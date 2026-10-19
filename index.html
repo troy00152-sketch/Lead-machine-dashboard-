@@ -146,6 +146,8 @@ label.lbl{display:block;color:var(--muted);font-size:12px;font-weight:600;margin
 .btn.primary:hover{background:var(--accent2)}
 .btn.small{padding:6px 12px;font-size:12px}
 .btn.ghost{background:none}
+.lb-chip{transition:all .15s ease}
+.lb-chip.active{background:rgba(255,122,26,.16)!important;border-color:var(--accent)!important;color:var(--accent)!important;font-weight:700}
 .btn:disabled{opacity:.5;cursor:not-allowed}
 select.field{appearance:none}
 /* Tables */
@@ -250,6 +252,8 @@ tr.clickable{cursor:pointer}
       <div class="nav-sec">Tools</div>
       <button class="nav-item" data-nav="buyers"><span class="ico">🤝</span> Buyer Match</button>
       <button class="nav-item" data-nav="skiptrace"><span class="ico">🔍</span> Skip Trace</button>
+<button class="nav-item" data-nav="listsearch"><span class="ico">🎯</span> List Builder</button>
+<button class="nav-item" data-nav="people"><span class="ico">👥</span> People Search</button>
       <button class="nav-item" data-nav="comps"><span class="ico">📊</span> Comps</button>
       <div class="nav-sec">System</div>
       <button class="nav-item" data-nav="settings"><span class="ico">⚙️</span> Settings</button>
@@ -486,11 +490,93 @@ tr.clickable{cursor:pointer}
           <button class="btn primary" onclick="runSkipTrace()">⚡ Trace Address</button>
           <div id="stResults" style="margin-top:16px"></div>
         </div>
+        
+        <div class="card" style="margin-bottom:14px">
+          <div class="sec-title" style="margin-bottom:8px">📵 DNC Bulk Check <span class="badge green" style="font-size:10px">DEALMACHINE</span></div>
+          <p style="color:var(--muted);font-size:13px;margin-bottom:12px">Check every phone on your leads against the National Do Not Call registry in one shot. Flagged numbers get marked so you never text them. <span style="color:var(--muted)">1 credit per matched number · re-checks are free.</span></p>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+            <button class="btn primary" onclick="dmCheckDnc()">📵 Check All Lead Phones</button>
+          </div>
+          <div id="dncStatus" style="margin-top:10px;font-size:13px"></div>
+        </div>
         <div class="sec-title">📜 Trace History</div>
         <div class="tbl-wrap"><table><thead><tr><th>Address</th><th>Hit</th><th>Mobiles</th><th>When</th></tr></thead><tbody id="traceHistoryBody"><tr><td colspan="4" style="text-align:center;color:var(--muted)">No traces yet</td></tr></tbody></table></div>
       </div>
 
-      <!-- COMPS TAB -->
+      
+      <!-- LIST BUILDER TAB -->
+      <div class="tab-page" id="page-listsearch">
+        <div class="sec-title">🎯 List Builder <span class="badge green" style="font-size:10px">DEALMACHINE · LIVE DATA</span></div>
+        <div class="card" style="margin-bottom:14px">
+          <p style="color:var(--muted);font-size:13px;margin-bottom:12px">Build a targeted seller list straight from DealMachine's 150M+ property database. Pick a ZIP, stack your distress filters, preview the cost free — then pull the list.</p>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px">
+            <div>
+              <label class="lbl">ZIP Code</label>
+              <input class="field" id="lbZip" placeholder="46201" maxlength="5" inputmode="numeric" style="max-width:130px" />
+            </div>
+            <div>
+              <label class="lbl">Results per search</label>
+              <select class="field" id="lbPerPage" style="max-width:130px">
+                <option value="25" selected>25</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+              </select>
+            </div>
+            <div>
+              <label class="lbl">Min Value ($)</label>
+              <input class="field" id="lbMinVal" type="number" min="0" step="5000" placeholder="50,000" style="max-width:150px" />
+            </div>
+            <div>
+              <label class="lbl">Max Value ($)</label>
+              <input class="field" id="lbMaxVal" type="number" min="0" step="5000" placeholder="300,000" style="max-width:150px" />
+            </div>
+          </div>
+          <div style="margin-bottom:14px">
+            <label class="lbl" style="margin-bottom:8px;display:block">Distress &amp; Property Filters <span style="color:var(--muted);font-weight:400">(stack them — Super Stack style)</span></label>
+            <div style="display:flex;gap:8px;flex-wrap:wrap" id="lbFilters">
+              <button class="btn small ghost lb-chip" data-f="absentee">✈️ Absentee Owners</button>
+              <button class="btn small ghost lb-chip" data-f="highEquity">💰 High Equity 50%+</button>
+              <button class="btn small ghost lb-chip" data-f="preforeclosure">⚠️ Pre-Foreclosure</button>
+              <button class="btn small ghost lb-chip" data-f="taxDelinquent">🧾 Tax Delinquent</button>
+              <button class="btn small ghost lb-chip" data-f="freeAndClear">🔓 Free &amp; Clear</button>
+              <button class="btn small ghost lb-chip" data-f="singleFamily">🏠 Single Family</button>
+            </div>
+          </div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+            <button class="btn" onclick="dmPreviewList()">💰 Preview Cost <span style="font-size:10px;color:var(--muted)">(free)</span></button>
+            <button class="btn primary" id="lbSearchBtn" onclick="dmRunListSearch()" disabled>🔍 Search</button>
+          </div>
+          <div id="lbStatus" style="margin-top:12px;font-size:13px"></div>
+        </div>
+        <div class="lead-cards" id="lbResults" style="margin-top:12px"></div>
+      </div>
+
+      <!-- PEOPLE SEARCH TAB -->
+      <div class="tab-page" id="page-people">
+        <div class="sec-title">👥 People Search <span class="badge green" style="font-size:10px">DEALMACHINE · LIVE DATA</span></div>
+        <div class="card" style="margin-bottom:14px">
+          <p style="color:var(--muted);font-size:13px;margin-bottom:12px">Look up a person by name — get their phones, emails, and every property tied to them. Perfect when a seller gives you a name on a call.</p>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
+            <div>
+              <label class="lbl">First Name</label>
+              <input class="field" id="psFirst" placeholder="Chet" style="max-width:170px" />
+            </div>
+            <div>
+              <label class="lbl">Last Name *</label>
+              <input class="field" id="psLast" placeholder="Mentlewski" style="max-width:170px" onkeypress="if(event.key==='Enter')dmPersonSearch()" />
+            </div>
+            <div>
+              <label class="lbl">State</label>
+              <input class="field" id="psState" placeholder="NC" maxlength="2" style="max-width:80px" />
+            </div>
+            <button class="btn primary" onclick="dmPersonSearch()">🔍 Search Person</button>
+          </div>
+          <div id="psStatus" style="margin-top:8px;font-size:13px"></div>
+        </div>
+        <div id="psResults" style="margin-top:12px"></div>
+      </div>
+
+<!-- COMPS TAB -->
       <div class="tab-page" id="page-comps">
         <div class="sec-title">📊 Quick Comp Calculator</div>
         <div class="card">
@@ -1070,6 +1156,260 @@ function addAllPropSearchToLeads(){
   saveState(); renderLeads(); updateStats();
   toast('Added ' + added + ' properties to My Leads');
 }
+
+/* ============ DEALMACHINE LIST BUILDER (POST /v1/properties/search) ============ */
+let lbSearchCache = [];
+let lbEstimate = null;
+
+// Filter chip toggles
+document.querySelectorAll('.lb-chip').forEach(chip => {
+  chip.addEventListener('click', () => {
+    chip.classList.toggle('active');
+    lbEstimate = null;
+    document.getElementById('lbSearchBtn').disabled = true;
+  });
+});
+function lbGetFilters(){
+  const out = {};
+  document.querySelectorAll('.lb-chip').forEach(chip => { out[chip.dataset.f] = chip.classList.contains('active'); });
+  out.minValue = document.getElementById('lbMinVal').value || '';
+  out.maxValue = document.getElementById('lbMaxVal').value || '';
+  return out;
+}
+function lbPayload(estimate){
+  return {
+    zip: (document.getElementById('lbZip').value || '').trim(),
+    filters: lbGetFilters(),
+    page: 1,
+    per_page: Number(document.getElementById('lbPerPage').value) || 25,
+    estimate_cost: !!estimate
+  };
+}
+async function dmPreviewList(){
+  const statusEl = document.getElementById('lbStatus');
+  const zip = (document.getElementById('lbZip').value || '').trim();
+  if(!/^\d{5}$/.test(zip)){ statusEl.innerHTML = '<span style="color:var(--red)">Enter a valid 5-digit ZIP.</span>'; return; }
+  statusEl.innerHTML = '<span style="color:var(--muted)">💰 Estimating cost (free)…</span>';
+  lbEstimate = null;
+  document.getElementById('lbSearchBtn').disabled = true;
+  try{
+    const resp = await fetch('/.netlify/functions/dealmachine-search', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(lbPayload(true))
+    });
+    const d = await resp.json();
+    if(!resp.ok) throw new Error(d.detail || d.error || 'HTTP ' + resp.status);
+    const count = (d.totals && (d.totals.properties ?? d.totals.total)) ?? '—';
+    const credits = (d.estimated_credits && (d.estimated_credits.total ?? d.estimated_credits.properties)) ?? '—';
+    lbEstimate = { count, credits };
+    statusEl.innerHTML = '<span style="color:var(--green)">✓ <b>' + esc(String(count)) + '</b> properties match</span> <span style="color:var(--muted)">· est. <b>' + esc(String(credits)) + '</b> credits for ' + esc(String(document.getElementById('lbPerPage').value)) + ' results</span>';
+    const btn = document.getElementById('lbSearchBtn');
+    btn.disabled = false;
+    btn.textContent = '🔍 Pull ' + document.getElementById('lbPerPage').value + ' Results (~' + credits + ' credits)';
+  }catch(e){
+    statusEl.innerHTML = '<span style="color:var(--red)">Preview failed: ' + esc(e.message) + '</span>';
+  }
+}
+async function dmRunListSearch(){
+  const statusEl = document.getElementById('lbStatus');
+  const resultsEl = document.getElementById('lbResults');
+  const zip = (document.getElementById('lbZip').value || '').trim();
+  if(!/^\d{5}$/.test(zip)){ statusEl.innerHTML = '<span style="color:var(--red)">Enter a valid 5-digit ZIP.</span>'; return; }
+  statusEl.innerHTML = '<span style="color:var(--muted)">🔍 Pulling list from DealMachine…</span>';
+  resultsEl.innerHTML = '';
+  try{
+    const resp = await fetch('/.netlify/functions/dealmachine-search', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(lbPayload(false))
+    });
+    const d = await resp.json();
+    if(!resp.ok) throw new Error(d.detail || d.error || 'HTTP ' + resp.status);
+    lbSearchCache = d.data || [];
+    const total = (d.totals && (d.totals.properties ?? d.totals.total)) ?? lbSearchCache.length;
+    statusEl.innerHTML = '<span style="color:var(--green)">✓ Pulled <b>' + lbSearchCache.length + '</b> of <b>' + esc(String(total)) + '</b> matching properties</span> <button class="btn small primary" style="margin-left:10px" onclick="addAllListResultsToLeads()">➕ Add All to My Leads</button>';
+    renderListBuilderResults();
+    recentSearches.unshift({q:'List Builder: ' + zip, at:new Date().toISOString()});
+    recentSearches = recentSearches.slice(0,8); saveState(); renderRecentSearches();
+  }catch(e){
+    statusEl.innerHTML = '<span style="color:var(--red)">Search failed: ' + esc(e.message) + '</span>';
+  }
+}
+function renderListBuilderResults(){
+  const el = document.getElementById('lbResults');
+  if(!lbSearchCache.length){ el.innerHTML = ''; return; }
+  el.innerHTML = lbSearchCache.map((p, i) => {
+    const val = p.estimatedValue ? '$' + Number(p.estimatedValue).toLocaleString() : '—';
+    const eq = p.equityPct != null ? Math.round(p.equityPct) + '% equity' : '';
+    const beds = numOrDash(p.bedrooms), baths = numOrDash(p.bathrooms);
+    const sqft = p.sqft ? Number(p.sqft).toLocaleString() : '—';
+    const year = numOrDash(p.yearBuilt);
+    return `<div class="lead-card">
+      <div class="lead-card-top"><div style="flex:1">
+        <div class="lead-addr">${esc(p.address || '')}</div>
+        <div class="lead-sub">${esc(p.city || '')}, ${esc(p.state || '')} ${esc(p.zip || '')}</div>
+      </div></div>
+      <div class="lead-badges">
+        <span class="badge orange">💰 ${val}</span>
+        ${eq ? '<span class="badge green">' + esc(eq) + '</span>' : ''}
+        ${p.propertyType ? '<span class="badge gray">' + esc(p.propertyType) + '</span>' : ''}
+        <span class="badge gray">${beds}bd / ${baths}ba · ${sqft} sqft · ${year}</span>
+      </div>
+      <div style="margin-top:10px"><button class="btn small" onclick="addListResultToLeads(${i})">➕ Add to My Leads</button></div>
+    </div>`;
+  }).join('');
+}
+function dmListSearchToLead(p){
+  return {
+    id: 'dml_' + Date.now() + '_' + Math.random().toString(36).slice(2,7),
+    address: p.address || '', city: p.city || '', state: p.state || '', zip: p.zip || '',
+    latitude: p.latitude, longitude: p.longitude,
+    bedrooms: p.bedrooms, bathrooms: p.bathrooms, sqft: p.sqft,
+    yearBuilt: p.yearBuilt, propertyType: p.propertyType,
+    estimatedValue: p.estimatedValue || null, arv: p.estimatedValue || null,
+    dmEquityPct: p.equityPct ?? null, dmEquity: p.equityAmount ?? null,
+    dmPropertyId: p.dmPropertyId || null,
+    distressSignal: 'List Builder', status: 'New Lead',
+    addedAt: new Date().toISOString(), source: 'dealmachine-list-builder',
+    phones: [], traced: false
+  };
+}
+function addListResultToLeads(i){
+  const p = lbSearchCache[i]; if(!p) return;
+  const key = (p.address||'').toLowerCase() + '|' + (p.zip||'');
+  if(leads.some(l=>(l.address||'').toLowerCase()+'|'+(l.zip||'')===key)){ toast('Already in My Leads'); return; }
+  leads.push(dmListSearchToLead(p)); saveState(); renderLeads(); updateStats();
+  toast('Added to My Leads: ' + (p.address || ''));
+}
+function addAllListResultsToLeads(){
+  if(!lbSearchCache.length) return;
+  let added = 0;
+  lbSearchCache.forEach(p => {
+    const key = (p.address||'').toLowerCase() + '|' + (p.zip||'');
+    if(!leads.some(l=>(l.address||'').toLowerCase()+'|'+(l.zip||'')===key)){ leads.push(dmListSearchToLead(p)); added++; }
+  });
+  saveState(); renderLeads(); updateStats();
+  toast('Added ' + added + ' properties to My Leads');
+}
+
+/* ============ DEALMACHINE DNC BULK CHECK (POST /v1/phones/dnc) ============ */
+async function dmCheckDnc(){
+  const statusEl = document.getElementById('dncStatus');
+  // Collect unique phones from all leads
+  const phoneMap = new Map(); // digits -> {leadIdx, phoneIdx}
+  leads.forEach((l, li) => {
+    (l.phones || []).forEach((p, pi) => {
+      const digits = String(p.number || '').replace(/\D/g, '');
+      const norm = digits.length === 11 && digits[0] === '1' ? digits.slice(1) : digits;
+      if(norm.length === 10 && !phoneMap.has(norm)) phoneMap.set(norm, {li, pi});
+    });
+  });
+  if(!phoneMap.size){ statusEl.innerHTML = '<span style="color:var(--muted)">No phones on your leads yet. Skip trace some leads first.</span>'; return; }
+  if(!confirm('Check ' + phoneMap.size + ' phone(s) against the National DNC registry? ~1 credit per matched number; re-checks are free.')) return;
+  statusEl.innerHTML = '<span style="color:var(--muted)">📵 Checking ' + phoneMap.size + ' numbers…</span>';
+  try{
+    const resp = await fetch('/.netlify/functions/dealmachine-dnc', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ phones: Array.from(phoneMap.keys()) })
+    });
+    const d = await resp.json();
+    if(!resp.ok) throw new Error(d.detail || d.error || 'HTTP ' + resp.status);
+    let dncCount = 0, landlineCount = 0;
+    (d.results || []).forEach(r => {
+      const key = String(r.number || '').replace(/\D/g, '');
+      const loc = phoneMap.get(key);
+      if(!loc) return;
+      const ph = leads[loc.li].phones[loc.pi];
+      if(r.doNotCall){ ph.dnc = true; dncCount++; }
+      if(r.phoneType === 'landline'){ ph.type = 'Landline'; landlineCount++; }
+      else if(r.phoneType === 'wireless' && (!ph.type || /unknown/i.test(ph.type))) ph.type = 'Mobile';
+      if(r.carrier && !ph.carrier) ph.carrier = r.carrier;
+    });
+    saveState(); renderLeads(); updateStats();
+    statusEl.innerHTML = '<span style="color:var(--green)">✓ Checked ' + d.results.length + ' number(s)</span> <span style="color:var(--red)">· ' + dncCount + ' on DNC</span> <span style="color:var(--muted)">· ' + landlineCount + ' landline(s) flagged</span>';
+    toast('DNC check done — ' + dncCount + ' DNC number(s) flagged');
+  }catch(e){
+    statusEl.innerHTML = '<span style="color:var(--red)">DNC check failed: ' + esc(e.message) + '</span>';
+  }
+}
+
+/* ============ DEALMACHINE PEOPLE SEARCH (POST /v1/enrichment/name) ============ */
+let psPeopleCache = [];
+async function dmPersonSearch(){
+  const statusEl = document.getElementById('psStatus');
+  const resultsEl = document.getElementById('psResults');
+  const first = (document.getElementById('psFirst').value || '').trim();
+  const last = (document.getElementById('psLast').value || '').trim();
+  const state = (document.getElementById('psState').value || '').trim().toUpperCase();
+  if(!last){ statusEl.innerHTML = '<span style="color:var(--red)">Enter a last name.</span>'; return; }
+  if(state && !/^[A-Z]{2}$/.test(state)){ statusEl.innerHTML = '<span style="color:var(--red)">State must be 2 letters (e.g. NC).</span>'; return; }
+  statusEl.innerHTML = '<span style="color:var(--muted)">🔍 Searching DealMachine for ' + esc((first + ' ' + last).trim()) + '…</span>';
+  resultsEl.innerHTML = '';
+  try{
+    const resp = await fetch('/.netlify/functions/dealmachine-person', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ first_name: first, last_name: last, state: state })
+    });
+    const d = await resp.json();
+    if(!resp.ok) throw new Error(d.detail || d.error || 'HTTP ' + resp.status);
+    psPeopleCache = d.people || [];
+    if(!psPeopleCache.length){
+      statusEl.innerHTML = '<span style="color:var(--muted)">No people found for "' + esc((first + ' ' + last).trim()) + '"' + (state ? ' in ' + esc(state) : '') + '.</span>';
+      return;
+    }
+    statusEl.innerHTML = '<span style="color:var(--green)">✓ Found ' + psPeopleCache.length + ' ' + (psPeopleCache.length===1?'person':'people') + '</span>';
+    renderPersonResults();
+  }catch(e){
+    statusEl.innerHTML = '<span style="color:var(--red)">Search failed: ' + esc(e.message) + '</span>';
+  }
+}
+function renderPersonResults(){
+  const el = document.getElementById('psResults');
+  el.innerHTML = psPeopleCache.map((p, pi) => {
+    const phones = (p.phones || []).map(ph => {
+      const tl = String(ph.type || '').toLowerCase();
+      const isMob = tl.indexOf('wireless') !== -1 || tl.indexOf('mobile') !== -1 || tl.indexOf('cell') !== -1;
+      return '<span class="badge ' + (ph.doNotCall ? 'red' : (isMob ? 'green' : 'gray')) + '" style="margin:2px">' +
+        (ph.doNotCall ? '📵 DNC ' : (isMob ? '📱 ' : '☎️ ')) + esc(ph.number || '') +
+        (ph.carrier ? ' · ' + esc(ph.carrier) : '') + '</span>';
+    }).join('') || '<span style="color:var(--muted);font-size:12px">No phones found</span>';
+    const emails = (p.emails || []).map(e => '<span class="badge gray" style="margin:2px">✉️ ' + esc(e) + '</span>').join('');
+    const res = p.residence ? '<div style="font-size:12px;color:var(--muted);margin-top:6px">🏠 ' + esc([p.residence.address, p.residence.city, p.residence.state, p.residence.zip].filter(Boolean).join(', ')) + '</div>' : '';
+    const props = (p.properties || []).map((pr, ri) =>
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--line)">' +
+        '<div style="font-size:13px"><b>' + esc(pr.address || '') + '</b><br><span style="color:var(--muted)">' + esc([pr.city, pr.state, pr.zip].filter(Boolean).join(', ')) + '</span></div>' +
+        '<button class="btn small" onclick="addPersonPropertyToLeads(' + pi + ',' + ri + ')">➕ Add to Leads</button>' +
+      '</div>').join('') || '<div style="font-size:12px;color:var(--muted)">No properties tied to this person</div>';
+    return '<div class="card" style="margin-bottom:12px">' +
+      '<div style="font-size:16px;font-weight:700;margin-bottom:6px">👤 ' + esc(p.fullName || '') + '</div>' +
+      '<div style="margin-bottom:4px">' + phones + '</div>' +
+      (emails ? '<div style="margin-bottom:4px">' + emails + '</div>' : '') + res +
+      '<div style="margin-top:10px;font-size:13px;font-weight:700">🏘️ Properties (' + (p.propertyCount ?? p.properties.length) + ')</div>' +
+      '<div>' + props + '</div></div>';
+  }).join('');
+}
+function addPersonPropertyToLeads(pi, ri){
+  const person = psPeopleCache[pi]; const pr = person && person.properties[ri];
+  if(!pr) return;
+  const key = (pr.address||'').toLowerCase() + '|' + (pr.zip||'');
+  if(leads.some(l=>(l.address||'').toLowerCase()+'|'+(l.zip||'')===key)){ toast('Already in My Leads'); return; }
+  leads.push({
+    id: 'dmp_' + Date.now() + '_' + Math.random().toString(36).slice(2,7),
+    address: pr.address || '', city: pr.city || '', state: pr.state || '', zip: pr.zip || '',
+    latitude: pr.latitude, longitude: pr.longitude,
+    ownerName: person.fullName || null,
+    owner: person.fullName ? { names: [person.fullName] } : null,
+    phones: (person.phones || []).map(ph => ({
+      number: ph.number, type: /wireless|mobile|cell/i.test(ph.type||'') ? 'Mobile' : (ph.type || 'Unknown'),
+      dnc: !!ph.doNotCall, carrier: ph.carrier || '', owner: person.fullName || ''
+    })),
+    traced: (person.phones || []).length > 0,
+    distressSignal: 'People Search', status: 'New Lead',
+    addedAt: new Date().toISOString(), source: 'dealmachine-people-search'
+  });
+  saveState(); renderLeads(); updateStats();
+  toast('Added to My Leads: ' + (pr.address || ''));
+}
+
 /* Single-address lookup via RentCast AVM + property records */
 async function searchPropertyByAddress(raw, key, statusEl, resultsEl){
   statusEl.innerHTML = '<span style="color:var(--muted)">🔍 Looking up ' + esc(raw) + '…</span>';
