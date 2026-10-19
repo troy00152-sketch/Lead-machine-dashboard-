@@ -1392,6 +1392,83 @@ function propIntelHtml(l){
     +'<div style="margin-top:8px"><button class="btn small" onclick="savePropNotes(\''+l.id+'\')">💾 Save Notes</button></div></div>';
 }
 
+/* ============ 🤖 AI DEAL ANALYSIS (rule-based, uses DealMachine data on the lead) ============ */
+function maoTier(estVal){
+  if(estVal == null) return { tier: null, label: '—' };
+  if(estVal < 120000) return { tier: 0.70, label: '70%' };
+  if(estVal < 220000) return { tier: 0.80, label: '80%' };
+  if(estVal < 300000) return { tier: 0.815, label: '81.5%' };
+  if(estVal < 400000) return { tier: 0.829, label: '82.9%' };
+  return { tier: 0.849, label: '84.9%' };
+}
+function fmtMoney(n){
+  if(n == null || isNaN(n)) return '—';
+  return '$' + Math.round(n).toLocaleString();
+}
+function analyzeDeal(id){
+  const l = leads.find(x=>x.id===id);
+  if(!l) return;
+  const box = document.getElementById('analysisBox');
+  if(!box) return;
+
+  const arv = l.estimatedValue || l.arv || null;
+  const repairs = 0; // placeholder — Troy enters repair estimate at offer time
+  const { tier, label } = maoTier(arv);
+  const mao = (arv != null && tier) ? Math.round((arv - repairs) * tier) : null;
+  const lao = mao != null ? Math.round(mao * 0.70) : null;
+
+  // Equity
+  const numMort = l.dmNumMortgages || 0;
+  const bal = l.dmTotalBalance;
+  const eq = l.dmEquity;
+  const eqPct = l.dmEquityPct;
+
+  // Distress signals
+  const distress = [];
+  if(l.preforeclosure) distress.push('Pre-foreclosure: ' + l.preforeclosure);
+  if(l.foreclosureStatus) distress.push('Foreclosure: ' + l.foreclosureStatus);
+  if(l.taxDelinquentYear) distress.push('Tax delinquent: ' + l.taxDelinquentYear);
+  if(l.numLiens) distress.push(l.numLiens + ' active lien(s)');
+
+  // Property flags
+  const flags = [];
+  if(l.yearBuilt && l.yearBuilt < 1950) flags.push('Older property (' + l.yearBuilt + ') — verify condition');
+  if(l.ownerOccupied === false) flags.push('Non-owner occupied — potential motivation');
+  if(l.ownerName) flags.push('Owner on record: ' + l.ownerName);
+
+  // Phones
+  const mobiles = (l.phones || []).filter(p => (p.type || '').toLowerCase().indexOf('mobile') >= 0 || (p.type || '').toLowerCase() === 'wireless');
+
+  // Verdict scoring
+  let score = 0;
+  const reasons = [];
+  if(numMort === 0){ score += 2; reasons.push('Free & clear — no payoff friction'); }
+  else if(eqPct != null && eqPct >= 50){ score += 1; reasons.push('Strong equity position (' + Math.round(eqPct) + '%)'); }
+  if(distress.length){ score += 1; reasons.push(distress.length + ' distress signal(s) stacked'); }
+  if(l.ownerOccupied === false){ score += 1; reasons.push('Absentee owner'); }
+  if(mobiles.length){ score += 1; reasons.push(mobiles.length + ' mobile number(s) ready'); }
+  else { reasons.push('No phones yet — needs skip trace'); }
+
+  let verdict, vColor;
+  if(score >= 4){ verdict = 'STRONG DEAL — work this one first'; vColor = 'var(--green)'; }
+  else if(score >= 2){ verdict = 'WORTH A LOOK'; vColor = 'var(--orange)'; }
+  else { verdict = 'THIN — deprioritize for now'; vColor = 'var(--muted)'; }
+
+  box.innerHTML = `
+    <div class="sec-title" style="font-size:14px;margin-top:14px">🤖 Deal Analysis</div>
+    <div style="background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;font-size:13px;line-height:1.6">
+      <div style="font-weight:700;color:${vColor};font-size:15px;margin-bottom:8px">${verdict}</div>
+      <div style="margin-bottom:6px"><strong>Value (ARV proxy):</strong> ${fmtMoney(arv)}${arv ? ' <span style="color:var(--muted)">(DealMachine estimate)</span>' : ''}</div>
+      <div style="margin-bottom:6px"><strong>Equity:</strong> ${numMort === 0 ? '<span style="color:var(--green);font-weight:700">Free & clear — no payoff friction</span>' : fmtMoney(eq) + (eqPct != null ? ' (' + Math.round(eqPct) + '%)' : '') + ' across ' + numMort + ' mortgage(s), balance ' + fmtMoney(bal)}</div>
+      <div style="margin-bottom:6px"><strong>MAO / LAO:</strong> ${mao != null ? fmtMoney(mao) + ' / ' + fmtMoney(lao) + ' <span style="color:var(--muted)">(' + label + ' tier, $0 repairs — enter real repair number at offer time)</span>' : '<span style="color:var(--muted)">Need ARV to calculate</span>'}</div>
+      ${distress.length ? '<div style="margin-bottom:6px"><strong>🚨 Distress:</strong> ' + distress.map(esc).join(' · ') + '</div>' : '<div style="margin-bottom:6px"><strong>Distress:</strong> <span style="color:var(--muted)">None flagged</span></div>'}
+      ${flags.length ? '<div style="margin-bottom:6px"><strong>Flags:</strong> ' + flags.map(esc).join(' · ') + '</div>' : ''}
+      <div style="margin-bottom:8px"><strong>Phones:</strong> ${mobiles.length ? '<span style="color:var(--green)">' + mobiles.length + ' mobile number(s) ready for outreach</span>' : '<span style="color:var(--muted)">No mobile numbers — run Skip Trace</span>'}</div>
+      <div><strong>Why:</strong><ul style="margin:6px 0 0 18px;padding:0">${reasons.map(r=>'<li>'+esc(r)+'</li>').join('')}</ul></div>
+    </div>`;
+  box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
 function openLead(id){
   const l = leads.find(x=>x.id===id);
   if(!l) return;
@@ -1422,9 +1499,11 @@ function openLead(id){
     ${phones}
     <div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap">
       <button class="btn primary" onclick="traceLead('${l.id}')">🔍 Skip Trace</button>
+      <button class="btn" onclick="analyzeDeal('${l.id}')">🤖 Analyze Deal</button>
       <button class="btn" onclick="matchLeadToBuyers('${l.id}')">🤝 Match Buyers</button>
       <button class="btn ghost" onclick="pushToGHL('${l.id}')">📤 Push to HighLevel</button>
-    </div>`;
+    </div>
+    <div id="analysisBox"></div>`;
   document.getElementById('leadModal').classList.add('open');
   renderImgFrame(l);
   loadMortgageInfo(l);
