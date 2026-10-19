@@ -1238,6 +1238,7 @@ function renderLeads(){
           <button class="btn small" onclick="event.stopPropagation();getARV('${l.id}')" title="Get ARV">💰</button>
           <button class="btn small" onclick="event.stopPropagation();traceLead('${l.id}')">🔍</button>
           <button class="btn small primary" onclick="event.stopPropagation();doPushSingle('${l.id}')">📤</button>
+          <button class="btn small" onclick="event.stopPropagation();deleteLead('${l.id}')" title="Delete lead" style="color:var(--red)">🗑️</button>
         </div>
       </div>
     </div>`;
@@ -1416,6 +1417,15 @@ function setLeadStatus(id, status){
   const l = leads.find(x=>x.id===id); if(!l) return;
   l.status = status; saveState(); renderLeads(); renderRecentLeads(); updateStats();
   toast('Status → '+status);
+}
+function deleteLead(id){
+  const l = leads.find(x=>x.id===id);
+  if(!l) return;
+  if(!confirm('Delete lead: ' + l.address + '?')) return;
+  leads = leads.filter(x=>x.id!==id);
+  selectedLeads.delete(id);
+  saveState(); renderLeads(); renderRecentLeads(); updateStats();
+  toast('Lead deleted');
 }
 /* ============ HIGHLEVEL WEBHOOK PUSH ============ */
 const GHL_WEBHOOK_URL = 'https://services.leadconnectorhq.com/hooks/krKoHLudPnn7nT0DPtwa/webhook-trigger/97d51ffc-5f51-485d-b1bf-11e747e155ba';
