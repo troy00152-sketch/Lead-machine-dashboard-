@@ -1,0 +1,1950 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="color-scheme" content="dark" />
+<link rel="icon" href="data:," />
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<title>Acquisition Command Center</title>
+<style>
+:root{
+  --bg:#0d1117; --bg2:#131a24; --panel:#161e2b; --panel2:#1c2536;
+  --line:#26314a; --text:#e8edf5; --muted:#8b96ad; --muted2:#5d6a84;
+  --accent:#ff6b1a; --accent2:#ff8c42; --green:#2ecc71; --red:#e74c3c;
+  --blue:#3498db; --chip:#223052;
+  --radius:10px;
+}
+/* ============ LIGHT THEME ============ */
+[data-theme="light"]{
+  --bg:#eef1f6; --bg2:#ffffff; --panel:#ffffff; --panel2:#f2f5fa;
+  --line:#dbe2ee; --text:#182234; --muted:#5d6a84; --muted2:#8b96ad;
+  --accent:#ff6b1a; --accent2:#e55a0f; --green:#1faa5c; --red:#d63c2f;
+  --blue:#2471a3; --chip:#e7edf7;
+}
+[data-theme="light"] .topbar{background:linear-gradient(135deg,#ffffff 0%,#eef2f9 60%,#e4ebf6 100%)}
+[data-theme="light"] .topbar::before{background:radial-gradient(ellipse at 20% 0%,rgba(255,107,26,.10),transparent 60%)}
+[data-theme="light"] .topbar h2{color:#182234}
+[data-theme="light"] .modal-overlay{background:rgba(24,34,52,.45)}
+[data-theme="light"] .img-zoom-hint{background:rgba(24,34,52,.75)}
+[data-theme="light"] .lightbox-close{background:rgba(24,34,52,.55)}
+[data-theme="light"] .qs-card:hover,[data-theme="light"] .card:hover{box-shadow:0 4px 14px rgba(24,34,52,.10)}
+/* Theme toggle button */
+.theme-toggle{margin-left:auto;display:flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:50%;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:18px;cursor:pointer;flex-shrink:0}
+.theme-toggle:hover{border-color:var(--accent)}
+.sidebar-foot{margin-top:auto;padding:14px;border-top:1px solid var(--line);display:flex;align-items:center;gap:10px}
+.sidebar-foot .lbl{font-size:12px;color:var(--muted)}
+.theme-toggle-sm{width:36px;height:36px;font-size:16px}
+/* Back to CRM button */
+.crm-btn{display:flex;align-items:center;gap:8px;padding:9px 16px;border-radius:24px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:13px;font-weight:600;cursor:pointer;flex-shrink:0;white-space:nowrap}
+.crm-btn:hover{border-color:var(--accent);color:var(--accent)}
+.crm-btn-sm{padding:7px 13px;font-size:12px}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,-apple-system,sans-serif;font-size:14px;line-height:1.5;overflow-x:hidden}
+/* Password gate */
+#lm-lock{position:fixed;top:0;left:0;width:100%;height:100%;background:#0d1117;z-index:999999;display:flex;flex-direction:column;justify-content:center;align-items:center}
+/* Layout */
+.app{display:flex;min-height:100vh}
+.sidebar{width:230px;background:var(--bg2);border-right:1px solid var(--line);position:fixed;top:0;bottom:0;left:0;z-index:100;display:flex;flex-direction:column;transition:transform .25s}
+.brand{padding:18px 16px;border-bottom:1px solid var(--line)}
+.brand h1{font-size:17px;font-weight:700;color:var(--text)}
+.brand h1 span{color:var(--accent)}
+.brand small{color:var(--muted);font-size:11px}
+.nav{flex:1;overflow-y:auto;padding:10px 8px}
+.nav-sec{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted2);padding:12px 10px 6px}
+.nav-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;color:var(--muted);cursor:pointer;font-weight:500;border:0;background:none;width:100%;text-align:left;font-size:14px}
+.nav-item:hover{background:var(--panel);color:var(--text)}
+.nav-item.active{background:var(--panel2);color:var(--accent);font-weight:600}
+.nav-item .ico{width:20px;text-align:center;font-size:16px}
+.nav-item .cnt{margin-left:auto;background:var(--accent);color:#fff;font-size:10px;font-weight:700;border-radius:99px;padding:2px 8px}
+.main{flex:1;margin-left:230px;min-width:0;display:flex;flex-direction:column}
+/* Top search bar */
+.topbar{background:linear-gradient(135deg,#0a1628 0%,#12233d 60%,#0d1a2e 100%);border-bottom:1px solid var(--line);padding:22px 24px;position:relative;overflow:hidden}
+.topbar::before{content:'';position:absolute;top:0;left:0;right:0;bottom:0;background:radial-gradient(ellipse at 20% 0%,rgba(255,107,26,.08),transparent 60%);pointer-events:none}
+.topbar h2{font-size:20px;font-weight:700;margin-bottom:14px;position:relative}
+.search-row{display:flex;gap:10px;position:relative;max-width:700px}
+.search-box{flex:1;display:flex;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+.search-box input{flex:1;background:none;border:0;color:var(--text);padding:12px 16px;font-size:15px;outline:none}
+.search-box input::placeholder{color:var(--muted2)}
+.search-box button{background:var(--accent);color:#fff;border:0;padding:0 22px;font-weight:600;cursor:pointer;font-size:14px}
+.search-box button:hover{background:var(--accent2)}
+/* Content */
+.content{padding:20px 24px;flex:1}
+.tab-page{display:none}
+.tab-page.active{display:block;animation:fadeIn .2s}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+.sec-title{font-size:16px;font-weight:700;margin:20px 0 12px;display:flex;align-items:center;gap:8px}
+.sec-title:first-child{margin-top:0}
+/* Cards */
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:8px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px}
+/* ============ XLEADS-STYLE LEAD CARDS ============ */
+.lead-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px}
+.lead-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:14px;position:relative;transition:border-color .15s,transform .15s;cursor:pointer}
+.lead-card:hover{border-color:var(--accent);transform:translateY(-2px)}
+.lead-card.selected{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.lead-card-top{display:flex;gap:10px;align-items:flex-start;margin-bottom:10px}
+.lead-check{width:20px;height:20px;margin-top:2px;accent-color:var(--accent);cursor:pointer;flex-shrink:0}
+.lead-addr{font-size:15px;font-weight:700;color:var(--blue);line-height:1.3;flex:1}
+.lead-sub{font-size:12px;color:var(--muted);margin-top:2px}
+.lead-badges{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}
+.lead-owner{font-size:13px;margin:6px 0;color:var(--text)}
+.lead-phones{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0}
+.lead-status-row{display:flex;align-items:center;gap:8px;margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
+.lead-actions{display:flex;gap:6px;margin-left:auto}
+.chip-btn{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:20px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:13px;font-weight:600;cursor:pointer;transition:all .15s}
+.chip-btn:hover{border-color:var(--accent)}
+.chip-btn.active{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.bulk-bar{display:flex;gap:10px;align-items:center;padding:10px 14px;background:var(--panel2);border:1px solid var(--accent);border-radius:var(--radius);margin-bottom:12px;font-size:13px}
+/* ============ XLEADS-STYLE FILTERS DRAWER ============ */
+.filter-drawer-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.5);z-index:900;display:none}
+.filter-drawer-overlay.open{display:block}
+.filter-drawer{position:fixed;top:0;right:0;bottom:0;width:340px;max-width:90vw;background:var(--bg2);border-left:1px solid var(--line);z-index:901;transform:translateX(100%);transition:transform .25s;display:flex;flex-direction:column}
+.filter-drawer.open{transform:translateX(0)}
+.filter-drawer-head{padding:16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px}
+.filter-drawer-head h3{font-size:16px;font-weight:700;flex:1}
+.filter-drawer-body{flex:1;overflow-y:auto;padding:16px}
+.filter-sec-title{font-size:13px;font-weight:700;margin:16px 0 10px;color:var(--text)}
+.filter-sec-title:first-child{margin-top:0}
+.ie-tabs{display:flex;background:var(--panel);border-radius:8px;padding:3px;margin-bottom:12px}
+.ie-tab{flex:1;padding:8px;border:0;background:none;color:var(--muted);font-weight:600;font-size:13px;border-radius:6px;cursor:pointer}
+.ie-tab.active{background:var(--accent);color:#fff}
+.leadtype-grid{display:flex;flex-wrap:wrap;gap:8px}
+.leadtype-pill{padding:7px 12px;border-radius:16px;border:1px solid var(--line);background:var(--panel);color:var(--text);font-size:12px;font-weight:500;cursor:pointer;display:flex;align-items:center;gap:6px}
+.leadtype-pill:hover{border-color:var(--accent)}
+.leadtype-pill.on{border-color:var(--accent);background:var(--chip);font-weight:700}
+.leadtype-pill.excluded{border-color:var(--red);background:rgba(231,76,60,.12);text-decoration:line-through}
+.filter-drawer-foot{padding:14px 16px;border-top:1px solid var(--line);display:flex;gap:10px}
+.filter-count-badge{background:var(--accent);color:#fff;font-size:10px;font-weight:700;border-radius:99px;padding:2px 7px;margin-left:6px}
+@media(max-width:640px){.lead-cards{grid-template-columns:1fr}}
+.card .num{font-size:28px;font-weight:700;color:var(--accent)}
+.card .lbl{color:var(--muted);font-size:12px;margin-top:4px}
+.card .sub{font-size:11px;color:var(--muted2);margin-top:2px}
+/* Quick searches */
+.qs-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px}
+.qs-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:14px;cursor:pointer;transition:border-color .15s}
+.qs-card:hover{border-color:var(--accent)}
+.qs-card .t{font-weight:600;font-size:13px}
+.qs-card .d{color:var(--muted);font-size:11px;margin-top:4px}
+/* Recent searches */
+.rs-list{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+.rs-item{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line);cursor:pointer}
+.rs-item:last-child{border-bottom:0}
+.rs-item:hover{background:var(--panel2)}
+.rs-item .addr{font-weight:600}
+.rs-item .meta{color:var(--muted);font-size:12px}
+/* Forms */
+.field{background:var(--panel);border:1px solid var(--line);border-radius:8px;color:var(--text);padding:10px 14px;font-size:14px;width:100%;outline:none}
+.field:focus{border-color:var(--accent)}
+textarea.field{font-family:monospace;font-size:12px;resize:vertical;min-height:160px}
+label.lbl{display:block;color:var(--muted);font-size:12px;font-weight:600;margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em}
+.btn{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:10px 20px;font-size:14px;font-weight:600;cursor:pointer}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.primary:hover{background:var(--accent2)}
+.btn.small{padding:6px 12px;font-size:12px}
+.btn.ghost{background:none}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+select.field{appearance:none}
+/* Tables */
+.tbl-wrap{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{background:var(--panel2);color:var(--muted);font-size:11px;text-align:left;padding:10px 12px;text-transform:uppercase;letter-spacing:.05em;white-space:nowrap}
+td{border-top:1px solid var(--line);padding:10px 12px;vertical-align:middle}
+tr:hover td{background:rgba(255,255,255,.02)}
+tr.clickable{cursor:pointer}
+/* Badges */
+.badge{display:inline-block;border-radius:99px;padding:3px 10px;font-size:11px;font-weight:600;background:var(--chip);white-space:nowrap}
+.badge.green{background:rgba(46,204,113,.15);color:var(--green)}
+.badge.orange{background:rgba(255,107,26,.15);color:var(--accent)}
+.badge.blue{background:rgba(52,152,219,.15);color:var(--blue)}
+.badge.red{background:rgba(231,76,60,.15);color:var(--red)}
+.badge.gray{background:var(--panel2);color:var(--muted)}
+/* Filters */
+.filter-bar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+.filter-bar .field{width:auto;min-width:140px}
+/* Modal */
+.modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.7);z-index:1000;display:none;align-items:center;justify-content:center;padding:16px}
+.modal-overlay.open{display:flex}
+.modal{background:var(--bg2);border:1px solid var(--line);border-radius:12px;max-width:600px;width:100%;max-height:90vh;overflow-y:auto}
+.modal-head{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--line)}
+.modal-head h3{font-size:16px}
+.modal-body{padding:20px}
+.modal-x{background:none;border:0;color:var(--muted);font-size:20px;cursor:pointer}
+.detail-row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line);font-size:13px}
+.detail-row:last-child{border:0}
+.detail-row .k{color:var(--muted)}
+.detail-row .v{font-weight:600;text-align:right}
+/* Phone list */
+.phone-item{display:flex;align-items:center;justify-content:space-between;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 14px;margin-bottom:8px}
+/* Property imagery */
+.img-tabs{display:flex;gap:6px;margin-bottom:10px}
+.img-tab{flex:1;padding:8px 6px;font-size:12px;font-weight:700;text-align:center;border:1px solid var(--line);border-radius:8px;background:var(--panel2);color:var(--muted);cursor:pointer}
+.img-tab.active{background:var(--accent);border-color:var(--accent);color:#fff}
+.img-frame{position:relative;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#0a0e1a;min-height:220px;cursor:zoom-in}
+.img-frame img{width:100%;height:auto;max-height:320px;object-fit:cover;display:block}
+.img-frame .img-fallback{display:flex;align-items:center;justify-content:center;min-height:220px;color:var(--muted);font-size:13px;text-align:center;padding:20px}
+.img-zoom-hint{position:absolute;bottom:8px;right:10px;background:rgba(0,0,0,.65);color:#fff;font-size:11px;padding:4px 10px;border-radius:20px}
+/* Prominent sticky segmented view toggle — always visible in the lead modal */
+.img-toggle-bar{position:sticky;top:-20px;z-index:6;background:var(--bg2);padding:12px 0 8px;margin:0}
+.img-seg{display:flex;background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:4px;gap:4px}
+.img-seg .img-tab{flex:1;padding:11px 6px;font-size:13px;font-weight:800;text-align:center;border:0;border-radius:9px;background:transparent;color:var(--muted);cursor:pointer;transition:background .15s,color .15s}
+.img-seg .img-tab.active{background:var(--accent);color:#fff;box-shadow:0 2px 8px rgba(0,0,0,.35)}
+/* Lightbox */
+.lightbox-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.92);z-index:2000;display:none;align-items:center;justify-content:center;padding:20px;cursor:zoom-out}
+.lightbox-overlay.open{display:flex}
+.lightbox-overlay img{max-width:100%;max-height:90vh;border-radius:8px;box-shadow:0 8px 60px rgba(0,0,0,.6)}
+.lightbox-close{position:fixed;top:18px;right:24px;background:rgba(255,255,255,.12);border:0;color:#fff;font-size:22px;width:44px;height:44px;border-radius:50%;cursor:pointer}
+/* Notes */
+.notes-area{width:100%;min-height:70px;background:var(--panel);border:1px solid var(--line);border-radius:8px;color:var(--text);padding:10px;font-size:13px;resize:vertical}
+.prop-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+.prop-chip{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 12px;font-size:12px}
+.prop-chip .k{color:var(--muted);display:block;font-size:11px}
+.prop-chip .v{font-weight:700;font-size:14px}
+.phone-item .pn{font-weight:700;font-size:15px;letter-spacing:.02em}
+/* Toast */
+#toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(100px);background:var(--panel2);border:1px solid var(--accent);color:var(--text);padding:12px 24px;border-radius:10px;z-index:9999;transition:transform .3s;font-weight:600;opacity:0}
+#toast.show{transform:translateX(-50%) translateY(0);opacity:1}
+/* Ingest results */
+.ingest-stats{display:flex;gap:12px;margin:14px 0;flex-wrap:wrap}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 18px;text-align:center}
+.stat .n{font-size:22px;font-weight:700}
+.stat .t{font-size:11px;color:var(--muted)}
+/* Buyer match */
+.match-hero{background:var(--panel);border:1px solid var(--accent);border-radius:var(--radius);padding:20px;margin-bottom:14px}
+.match-hero .buyer-name{font-size:20px;font-weight:700}
+.match-hero .buyer-co{color:var(--muted);font-size:13px}
+.buyer-row{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line)}
+.buyer-row:last-child{border:0}
+.buyer-rank{background:var(--accent);color:#fff;font-weight:700;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0}
+.score-bar{height:6px;background:var(--panel2);border-radius:3px;overflow:hidden;margin-top:6px}
+.score-fill{height:100%;background:var(--accent);border-radius:3px}
+/* Mobile */
+.menu-btn{display:none;position:fixed;top:14px;left:14px;z-index:200;background:var(--panel2);border:1px solid var(--line);border-radius:8px;color:var(--text);padding:8px 12px;font-size:18px;cursor:pointer}
+@media(max-width:768px){
+  .sidebar{transform:translateX(-100%)}
+  .sidebar.open{transform:translateX(0)}
+  .main{margin-left:0}
+  .menu-btn{display:block}
+  .topbar{padding:60px 16px 18px}
+  .content{padding:14px}
+  .search-row{flex-direction:column}
+}
+</style>
+</head>
+<body>
+<button class="menu-btn" id="menuBtn" onclick="document.querySelector('.sidebar').classList.toggle('open')">☰</button>
+<div class="app">
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <h1>Acquisition <span>Command</span> Center</h1>
+      <small>Direct Property Buyers</small>
+    </div>
+    <nav class="nav">
+      <div class="nav-sec">Main</div>
+      <button class="nav-item active" data-nav="dashboard"><span class="ico">🏠</span> Dashboard</button>
+      <button class="nav-item" data-nav="paste"><span class="ico">📋</span> Paste Leads</button>
+      <button class="nav-item" data-nav="myleads"><span class="ico">📁</span> My Leads <span class="cnt" id="leadCountNav">0</span></button>
+      <div class="nav-sec">Tools</div>
+      <button class="nav-item" data-nav="buyers"><span class="ico">🤝</span> Buyer Match</button>
+      <button class="nav-item" data-nav="skiptrace"><span class="ico">🔍</span> Skip Trace</button>
+      <button class="nav-item" data-nav="comps"><span class="ico">📊</span> Comps</button>
+      <div class="nav-sec">System</div>
+      <button class="nav-item" data-nav="settings"><span class="ico">⚙️</span> Settings</button>
+    </nav>
+    <div class="sidebar-foot">
+      <button class="theme-toggle theme-toggle-sm" id="themeToggleSide" onclick="cycleTheme()" title="Toggle dark/light mode">🌙</button>
+      <span class="lbl" id="themeLabelSide">Dark mode</span>
+    </div>
+    <div class="sidebar-foot" style="border-top:none;padding-top:0">
+      <button class="crm-btn crm-btn-sm" onclick="window.open('https://app.gohighlevel.com/v2/location/krKoHLudPnn7nT0DPtwa/','_blank')" title="Open HighLevel CRM">← Back to CRM</button>
+    </div>
+  </aside>
+  <div class="main">
+    <div class="topbar">
+      <div style="display:flex;align-items:center;gap:12px;position:relative">
+        <h2 style="margin-bottom:0;flex:1">Where would you like to invest?</h2>
+        <button class="crm-btn" onclick="window.open('https://app.gohighlevel.com/v2/location/krKoHLudPnn7nT0DPtwa/','_blank')" title="Open HighLevel CRM">← Back to CRM</button>
+        <button class="theme-toggle" id="themeToggleTop" onclick="cycleTheme()" title="Toggle dark/light mode">🌙</button>
+      </div>
+      <div class="search-row">
+        <div class="search-box">
+          <input type="text" id="globalSearch" placeholder="Enter city, ZIP, or address..." onkeypress="if(event.key==='Enter')doGlobalSearch()" />
+          <button onclick="doGlobalSearch()">Search</button>
+        </div>
+      </div>
+    </div>
+    <div class="content" id="content">
+      <!-- DASHBOARD TAB -->
+      <div class="tab-page active" id="page-dashboard">
+        <div class="sec-title">📊 Overview</div>
+        <div class="cards">
+          <div class="card"><div class="num" id="statLeads">0</div><div class="lbl">My Leads</div></div>
+          <div class="card"><div class="num" id="statBuyers">0</div><div class="lbl">Active Buyers</div></div>
+          <div class="card"><div class="num" id="statHedge">0</div><div class="lbl">Hedge Funds</div></div>
+          <div class="card"><div class="num" id="statTraced">0</div><div class="lbl">Skip Traced</div></div>
+        </div>
+        <div class="sec-title">⚡ Quick Searches</div>
+        <div class="qs-grid">
+          <div class="qs-card" onclick="quickSearch('Indianapolis')"><div class="t">🏘️ Indianapolis Leads</div><div class="d">View all Indy leads</div></div>
+          <div class="qs-card" onclick="quickSearch('Cleveland')"><div class="t">🏘️ Cleveland Leads</div><div class="d">View all Cleveland leads</div></div>
+          <div class="qs-card" onclick="quickSearch('Kansas City')"><div class="t">🏘️ Kansas City Leads</div><div class="d">View all KC leads</div></div>
+          <div class="qs-card" onclick="quickSearch('Charlotte')"><div class="t">🏘️ Charlotte Leads</div><div class="d">View all Charlotte leads</div></div>
+          <div class="qs-card" onclick="quickSearch('Greenville')"><div class="t">🏘️ Greenville Leads</div><div class="d">View all Greenville leads</div></div>
+          <div class="qs-card" onclick="quickSearch('Jacksonville')"><div class="t">🏘️ Jacksonville Leads</div><div class="d">View all Jax leads</div></div>
+          <div class="qs-card" onclick="showPage('buyers')"><div class="t">🤝 Buyer Match</div><div class="d">Match a property to buyers</div></div>
+          <div class="qs-card" onclick="showPage('paste')"><div class="t">📋 Paste New Leads</div><div class="d">Import from spreadsheet</div></div>
+        </div>
+        <div class="sec-title">🏠 Property Search <span class="badge green" style="font-size:10px">RENTCAST · LIVE DATA</span></div>
+        <div class="card" style="margin-bottom:8px">
+          <p style="color:var(--muted);font-size:13px;margin-bottom:12px">Enter any ZIP code to pull live property records — no pasting needed. Uses your RentCast key (free tier: 50 calls/mo).</p>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+            <input class="field" id="propSearchZip" placeholder="ZIP code (e.g. 46201) or full address" style="max-width:320px;flex:1" onkeypress="if(event.key==='Enter')searchPropertiesByZip()" />
+            <button class="btn" onclick="openPropFilters()">🎛️ Filters <span class="badge orange" id="propFilterCount" style="display:none;font-size:10px">0</span></button>
+            <button class="btn primary" onclick="searchPropertiesByZip()">🔍 Search Properties</button>
+          </div>
+          <div id="propSearchStatus" style="margin-top:10px;font-size:13px"></div>
+          <div style="display:flex;gap:8px;align-items:center;margin-top:12px;flex-wrap:wrap" id="propViewRow" hidden>
+            <button class="btn small" id="propViewListBtn" onclick="setPropView('list')">📋 List</button>
+            <button class="btn small ghost" id="propViewMapBtn" onclick="setPropView('map')">🗺️ Map</button>
+            <span style="font-size:11px;color:var(--muted)" id="propMapNote"></span>
+          </div>
+          <div id="propSearchMap" style="display:none;height:420px;border-radius:12px;margin-top:12px;border:1px solid var(--line);z-index:0"></div>
+        </div>
+        <div class="lead-cards" id="propSearchResults" style="margin-top:12px"></div>
+        <!-- Property Search Filters Drawer -->
+        <div class="drawer-overlay" id="propFilterOverlay" onclick="closePropFilters()"></div>
+        <div class="drawer" id="propFilterDrawer">
+          <div class="drawer-head">
+            <div style="font-weight:700;font-size:16px">🎛️ Search Filters</div>
+            <button class="btn small ghost" onclick="closePropFilters()">✕</button>
+          </div>
+          <div class="drawer-body">
+            <div class="filter-sec">
+              <div class="filter-sec-title">🏠 Property Types</div>
+              <label class="filter-check"><input type="checkbox" id="pfTypeSingle" checked /> Single Family</label>
+              <label class="filter-check"><input type="checkbox" id="pfTypeMulti" /> Multi-Family</label>
+              <label class="filter-check"><input type="checkbox" id="pfTypeCondo" /> Condo</label>
+              <label class="filter-check"><input type="checkbox" id="pfTypeTown" /> Townhouse</label>
+              <label class="filter-check"><input type="checkbox" id="pfTypeApart" /> Apartment</label>
+              <label class="filter-check"><input type="checkbox" id="pfTypeLand" /> Land</label>
+              <label class="filter-check"><input type="checkbox" id="pfTypeOther" /> Other</label>
+            </div>
+            <div class="filter-sec">
+              <div class="filter-sec-title">🛏️ Bedrooms</div>
+              <div style="display:flex;gap:8px;align-items:center">
+                <input class="field" id="pfBedsMin" type="number" placeholder="Min" style="max-width:80px" />
+                <span style="color:var(--muted)">to</span>
+                <input class="field" id="pfBedsMax" type="number" placeholder="Max" style="max-width:80px" />
+              </div>
+            </div>
+            <div class="filter-sec">
+              <div class="filter-sec-title">🛁 Bathrooms</div>
+              <div style="display:flex;gap:8px;align-items:center">
+                <input class="field" id="pfBathsMin" type="number" placeholder="Min" step="0.5" style="max-width:80px" />
+                <span style="color:var(--muted)">to</span>
+                <input class="field" id="pfBathsMax" type="number" placeholder="Max" step="0.5" style="max-width:80px" />
+              </div>
+            </div>
+            <div class="filter-sec">
+              <div class="filter-sec-title">📅 Year Built</div>
+              <div style="display:flex;gap:8px;align-items:center">
+                <input class="field" id="pfYearMin" type="number" placeholder="Min" style="max-width:90px" />
+                <span style="color:var(--muted)">to</span>
+                <input class="field" id="pfYearMax" type="number" placeholder="Max" style="max-width:90px" />
+              </div>
+            </div>
+            <div class="filter-sec">
+              <div class="filter-sec-title">📐 Lot Size (sqft)</div>
+              <div style="display:flex;gap:8px;align-items:center">
+                <input class="field" id="pfLotMin" type="number" placeholder="Min" style="max-width:90px" />
+                <span style="color:var(--muted)">to</span>
+                <input class="field" id="pfLotMax" type="number" placeholder="Max" style="max-width:90px" />
+              </div>
+            </div>
+            <div class="filter-sec">
+              <div class="filter-sec-title">🔄 Last Sold</div>
+              <div style="display:flex;gap:8px;align-items:center">
+                <select class="field" id="pfSoldRange" style="max-width:220px">
+                  <option value="">Any time</option>
+                  <option value="1">Not sold in 1+ years</option>
+                  <option value="5">Not sold in 5+ years</option>
+                  <option value="10">Not sold in 10+ years (high equity likely)</option>
+                  <option value="15">Not sold in 15+ years</option>
+                  <option value="20">Not sold in 20+ years</option>
+                </select>
+              </div>
+            </div>
+            <div class="filter-sec">
+              <div class="filter-sec-title">👤 Ownership</div>
+              <label class="filter-check"><input type="checkbox" id="pfAbsentee" /> ✈️ Absentee owners only</label>
+              <label class="filter-check"><input type="checkbox" id="pfOwnerOcc" /> 🏠 Owner-occupied only</label>
+              <div style="margin-top:8px;font-size:12px;color:var(--muted)">Owner type:</div>
+              <label class="filter-check"><input type="checkbox" id="pfOwnerInd" checked /> Individual</label>
+              <label class="filter-check"><input type="checkbox" id="pfOwnerOrg" checked /> Business / Organization</label>
+            </div>
+            <div style="display:flex;gap:10px;margin-top:16px">
+              <button class="btn primary" style="flex:1" onclick="applyPropFilters()">Apply Filters</button>
+              <button class="btn ghost" onclick="resetPropFilters()">Reset</button>
+            </div>
+          </div>
+        </div>
+        <div class="sec-title">🕐 Recent Searches</div>
+        <div class="rs-list" id="recentSearches"><div class="rs-item"><span class="meta">No recent searches yet</span></div></div>
+        <div class="sec-title">📁 Recent Leads</div>
+        <div class="tbl-wrap"><table><thead><tr><th>Address</th><th>Market</th><th>Signal</th><th>Status</th><th>Added</th></tr></thead><tbody id="recentLeadsBody"><tr><td colspan="5" style="text-align:center;color:var(--muted)">No leads yet — paste some in!</td></tr></tbody></table></div>
+      </div>
+
+      <!-- PASTE LEADS TAB -->
+      <div class="tab-page" id="page-paste">
+        <div class="sec-title">📋 Paste Leads from Spreadsheet</div>
+        <div class="card" style="margin-bottom:14px">
+          <p style="color:var(--muted);font-size:13px;margin-bottom:10px">
+            Copy rows from your spreadsheet and paste below. Expected columns:<br>
+            <strong style="color:var(--text)">Address &nbsp;|&nbsp; City &nbsp;|&nbsp; State &nbsp;|&nbsp; ZIP &nbsp;|&nbsp; Distress Signal</strong><br>
+            Tab or comma separated. Header row is auto-detected and skipped.<br>
+            Condos, townhouses, units, suites, and apartments are auto-filtered out.
+          </p>
+          <label class="lbl">Distress Category <span style="color:var(--muted2);font-weight:400">(click to apply to all pasted leads)</span></label>
+          <div id="signalChips" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px"></div>
+          <label class="lbl">Paste rows here</label>
+          <textarea class="field" id="pasteArea" placeholder="123 Main St&#9;Indianapolis&#9;IN&#9;46201&#9;Tax Delinquent&#10;456 Oak Ave&#9;Cleveland&#9;OH&#9;44101&#9;Pre-Foreclosure"></textarea>
+          <div style="display:flex;gap:10px;margin-top:12px;flex-wrap:wrap">
+            <button class="btn primary" onclick="ingestPastedLeads()">⚡ Ingest Leads</button>
+            <button class="btn ghost" onclick="document.getElementById('pasteArea').value=''">Clear</button>
+          </div>
+          <div class="ingest-stats" id="ingestStats" style="display:none">
+            <div class="stat"><div class="n" style="color:var(--green)" id="ingAdded">0</div><div class="t">Added</div></div>
+            <div class="stat"><div class="n" style="color:var(--accent)" id="ingFiltered">0</div><div class="t">Filtered Out</div></div>
+            <div class="stat"><div class="n" style="color:var(--muted)" id="ingDupes">0</div><div class="t">Duplicates</div></div>
+            <div class="stat"><div class="n" style="color:var(--red)" id="ingInvalid">0</div><div class="t">Invalid</div></div>
+          </div>
+          <div id="ingestLog" style="margin-top:10px;font-size:12px;color:var(--muted);max-height:150px;overflow-y:auto"></div>
+        </div>
+      </div>
+      <!-- MY LEADS TAB -->
+      <div class="tab-page" id="page-myleads">
+        <div class="sec-title">📁 My Leads <span class="badge orange" id="leadCountBadge">0</span>
+          <button class="btn" style="margin-left:auto" onclick="traceAllLeads()">🔍 Skip Trace All</button>
+          <button class="btn primary" onclick="pushAllToGHL()">📤 Push All to HighLevel</button>
+        </div>
+        <div class="filter-bar">
+          <button class="btn" onclick="openFilterDrawer()">🎛️ Filters<span class="filter-count-badge" id="filterCountBadge" style="display:none">0</span></button>
+          <select class="field" id="filterMarket" onchange="renderLeads()"><option value="">All Markets / States</option><option>Indianapolis</option><option>Cleveland</option><option>Kansas City</option><option>Charlotte</option><option>Greenville</option><option>Jacksonville</option><option disabled>── All 50 States ──</option><option>Alabama</option><option>Alaska</option><option>Arizona</option><option>Arkansas</option><option>California</option><option>Colorado</option><option>Connecticut</option><option>Delaware</option><option>Florida</option><option>Georgia</option><option>Hawaii</option><option>Idaho</option><option>Illinois</option><option>Indiana</option><option>Iowa</option><option>Kansas</option><option>Kentucky</option><option>Louisiana</option><option>Maine</option><option>Maryland</option><option>Massachusetts</option><option>Michigan</option><option>Minnesota</option><option>Mississippi</option><option>Missouri</option><option>Montana</option><option>Nebraska</option><option>Nevada</option><option>New Hampshire</option><option>New Jersey</option><option>New Mexico</option><option>New York</option><option>North Carolina</option><option>North Dakota</option><option>Ohio</option><option>Oklahoma</option><option>Oregon</option><option>Pennsylvania</option><option>Rhode Island</option><option>South Carolina</option><option>South Dakota</option><option>Tennessee</option><option>Texas</option><option>Utah</option><option>Vermont</option><option>Virginia</option><option>Washington</option><option>West Virginia</option><option>Wisconsin</option><option>Wyoming</option></select>
+          <select class="field" id="filterSignal" onchange="renderLeads()"><option value="">All Signals</option></select>
+          <select class="field" id="filterStatus" onchange="renderLeads()"><option value="">All Statuses</option><option>New Lead</option><option>Skip Traced</option><option>Pushed to CRM</option><option>Contacted</option><option>Appointment Set</option><option>Dead</option></select>
+          <input class="field" id="filterSearch" placeholder="Search address..." oninput="renderLeads()" style="min-width:180px" />
+        </div>
+        <div class="bulk-bar" id="bulkBar" style="display:none">
+          <strong id="bulkCount">0 selected</strong>
+          <button class="btn small" onclick="traceSelected()">🔍 Trace Selected</button>
+          <button class="btn small primary" onclick="pushSelected()">📤 Push Selected</button>
+          <button class="btn small ghost" onclick="clearSelection()">Clear</button>
+        </div>
+        <div class="lead-cards" id="leadsBody"><p style="color:var(--muted);grid-column:1/-1;text-align:center">No leads yet — paste some in!</p></div>
+      </div>
+
+      <!-- BUYER MATCH TAB -->
+      <div class="tab-page" id="page-buyers">
+        <div class="sec-title">🤝 Buyer Match AI</div>
+        <div class="card" style="margin-bottom:14px">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+            <div><label class="lbl">Market</label><select class="field" id="matchMarket"><option>Indianapolis</option><option>Cleveland</option><option>Kansas City</option><option>Charlotte</option><option>Greenville</option><option>Jacksonville</option><option disabled>── All 50 States ──</option><option>Alabama</option><option>Alaska</option><option>Arizona</option><option>Arkansas</option><option>California</option><option>Colorado</option><option>Connecticut</option><option>Delaware</option><option>Florida</option><option>Georgia</option><option>Hawaii</option><option>Idaho</option><option>Illinois</option><option>Indiana</option><option>Iowa</option><option>Kansas</option><option>Kentucky</option><option>Louisiana</option><option>Maine</option><option>Maryland</option><option>Massachusetts</option><option>Michigan</option><option>Minnesota</option><option>Mississippi</option><option>Missouri</option><option>Montana</option><option>Nebraska</option><option>Nevada</option><option>New Hampshire</option><option>New Jersey</option><option>New Mexico</option><option>New York</option><option>North Carolina</option><option>North Dakota</option><option>Ohio</option><option>Oklahoma</option><option>Oregon</option><option>Pennsylvania</option><option>Rhode Island</option><option>South Carolina</option><option>South Dakota</option><option>Tennessee</option><option>Texas</option><option>Utah</option><option>Vermont</option><option>Virginia</option><option>Washington</option><option>West Virginia</option><option>Wisconsin</option><option>Wyoming</option></select></div>
+            <div><label class="lbl">Target Deal Price ($)</label><input class="field" id="matchPrice" type="number" min="0" step="1000" placeholder="100000" /></div>
+          </div>
+          <div style="margin-bottom:12px"><label class="lbl">Property Address</label><input class="field" id="matchAddress" placeholder="123 Main St, Indianapolis, IN" /></div>
+          <button class="btn primary" onclick="findBuyers()">🔍 Find Buyers</button>
+          <div style="margin-top:12px;display:flex;gap:8px">
+            <button class="btn small" id="secActiveBtn" onclick="setBuyerSection('active')">Active Cash Buyers (<span id="activeCount">0</span>)</button>
+            <button class="btn small ghost" id="secHfBtn" onclick="setBuyerSection('hedge')">Hedge Funds (<span id="hedgeCount">0</span>)</button>
+          </div>
+        </div>
+        <div id="matchHero"></div>
+        <div class="tbl-wrap" style="margin-top:12px"><table><thead><tr><th>#</th><th>Buyer</th><th>Market</th><th>Deals</th><th>Avg Price</th><th>Match</th><th>Action</th></tr></thead><tbody id="buyersBody"></tbody></table></div>
+      </div>
+
+      <!-- SKIP TRACE TAB -->
+      <div class="tab-page" id="page-skiptrace">
+        <div class="sec-title">🔍 Skip Trace</div>
+        <div class="card" style="margin-bottom:14px">
+          <div style="display:flex;gap:12px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
+            <div style="padding-top:4px"><span class="badge green">Ava Data — 2¢/hit</span> <span id="stKeyStatus"></span></div>
+          </div>
+          <p style="color:var(--muted);font-size:13px;margin-bottom:12px">Trace any address to find owner phone numbers.</p>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+            <div><label class="lbl">First Name (optional)</label><input class="field" id="stFirst" placeholder="John" /></div>
+            <div><label class="lbl">Last Name (optional)</label><input class="field" id="stLast" placeholder="Doe" /></div>
+          </div>
+          <div style="margin-bottom:12px"><label class="lbl">Street Address</label><input class="field" id="stAddress" placeholder="123 Main St" /></div>
+          <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:12px;margin-bottom:12px">
+            <div><label class="lbl">City</label><input class="field" id="stCity" placeholder="Indianapolis" /></div>
+            <div><label class="lbl">State</label><input class="field" id="stState" placeholder="IN" maxlength="2" /></div>
+            <div><label class="lbl">ZIP</label><input class="field" id="stZip" placeholder="46201" maxlength="5" /></div>
+          </div>
+          <button class="btn primary" onclick="runSkipTrace()">⚡ Trace Address</button>
+          <div id="stResults" style="margin-top:16px"></div>
+        </div>
+        <div class="sec-title">📜 Trace History</div>
+        <div class="tbl-wrap"><table><thead><tr><th>Address</th><th>Hit</th><th>Mobiles</th><th>When</th></tr></thead><tbody id="traceHistoryBody"><tr><td colspan="4" style="text-align:center;color:var(--muted)">No traces yet</td></tr></tbody></table></div>
+      </div>
+
+      <!-- COMPS TAB -->
+      <div class="tab-page" id="page-comps">
+        <div class="sec-title">📊 Quick Comp Calculator</div>
+        <div class="card">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+            <div><label class="lbl">ARV ($)</label><input class="field" id="compARV" type="number" placeholder="150000" oninput="calcComp()" /></div>
+            <div><label class="lbl">Repairs ($)</label><input class="field" id="compRepairs" type="number" placeholder="30000" oninput="calcComp()" /></div>
+          </div>
+          <div id="compResult" style="margin-top:14px"></div>
+          <p style="color:var(--muted2);font-size:11px;margin-top:12px">MAO tiers: 70% under $120K · 80% $120–220K · 81.5% $220–300K · 82.9% $300–400K · 84.9% $400K+. LAO = MAO × 70%.</p>
+        </div>
+      </div>
+
+      <!-- SETTINGS TAB -->
+      <div class="tab-page" id="page-settings">
+        <div class="sec-title">⚙️ Settings</div>
+        <div class="card" style="margin-bottom:14px">
+          <div class="sec-title" style="font-size:14px">🔑 Ava Data API <span class="badge green" style="font-size:10px">2¢/hit</span></div>
+          <p style="color:var(--muted);font-size:13px;margin-bottom:10px">Enter your Ava Data API key for 2¢/hit skip tracing. Stored only in this browser. Get your key from Settings → API Access in your Ava Data dashboard.</p>
+          <label class="lbl">API Key</label>
+          <div style="display:flex;gap:10px">
+            <input class="field" type="password" id="avaDataKey" placeholder="Paste Ava Data API key here" style="flex:1" />
+            <button class="btn" onclick="toggleAvaKeyVis()">👁️</button>
+            <button class="btn primary" onclick="saveAvaKey()">Save</button>
+          </div>
+          <div id="avaKeySavedMsg" style="margin-top:8px;font-size:13px"></div>
+        </div>
+        <div class="card" style="margin-bottom:14px">
+          <div class="sec-title" style="font-size:14px">🔑 RentCast API <span class="badge green" style="font-size:10px">FREE 50/mo</span></div>
+          <p style="color:var(--muted);font-size:13px;margin-bottom:10px">Enter your RentCast API key for free ARV estimates + comps. Stored only in this browser. Get your key from app.rentcast.io → API Dashboard.</p>
+          <label class="lbl">API Key</label>
+          <div style="display:flex;gap:10px">
+            <input class="field" type="password" id="rentcastKey" placeholder="Paste RentCast API key here" style="flex:1" />
+            <button class="btn" onclick="toggleRentcastKeyVis()">👁️</button>
+            <button class="btn primary" onclick="saveRentcastKey()">Save</button>
+          </div>
+          <div id="rentcastKeySavedMsg" style="margin-top:8px;font-size:13px"></div>
+        </div>
+        <div class="card" style="margin-bottom:14px">
+          <div class="sec-title" style="font-size:14px">🛰️ Default Property View</div>
+          <p style="color:var(--muted);font-size:13px;margin-bottom:10px">Which view loads first when you open a lead. You can still switch anytime in the lead.</p>
+          <div class="img-seg" id="defViewSeg">
+            <button class="img-tab defview-btn" data-mode="street" onclick="setDefaultImgView('street')">🏠 Street</button>
+            <button class="img-tab defview-btn" data-mode="satellite" onclick="setDefaultImgView('satellite')">🛰️ Satellite</button>
+            <button class="img-tab defview-btn" data-mode="map" onclick="setDefaultImgView('map')">🗺️ Map</button>
+          </div>
+        </div>
+        <div class="card" style="margin-bottom:14px">
+          <div class="sec-title" style="font-size:14px">🎨 Theme</div>
+          <p style="color:var(--muted);font-size:13px;margin-bottom:10px">Switch between dark and light mode. Your choice is saved on this device.</p>
+          <div class="img-seg" id="themeSeg">
+            <button class="img-tab theme-btn" data-mode="dark" onclick="setTheme('dark')">🌙 Dark</button>
+            <button class="img-tab theme-btn" data-mode="light" onclick="setTheme('light')">☀️ Light</button>
+            <button class="img-tab theme-btn" data-mode="system" onclick="setTheme('system')">💻 System</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="sec-title" style="font-size:14px">📤 Export Leads</div>
+          <button class="btn" onclick="exportLeadsCSV()">Download Leads CSV</button>
+        </div>
+      </div>
+
+    </div><!-- /content -->
+  </div><!-- /main -->
+</div><!-- /app -->
+
+<!-- LEAD DETAIL MODAL -->
+<div class="modal-overlay" id="leadModal">
+  <div class="modal">
+    <div class="modal-head"><h3 id="lmTitle">Lead Detail</h3><button class="modal-x" onclick="closeModal()">✕</button></div>
+    <div class="modal-body" id="lmBody"></div>
+  </div>
+</div>
+<!-- IMAGE LIGHTBOX -->
+<div class="lightbox-overlay" id="lightbox" onclick="closeLightbox()">
+  <button class="lightbox-close" onclick="closeLightbox()">✕</button>
+  <img id="lightboxImg" src="" alt="Enlarged property image">
+</div>
+<div id="toast"></div>
+<script>
+/* ============ STATE ============ */
+let leads = [];
+let leadIdCounter = 1;
+let recentSearches = [];
+let traceHistory = [];
+let buyerSection = 'active';
+let currentLeadId = null;
+
+const MARKETS = ['Indianapolis','Cleveland','Kansas City','Charlotte','Greenville','Jacksonville'];
+
+/* XLeads-style lead types (18) with colors */
+const DISTRESS_SIGNALS = [
+  {name:'Absentee Owner', color:'blue', icon:'✈️'},
+  {name:'Pre-Foreclosure', color:'red', icon:'🏠'},
+  {name:'Code Violations', color:'orange', icon:'⚠️'},
+  {name:'Tax Delinquent', color:'orange', icon:'💰'},
+  {name:'Delinquent Tax Activity', color:'orange', icon:'🧾'},
+  {name:'Vacant / Abandoned', color:'gray', icon:'🏚️'},
+  {name:'Vacancy', color:'gray', icon:'🏚️'},
+  {name:'Probate / Inherited', color:'blue', icon:'📜'},
+  {name:'Deceased / Probate', color:'blue', icon:'📜'},
+  {name:'Tired Landlord', color:'green', icon:'🔑'},
+  {name:'Bored Investor', color:'green', icon:'😴'},
+  {name:'Divorce', color:'red', icon:'💔'},
+  {name:'Bankruptcy', color:'gray', icon:'📉'},
+  {name:'Liens / Judgments', color:'orange', icon:'⚖️'},
+  {name:'Flipped', color:'blue', icon:'🔄'},
+  {name:'Low Equity', color:'orange', icon:'📉'},
+  {name:'High Equity', color:'green', icon:'📈'},
+  {name:'Free & Clear', color:'green', icon:'✅'},
+  {name:'Cash Buyer', color:'blue', icon:'💵'},
+  {name:'Active Investor Owned', color:'blue', icon:'🏢'},
+  {name:'Marketplace Deal', color:'red', icon:'🏷️'},
+];
+let selectedSignal = '';
+const PASTE_CHIPS = ['Pre-Foreclosure','Code Violations','Tax Delinquent','Vacant / Abandoned','Probate / Inherited','Absentee Owner','Tired Landlord','Divorce','Bankruptcy','Liens / Judgments'];
+function renderSignalChips(){
+  const el = document.getElementById('signalChips');
+  if(!el) return;
+  el.innerHTML = PASTE_CHIPS.map(name=>{
+    const s = DISTRESS_SIGNALS.find(x=>x.name===name);
+    if(!s) return '';
+    return `<button class="chip-btn ${selectedSignal===s.name?'active':''}" onclick="selectSignal('${s.name}')" style="${selectedSignal===s.name?'border-color:var(--accent);background:var(--chip);':''}">${s.icon} ${s.name}</button>`;
+  }).join('');
+}
+function selectSignal(name){
+  selectedSignal = selectedSignal===name ? '' : name;
+  renderSignalChips();
+  toast(selectedSignal ? 'Category set: '+selectedSignal : 'Category cleared');
+}
+function signalBadge(signal){
+  const s = DISTRESS_SIGNALS.find(x=>x.name===signal);
+  if(!s) return `<span class="badge gray">${esc(signal||'General')}</span>`;
+  return `<span class="badge ${s.color}">${s.icon} ${esc(signal)}</span>`;
+}
+
+/* Google Maps — satellite, street view, static map (same key as Troy's other dashboards) */
+const GOOGLE_MAPS_KEY = 'AIzaSyDiizMKd7yZ5rPVv3nnAQGymjdAKv3Tcvo'; // Troy's Google Maps key (same as other dashboards)
+
+/* ============ HELPERS ============ */
+function toast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'), 2500);
+}
+function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function normAddr(a){ return String(a||'').toLowerCase().replace(/[^a-z0-9]/g,''); }
+function fmtDate(iso){ try{ return new Date(iso).toLocaleDateString(); }catch(e){ return ''; } }
+function saveState(){ try{ localStorage.setItem('acc_leads', JSON.stringify(leads)); localStorage.setItem('acc_searches', JSON.stringify(recentSearches)); localStorage.setItem('acc_traces', JSON.stringify(traceHistory)); localStorage.setItem('acc_counter', String(leadIdCounter)); }catch(e){} }
+function loadState(){ try{ leads = JSON.parse(localStorage.getItem('acc_leads')||'[]'); recentSearches = JSON.parse(localStorage.getItem('acc_searches')||'[]'); traceHistory = JSON.parse(localStorage.getItem('acc_traces')||'[]'); leadIdCounter = parseInt(localStorage.getItem('acc_counter')||'1'); }catch(e){ leads=[]; } }
+
+/* ============ NAVIGATION ============ */
+document.querySelectorAll('.nav-item').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    document.querySelectorAll('.nav-item').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    showPage(btn.dataset.nav);
+    document.getElementById('sidebar').classList.remove('open');
+  });
+});
+function showPage(name){
+  document.querySelectorAll('.tab-page').forEach(p=>p.classList.remove('active'));
+  const el = document.getElementById('page-'+name);
+  if(el) el.classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active', b.dataset.nav===name));
+}
+
+/* ============ GLOBAL SEARCH ============ */
+function doGlobalSearch(){
+  const q = document.getElementById('globalSearch').value.trim();
+  if(!q) return;
+  recentSearches.unshift({q, at:new Date().toISOString()});
+  recentSearches = recentSearches.slice(0,8);
+  saveState(); renderRecentSearches();
+  // Search leads
+  const ql = q.toLowerCase();
+  const hits = leads.filter(l => (l.address+' '+l.city+' '+l.zip).toLowerCase().includes(ql));
+  document.getElementById('filterSearch').value = q;
+  document.getElementById('filterMarket').value = '';
+  showPage('myleads'); renderLeads();
+  if(hits.length===0){
+    toast('No leads match "' + q + '" — paste a lead list first, then search it');
+  } else {
+    toast(hits.length + ' lead(s) match "' + q + '"');
+  }
+}
+function quickSearch(market){
+  recentSearches.unshift({q:market+' leads', at:new Date().toISOString()});
+  recentSearches = recentSearches.slice(0,8);
+  saveState(); renderRecentSearches();
+  document.getElementById('filterMarket').value = market;
+  document.getElementById('filterSearch').value = '';
+  showPage('myleads'); renderLeads();
+}
+function renderRecentSearches(){
+  const el = document.getElementById('recentSearches');
+  if(!recentSearches.length){ el.innerHTML = '<div class="rs-item"><span class="meta">No recent searches yet</span></div>'; return; }
+  el.innerHTML = recentSearches.map(s=>`<div class="rs-item" onclick="document.getElementById('globalSearch').value='${esc(s.q)}';doGlobalSearch()"><span>🔍</span><div><div class="addr">${esc(s.q)}</div><div class="meta">${fmtDate(s.at)}</div></div></div>`).join('');
+}
+
+
+let propSearchCache = [];
+async function searchPropertiesByZip(){
+  const raw = (document.getElementById('propSearchZip').value || '').trim();
+  const statusEl = document.getElementById('propSearchStatus');
+  const resultsEl = document.getElementById('propSearchResults');
+  if(!raw){ statusEl.innerHTML = '<span style="color:var(--red)">Enter a ZIP code or address.</span>'; return; }
+  const key = getRentcastKey();
+  if(!key){ statusEl.innerHTML = '<span style="color:var(--red)">Add your RentCast API key in Settings first.</span>'; return; }
+  // Route: 5-digit ZIP → area list search; anything else → single-address lookup
+  if(/^\d{5}$/.test(raw)){ return searchPropertiesByZipCode(raw, key, statusEl, resultsEl); }
+  return searchPropertyByAddress(raw, key, statusEl, resultsEl);
+}
+async function searchPropertiesByZipCode(zip, key, statusEl, resultsEl){
+  if(!key){ statusEl.innerHTML = '<span style="color:var(--red)">Add your RentCast API key in Settings first.</span>'; return; }
+  statusEl.innerHTML = '<span style="color:var(--muted)">🔍 Searching RentCast for ' + esc(zip) + '…</span>';
+  resultsEl.innerHTML = '';
+  try{
+    const resp = await fetch('https://api.rentcast.io/v1/properties?zipCode=' + zip + '&limit=100', {
+      headers: { 'X-Api-Key': key, 'accept': 'application/json' }
+    });
+    if(resp.status === 401){ statusEl.innerHTML = '<span style="color:var(--red)">RentCast key rejected (401). Check your key in Settings.</span>'; return; }
+    if(!resp.ok){ statusEl.innerHTML = '<span style="color:var(--red)">RentCast error ' + resp.status + '. Try again.</span>'; return; }
+    const props = await resp.json();
+    propSearchCache = Array.isArray(props) ? props : [];
+    if(!propSearchCache.length){ statusEl.innerHTML = '<span style="color:var(--muted)">No properties returned for ' + esc(zip) + '.</span>'; return; }
+    statusEl.innerHTML = '<span style="color:var(--green)">✓ Found ' + propSearchCache.length + ' properties in ' + esc(zip) + '</span> <button class="btn small primary" style="margin-left:10px" onclick="addAllPropSearchToLeads()">➕ Add All to My Leads</button>';
+    renderPropSearchResults();
+    recentSearches.unshift({q:'RentCast: ' + zip, at:new Date().toISOString()});
+    recentSearches = recentSearches.slice(0,8); saveState(); renderRecentSearches();
+  }catch(e){
+    statusEl.innerHTML = '<span style="color:var(--red)">Search failed: ' + esc(e.message) + '</span>';
+  }
+}
+function isAbsenteeProp(p){
+  try{
+    if(p.ownerOccupied === false) return true;
+    if(p.ownerOccupied === true) return false;
+    const mail = ((p.owner && p.owner.mailingAddress) || {});
+    const mAddr = (mail.addressLine1 || '').toLowerCase().trim();
+    const pAddr = (p.addressLine1 || '').toLowerCase().trim();
+    return mAddr && pAddr && mAddr !== pAddr;
+  }catch(e){ return false; }
+}
+function getOwnerName(p){
+  try{
+    const names = (p.owner && p.owner.names) || [];
+    return names.length ? names.join(', ') : '';
+  }catch(e){ return ''; }
+}
+function numOrDash(v){ return (v === null || v === undefined || v === '') ? '—' : v; }
+function moneyOrDash(v){ return (v === null || v === undefined || v === '') ? '—' : '$' + Number(v).toLocaleString(); }
+function propDetailHtml(p, i){
+  const owner = getOwnerName(p) || 'Not listed';
+  const mail = (p.owner && p.owner.mailingAddress) || {};
+  const mailStr = mail.formattedAddress || [mail.addressLine1, mail.city, mail.state, mail.zipCode].filter(Boolean).join(', ') || '—';
+  let taxHtml = '—';
+  try{
+    if(p.taxAssessed){ taxHtml = moneyOrDash(p.taxAssessed) + (p.taxYear ? ' <span style="color:var(--muted)">(' + p.taxYear + ')</span>' : ''); }
+    else {
+      const years = Object.keys(p.taxAssessments || {}).sort().reverse();
+      if(years.length){
+        const t = p.taxAssessments[years[0]];
+        taxHtml = moneyOrDash(t.value) + ' <span style="color:var(--muted)">(' + years[0] + ')</span>';
+      }
+    }
+  }catch(e){}
+  let saleHtml = '—';
+  if(p.lastSaleDate){
+    const d = new Date(p.lastSaleDate);
+    saleHtml = d.toLocaleDateString() + (p.lastSalePrice ? ' · ' + moneyOrDash(p.lastSalePrice) : '');
+  }
+  return `<div style="margin-top:10px;padding:12px;background:var(--panel2,#f5f5f5);border-radius:10px;font-size:13px;line-height:1.9">
+    <div><strong>👤 Owner:</strong> ${esc(owner)}</div>
+    <div><strong>✉️ Owner mailing:</strong> ${esc(mailStr)}</div>
+    <div><strong>🏠 Type:</strong> ${esc(p.propertyType || '—')} ${p.ownerOccupied===true?'· <span class="badge green">Owner Occupied</span>':p.ownerOccupied===false?'· <span class="badge blue">Non-Owner Occupied</span>':''}</div>
+    <div><strong>📐 Lot:</strong> ${p.lotSize ? Number(p.lotSize).toLocaleString() + ' sqft' : '—'} ${p.county?'· '+esc(p.county)+' County':''}</div>
+    <div><strong>💰 Tax assessed:</strong> ${taxHtml}</div>
+    <div><strong>🔄 Last sale:</strong> ${saleHtml}</div>
+    ${p.assessorID?`<div><strong>🗂️ APN:</strong> ${esc(p.assessorID)}</div>`:''}
+    ${p.legalDescription?`<div><strong>📜 Legal description:</strong> ${esc(p.legalDescription)}</div>`:''}
+  </div>`;
+}
+function togglePropDetail(i){
+  const el = document.getElementById('propDetail' + i);
+  if(el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+function propTypeExcluded(p){
+  const t = (p.propertyType || '').toLowerCase();
+  return t.includes('apartment') || t.includes('condo') || t.includes('townhouse') || t.includes('townhome');
+}
+/* ---- Property Search Filters (XLeads-style drawer) ---- */
+function openPropFilters(){ document.getElementById('propFilterDrawer').classList.add('open'); document.getElementById('propFilterOverlay').classList.add('open'); }
+function closePropFilters(){ document.getElementById('propFilterDrawer').classList.remove('open'); document.getElementById('propFilterOverlay').classList.remove('open'); }
+function getPropFilters(){
+  const v = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+  const c = id => { const el = document.getElementById(id); return el ? el.checked : false; };
+  return {
+    types: {
+      single: c('pfTypeSingle'), multi: c('pfTypeMulti'), condo: c('pfTypeCondo'),
+      town: c('pfTypeTown'), apart: c('pfTypeApart'), land: c('pfTypeLand'), other: c('pfTypeOther')
+    },
+    bedsMin: v('pfBedsMin') ? parseInt(v('pfBedsMin')) : null,
+    bedsMax: v('pfBedsMax') ? parseInt(v('pfBedsMax')) : null,
+    bathsMin: v('pfBathsMin') ? parseFloat(v('pfBathsMin')) : null,
+    bathsMax: v('pfBathsMax') ? parseFloat(v('pfBathsMax')) : null,
+    yearMin: v('pfYearMin') ? parseInt(v('pfYearMin')) : null,
+    yearMax: v('pfYearMax') ? parseInt(v('pfYearMax')) : null,
+    lotMin: v('pfLotMin') ? parseInt(v('pfLotMin')) : null,
+    lotMax: v('pfLotMax') ? parseInt(v('pfLotMax')) : null,
+    soldYears: v('pfSoldRange') ? parseInt(v('pfSoldRange')) : null,
+    absenteeOnly: c('pfAbsentee'), ownerOccOnly: c('pfOwnerOcc'),
+    ownerInd: c('pfOwnerInd'), ownerOrg: c('pfOwnerOrg')
+  };
+}
+function countActivePropFilters(f){
+  let n = 0;
+  const typeCount = Object.values(f.types).filter(Boolean).length;
+  if(typeCount < 7) n++;
+  if(f.bedsMin !== null || f.bedsMax !== null) n++;
+  if(f.bathsMin !== null || f.bathsMax !== null) n++;
+  if(f.yearMin !== null || f.yearMax !== null) n++;
+  if(f.lotMin !== null || f.lotMax !== null) n++;
+  if(f.soldYears !== null) n++;
+  if(f.absenteeOnly || f.ownerOccOnly) n++;
+  if(!f.ownerInd || !f.ownerOrg) n++;
+
+  return n;
+}
+function applyPropFilters(){
+  const n = countActivePropFilters(getPropFilters());
+  const badge = document.getElementById('propFilterCount');
+  badge.style.display = n > 0 ? 'inline-block' : 'none';
+  badge.textContent = n;
+  closePropFilters();
+  if(propSearchCache.length) renderPropSearchResults();
+}
+function resetPropFilters(){
+  ['pfTypeSingle'].forEach(id=>document.getElementById(id).checked=true);
+  ['pfTypeMulti','pfTypeCondo','pfTypeTown','pfTypeApart','pfTypeLand','pfTypeOther'].forEach(id=>document.getElementById(id).checked=false);
+  ['pfBedsMin','pfBedsMax','pfBathsMin','pfBathsMax','pfYearMin','pfYearMax','pfLotMin','pfLotMax'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('pfSoldRange').value='';
+  document.getElementById('pfAbsentee').checked=false;
+  document.getElementById('pfOwnerOcc').checked=false;
+
+  document.getElementById('pfOwnerInd').checked=true;
+  document.getElementById('pfOwnerOrg').checked=true;
+  applyPropFilters();
+}
+function matchPropType(p, types){
+  const t = (p.propertyType || '').toLowerCase();
+  const anyChecked = Object.values(types).some(Boolean);
+  if(!anyChecked) return true;
+  if(t.includes('single') && types.single) return true;
+  if((t.includes('multi') || t.includes('duplex')) && types.multi) return true;
+  if(t.includes('condo') && types.condo) return true;
+  if((t.includes('townhouse') || t.includes('townhome')) && types.town) return true;
+  if(t.includes('apartment') && types.apart) return true;
+  if(t.includes('land') && types.land) return true;
+  // "Other" catches anything not matched above
+  if(types.other){
+    const matched = t.includes('single')||t.includes('multi')||t.includes('duplex')||t.includes('condo')||t.includes('townhouse')||t.includes('townhome')||t.includes('apartment')||t.includes('land');
+    if(!matched) return true;
+  }
+  return false;
+}
+function applyPropFiltersToResults(props){
+  const f = getPropFilters();
+  return props.filter(p=>{
+    if(!matchPropType(p, f.types)) return false;
+    if(f.bedsMin !== null && (p.bedrooms === null || p.bedrooms === undefined || p.bedrooms < f.bedsMin)) return false;
+    if(f.bedsMax !== null && (p.bedrooms === null || p.bedrooms === undefined || p.bedrooms > f.bedsMax)) return false;
+    if(f.bathsMin !== null && (p.bathrooms === null || p.bathrooms === undefined || p.bathrooms < f.bathsMin)) return false;
+    if(f.bathsMax !== null && (p.bathrooms === null || p.bathrooms === undefined || p.bathrooms > f.bathsMax)) return false;
+    if(f.yearMin !== null && (p.yearBuilt === null || p.yearBuilt === undefined || p.yearBuilt < f.yearMin)) return false;
+    if(f.yearMax !== null && (p.yearBuilt === null || p.yearBuilt === undefined || p.yearBuilt > f.yearMax)) return false;
+    if(f.lotMin !== null && (p.lotSize === null || p.lotSize === undefined || p.lotSize < f.lotMin)) return false;
+    if(f.lotMax !== null && (p.lotSize === null || p.lotSize === undefined || p.lotSize > f.lotMax)) return false;
+    if(f.soldYears !== null){
+      if(!p.lastSaleDate) return false;
+      const yrsAgo = (Date.now() - new Date(p.lastSaleDate).getTime()) / (365.25*24*3600*1000);
+      if(yrsAgo < f.soldYears) return false;
+    }
+    if(f.absenteeOnly && !isAbsenteeProp(p)) return false;
+    if(f.ownerOccOnly && p.ownerOccupied !== true) return false;
+    const oType = ((p.owner && p.owner.type) || '').toLowerCase();
+    if(oType === 'individual' && !f.ownerInd) return false;
+    if(oType === 'organization' && !f.ownerOrg) return false;
+    return true;
+  });
+}
+function renderPropSearchResults(){
+  const el = document.getElementById('propSearchResults');
+  const filtered = applyPropFiltersToResults(propSearchCache);
+  const skipped = propSearchCache.length - filtered.length;
+  if(propView === 'map'){ syncPropView(); return; } // map view handles its own display
+  el.innerHTML = (skipped > 0 ? `<div style="font-size:12px;color:var(--muted);margin-bottom:8px">Filtered out ${skipped} ${skipped===1?'property':'properties'} by your filters</div>` : '') + filtered.map((p)=>{
+    const i = propSearchCache.indexOf(p);
+    const absentee = isAbsenteeProp(p);
+    const owner = getOwnerName(p);
+    const beds = numOrDash(p.bedrooms), baths = numOrDash(p.bathrooms);
+    const sqft = p.squareFootage ? Number(p.squareFootage).toLocaleString() : '—';
+    const year = numOrDash(p.yearBuilt);
+    return `<div class="lead-card" onclick="togglePropDetail(${i})" style="cursor:pointer">
+      <div class="lead-card-top"><div style="flex:1">
+        <div class="lead-addr">${esc(p.addressLine1 || '')}</div>
+        <div class="lead-sub">${esc(p.city || '')}, ${esc(p.state || '')} ${esc(p.zipCode || '')}</div>
+      </div></div>
+      <div class="lead-badges">
+        ${absentee?'<span class="badge blue">✈️ Absentee Owner</span>':''}
+        <span class="badge gray">${beds}bd / ${baths}ba · ${sqft} sqft · ${year}</span>
+      </div>
+      ${owner?`<div class="lead-owner">👤 ${esc(owner)}</div>`:''}
+      <div id="propDetail${i}" style="display:none">${propDetailHtml(p,i)}</div>
+      <div class="lead-status-row">
+        <span class="badge orange">Tap card for details</span>
+        <div class="lead-actions"><button class="btn small primary" onclick="event.stopPropagation();addPropSearchToLeads(${i})">➕ Add to Leads</button></div>
+      </div>
+    </div>`;
+  }).join('');
+  syncPropView();
+}
+/* ============ PROPERTY SEARCH MAP VIEW (Leaflet, v23) ============ */
+let propView = 'list';
+let propMap = null;
+let propMapTileLayer = null;
+function propMapTiles(){
+  const light = document.documentElement.getAttribute('data-theme') === 'light';
+  return light
+    ? 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'
+    : 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
+}
+function setPropView(v){ propView = v; syncPropView(); }
+function syncPropView(){
+  const row = document.getElementById('propViewRow');
+  const cards = document.getElementById('propSearchResults');
+  const mapEl = document.getElementById('propSearchMap');
+  const listBtn = document.getElementById('propViewListBtn');
+  const mapBtn = document.getElementById('propViewMapBtn');
+  if(!row || !cards || !mapEl) return;
+  row.hidden = !propSearchCache.length;
+  if(propView === 'map' && propSearchCache.length){
+    if(listBtn) listBtn.className = 'btn small ghost';
+    if(mapBtn) mapBtn.className = 'btn small';
+    cards.style.display = 'none'; mapEl.style.display = 'block';
+    renderPropMap();
+    setTimeout(()=>{ if(propMap) propMap.invalidateSize(); }, 150);
+  }else{
+    if(listBtn) listBtn.className = 'btn small';
+    if(mapBtn) mapBtn.className = 'btn small ghost';
+    cards.style.display = ''; mapEl.style.display = 'none';
+  }
+}
+function renderPropMap(){
+  const note = document.getElementById('propMapNote');
+  if(typeof L === 'undefined'){
+    if(note) note.textContent = 'Map needs an internet connection to load.';
+    return;
+  }
+  const all = applyPropFiltersToResults(propSearchCache);
+  const pinned = all.filter(p => p.latitude !== null && p.latitude !== undefined && p.longitude !== null && p.longitude !== undefined);
+  const noCoords = all.length - pinned.length;
+  if(note) note.textContent = pinned.length
+    ? pinned.length + ' pinned' + (noCoords ? ' (' + noCoords + ' without coordinates)' : '') + ' · 🔵 absentee · 🟠 other'
+    : 'No coordinates on these results.';
+  if(!propMap){
+    propMap = L.map('propSearchMap', { scrollWheelZoom: false });
+    propMap.on('focus', ()=> propMap.scrollWheelZoom.enable());
+    propMap.on('blur', ()=> propMap.scrollWheelZoom.disable());
+  }
+  const tileUrl = propMapTiles();
+  if(propMapTileLayer){ propMapTileLayer.setUrl(tileUrl); }
+  else{
+    propMapTileLayer = L.tileLayer(tileUrl, {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+      maxZoom: 19
+    }).addTo(propMap);
+  }
+  propMap.eachLayer(l=>{ if(l instanceof L.CircleMarker) propMap.removeLayer(l); });
+  if(!pinned.length) return;
+  const bounds = L.latLngBounds();
+  pinned.forEach(p=>{
+    const i = propSearchCache.indexOf(p);
+    const abs = isAbsenteeProp(p);
+    const owner = getOwnerName(p);
+    const beds = numOrDash(p.bedrooms), baths = numOrDash(p.bathrooms);
+    const m = L.circleMarker([p.latitude, p.longitude], {
+      radius: 8, color: '#0d1117', weight: 2,
+      fillColor: abs ? '#3498db' : '#ff6b1a', fillOpacity: 0.9
+    }).addTo(propMap);
+    m.bindPopup('<div style="font-size:13px;line-height:1.7;min-width:180px;color:#182234">'
+      + '<div style="font-weight:700">' + esc(p.addressLine1 || '') + '</div>'
+      + '<div style="color:#666">' + esc((p.city||'') + ', ' + (p.state||'') + ' ' + (p.zipCode||'')) + '</div>'
+      + (abs ? '<div>✈️ Absentee Owner</div>' : '')
+      + (owner ? '<div>👤 ' + esc(owner) + '</div>' : '')
+      + '<div>' + beds + 'bd / ' + baths + 'ba' + (p.squareFootage ? ' · ' + Number(p.squareFootage).toLocaleString() + ' sqft' : '') + '</div>'
+      + (p._avm ? '<div>💰 ARV ~$' + Number(p._avm).toLocaleString() + '</div>' : '')
+      + '<button onclick="addPropSearchToLeads(' + i + ')" style="margin-top:6px;background:#ff6b1a;color:#fff;border:0;border-radius:8px;padding:6px 10px;cursor:pointer">➕ Add to Leads</button>'
+      + '</div>');
+    bounds.extend([p.latitude, p.longitude]);
+  });
+  if(bounds.isValid()) propMap.fitBounds(bounds.pad(0.2));
+}
+function propToLead(p){
+  const absentee = isAbsenteeProp(p);
+  return {
+    id: 'rc' + Date.now() + Math.floor(Math.random()*9999),
+    address: p.addressLine1 || '', city: p.city || '', state: p.state || '', zip: p.zipCode || '',
+    market: p.city || '', distressSignal: absentee ? 'Absentee Owner' : 'General',
+    owner: getOwnerName(p),
+    status: 'New Lead', addedAt: new Date().toISOString(), source: 'rentcast-search',
+    beds: p.bedrooms, baths: p.bathrooms, sqft: p.squareFootage, yearBuilt: p.yearBuilt,
+    phones: [], traced: false
+  };
+}
+function addPropSearchToLeads(i){
+  const p = propSearchCache[i]; if(!p) return;
+  leads.push(propToLead(p)); saveState(); renderLeads(); updateStats();
+  toast('Added to My Leads: ' + (p.addressLine1 || ''));
+}
+function addAllPropSearchToLeads(){
+  if(!propSearchCache.length) return;
+  let added = 0;
+  propSearchCache.forEach(p=>{
+    const key = (p.addressLine1||'').toLowerCase() + '|' + (p.zipCode||'');
+    if(!leads.some(l=>(l.address||'').toLowerCase()+'|'+(l.zip||'')===key)){ leads.push(propToLead(p)); added++; }
+  });
+  saveState(); renderLeads(); updateStats();
+  toast('Added ' + added + ' properties to My Leads');
+}
+/* Single-address lookup via RentCast AVM + property records */
+async function searchPropertyByAddress(raw, key, statusEl, resultsEl){
+  statusEl.innerHTML = '<span style="color:var(--muted)">🔍 Looking up ' + esc(raw) + '…</span>';
+  resultsEl.innerHTML = '';
+  try{
+    // Try parsing "123 Main St, Indianapolis, IN 46201" format
+    let address = raw, city = '', state = '', zipCode = '';
+    const parts = raw.split(',').map(s=>s.trim());
+    if(parts.length >= 1) address = parts[0];
+    if(parts.length >= 2){
+      const csz = parts[1].trim().split(/\s+/);
+      if(csz.length >= 2 && /^[A-Z]{2}$/i.test(csz[csz.length-1])){
+        state = csz.pop().toUpperCase(); city = csz.join(' ');
+      } else { city = parts[1].trim(); }
+    }
+    if(parts.length >= 3){
+      const sz = parts[2].trim().split(/\s+/);
+      if(sz.length >= 1 && /^[A-Z]{2}$/i.test(sz[0])){ state = sz[0].toUpperCase(); }
+      const zm = parts[2].match(/\b\d{5}\b/); if(zm) zipCode = zm[0];
+    }
+    const zm1 = raw.match(/\b\d{5}\b/); if(zm1 && !zipCode) zipCode = zm1[0];
+    const params = new URLSearchParams({ address });
+    if(city) params.set('city', city);
+    if(state) params.set('state', state);
+    if(zipCode) params.set('zipCode', zipCode);
+    const resp = await fetch('https://api.rentcast.io/v1/avm/value?' + params.toString(), {
+      headers: { 'X-Api-Key': key, 'accept': 'application/json' }
+    });
+    if(resp.status === 401){ statusEl.innerHTML = '<span style="color:var(--red)">RentCast key rejected (401). Check your key in Settings.</span>'; return; }
+    if(!resp.ok){ statusEl.innerHTML = '<span style="color:var(--red)">RentCast error ' + resp.status + '. Try "123 Main St, City, ST 12345" format.</span>'; return; }
+    const data = await resp.json();
+    if(!data || !data.addressLine1){ statusEl.innerHTML = '<span style="color:var(--muted)">No property found for that address.</span>'; return; }
+    // Normalize AVM result into the same card shape as zip search
+    const p = {
+      addressLine1: data.addressLine1, city: data.city, state: data.state, zipCode: data.zipCode,
+      bedrooms: data.bedrooms, bathrooms: data.bathrooms, squareFootage: data.squareFootage,
+      yearBuilt: data.yearBuilt, propertyType: data.propertyType,
+      owner: { names: data.ownerName ? [data.ownerName] : [] },
+      latitude: data.latitude, longitude: data.longitude,
+      _avm: data.price, _avmLow: data.priceRangeLow, _avmHigh: data.priceRangeHigh
+    };
+    propSearchCache = [p];
+    statusEl.innerHTML = '<span style="color:var(--green)">✓ Found ' + esc(data.addressLine1 || raw) + '</span>';
+    const avmHtml = data.price
+      ? `<div style="margin:6px 0;padding:8px;background:var(--panel2);border-radius:8px"><div style="font-size:11px;color:var(--muted)">EST. VALUE (ARV)</div><div style="font-size:18px;font-weight:700;color:var(--green)">$${Number(data.price).toLocaleString()}</div>${data.priceRangeLow?`<div style="font-size:11px;color:var(--muted)">Range: $${Number(data.priceRangeLow).toLocaleString()} – $${Number(data.priceRangeHigh).toLocaleString()}</div>`:''}</div>` : '';
+    resultsEl.innerHTML = `<div class="lead-card">
+      <div class="lead-card-top"><div style="flex:1">
+        <div class="lead-addr">${esc(p.addressLine1 || '')}</div>
+        <div class="lead-sub">${esc(p.city || '')}, ${esc(p.state || '')} ${esc(p.zipCode || '')}</div>
+      </div></div>
+      <div class="lead-badges"><span class="badge gray">${p.bedrooms||'?'}bd / ${p.bathrooms||'?'}ba · ${p.squareFootage?p.squareFootage.toLocaleString():'?'} sqft · ${p.yearBuilt||'?'}</span>${p.propertyType?`<span class="badge blue">${esc(p.propertyType)}</span>`:''}</div>
+      ${avmHtml}
+      <div class="lead-status-row">
+        <span class="badge orange">Address Lookup</span>
+        <div class="lead-actions"><button class="btn small primary" onclick="addPropSearchToLeads(0)">➕ Add to Leads</button></div>
+      </div>
+    </div>`;
+    recentSearches.unshift({q:'Address: ' + raw, at:new Date().toISOString()});
+    recentSearches = recentSearches.slice(0,8); saveState(); renderRecentSearches();
+    syncPropView();
+  }catch(e){
+    statusEl.innerHTML = '<span style="color:var(--red)">Lookup failed: ' + esc(e.message) + '</span>';
+  }
+}
+
+/* ============ PASTE-TO-INGEST (improved) ============ */
+const FILTER_WORDS = ['condo','townhouse','twnhs','unit ','unit-','ste ','suite','apt ','apartment','#'];
+function shouldFilter(address, signal){
+  const lower = (address+' '+(signal||'')).toLowerCase();
+  return FILTER_WORDS.some(w => lower.includes(w));
+}
+function ingestPastedLeads(){
+  const text = document.getElementById('pasteArea').value.trim();
+  if(!text){ toast('Paste some rows first'); return; }
+  const lines = text.split('\n').filter(l=>l.trim());
+  let added=0, filtered=0, dupes=0, invalid=0;
+  const log = [];
+  const existingAddrs = new Set(leads.map(l=>normAddr(l.address+' '+l.zip)));
+
+  lines.forEach((line, idx)=>{
+    // Skip header row
+    if(idx===0 && /address|city/i.test(line)){ log.push('⊘ Skipped header row'); return; }
+    const delim = line.includes('\t') ? '\t' : ',';
+    const parts = line.split(delim).map(c=>c.trim().replace(/^["']|["']$/g,''));
+    if(parts.length < 4){ invalid++; log.push('✗ Invalid (need 4+ cols): '+line.substring(0,50)); return; }
+    const [address, city, stateRaw, zipRaw, signal] = parts;
+    const state = (stateRaw||'').toUpperCase().replace(/[^A-Z]/g,'').substring(0,2);
+    const zip = (zipRaw||'').replace(/\D/g,'').substring(0,5);
+    if(!address || !city || state.length!==2 || zip.length!==5){
+      invalid++; log.push('✗ Invalid data: '+address.substring(0,40)); return;
+    }
+    // Filter condos/townhouses/units
+    if(shouldFilter(address, signal)){ filtered++; log.push('⊘ Filtered (condo/unit): '+address.substring(0,40)); return; }
+    // Dedupe
+    const key = normAddr(address+' '+zip);
+    if(existingAddrs.has(key)){ dupes++; log.push('⊘ Duplicate: '+address.substring(0,40)); return; }
+    existingAddrs.add(key);
+    // Detect market from state/city
+    const market = detectMarket(city, state, zip);
+    leads.push({
+      id: 'lead_' + (leadIdCounter++),
+      address, city, state, zip,
+      distressSignal: selectedSignal || signal || 'General Distressed',
+      market, status: 'New Lead',
+      phones: [], traced: false,
+      addedAt: new Date().toISOString()
+    });
+    added++;
+  });
+
+  saveState(); updateStats(); renderLeads(); renderRecentLeads(); buildSignalFilter();
+  // Show stats
+  document.getElementById('ingestStats').style.display = 'flex';
+  document.getElementById('ingAdded').textContent = added;
+  document.getElementById('ingFiltered').textContent = filtered;
+  document.getElementById('ingDupes').textContent = dupes;
+  document.getElementById('ingInvalid').textContent = invalid;
+  document.getElementById('ingestLog').innerHTML = log.slice(0,50).map(l=>'<div>'+esc(l)+'</div>').join('');
+  document.getElementById('pasteArea').value = '';
+  toast(`Ingested ${added} leads (${filtered} filtered, ${dupes} dupes)`);
+}
+function detectMarket(city, state, zip){
+  const c = city.toLowerCase();
+  const z = zip.substring(0,3);
+  if(state==='IN') return 'Indianapolis';
+  if(state==='OH') return 'Cleveland';
+  if(state==='MO'||state==='KS') return 'Kansas City';
+  if(state==='FL') return 'Jacksonville';
+  if(state==='NC'){
+    if(c.includes('charlotte')||['282','280','281'].includes(z)) return 'Charlotte';
+    return 'Greenville';
+  }
+  return 'Indianapolis';
+}
+
+/* ============ LEADS RENDER ============ */
+function buildSignalFilter(){
+  const signals = [...new Set(leads.map(l=>l.distressSignal))].sort();
+  const sel = document.getElementById('filterSignal');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">All Signals</option>' + signals.map(s=>`<option ${s===cur?'selected':''}>${esc(s)}</option>`).join('');
+}
+let selectedLeads = new Set();
+function toggleLeadSelect(id, ev){
+  ev.stopPropagation();
+  if(selectedLeads.has(id)) selectedLeads.delete(id); else selectedLeads.add(id);
+  renderLeads();
+}
+function clearSelection(){ selectedLeads.clear(); renderLeads(); }
+function updateBulkBar(){
+  const bar = document.getElementById('bulkBar');
+  if(!bar) return;
+  if(selectedLeads.size){
+    bar.style.display = 'flex';
+    document.getElementById('bulkCount').textContent = selectedLeads.size + ' selected';
+  } else bar.style.display = 'none';
+}
+async function traceSelected(){
+  const ids = [...selectedLeads];
+  if(!ids.length) return;
+  for(const id of ids){ await traceLead(id); }
+  clearSelection();
+}
+async function pushSelected(){
+  const ids = [...selectedLeads];
+  if(!ids.length) return;
+  for(const id of ids){ await doPushSingle(id); }
+  clearSelection();
+}
+function renderLeads(){
+  const fm = document.getElementById('filterMarket').value;
+  const fs = document.getElementById('filterSignal').value;
+  const fst = document.getElementById('filterStatus').value;
+  const fq = document.getElementById('filterSearch').value.toLowerCase();
+  const rows = leads.filter(l=>{
+    if(fm && l.market!==fm) return false;
+    if(fs && l.distressSignal!==fs) return false;
+    if(fst && l.status!==fst) return false;
+    if(fq && !(l.address+' '+l.city+' '+l.zip).toLowerCase().includes(fq)) return false;
+    if(!leadPassesTypeFilter(l)) return false;
+    return true;
+  });
+  const el = document.getElementById('leadsBody');
+  if(!rows.length){
+    const hasQuery = fq || fm || fs || fst;
+    el.innerHTML = hasQuery
+      ? '<div style="grid-column:1/-1;text-align:center;padding:30px 20px"><p style="color:var(--text);font-size:15px;font-weight:600;margin-bottom:8px">No leads match your search</p><p style="color:var(--muted);font-size:13px;max-width:440px;margin:0 auto">This searches the leads you\'ve added. To see properties in a ZIP or area, paste a lead list first in the <b>Paste Leads</b> tab — then search, filter, trace, and push them to your CRM.</p><button class="btn primary" style="margin-top:14px" onclick="showPage(\'paste\')">📋 Go to Paste Leads</button></div>'
+      : '<p style="color:var(--muted);grid-column:1/-1;text-align:center">No leads yet — paste some in!</p>';
+    updateBulkBar(); return;
+  }
+  el.innerHTML = rows.map(l=>{
+    const stBadge = l.status==='New Lead' ? 'orange' : l.status==='Skip Traced' ? 'blue' : l.status==='Dead' ? 'red' : 'green';
+    const sel = selectedLeads.has(l.id);
+    const mobiles = leadMobilePhones(l);
+    const phonesHtml = mobiles.length
+      ? mobiles.slice(0,3).map(p=>`<span class="badge green">📱 ${esc(p.number)}</span>`).join('') + (mobiles.length>3?`<span class="badge gray">+${mobiles.length-3} more</span>`:'')
+      : (l.traced ? '<span style="color:var(--muted);font-size:12px">No mobiles found</span>' : '<span style="color:var(--muted);font-size:12px">Not traced yet</span>');
+    const arvHtml = l.arv
+      ? `<div style="margin:6px 0;padding:8px;background:var(--panel2);border-radius:8px"><div style="font-size:11px;color:var(--muted)">EST. VALUE (ARV)</div><div style="font-size:18px;font-weight:700;color:var(--green)">$${l.arv.toLocaleString()}</div>${l.arvLow?`<div style="font-size:11px;color:var(--muted)">Range: $${l.arvLow.toLocaleString()} – $${l.arvHigh.toLocaleString()}</div>`:''}</div>`
+      : '';
+    return `<div class="lead-card ${sel?'selected':''}" onclick="openLead('${l.id}')">
+      <div class="lead-card-top">
+        <input type="checkbox" class="lead-check" ${sel?'checked':''} onclick="toggleLeadSelect('${l.id}',event)" />
+        <div style="flex:1">
+          <div class="lead-addr">${esc(l.address)}</div>
+          <div class="lead-sub">${esc(l.city)}, ${esc(l.state)} ${esc(l.zip)} · ${esc(l.market)}</div>
+        </div>
+      </div>
+      <div class="lead-badges">${signalBadge(l.distressSignal)}</div>
+      ${l.owner?`<div class="lead-owner">👤 ${esc(l.owner)}</div>`:''}
+      ${arvHtml}
+      <div class="lead-phones">${phonesHtml}</div>
+      <div class="lead-status-row">
+        <span class="badge ${stBadge}">${esc(l.status)}</span>
+        <div class="lead-actions">
+          <button class="btn small" onclick="event.stopPropagation();getARV('${l.id}')" title="Get ARV">💰</button>
+          <button class="btn small" onclick="event.stopPropagation();traceLead('${l.id}')">🔍</button>
+          <button class="btn small primary" onclick="event.stopPropagation();doPushSingle('${l.id}')">📤</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+  updateBulkBar();
+}
+function renderRecentLeads(){
+  const tb = document.getElementById('recentLeadsBody');
+  const recent = [...leads].sort((a,b)=>new Date(b.addedAt)-new Date(a.addedAt)).slice(0,5);
+  if(!recent.length){ tb.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--muted)">No leads yet — paste some in!</td></tr>'; return; }
+  tb.innerHTML = recent.map(l=>`<tr class="clickable" onclick="openLead('${l.id}')">
+    <td><strong>${esc(l.address)}</strong><br><span style="color:var(--muted);font-size:12px">${esc(l.city)}, ${esc(l.state)}</span></td>
+    <td>${esc(l.market)}</td><td><span class="badge gray">${esc(l.distressSignal)}</span></td>
+    <td><span class="badge orange">${esc(l.status)}</span></td><td style="color:var(--muted)">${fmtDate(l.addedAt)}</td></tr>`).join('');
+}
+function updateStats(){
+  document.getElementById('statLeads').textContent = leads.length;
+  document.getElementById('leadCountNav').textContent = leads.length;
+  document.getElementById('leadCountBadge').textContent = leads.length;
+  document.getElementById('statBuyers').textContent = (typeof BUYERS!=='undefined'?BUYERS.length:0);
+  document.getElementById('statHedge').textContent = (typeof HEDGE_FUNDS!=='undefined'?HEDGE_FUNDS.length:0);
+  document.getElementById('statTraced').textContent = leads.filter(l=>l.traced).length;
+  if(typeof BUYERS!=='undefined'){ document.getElementById('activeCount').textContent = BUYERS.length; }
+  if(typeof HEDGE_FUNDS!=='undefined'){ document.getElementById('hedgeCount').textContent = HEDGE_FUNDS.length; }
+}
+
+/* ============ LEAD DETAIL MODAL ============ */
+/* ============ PROPERTY IMAGERY (Satellite / Street View / Map) ============ */
+function getDefaultImgView(){ return localStorage.getItem('acc_default_view') || 'street'; }
+function setDefaultImgView(mode){
+  localStorage.setItem('acc_default_view', mode);
+  document.querySelectorAll('.defview-btn').forEach(b=>b.classList.toggle('active', b.dataset.mode===mode));
+  toast('Default view → '+({street:'Street View',satellite:'Satellite',map:'Map'}[mode]));
+}
+let imgMode = 'street'; // current modal view; reset to saved default on open
+function leadGeoQuery(l){
+  return encodeURIComponent((l.address||'')+', '+(l.city||'')+', '+(l.state||'')+' '+(l.zip||''));
+}
+function streetViewUrl(l, size){
+  return 'https://maps.googleapis.com/maps/api/streetview?size='+(size||'800x500')
+    +'&location='+leadGeoQuery(l)+'&key='+GOOGLE_MAPS_KEY;
+}
+function satelliteUrl(l, size){
+  // Static Maps satellite = drone-like aerial view
+  return 'https://maps.googleapis.com/maps/api/staticmap?size='+(size||'800x500')
+    +'&maptype=satellite&zoom=19&markers=color:red%7C'+leadGeoQuery(l)
+    +'&key='+GOOGLE_MAPS_KEY;
+}
+function mapUrl(l, size){
+  return 'https://maps.googleapis.com/maps/api/staticmap?size='+(size||'800x500')
+    +'&maptype=roadmap&zoom=16&markers=color:red%7C'+leadGeoQuery(l)
+    +'&key='+GOOGLE_MAPS_KEY;
+}
+function setImgMode(mode){
+  imgMode = mode;
+  document.querySelectorAll('#lmBody .img-tab').forEach(t=>t.classList.toggle('active', t.dataset.mode===mode));
+  const l = leads.find(x=>x.id===currentLeadId); if(!l) return;
+  renderImgFrame(l);
+}
+function renderImgFrame(l){
+  const frame = document.getElementById('imgFrame'); if(!frame) return;
+  const q = leadGeoQuery(l);
+  let url, label;
+  if(imgMode==='satellite'){ url = satelliteUrl(l); label = 'Satellite / aerial view'; }
+  else if(imgMode==='map'){ url = mapUrl(l); label = 'Map view'; }
+  else { url = streetViewUrl(l); label = 'Street view — house exterior'; }
+  frame.innerHTML = '<img id="imgMain" src="'+url+'" alt="'+label+'" onclick="openLightbox(\''+url.replace(/800x500/g,'1600x1000')+'\')"'
+    +' onerror="this.outerHTML=\'<div class=&quot;img-fallback&quot;>'+(imgMode==='street'
+      ? '📷 No Street View imagery for this address yet.<br>Try Satellite view for the aerial look.'
+      : '⚠️ Imagery failed to load — check the Google Maps key / billing.')+'</div>\'">'
+    +'<span class="img-zoom-hint">🔍 Tap to enlarge</span>';
+}
+function openLightbox(url){
+  const lb = document.getElementById('lightbox');
+  document.getElementById('lightboxImg').src = url;
+  lb.classList.add('open');
+}
+function closeLightbox(){
+  document.getElementById('lightbox').classList.remove('open');
+  document.getElementById('lightboxImg').src = '';
+}
+document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeLightbox(); });
+
+/* ============ PROPERTY INTELLIGENCE ============ */
+function savePropNotes(id){
+  const l = leads.find(x=>x.id===id); if(!l) return;
+  l.propNotes = document.getElementById('propNotes').value;
+  saveState(); toast('Notes saved');
+}
+function propIntelHtml(l){
+  const p = l.propIntel || {};
+  const chip = (k,v)=>'<div class="prop-chip"><span class="k">'+k+'</span><span class="v">'+(v||'—')+'</span></div>';
+  return '<div class="sec-title" style="font-size:14px;margin-top:14px">🏠 Property Intel</div>'
+    +'<div class="prop-grid">'
+    + chip('Beds', p.beds || l.beds) + chip('Baths', p.baths || l.baths)
+    + chip('Sq Ft', p.sqft || l.sqft) + chip('Lot Size', p.lot || l.lot)
+    + chip('Year Built', p.yearBuilt || l.yearBuilt) + chip('Type', p.type || l.propType || '—')
+    +'</div>'
+    +'<div style="margin-top:10px"><label class="lbl" style="font-size:12px;color:var(--muted)">👁️ Exterior condition notes (roof, siding, yard, vacancy signs)</label>'
+    +'<textarea class="notes-area" id="propNotes" placeholder="e.g. Roof looks worn, overgrown yard, boarded side window — likely vacant…">'+esc(l.propNotes||'')+'</textarea>'
+    +'<div style="margin-top:8px"><button class="btn small" onclick="savePropNotes(\''+l.id+'\')">💾 Save Notes</button></div></div>';
+}
+
+function openLead(id){
+  const l = leads.find(x=>x.id===id);
+  if(!l) return;
+  currentLeadId = id;
+  imgMode = getDefaultImgView();
+  document.getElementById('lmTitle').textContent = l.address;
+  const phones = (l.phones||[]).map(p=>`<div class="phone-item"><span class="pn">${esc(p.number)}</span><span><span class="badge ${p.type==='Mobile'?'green':'gray'}">${esc(p.type||'')}</span> ${p.dnc?'<span class="badge red">DNC</span>':''}<br><small style="color:var(--muted)">${esc(p.owner||'')}</small></span></div>`).join('') || '<p style="color:var(--muted)">Not traced yet</p>';
+  document.getElementById('lmBody').innerHTML = `
+    <div class="detail-row"><span class="k">Address</span><span class="v">${esc(l.address)}</span></div>
+    <div class="detail-row"><span class="k">City / State / ZIP</span><span class="v">${esc(l.city)}, ${esc(l.state)} ${esc(l.zip)}</span></div>
+    <div class="detail-row"><span class="k">Market</span><span class="v">${esc(l.market)}</span></div>
+    <div class="detail-row"><span class="k">Distress Signal</span><span class="v">${esc(l.distressSignal)}</span></div>
+    <div class="detail-row"><span class="k">Status</span><span class="v"><select class="field" style="width:auto;padding:4px 8px" onchange="setLeadStatus('${l.id}',this.value)">${['New Lead','Skip Traced','Contacted','Appointment Set','Dead'].map(s=>`<option ${l.status===s?'selected':''}>${s}</option>`).join('')}</select></span></div>
+    <div class="detail-row"><span class="k">Added</span><span class="v">${fmtDate(l.addedAt)}</span></div>
+    <div class="img-toggle-bar">
+      <div class="sec-title" style="font-size:14px;margin:0 0 8px">🛰️ Property Views</div>
+      <div class="img-seg">
+        <div class="img-tab${imgMode==='street'?' active':''}" data-mode="street" onclick="setImgMode('street')">🏠 Street</div>
+        <div class="img-tab${imgMode==='satellite'?' active':''}" data-mode="satellite" onclick="setImgMode('satellite')">🛰️ Satellite</div>
+        <div class="img-tab${imgMode==='map'?' active':''}" data-mode="map" onclick="setImgMode('map')">🗺️ Map</div>
+      </div>
+    </div>
+    <div class="img-frame" id="imgFrame"></div>
+    ${propIntelHtml(l)}
+    <div class="sec-title" style="font-size:14px;margin-top:14px">🏦 Mortgage Info</div>
+    <div id="mortgageInfoBox"><p style="color:var(--muted);font-size:13px">Loading mortgage data…</p></div>
+    <div class="sec-title" style="font-size:14px;margin-top:14px">📱 Phone Numbers</div>
+    ${phones}
+    <div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap">
+      <button class="btn primary" onclick="traceLead('${l.id}')">🔍 Skip Trace</button>
+      <button class="btn" onclick="matchLeadToBuyers('${l.id}')">🤝 Match Buyers</button>
+      <button class="btn ghost" onclick="pushToGHL('${l.id}')">📤 Push to HighLevel</button>
+    </div>`;
+  document.getElementById('leadModal').classList.add('open');
+  renderImgFrame(l);
+  loadMortgageInfo(l);
+}
+/* ============ HOMESAGE MORTGAGE LOOKUP (via Netlify function) ============ */
+async function loadMortgageInfo(l){
+  const box = document.getElementById('mortgageInfoBox');
+  if(!box) return;
+  const fullAddr = [l.address, l.city, l.state, l.zip].filter(Boolean).join(', ');
+  if(!fullAddr){ box.innerHTML = '<p style="color:var(--muted);font-size:13px">No address to look up.</p>'; return; }
+  try{
+    const resp = await fetch('/.netlify/functions/mortgage-lookup?address=' + encodeURIComponent(fullAddr));
+    if(!resp.ok) throw new Error('HTTP ' + resp.status);
+    const d = await resp.json();
+    box.innerHTML = mortgageInfoHtml(d);
+  }catch(e){
+    box.innerHTML = '<p style="color:var(--muted);font-size:13px">Mortgage lookup unavailable.</p>';
+  }
+}
+function mortgageInfoHtml(d){
+  if(!d || !d.hasData){
+    return '<div style="padding:10px;background:var(--panel2);border-radius:8px"><span class="badge green">✓ Free & Clear</span> <span style="color:var(--muted);font-size:13px">No active liens found.</span></div>';
+  }
+  const money = v => v==null ? '—' : '$' + Number(v).toLocaleString();
+  const fcBadge = d.preForeclosure
+    ? '<span class="badge red">⚠️ Pre-Foreclosure</span>'
+    : '<span class="badge gray">No foreclosure</span>';
+  return '<div class="prop-grid">'
+    + '<div class="prop-chip"><span class="k">Lender</span><span class="v">' + esc(d.lender || '—') + '</span></div>'
+    + '<div class="prop-chip"><span class="k">Original Loan</span><span class="v">' + money(d.loanAmount) + '</span></div>'
+    + '<div class="prop-chip"><span class="k">Est. Balance Owed</span><span class="v">' + money(d.outstandingBalance) + '</span></div>'
+    + '<div class="prop-chip"><span class="k">Interest Rate</span><span class="v">' + (d.interestRate != null ? d.interestRate + '%' : '—') + '</span></div>'
+    + '<div class="prop-chip"><span class="k">Recorded</span><span class="v">' + esc(d.recordingDate || '—') + '</span></div>'
+    + '<div class="prop-chip"><span class="k">Foreclosure</span><span class="v">' + fcBadge + '</span></div>'
+    + '</div>';
+}
+function closeModal(){ document.getElementById('leadModal').classList.remove('open'); }
+document.getElementById('leadModal').addEventListener('click', e=>{ if(e.target.id==='leadModal') closeModal(); });
+function setLeadStatus(id, status){
+  const l = leads.find(x=>x.id===id); if(!l) return;
+  l.status = status; saveState(); renderLeads(); renderRecentLeads(); updateStats();
+  toast('Status → '+status);
+}
+/* ============ HIGHLEVEL WEBHOOK PUSH ============ */
+const GHL_WEBHOOK_URL = 'https://services.leadconnectorhq.com/hooks/krKoHLudPnn7nT0DPtwa/webhook-trigger/97d51ffc-5f51-485d-b1bf-11e747e155ba';
+function marketToTag(market){
+  const m = (market||'').toLowerCase();
+  if(m.includes('indianapolis')) return 'indianapolis sms';
+  if(m.includes('cleveland')) return 'oh sms';
+  if(m.includes('kansas')) return 'kansas city sms';
+  if(m.includes('carolina')||m.includes('charlotte')||m.includes('greenville')) return 'carolina sms';
+  if(m.includes('jacksonville')||m.includes('florida')) return 'florida sms';
+  return 'indianapolis sms';
+}
+/* Mobile-only helpers: Troy's standing rule - landlines are a waste of time. */
+function isLandline(p){
+  const t = ((p && p.type) || '').toLowerCase();
+  return t.indexOf('land') !== -1;
+}
+function leadMobilePhones(l){
+  // Mobile + unknown-type numbers only; landlines excluded from push.
+  return (l.phones || []).filter(function(p){ return !isLandline(p); });
+}
+function leadHasMobile(l){ return leadMobilePhones(l).length > 0; }
+function phoneTypeBadge(p){
+  var t = (p && p.type) || 'Unknown';
+  var tl = String(t).toLowerCase();
+  if(isLandline(p)) return '<span class="badge gray">&#9742;&#65039; ' + esc(t) + '</span>';
+  if(tl.indexOf('mobile') !== -1 || tl.indexOf('cell') !== -1) return '<span class="badge green">&#128241; Mobile</span>';
+  return '<span class="badge orange">&#10067; ' + esc(t) + '</span>';
+}
+function leadPhoneBadge(l){
+  var m = leadMobilePhones(l).length;
+  if(m) return '<span class="badge green">&#128241; ' + m + ' mobile</span>';
+  if((l.phones || []).length) return '<span class="badge orange">&#9888;&#65039; landline only</span>';
+  if(l.traced) return '<span class="badge orange">&#9888;&#65039; no mobile</span>';
+  return '<span class="badge orange">&#9888;&#65039; trace</span>';
+}
+function leadToPayload(l){
+  const mobiles = leadMobilePhones(l);
+  const phones = mobiles.map(p=>p.number||p).filter(Boolean);
+  const withOwner = mobiles.find(p=>p.owner);
+  const owner = withOwner ? withOwner.owner : '';
+  return {
+    address: l.address||'',
+    city: l.city||'',
+    state: l.state||'',
+    zip: l.zip||'',
+    market: l.market||'',
+    market_tag: marketToTag(l.market),
+    distress_signal: l.distressSignal||'',
+    phones: phones,
+    owner_name: owner
+  };
+}
+async function pushLeadToGHL(l){
+  const resp = await fetch(GHL_WEBHOOK_URL, {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(leadToPayload(l))
+  });
+  if(!resp.ok) throw new Error('HTTP '+resp.status);
+  return resp;
+}
+
+async function doPushSingle(id){
+  const l = leads.find(x=>x.id===id); if(!l) return;
+  toast('Pushing '+l.address+' to HighLevel...');
+  try{
+    await pushLeadToGHL(l);
+    l.status = 'Pushed to CRM'; saveState(); renderLeads(); renderRecentLeads(); updateStats();
+    toast('✓ Pushed to HighLevel: '+l.address);
+  }catch(e){
+    toast('✗ Push failed: '+e.message);
+  }
+}
+function pushToGHL(id){
+  const l = leads.find(x=>x.id===id); if(!l) return;
+  if(!leadHasMobile(l)){
+    if(confirm('⚠️ This lead has NO phone number yet.\n\nSkip trace it first to get the number?\n\nOK = Skip Trace Now\nCancel = Push Anyway (no number)')){
+      traceLead(id); return;
+    }
+  }
+  doPushSingle(id);
+}
+async function pushAllToGHL(){
+  const pending = leads.filter(l=>l.status!=='Pushed to CRM');
+  if(!pending.length){ toast('No unpushed leads'); return; }
+  const withPhones = pending.filter(leadHasMobile);
+  const without = pending.filter(l=>!leadHasMobile(l));
+  let msg = 'Push '+withPhones.length+' lead(s) with phone numbers to HighLevel?';
+  if(without.length) msg += '\n('+without.length+' without MOBILE numbers will be SKIPPED — landlines are not pushed)';
+  if(!withPhones.length){ toast('No leads with mobile numbers to push — run Skip Trace All first'); return; }
+  if(!confirm(msg)) return;
+  let ok=0, fail=0;
+  for(const l of withPhones){
+    try{
+      await pushLeadToGHL(l);
+      l.status = 'Pushed to CRM'; ok++;
+    }catch(e){ fail++; }
+  }
+  saveState(); renderLeads(); renderRecentLeads(); updateStats();
+  toast('Pushed '+ok+' lead(s)'+(fail?' — '+fail+' failed':'')+(without.length?' — '+without.length+' skipped (no mobile / landline only)':''));
+}
+async function traceAllLeads(){
+  const untraced = leads.filter(l=>!l.traced && l.status!=='Pushed to CRM');
+  if(!untraced.length){ toast('All leads already traced'); return; }
+  if(!getAvaKey()){ toast('Add your Ava Data API key in Settings first'); showPage('settings'); return; }
+  if(!confirm('Skip trace '+untraced.length+' lead(s) via Ava Data (2¢/hit)? Each trace uses API credits.')) return;
+  let ok=0, fail=0;
+  for(let i=0;i<untraced.length;i++){
+    const l = untraced[i];
+    toast('Tracing '+(i+1)+' of '+untraced.length+': '+l.address);
+    try{
+      let first='', last='';
+      if(l.owner){
+        const parts = l.owner.trim().split(/\s+/);
+        if(parts.length>=2){ first = parts.slice(0,-1).join(' '); last = parts[parts.length-1]; }
+        else if(parts.length===1){ last = parts[0]; }
+      }
+      const result = await callAvaData(first, last, l.address, l.city, l.state, l.zip);
+      const phones = extractPhones(result);
+      l.phones = phones; l.traced = true;
+      if(l.status==='New Lead') l.status = 'Skip Traced';
+      traceHistory.unshift({address:l.address, hit:!!result.hit, mobiles:phones.filter(p=>p.type==='Mobile'&&!p.dnc).length, at:new Date().toISOString()});
+      ok++;
+    }catch(e){ fail++; }
+  }
+  saveState(); renderLeads(); renderRecentLeads(); updateStats(); renderTraceHistory();
+  var mobCt = untraced.reduce(function(n,l){ return n + leadMobilePhones(l).length; }, 0);
+  toast('Traced '+ok+' lead(s)'+(fail?' — '+fail+' failed':'')+' — '+mobCt+' mobile number(s) found');
+}
+function exportLeadsCSV(){
+  if(!leads.length){ toast('No leads to export'); return; }
+  const rows = [['Address','City','State','ZIP','Market','Signal','Status','Phones']];
+  leads.forEach(l=>rows.push([l.address,l.city,l.state,l.zip,l.market,l.distressSignal,l.status,(l.phones||[]).map(p=>p.number).join(';')]));
+  const csv = rows.map(r=>r.map(c=>'"'+String(c).replace(/"/g,'""')+'"').join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+  a.download = 'acquisition-leads.csv'; a.click();
+  toast('Exported '+leads.length+' leads');
+}
+
+/* ============ SKIP TRACE (Tracerfy) ============ */
+function getApiKey(){ return localStorage.getItem('acc_tracerfy_key') || ''; }
+/* ============ SKIP TRACE (Ava Data) ============ */
+function getAvaKey(){ return localStorage.getItem('acc_avadata_key') || ''; }
+function saveAvaKey(){
+  const k = document.getElementById('avaDataKey').value.trim();
+  if(!k){ toast('Enter a key first'); return; }
+  localStorage.setItem('acc_avadata_key', k);
+  document.getElementById('avaKeySavedMsg').innerHTML = '<span style="color:var(--green)">✓ Key saved in this browser</span>';
+  updateProviderStatus();
+  toast('Ava Data key saved');
+}
+function toggleAvaKeyVis(){
+  const i = document.getElementById('avaDataKey');
+  i.type = i.type==='password' ? 'text' : 'password';
+}
+/* ============ RENTCAST (Free ARV + Comps) ============ */
+function getRentcastKey(){ return localStorage.getItem('acc_rentcast_key') || ''; }
+function saveRentcastKey(){
+  const k = document.getElementById('rentcastKey').value.trim();
+  if(!k){ toast('Enter a key first'); return; }
+  localStorage.setItem('acc_rentcast_key', k);
+  document.getElementById('rentcastKeySavedMsg').innerHTML = '<span style="color:var(--green)">✓ Key saved in this browser</span>';
+  toast('RentCast key saved');
+}
+function toggleRentcastKeyVis(){
+  const i = document.getElementById('rentcastKey');
+  i.type = i.type==='password' ? 'text' : 'password';
+}
+async function callRentcastAVM(address, city, state, zip){
+  const key = getRentcastKey();
+  if(!key) throw new Error('NO_KEY');
+  const url = 'https://api.rentcast.io/v1/avm/value?address='+encodeURIComponent(address)+'&city='+encodeURIComponent(city)+'&state='+encodeURIComponent(state)+'&zipCode='+encodeURIComponent(zip);
+  const resp = await fetch(url, {headers:{'X-Api-Key':key}});
+  if(!resp.ok) throw new Error('HTTP '+resp.status);
+  return resp.json();
+}
+async function getARV(id){
+  const l = leads.find(x=>x.id===id); if(!l) return;
+  if(!getRentcastKey()){ toast('Add your RentCast API key in Settings first'); showPage('settings'); return; }
+  toast('Getting ARV for '+l.address+'...');
+  try{
+    const data = await callRentcastAVM(l.address, l.city, l.state, l.zip);
+    l.arv = data.price || null;
+    l.arvLow = data.priceRangeLow || null;
+    l.arvHigh = data.priceRangeHigh || null;
+    l.comps = (data.comparables||[]).slice(0,5).map(c=>({address:c.formattedAddress||c.addressLine1, price:c.price, beds:c.bedrooms, baths:c.bathrooms, sqft:c.squareFootage, soldDate:c.lastSoldDate}));
+    saveState(); renderLeads();
+    if(currentLeadId===id) openLead(id);
+    toast(data.price ? 'ARV: $'+data.price.toLocaleString() : 'No value found');
+  }catch(e){
+    toast(e.message==='NO_KEY' ? 'Add RentCast key in Settings' : 'ARV lookup failed: '+e.message);
+  }
+}
+function getTraceProvider(){ return 'avadata'; }
+function updateProviderStatus(){
+  const has = !!getAvaKey();
+  const el = document.getElementById('stKeyStatus');
+  if(el) el.innerHTML = has
+    ? '<span class="badge green">API key set</span>'
+    : '<span class="badge red">No API key — add one in Settings</span>';
+}
+async function callAvaData(first, last, address, city, state, zip){
+  const key = getAvaKey();
+  if(!key) throw new Error('NO_KEY');
+  const AVA_ENDPOINT = 'https://app.avadata.ai/api/v1/standard-search';
+  const resp = await fetch(AVA_ENDPOINT, {
+    method:'POST',
+    headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},
+    body: JSON.stringify({firstName:first||'', lastName:last||'', address, city, state, zip, dataTypes:['phone']})
+  });
+  if(!resp.ok) throw new Error('HTTP '+resp.status);
+  const json = await resp.json();
+  // Normalize Ava Data response to internal format
+  const d = json.data || {};
+  return {
+    hit: !!d.matchFound,
+    persons: d.matchFound ? [{full_name: d.name || ((first||'')+' '+(last||'')).trim(), phones: (d.phones||[]).map(p=>({number:p.number, type:(p.type||'').toLowerCase()==='mobile'?'Mobile':'Unknown', dnc:false, carrier:''}))}] : []
+  };
+}
+function saveApiKey(){
+  const k = document.getElementById('tracerfyKey').value.trim();
+  if(!k){ toast('Enter a key first'); return; }
+  localStorage.setItem('acc_tracerfy_key', k);
+  document.getElementById('keySavedMsg').innerHTML = '<span style="color:var(--green)">✓ Key saved in this browser</span>';
+  updateKeyStatus();
+  toast('API key saved');
+}
+function toggleKeyVis(){
+  const i = document.getElementById('tracerfyKey');
+  i.type = i.type==='password' ? 'text' : 'password';
+}
+function updateKeyStatus(){
+  const has = !!getApiKey();
+  document.getElementById('stKeyStatus').innerHTML = has
+    ? '<span class="badge green">API key set</span>'
+    : '<span class="badge red">No API key — add one in Settings</span>';
+}
+async function callTracerfy(first, last, address, city, state, zip){
+  const key = getApiKey();
+  if(!key) throw new Error('NO_KEY');
+  // NOTE: endpoint shape follows the Tracerfy connector helper (POST /v1/api/trace/lookup/).
+  // If Tracerfy's docs show a different path, update TRACERFY_ENDPOINT below.
+  const TRACERFY_ENDPOINT = 'https://tracerfy.com/v1/api/trace/lookup/';
+  const resp = await fetch(TRACERFY_ENDPOINT, {
+    method:'POST',
+    headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},
+    body: JSON.stringify({first_name:first||'',last_name:last||'',address,city,state,zip})
+  });
+  if(!resp.ok) throw new Error('HTTP '+resp.status);
+  return resp.json();
+}
+function extractPhones(traceResult){
+  const out = [];
+  if(!traceResult || !traceResult.hit) return out;
+  (traceResult.persons||[]).forEach(p=>{
+    (p.phones||[]).forEach(ph=>{
+      out.push({number:ph.number, type:ph.type||'Unknown', dnc:!!ph.dnc, carrier:ph.carrier||'', owner:p.full_name||''});
+    });
+  });
+  return out;
+}
+async function traceLead(id){
+  const l = leads.find(x=>x.id===id); if(!l) return;
+  if(!getAvaKey()){ toast('Add your Ava Data API key in Settings first'); showPage('settings'); return; }
+  toast('Tracing '+l.address+'...');
+  try{
+    // Ava Data needs a last name — try to split from owner name if available
+    let first='', last='';
+    if(l.owner){
+      const parts = l.owner.trim().split(/\s+/);
+      if(parts.length>=2){ first = parts.slice(0,-1).join(' '); last = parts[parts.length-1]; }
+      else if(parts.length===1){ last = parts[0]; }
+    }
+    const result = await callAvaData(first, last, l.address, l.city, l.state, l.zip);
+    const phones = extractPhones(result);
+    l.phones = phones;
+    l.traced = true;
+    if(l.status==='New Lead') l.status = 'Skip Traced';
+    traceHistory.unshift({address:l.address, hit:!!result.hit, mobiles:phones.filter(p=>p.type==='Mobile'&&!p.dnc).length, at:new Date().toISOString()});
+    saveState(); renderLeads(); renderRecentLeads(); updateStats(); renderTraceHistory();
+    if(currentLeadId===id) openLead(id); // refresh modal
+    toast(result.hit ? `Found ${leadMobilePhones({phones:phones}).length} mobile number(s)` + (phones.filter(isLandline).length ? ` (${phones.filter(isLandline).length} landline - excluded)` : '') : 'No owner found');
+  }catch(e){
+    toast(e.message==='NO_KEY' ? 'Add API key in Settings' : 'Trace failed: '+e.message);
+  }
+}
+async function runSkipTrace(){
+  const address = document.getElementById('stAddress').value.trim();
+  const city = document.getElementById('stCity').value.trim();
+  const state = document.getElementById('stState').value.trim().toUpperCase();
+  const zip = document.getElementById('stZip').value.trim();
+  if(!address||!city||!state||!zip){ toast('Fill in all address fields'); return; }
+  if(!getAvaKey()){ toast('Add your Ava Data API key in Settings first'); showPage('settings'); return; }
+  const box = document.getElementById('stResults');
+  box.innerHTML = '<p style="color:var(--muted)">Tracing...</p>';
+  try{
+    const result = await callAvaData(
+      document.getElementById('stFirst').value.trim(),
+      document.getElementById('stLast').value.trim(),
+      address, city, state, zip);
+    const phones = extractPhones(result);
+    traceHistory.unshift({address, hit:!!result.hit, mobiles:phones.filter(p=>p.type==='Mobile'&&!p.dnc).length, at:new Date().toISOString()});
+    saveState(); renderTraceHistory();
+    box.innerHTML = result.hit
+      ? `<div class="sec-title" style="font-size:14px">✓ Owner found</div>` + phones.map(p=>`<div class="phone-item"><span class="pn">${esc(p.number)}</span><span><span class="badge ${p.type==='Mobile'?'green':'gray'}">${esc(p.type)}</span> ${p.dnc?'<span class="badge red">DNC</span>':''}<br><small style="color:var(--muted)">${esc(p.owner)} ${p.carrier?'· '+esc(p.carrier):''}</small></span></div>`).join('')
+      : '<p style="color:var(--muted)">No owner found for this address.</p>';
+  }catch(e){
+    box.innerHTML = `<p style="color:var(--red)">Trace failed: ${esc(e.message)}</p>`;
+  }
+}
+function renderTraceHistory(){
+  const tb = document.getElementById('traceHistoryBody');
+  if(!traceHistory.length){ tb.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--muted)">No traces yet</td></tr>'; return; }
+  tb.innerHTML = traceHistory.slice(0,20).map(t=>`<tr><td><strong>${esc(t.address)}</strong></td><td>${t.hit?'<span class="badge green">Hit</span>':'<span class="badge gray">Miss</span>'}</td><td>${t.mobiles}</td><td style="color:var(--muted)">${fmtDate(t.at)}</td></tr>`).join('');
+}
+
+/* ============ BUYER MATCH ============ */
+function setBuyerSection(s){
+  buyerSection = s;
+  document.getElementById('secActiveBtn').classList.toggle('ghost', s!=='active');
+  document.getElementById('secHfBtn').classList.toggle('ghost', s!=='hedge');
+  renderBuyerTable();
+}
+function buyerScore(b, targetPrice){
+  // purchase volume 40% / market match 30% / price fit 30%
+  const vol = Math.min(b.purchases/100, 1) * 40;
+  const priceFit = targetPrice>0 && b.avg>0 ? Math.max(0, 30 - Math.abs(b.avg-targetPrice)/targetPrice*30) : 15;
+  return Math.round(vol + 30 + priceFit); // market match = 30 (pre-filtered by market)
+}
+function findBuyers(){
+  const market = document.getElementById('matchMarket').value;
+  const price = parseFloat(document.getElementById('matchPrice').value)||0;
+  const address = document.getElementById('matchAddress').value.trim();
+  const pool = (buyerSection==='active'?BUYERS:HEDGE_FUNDS).filter(b=>b.market===market || (market==='Charlotte'&&b.market==='Greenville') || (market==='Greenville'&&b.market==='Charlotte'));
+  const ranked = pool.map(b=>({...b, score:buyerScore(b,price)})).sort((a,b)=>b.score-a.score).slice(0,20);
+  // Hero: top buyer
+  const hero = document.getElementById('matchHero');
+  if(ranked.length){
+    const t = ranked[0];
+    hero.innerHTML = `<div class="match-hero">
+      <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">🏆 Top Match ${address?'for '+esc(address):''}</div>
+      <div class="buyer-name">${esc(t.company)}</div>
+      <div class="buyer-co">${esc(t.name)} · ${t.purchases} deals · avg $${t.avg.toLocaleString()}</div>
+      <div style="display:flex;gap:10px;margin-top:12px"><a class="btn primary" href="tel:+1${t.phone}" style="text-decoration:none">📞 ${t.phone.replace(/(\d{3})(\d{3})(\d{4})/,'$1-$2-$3')}</a></div>
+    </div>`;
+  } else { hero.innerHTML = ''; }
+  // Table
+  const tb = document.getElementById('buyersBody');
+  tb.innerHTML = ranked.map((b,i)=>`<tr>
+    <td><span class="buyer-rank">${i+1}</span></td>
+    <td><strong>${esc(b.company)}</strong><br><span style="color:var(--muted);font-size:12px">${esc(b.name)} · ${esc(b.city)}, ${esc(b.state)}</span></td>
+    <td>${esc(b.market)}</td><td>${b.purchases}</td><td>$${b.avg.toLocaleString()}</td>
+    <td><div style="font-weight:700;color:var(--accent)">${b.score}%</div><div class="score-bar"><div class="score-fill" style="width:${b.score}%"></div></div></td>
+    <td><a class="btn small" href="tel:+1${b.phone}" style="text-decoration:none">📞 Call</a></td>
+  </tr>`).join('') || '<tr><td colspan="7" style="text-align:center;color:var(--muted)">No buyers in this market</td></tr>';
+  toast(`Ranked ${ranked.length} buyers`);
+}
+function matchLeadToBuyers(leadId){
+  const l = leads.find(x=>x.id===leadId); if(!l) return;
+  closeModal();
+  document.getElementById('matchMarket').value = l.market;
+  document.getElementById('matchAddress').value = `${l.address}, ${l.city}, ${l.state} ${l.zip}`;
+  showPage('buyers'); findBuyers();
+}
+function renderBuyerTable(){
+  // Default view: top buyers by purchases in selected market
+  findBuyers();
+}
+
+/* ============ COMPS CALC ============ */
+function compTier(arv){
+  if(arv<120000) return .70;
+  if(arv<220000) return .80;
+  if(arv<300000) return .815;
+  if(arv<400000) return .829;
+  return .849;
+}
+function calcComp(){
+  const arv = parseFloat(document.getElementById('compARV').value)||0;
+  const rep = parseFloat(document.getElementById('compRepairs').value)||0;
+  const el = document.getElementById('compResult');
+  if(!arv){ el.innerHTML=''; return; }
+  const tier = compTier(arv);
+  const mao = Math.round((arv-rep)*tier);
+  const lao = Math.round(mao*.70);
+  el.innerHTML = `<div class="cards">
+    <div class="card"><div class="num">$${mao.toLocaleString()}</div><div class="lbl">MAO (ceiling)</div><div class="sub">${(tier*100).toFixed(1)}% tier</div></div>
+    <div class="card"><div class="num" style="color:var(--green)">$${lao.toLocaleString()}</div><div class="lbl">LAO (opening)</div><div class="sub">70% of MAO</div></div>
+    <div class="card"><div class="num" style="color:var(--blue)">$${(mao-lao).toLocaleString()}</div><div class="lbl">Negotiation Room</div></div>
+  </div>`;
+}
+
+/* ============ THEME (dark/light) ============ */
+function getThemePref(){ return localStorage.getItem('acc_theme') || 'dark'; }
+function getEffectiveTheme(){
+  const p = getThemePref();
+  if(p === 'system') return (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark';
+  return p;
+}
+function applyTheme(){
+  const t = getEffectiveTheme();
+  document.documentElement.setAttribute('data-theme', t === 'light' ? 'light' : 'dark');
+  const icon = t === 'light' ? '☀️' : '🌙';
+  const label = t === 'light' ? 'Light mode' : 'Dark mode';
+  ['themeToggleTop','themeToggleSide'].forEach(id=>{ const b=document.getElementById(id); if(b) b.textContent = icon; });
+  const sl = document.getElementById('themeLabelSide'); if(sl) sl.textContent = label;
+  document.querySelectorAll('.theme-btn').forEach(b=>b.classList.toggle('active', b.dataset.mode===getThemePref()));
+}
+function setTheme(mode){ localStorage.setItem('acc_theme', mode); applyTheme(); }
+function cycleTheme(){ setTheme(getEffectiveTheme() === 'light' ? 'dark' : 'light'); }
+if(window.matchMedia){ try{ window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', ()=>{ if(getThemePref()==='system') applyTheme(); }); }catch(e){} }
+
+/* ============ INIT ============ */
+document.addEventListener('DOMContentLoaded', function(){
+  applyTheme(); // theme before anything renders
+  // Password gate
+  if(sessionStorage.getItem('acc_auth')!=='true'){
+    const ov = document.createElement('div'); ov.id='lm-lock';
+    ov.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:9999';
+    ov.innerHTML = '<h2 style="color:var(--text);margin-bottom:20px">Acquisition Command Center</h2>'+
+      '<input type="password" id="acc-pass" placeholder="Enter password" style="padding:12px 20px;font-size:16px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--text);margin-bottom:12px;width:250px;text-align:center">'+
+      '<button id="acc-go" style="padding:12px 40px;font-size:16px;border-radius:8px;border:none;background:#ff6b1a;color:#fff;cursor:pointer">Unlock</button>'+
+      '<p id="acc-err" style="color:#f66;margin-top:12px;display:none">Incorrect password</p>';
+    document.body.appendChild(ov);
+    const go = ()=>{ if(document.getElementById('acc-pass').value==='LeadMachine2026'){ sessionStorage.setItem('acc_auth','true'); ov.remove(); } else { document.getElementById('acc-err').style.display='block'; } };
+    document.getElementById('acc-go').onclick = go;
+    document.getElementById('acc-pass').onkeypress = e=>{ if(e.key==='Enter') go(); };
+    document.getElementById('acc-pass').focus();
+  }
+  loadState();
+  // Restore API key fields
+  const k = getApiKey();
+  if(k) document.getElementById('tracerfyKey').value = k;
+  const ak = getAvaKey();
+  if(ak) document.getElementById('avaDataKey').value = ak;
+  const rk = getRentcastKey();
+  if(rk) document.getElementById('rentcastKey').value = rk;
+  updateProviderStatus();
+  if(k) document.getElementById('keySavedMsg').innerHTML = '<span style="color:var(--green)">✓ Key saved in this browser</span>';
+  if(ak) document.getElementById('avaKeySavedMsg').innerHTML = '<span style="color:var(--green)">✓ Key saved in this browser</span>';
+  document.querySelectorAll('.defview-btn').forEach(b=>b.classList.toggle('active', b.dataset.mode===getDefaultImgView()));
+  buildSignalFilter(); renderSignalChips(); renderLeads(); renderRecentLeads(); renderRecentSearches(); renderTraceHistory(); updateStats();
+});
+
+/* ============ XLEADS-STYLE FILTER DRAWER ============ */
+let filterMode = 'include'; // 'include' or 'exclude'
+let includedTypes = new Set();
+let excludedTypes = new Set();
+
+function openFilterDrawer(){
+  document.getElementById('filterOverlay').classList.add('open');
+  document.getElementById('filterDrawer').classList.add('open');
+  renderFilterDrawer();
+}
+function closeFilterDrawer(){
+  document.getElementById('filterOverlay').classList.remove('open');
+  document.getElementById('filterDrawer').classList.remove('open');
+}
+function setFilterMode(mode){
+  filterMode = mode;
+  renderFilterDrawer();
+}
+function toggleLeadType(name){
+  if(filterMode==='include'){
+    if(includedTypes.has(name)) includedTypes.delete(name);
+    else { includedTypes.add(name); excludedTypes.delete(name); }
+  } else {
+    if(excludedTypes.has(name)) excludedTypes.delete(name);
+    else { excludedTypes.add(name); includedTypes.delete(name); }
+  }
+  renderFilterDrawer(); renderLeads(); updateFilterBadge();
+}
+function clearLeadTypeFilters(){
+  includedTypes.clear(); excludedTypes.clear();
+  renderFilterDrawer(); renderLeads(); updateFilterBadge();
+}
+function updateFilterBadge(){
+  const n = includedTypes.size + excludedTypes.size;
+  const b = document.getElementById('filterCountBadge');
+  if(b){ b.style.display = n ? '' : 'none'; b.textContent = n; }
+}
+function renderFilterDrawer(){
+  document.querySelectorAll('.ie-tab').forEach(t=>t.classList.toggle('active',
+    (t.dataset.mode==='include')===(filterMode==='include')));
+  const grid = document.getElementById('leadTypeGrid');
+  if(!grid) return;
+  grid.innerHTML = DISTRESS_SIGNALS.map(s=>{
+    const isOn = filterMode==='include' ? includedTypes.has(s.name) : excludedTypes.has(s.name);
+    const cls = isOn ? (filterMode==='include'?'on':'excluded') : '';
+    return `<button class="leadtype-pill ${cls}" onclick="toggleLeadType('${s.name.replace(/'/g,"\\'")}')">${s.icon} ${esc(s.name)}</button>`;
+  }).join('');
+  const inc = includedTypes.size, exc = excludedTypes.size;
+  document.getElementById('filterSummary').innerHTML =
+    (inc||exc) ? `<span style="font-size:12px;color:var(--muted)">${inc?`Including <b style="color:var(--green)">${inc}</b>`:''}${inc&&exc?' · ':''}${exc?`Excluding <b style="color:var(--red)">${exc}</b>`:''}</span>`
+    : '<span style="font-size:12px;color:var(--muted)">Tap a lead type to filter</span>';
+}
+function leadPassesTypeFilter(l){
+  const sig = l.distressSignal || '';
+  if(includedTypes.size && !includedTypes.has(sig)) return false;
+  if(excludedTypes.has(sig)) return false;
+  return true;
+}
+</script>
+<!-- XLeads-style Filters Drawer -->
+<div class="filter-drawer-overlay" id="filterOverlay" onclick="closeFilterDrawer()"></div>
+<div class="filter-drawer" id="filterDrawer">
+  <div class="filter-drawer-head">
+    <h3>🎛️ Filters</h3>
+    <button class="btn small ghost" onclick="closeFilterDrawer()">✕</button>
+  </div>
+  <div class="filter-drawer-body">
+    <div class="filter-sec-title">Lead Types</div>
+    <div class="ie-tabs">
+      <button class="ie-tab active" data-mode="include" onclick="setFilterMode('include')">Include</button>
+      <button class="ie-tab" data-mode="exclude" onclick="setFilterMode('exclude')">Exclude</button>
+    </div>
+    <div class="leadtype-grid" id="leadTypeGrid"></div>
+    <div style="margin-top:12px" id="filterSummary"></div>
+    <div class="filter-sec-title">Status</div>
+    <p style="font-size:12px;color:var(--muted)">Use the Status dropdown in My Leads to filter by lead status.</p>
+  </div>
+  <div class="filter-drawer-foot">
+    <button class="btn ghost" style="flex:1" onclick="clearLeadTypeFilters()">Clear All</button>
+    <button class="btn primary" style="flex:1" onclick="closeFilterDrawer()">Apply</button>
+  </div>
+</div>
+<script>
+const BUYERS=[{name:'Eve Ryan',company:'HAWK NORMANDY LLC',phone:'7278715600',purchases:342,avg:100,city:'Tampa',state:'FL',market:'Jacksonville',email:'ryaneve100@gmail.com'},{name:'Sau Leung',company:'BRIDLE CREEK PROPCO GT LLC',phone:'9729899782',purchases:238,avg:100,city:'Az',state:'FL',market:'Jacksonville',email:''},{name:'Barry Axtell',company:'NVR INC',phone:'4054014107',purchases:202,avg:580237,city:'Charlotte',state:'NC',market:'Charlotte',email:'baxtell@hotmail.com'},{name:'Alicia Angus',company:'D R HORTON INC JACKSONVILLE',phone:'3058989853',purchases:183,avg:1703360,city:'Johns',state:'FL',market:'Jacksonville',email:'alicia4social@gmail.com'},{name:'Ishmael Gordon',company:'RICHMOND AMERICAN HOMES OF FLO',phone:'6785577293',purchases:165,avg:100,city:'Jacksonville',state:'FL',market:'Jacksonville',email:'yellowrider29@yahoo.com'},{name:'Brooke Tralmer',company:'LGI HOMES FLORIDA LLC',phone:'2147964924',purchases:148,avg:100,city:'Woodlands',state:'TX',market:'Jacksonville',email:'brooke.tralmer@gmail.com'},{name:'Charles Swan',company:'DREAM FINDERS HOMES LLC',phone:'9043272311',purchases:147,avg:1214880,city:'Jacksonville',state:'FL',market:'Jacksonville',email:'charlesswan01091967@gmail.com'},{name:'Holli Meredith',company:'BSFR TWO OWNER I LP',phone:'2392202049',purchases:142,avg:6716667,city:'Charleston',state:'SC',market:'Charlotte',email:'holli.hyte.cf@gmail.com'},{name:'Michael Kavourias',company:'MCP OLD ST AUGUSTINE LP',phone:'9176587817',purchases:138,avg:5243822,city:'New York',state:'NY',market:'Jacksonville',email:'mkavourius@aol.com'},{name:'Elmer Blankenship',company:'GRISE HOME AND PROPERTY GROUP LLC',phone:'3172704671',purchases:136,avg:107248,city:'Indianapolis',state:'IN',market:'Indianapolis',email:'lanitabland127@yahoo.com'},{name:'Derrik Pannell',company:'CLIFTON SUITES OWNER, LLC',phone:'6143093273',purchases:133,avg:7250000,city:'Columbus',state:'OH',market:'Cleveland',email:'derrikpannell@gmail.com'},{name:'Lesa Calvert',company:'JACKSONVILLE HOMES LLC',phone:'9046088692',purchases:124,avg:148789,city:'Jacksonville',state:'FL',market:'Jacksonville',email:'lesa.duncan@yahoo.com'},{name:'Ashley Reeves',company:'TPG AG EHC III LEN MULTI STATE',phone:'4232544747',purchases:107,avg:100,city:'Scottsdale',state:'AZ',market:'Jacksonville',email:'abowlin1987@gmail.com'},{name:'Mukesh Guntaka',company:'KD RAYNA CHARLOTTE LLC',phone:'7186074595',purchases:104,avg:3911833,city:'Chicago',state:'IL',market:'Charlotte',email:'gmukeshreddy@chequemail.com'},{name:'Alexander Sifakis',company:'HOOSE 18 LLC',phone:'9045666400',purchases:102,avg:381649,city:'Jacksonville',state:'FL',market:'Jacksonville',email:'asifakis@yahoo.com'},{name:'Danny Wimbleduff',company:'Simple Quarters LLC',phone:'3175062449',purchases:98,avg:99137,city:'Carmel',state:'IN',market:'Indianapolis',email:'dwimbleduff01@gmail.com'},{name:'Jeremy Stoler',company:'ALTO ASSET COMPANY 6 LLC',phone:'9175706745',purchases:95,avg:2750,city:'Austin',state:'TX',market:'Jacksonville',email:'pmdag@aol.com'},{name:'Darren Davis',company:'KL LB PROPCO IV C LLC',phone:'6027032581',purchases:91,avg:8592950,city:'Scottsdale',state:'AZ',market:'Jacksonville',email:'dhdavis44@gmail.com'},{name:'Adam Covington',company:'CPI/EV ABODE MILLER FARM OWNER LLC',phone:'9134887478',purchases:89,avg:8360000,city:'Raleigh',state:'NC',market:'Charlotte',email:'adam.covington@hotmail.com'},{name:'Raymond Wetherington',company:'WEEKLEY HOMES LLC',phone:'7042311362',purchases:71,avg:1218000,city:'Houston',state:'TX',market:'Charlotte',email:'rwetherington@carolina.rr.com'},{name:'Michael Balanky',company:'LOCKWOOD ESTATES HOLDCO LLC',phone:'9049237065',purchases:62,avg:100,city:'Jacksonville',state:'FL',market:'Jacksonville',email:'michael@chaseproperties.com'},{name:'Tammy Norman',company:'DRP GREENBOUGH 4 LLC',phone:'9048388628',purchases:61,avg:100,city:'New York',state:'NY',market:'Jacksonville',email:'tammy.norman1964@gmail.com'},{name:'Benjamin Davis',company:'EVRDEV LLC',phone:'7072356833',purchases:58,avg:240080,city:'Jacksonville',state:'FL',market:'Jacksonville',email:''},{name:'Barrocka Mckay',company:'Shake and Bake LLC',phone:'6786224993',purchases:58,avg:87545,city:'Indianapolis',state:'IN',market:'Indianapolis',email:'roberta.ramsey@yahoo.com'},{name:'Gregory Gott',company:'BCEL 10F LLC',phone:'9044027968',purchases:55,avg:97680,city:'Jacksonville',state:'FL',market:'Jacksonville',email:''},{name:'Chelan Chudgar',company:'FOUR CORNERS OF CHARLOTTE LLC',phone:'7043431445',purchases:52,avg:279039,city:'Waxhaw',state:'NC',market:'Charlotte',email:'chelan@gmail.com'},{name:'Crystal Rilee',company:'EHC HOMES LP',phone:'7042013183',purchases:52,avg:2207600,city:'Charlotte',state:'NC',market:'Charlotte',email:'crystalrilee@yahoo.com'},{name:'Julius Limehouse',company:'DRB GROUP FLORIDA LLC',phone:'6785580541',purchases:51,avg:100,city:'Rockville',state:'MD',market:'Jacksonville',email:'juliuslimehouse@yahoo.com'},{name:'Kaitlynn Loop',company:'SLAN HOMES LLC',phone:'9045252114',purchases:46,avg:2230500,city:'Jacksonville',state:'FL',market:'Jacksonville',email:'katloop@hotmail.com'},{name:'Connie Deberry',company:'TRUE HOMES LLC',phone:'9802028503',purchases:45,avg:399286,city:'Monroe',state:'NC',market:'Charlotte',email:'cdeberry@truehomesusa.com'},{name:'Alfred Roseberry',company:'HEAVENLY HAPPY HOMES LLC',phone:'2516235243',purchases:44,avg:108440,city:'Indianapolis',state:'IN',market:'Indianapolis',email:'alfredleerosebery@gmail.com'},{name:'Ingrid Wilson',company:'RIVERSIDE HOMES OF NORTH FLORI',phone:'9047049006',purchases:43,avg:457525,city:'Jacksonville',state:'FL',market:'Jacksonville',email:'ingridannie@aol.com'},{name:'Noel Gomez',company:'TRICON SFR 2026 1 BORROWER LLC',phone:'7867186137',purchases:43,avg:100,city:'Tustin',state:'CA',market:'Jacksonville',email:'gonzaleznoel19753@gmail.com'},{name:'Victoria Long',company:'TMDW PROPERTIES LLC',phone:'2162695541',purchases:42,avg:4315716,city:'Buffalo',state:'NY',market:'Cleveland',email:'longvictoria923@gmail.com'},{name:'Amanda Ledford',company:'COLOSSEUM 2 LLC',phone:'9047049815',purchases:40,avg:100,city:'West Palm Beach',state:'FL',market:'Jacksonville',email:''},{name:'Kelvin Ngo',company:'PROVIDENCE CONSTRUCTION COMPAN',phone:'9042081210',purchases:40,avg:85575,city:'Jacksonville',state:'FL',market:'Jacksonville',email:'ngo_kelvin@yahoo.com'},{name:'Dawn Little',company:'D R HORTON INC',phone:'9044035719',purchases:39,avg:646900,city:'Saint Johns',state:'FL',market:'Jacksonville',email:'littled314@att.net'},{name:'Kaila Cantillas',company:'SFR OWNER I LLC',phone:'9373133223',purchases:37,avg:325984,city:'Portsmouth',state:'NH',market:'Cleveland',email:'kgcantillas@gmail.com'},{name:'Edgardo Aboytes',company:'LAKE PROP 1, LLC',phone:'3179384850',purchases:36,avg:95208,city:'Noblesville',state:'IN',market:'Indianapolis',email:'edgardoaboytes@yahoo.com'},{name:'Patricia Wyatt',company:'2 Jets LLC',phone:'5628248856',purchases:36,avg:88130,city:'Indianapolis',state:'IN',market:'Indianapolis',email:'lagbchpat@yahoo.com'},{name:'Beata Telesz',company:'TH PROPERTY OWNER I LLC',phone:'2164080839',purchases:31,avg:422113,city:'Independence',state:'OH',market:'Cleveland',email:'telekocia@yahoo.com'},{name:'Benjamin Borgerding',company:'JACKSONVILLE COMMUNITY LAND TR',phone:'2312880617',purchases:31,avg:100,city:'Jacksonville',state:'FL',market:'Jacksonville',email:'benborgie@hotmail.com'},{name:'Aaron Bankston',company:'MWH 1A LLC',phone:'2162583897',purchases:30,avg:67863,city:'Wilmington',state:'DE',market:'Cleveland',email:'aeastwood34@gmail.com'},{name:'Donald Childress',company:'FKH SFR Q LP',phone:'4043750499',purchases:30,avg:403500,city:'Atlanta',state:'GA',market:'Charlotte',email:'don.childress@childressklein.com'},{name:'Kaila Cantillas',company:'CPT ASL SFR PROPCO LLC',phone:'9373133223',purchases:28,avg:343300,city:'Portsmouth',state:'NH',market:'Jacksonville',email:'kgcantillas@gmail.com'},{name:'Pamela Brown',company:'SFR XII JACKSONVILLE OWNER 1 L',phone:'6466512537',purchases:28,avg:7180000,city:'Greenwich',state:'CT',market:'Jacksonville',email:'pamelajudy@yahoo.com'},{name:'Gavin Smith',company:'AMH DEVELOPMENT LLC',phone:'8183902678',purchases:27,avg:3902500,city:'Calabasas',state:'CA',market:'Jacksonville',email:'supermansmith33@yahoo.com'},{name:'Willi Krieger',company:'AMERITERPENES LLC',phone:'9046018550',purchases:25,avg:100,city:'Jacksonville',state:'FL',market:'Jacksonville',email:''},{name:'David Garfunkel',company:'HABITAT FOR HUMANITY OF JACKSO',phone:'6179352791',purchases:24,avg:30695,city:'Jacksonville',state:'FL',market:'Jacksonville',email:''},{name:'Daniel Beecroft',company:'CAMBRIDGE 5081 LLC',phone:'5612129599',purchases:23,avg:84570,city:'Boca Raton',state:'FL',market:'Jacksonville',email:'daniel.beecroft@gmail.com'},{name:'Richard Dostie',company:'DOSTIE HOMES LLC',phone:'3053935283',purchases:23,avg:310367,city:'Jacksonville',state:'FL',market:'Jacksonville',email:'rdostie@dostiehomes.com'},{name:'Delma Mayhew',company:'NEU ECKERT DEVELOPMENT LLC-S',phone:'3177172505',purchases:22,avg:68181,city:'Indianapolis',state:'IN',market:'Indianapolis',email:'mdelma@excite.com'},{name:'Joel Berry',company:'NATIONAL HOME CORPORATION INC',phone:'7138292497',purchases:22,avg:2720000,city:'Houston',state:'TX',market:'Charlotte',email:'elissa.g.sanders@gmail.com'},{name:'Traci Yates',company:'YAMASA CO LTD',phone:'6823178148',purchases:22,avg:314318,city:'Scottsdale',state:'AZ',market:'Charlotte',email:'tyates148@gmail.com'},{name:'Iraj Karimkhany',company:'SUMMERHOUSE PROJECTS LLC',phone:'9493105400',purchases:20,avg:50975,city:'Laguna Hills',state:'CA',market:'Cleveland',email:'iraj@karimkhany.com'},{name:'Carolyn Heatrice',company:'VERSAILLES HOMES LLC',phone:'9045368429',purchases:20,avg:113155,city:'Orange Park',state:'FL',market:'Jacksonville',email:''},{name:'DOOLABH BIMAL S LIFE ESTATE',company:'DOOLABH BIMAL S LIFE ESTATE',phone:'9043031662',purchases:20,avg:100,city:'Jacksonville',state:'FL',market:'Jacksonville',email:'vbdoolabh@aol.com'},{name:'HIGGINBOTHAM DAVID',company:'HIGGINBOTHAM DAVID',phone:'9047280886',purchases:20,avg:100,city:'Hilliard',state:'FL',market:'Jacksonville',email:'dixiecat60@yahoo.com'},{name:'John Toner',company:'TOLL SOUTHEAST LP COMPANY INC',phone:'9046109402',purchases:20,avg:71300,city:'Johns',state:'FL',market:'Jacksonville',email:'jacktoner55@yahoo.com'},{name:'Clayton Properties Group Inc. dba Silverthorne Homes',company:'Clayton Properties Group Inc. dba Silverthorne Homes',phone:'9415920576',purchases:20,avg:87775,city:'Indianapolis',state:'IN',market:'Indianapolis',email:'rdeana73@gmail.com'},{name:'Pritinder Khara',company:'DEVISER LLC',phone:'3014180613',purchases:20,avg:209167,city:'WINTERVILLE',state:'NC',market:'Greenville',email:'elissekhara@gmail.com'},{name:'Eneabo Achadu',company:'OHIO REAL ESTATE INVESTING GROUP LLC',phone:'2167996662',purchases:19,avg:825000,city:'Cleveland',state:'OH',market:'Cleveland',email:'jacquelineachadu@gmail.com'},{name:'Alisha Johnson',company:'TPG AG EHC SD LEN MULTI STATE',phone:'9046514741',purchases:19,avg:100,city:'Scottsdale',state:'AZ',market:'Jacksonville',email:'alishajohnson81@yahoo.com'},{name:'Caroline Ngere',company:'ROOTS MAGNOLIA PINES 1 LLC',phone:'5037521464',purchases:19,avg:2380000,city:'Atlanta',state:'GA',market:'Charlotte',email:'ngere_c@yahoo.com'},{name:'Jenipher Acosta',company:'TRUSA HOMES LLC',phone:'8133643425',purchases:18,avg:52889,city:'Park',state:'MI',market:'Cleveland',email:'jenipheracosta@yahoo.com'},{name:'Serena Crockett',company:'MACH 1 GROUP LLC',phone:'7866821459',purchases:18,avg:753556,city:'Miami',state:'FL',market:'Cleveland',email:'sdcrockett72@gmail.com'},{name:'Phyllis Ochs',company:'Aurum 2 LLC',phone:'6782005805',purchases:18,avg:136555,city:'Indianapolis',state:'IN',market:'Indianapolis',email:'thatguybrendan@hotmail.com'},{name:'Abigail Osborne',company:'OSBORNE FAMILY HOMES LLC',phone:'3366625945',purchases:18,avg:23881,city:'LITTLETON',state:'NC',market:'Greenville',email:'ao4669@uncw.edu'},{name:'Maria Cheema',company:'SAHI MULTIFAMILY LLC',phone:'2058624295',purchases:18,avg:93972,city:'CARY',state:'NC',market:'Greenville',email:'maria_ch7@yahoo.com'},{name:'Alice Brooks',company:'PHOHO LLC',phone:'2169706980',purchases:17,avg:379250,city:'Hts.',state:'OH',market:'Cleveland',email:'avonbrks@yahoo.com'},{name:'Lawrence Miller',company:'HASSMAN HOMES 2 LLC',phone:'9043228215',purchases:17,avg:65294,city:'Miami',state:'FL',market:'Jacksonville',email:''},{name:'Albert Promislow',company:'TOLL SOUTHEAST LP CO INC',phone:'7042319394',purchases:17,avg:1516500,city:'Charlotte',state:'NC',market:'Charlotte',email:'abpromislow@att.net'},{name:'Marcia Taylor',company:'NDG LLC',phone:'2162697040',purchases:16,avg:96688,city:'Chagrin Falls',state:'OH',market:'Cleveland',email:'taylormarcia202@gmail.com'},{name:'Francis Bermudez',company:'EASTSIDE FUTURES LLC',phone:'9048970672',purchases:16,avg:118833,city:'Jacksonville',state:'FL',market:'Jacksonville',email:'francisvanessabermudez@gmail.com'},{name:'David Retherford',company:'Pentecost, LLC',phone:'8502812801',purchases:16,avg:315000,city:'Indianapolis',state:'IN',market:'Indianapolis',email:'krisha.retherford@yahoo.com'},{name:'Edwin Dejka',company:'ROOTS JOY CROSSING LLC',phone:'8154743893',purchases:16,avg:4260000,city:'Atlanta',state:'GA',market:'Charlotte',email:'mesposito3409@gmail.com'},{name:'Joseph Dimartino',company:'DIMARTINO HOMES LLC',phone:'2524128661',purchases:16,avg:50800,city:'GREENVILLE',state:'NC',market:'Greenville',email:'jdimartino82@yahoo.com'},{name:'Timothy Napier',company:'LARGEMOUTH REI LLC',phone:'2164715192',purchases:15,avg:244867,city:'University Heights',state:'OH',market:'Cleveland',email:'timothynapier1@gmail.com'},{name:'Frank Waycaster',company:'JOHN AND JEAN GRANT DOOLEY REV',phone:'9543743693',purchases:15,avg:100,city:'Jacksonville',state:'FL',market:'Jacksonville',email:''},{name:'Jamie Thomas',company:'CJR PROPERTIES 1 LLC',phone:'9044035837',purchases:15,avg:100,city:'West Palm Beach',state:'FL',market:'Jacksonville',email:''},{name:'Darlene Megliola',company:'BUILD CLE LLC',phone:'3109537279',purchases:14,avg:436786,city:'Beachwood',state:'OH',market:'Cleveland',email:'kingston0303@yahoo.com'},{name:'Adriane Mcdonald',company:'NEWTON TOWNHOME HOMEOWNERS ASS',phone:'9042909303',purchases:14,avg:100,city:'Jacksonville',state:'FL',market:'Jacksonville',email:'mcdonald.adriane@yahoo.com'},{name:'GRIFFIN DARRELL V LIFE ESTATE',company:'GRIFFIN DARRELL V LIFE ESTATE',phone:'9043435999',purchases:14,avg:100,city:'Jacksonville',state:'FL',market:'Jacksonville',email:'dvgriffin@comcast.net'},{name:'Mitchell Hassman',company:'HASSMAN HOMES LLC',phone:'6103291893',purchases:14,avg:59657,city:'Miami',state:'FL',market:'Jacksonville',email:''},{name:'Brokera Wynkoop',company:'S&C Financial Group, LLC',phone:'3175905032',purchases:14,avg:33510,city:'Plainfield',state:'IN',market:'Indianapolis',email:''},{name:'Dewayne Adams',company:'Catalina Realties LLC',phone:'3177280721',purchases:14,avg:140686,city:'Fishers',state:'IN',market:'Indianapolis',email:'dewayneadams062@gmail.com'},{name:'Cyrus Mojdehi',company:'NORTHWAY HOMES 2026 LLC',phone:'8583541479',purchases:14,avg:242269,city:'Charlotte',state:'NC',market:'Charlotte',email:'haidamojdehi@yahoo.com'},{name:'Bianca Melendez',company:'SEAWAVE 2 LLC',phone:'4403961900',purchases:13,avg:89308,city:'Naples',state:'FL',market:'Cleveland',email:'bebemonti@yahoo.com'},{name:'Brian Rose',company:'MIFH LLC',phone:'2163235163',purchases:13,avg:124654,city:'Chicago',state:'IL',market:'Cleveland',email:'bkr968@yahoo.com'},{name:'Garren Decaro',company:'THE DRESS COMPANY INC.,',phone:'2164409941',purchases:13,avg:420000,city:'Brecksville',state:'OH',market:'Cleveland',email:'garrend@gmail.com'},{name:'Asaf Ashkenazi',company:'CITY GROUP A A PROPERTY MANAGE',phone:'7547155233',purchases:13,avg:43367,city:'Jacksonville',state:'FL',market:'Jacksonville',email:'asaf099@gmail.com'},{name:'Gregory Forster',company:'ALOHOMORA LLC',phone:'9042357077',purchases:13,avg:166167,city:'Jacksonville',state:'FL',market:'Jacksonville',email:'forstergreg@aol.com'},{name:'OLIVER SHARON D LIFE ESTATE',company:'OLIVER SHARON D LIFE ESTATE',phone:'9043431454',purchases:13,avg:100,city:'Saint Johns',state:'FL',market:'Jacksonville',email:'sharonioliver@yahoo.com'},{name:'Paul Harris',company:'DOORBIA LLC',phone:'4109721364',purchases:13,avg:204015,city:'Jacksonville',state:'FL',market:'Jacksonville',email:'pmharrisbills@gmail.com'},{name:'YARBOROUGH JERRY O',company:'YARBOROUGH JERRY O',phone:'9045146814',purchases:13,avg:100,city:'Jacksonville',state:'FL',market:'Jacksonville',email:'mmyjoy@comcast.net'},{name:'Amanda Archer',company:'Solana Star LLC',phone:'3025624358',purchases:13,avg:96653,city:'Indianapolis',state:'IN',market:'Indianapolis',email:'ellen.kirby@gmail.com'},{name:'Andrew Hehman',company:'LALA ENTERPRISES, LLC AN INDIANA LIMITED LIABILITY COMPANY',phone:'8123440722',purchases:13,avg:100230,city:'Zionsville',state:'IN',market:'Indianapolis',email:'andyhehman@gmail.com'},{name:'Desahrai Johnson',company:'One More Real Estate LLC',phone:'3179142384',purchases:13,avg:58153,city:'Indianapolis',state:'IN',market:'Indianapolis',email:'desahraij@icloud.com'},{name:'Kaila Cantillas',company:'TH Property Owner I, LLC',phone:'9373133223',purchases:13,avg:186545,city:'Portsmouth',state:'NH',market:'Indianapolis',email:'kgcantillas@gmail.com'},{name:'Makayla Elks',company:'A ELKS CONSTRUCTION INC',phone:'2529177543',purchases:13,avg:46389,city:'GREENVILLE',state:'NC',market:'Greenville',email:'mnelks@yahoo.com'},{name:'Ana Sanchez Gelviz',company:'MAKE CLEVELAND GREAT LLC',phone:'9177367309',purchases:12,avg:152667,city:'Petersburg',state:'FL',market:'Cleveland',email:''},{name:'Gertlene Broaden',company:'THIS IS JOHN WILLIAMS CR LLC',phone:'2162092109',purchases:12,avg:69375,city:'Cleveland',state:'OH',market:'Cleveland',email:'jamie_broaden@yahoo.com'},{name:'Sullea Berry',company:'BRICKLINE HOMES LLC',phone:'2166400025',purchases:12,avg:71708,city:'Hts.',state:'OH',market:'Cleveland',email:'dameleah@live.com'},{name:'Jacqueline Burns',company:'BIRD DOG, LLC',phone:'9042100352',purchases:12,avg:6150000,city:'Jacksonville',state:'FL',market:'Jacksonville',email:'monicaramirez0818@gmail.com'},{name:'Michael Buslovich',company:'SHRCASA HOMES LLC',phone:'6475302274',purchases:12,avg:22950,city:'Orlando',state:'FL',market:'Jacksonville',email:''},{name:'Shannon Hughes',company:'CAMERON RICARDO',phone:'3018215892',purchases:12,avg:92217,city:'Martinsburg',state:'WV',market:'Jacksonville',email:'shanreb816@gmail.com'},{name:'Stephen Cronin',company:'SEDA CONSTRUCTIONS COMPANY',phone:'9043334432',purchases:12,avg:1440000,city:'Jacksonville',state:'FL',market:'Jacksonville',email:''},{name:'Traci Yates',company:'PR BORROWER 26 LLC',phone:'6823178148',purchases:12,avg:100,city:'City',state:'UT',market:'Jacksonville',email:'tyates148@gmail.com'},{name:'Debra Shields',company:'Homes In Motion LLC',phone:'3174178098',purchases:12,avg:99565,city:'Indianapolis',state:'IN',market:'Indianapolis',email:''},{name:'Alexandrea Robinson',company:'SHUNEN 9 LLC',phone:'4143973659',purchases:12,avg:310500,city:'Charlotte',state:'NC',market:'Charlotte',email:'robinsonalexandrea@yahoo.com'},{name:'Emma Gelson',company:'DAPPER DEVELOPMENT LLC',phone:'5082091836',purchases:12,avg:635208,city:'Charlotte',state:'NC',market:'Charlotte',email:'emmagelson@oldrochester.org'},{name:'Eugene Wang',company:'WANG PROPERTY LLC',phone:'2529166466',purchases:12,avg:112682,city:'WINTERVILLE',state:'NC',market:'Greenville',email:'yutianwang0704@yahoo.com'},{name:'Anita Mcevoy',company:'MAZCLEVELAND LLC',phone:'4408215267',purchases:11,avg:110736,city:'Pittsburgh',state:'PA',market:'Cleveland',email:''},{name:'Ashlyn Nuckols',company:'APEX PROPERTY GROUP LLC',phone:'8018703513',purchases:11,avg:110909,city:'Denver',state:'CO',market:'Cleveland',email:'iamnuckols@gmail.com'},{name:'Bethany Chan',company:'JOHN CARROLL UNIVERISTY',phone:'4402891368',purchases:11,avg:350000,city:'Hts',state:'OH',market:'Cleveland',email:''},{name:'Ernestine Mccall',company:'REKRUTOHIO LLC',phone:'2484316373',purchases:11,avg:59091,city:'Angeles',state:'CA',market:'Cleveland',email:'ernestinemccall@hotmail.com'},{name:'Jose Aponte',company:'HOME PULSE LLC',phone:'6093287652',purchases:11,avg:31401,city:'Trenton',state:'NJ',market:'Cleveland',email:'japontemusic@yahoo.com'},{name:'Michael Fazio',company:'ZANTEM CORP.,',phone:'2162694462',purchases:11,avg:190545,city:'Cleveland',state:'OH',market:'Cleveland',email:'mfazioglobal@yahoo.com'},{name:'Theodore Christakos',company:'B1Z BUSINESS 6 LLC',phone:'3057937333',purchases:11,avg:116464,city:'Coral Gables',state:'FL',market:'Cleveland',email:'tchristakos@yahoo.com'},{name:'Adriana Bauer',company:'MGG REAL ESTATE LLC',phone:'4025413122',purchases:11,avg:100,city:'Boca Raton',state:'FL',market:'Jacksonville',email:'adriana.bauer3105@gmail.com'},{name:'Albert Dowell',company:'A CLAY DOWELL AND HELLEN C DOW',phone:'9045097574',purchases:11,avg:12550,city:'Jacksonville',state:'FL',market:'Jacksonville',email:'calyxrelgp@aol.com'},{name:'Amy Brown',company:'Charles SFR LLC, a Delaware limited liability company',phone:'6023262501',purchases:11,avg:321136,city:'Phoenix',state:'AZ',market:'Indianapolis',email:'amemari@aol.com'},{name:'Bert Neff',company:'Grand Slam Getaways LLC',phone:'3176285141',purchases:11,avg:150018,city:'Indianapolis',state:'IN',market:'Indianapolis',email:'bbplyr@gmail.com'},{name:'Britney Dixon',company:'NRHQ, LLC',phone:'3177014212',purchases:11,avg:84462,city:'Pittsburgh',state:'PA',market:'Indianapolis',email:'dixonjenkins6@yahoo.com'},{name:'Abigail Longner',company:'HCR ARR LLC',phone:'5636501384',purchases:11,avg:260045,city:'Charlotte',state:'NC',market:'Charlotte',email:'abilover2004@yahoo.com'},{name:'Gerardo Cardenas',company:'ATMORE PROPERTIES LLC',phone:'7044908555',purchases:11,avg:233000,city:'Charlotte',state:'NC',market:'Charlotte',email:'lkt9205@yahoo.com'},{name:'Jaimal Patel',company:'QC BUILD VENTURE LLC',phone:'7049578561',purchases:11,avg:603000,city:'Charlotte',state:'NC',market:'Charlotte',email:'jaimal@square1mgmt.com'},{name:'Alexander Vinokur',company:'12224 FAIRVIEW COURT LLC',phone:'4406661900',purchases:10,avg:57037,city:'Beachwood',state:'OH',market:'Cleveland',email:'alecvino@yahoo.com'},{name:'Anthony Amos',company:'HEALTHWAVE CONSULTING LLC',phone:'2164093274',purchases:10,avg:90584,city:'Sheridan',state:'WY',market:'Cleveland',email:''},{name:'Brenda Griffin',company:'NSS REALTY, LLC',phone:'2165704685',purchases:10,avg:129400,city:'Hts',state:'OH',market:'Cleveland',email:'sistahgriffin@yahoo.com'},{name:'Curtis Clark',company:'LANDCO PROPERTY GROUP LLC',phone:'2162246614',purchases:10,avg:58425,city:'Cleveland',state:'OH',market:'Cleveland',email:'curtclark2999@gmail.com'},{name:'Garry Lei',company:'NAG VENTURE PROPERTIES LLC',phone:'6465758972',purchases:10,avg:126300,city:'Cincinnati',state:'OH',market:'Cleveland',email:'glei1339@gmail.com'},{name:'Gregory Topalian',company:'OEC REAL ESTATE LLC',phone:'2035502139',purchases:10,avg:121100,city:'Dover',state:'DE',market:'Cleveland',email:'oliviatop16@gmail.com'},{name:'Helen Slattengren',company:'MANN MADE PROPERTIES LLC',phone:'7752477420',purchases:10,avg:97250,city:'Mesa',state:'AZ',market:'Cleveland',email:'gslattengren@worldnet.att.net'},{name:'Nolan James',company:'RPG KWSTA II, LLC',phone:'4403209422',purchases:10,avg:155131,city:'Strongsville',state:'OH',market:'Cleveland',email:'njamesjr@yahoo.com'},{name:'Julia Mckillop',company:'GROUNDFLOOR JACKSONVILLE LLC',phone:'9049108403',purchases:10,avg:94900,city:'Jacksonville',state:'FL',market:'Jacksonville',email:'jchansen@aol.com'},{name:'ANDREW SCOTT',company:'ANDREW SCOTT',phone:'6038018482',purchases:10,avg:129200,city:'Knoxville',state:'TN',market:'Indianapolis',email:'stephy0608@hotmail.com'},{name:'Arthur Dillard',company:'SZ Financial LLC',phone:'3177244757',purchases:10,avg:20625,city:'Indianapolis',state:'IN',market:'Indianapolis',email:'artdillard72@gmail.com'},{name:'Bonita Anderson',company:'Align Propco 2601 LLC',phone:'7656155869',purchases:10,avg:189359,city:'Gilbert',state:'AZ',market:'Indianapolis',email:'boreananderson@gmail.com'},{name:'Curtis Crumble',company:'Aspire Forward Homes LLC',phone:'3176719883',purchases:10,avg:165740,city:'Avon',state:'IN',market:'Indianapolis',email:'curtiscrumble69@gmail.com'},{name:'Paul Hess',company:'ENA RENTALS LLC',phone:'8172298474',purchases:10,avg:374000,city:'Pineville',state:'NC',market:'Charlotte',email:'pauljhess@gmail.com'},{name:'ALLEGIANT INVESTMENTS',company:'ALLEGIANT INVESTMENTS',phone:'6027222868',purchases:9,avg:83000,city:'Rocky River',state:'OH',market:'Cleveland',email:'teos.ortiz@yahoo.com'},{name:'Adriana Taylor',company:'PROJECT MADHOUSE LLC',phone:'2164080441',purchases:9,avg:42444,city:'Mission Viejo',state:'CA',market:'Cleveland',email:'tayloradriana@gmail.com'},{name:'Alaina Morton',company:'BRIDGE FOUNTAIN LLC',phone:'4196120002',purchases:9,avg:67222,city:'Cleveland',state:'OH',market:'Cleveland',email:'alainamorton755@gmail.com'},{name:'Alexander Khaykin',company:'MOUNTVIEW INVESTMENTS, LLC',phone:'4403363763',purchases:9,avg:197633,city:'Willoughby',state:'OH',market:'Cleveland',email:'akhaykin@hotmail.com'},{name:'Allison Tobin',company:'HALSTEAD-2711 W 14 LLC,',phone:'4405900563',purchases:9,avg:4000000,city:'Cleveland',state:'OH',market:'Cleveland',email:''},{name:'Andrea Smith',company:'MAGNIV REALTY, LLC,',phone:'2169739862',purchases:9,avg:742500,city:'Segundo',state:'CA',market:'Cleveland',email:''},{name:'Anne Bachini',company:'TURNKEY REAL ESTATE COMPANY LLC',phone:'6036613122',purchases:9,avg:53389,city:'Cleveland',state:'OH',market:'Cleveland',email:''},{name:'Anthony Comeriato',company:'TRORC3 LLC',phone:'8508147757',purchases:9,avg:63153,city:'Cleveland',state:'OH',market:'Cleveland',email:'hhnorthnaples@aol.com'},{name:'Beulah Mcneill',company:'MAVERICK PROPERTY GROUP III LLC',phone:'2164033519',purchases:9,avg:130444,city:'Canton',state:'OH',market:'Cleveland',email:''},{name:'Elena Naumenko',company:'MGS HOLDINGS LLC',phone:'2164664056',purchases:9,avg:55278,city:'Hts',state:'OH',market:'Cleveland',email:'emncorp@gmail.com'},{name:'FUND 5',company:'FUND 5',phone:'2162535919',purchases:9,avg:147022,city:'Eastlake',state:'OH',market:'Cleveland',email:'a1mastertech@aol.com'},{name:'MJRE REAL ESTATE OHIO LLC',company:'MJRE REAL ESTATE OHIO LLC',phone:'2162158385',purchases:9,avg:98556,city:'Cleveland',state:'OH',market:'Cleveland',email:'fmaraldo@yahoo.com'},{name:'Mohammad Iwais',company:'IWAIS WIRELESS LLC',phone:'2162565858',purchases:9,avg:83578,city:'Cleveland',state:'OH',market:'Cleveland',email:'amaniwais_2010@yahoo.com'},{name:'Musa Jundi',company:'YASSINI REAL ESTATE LLC',phone:'4403340151',purchases:9,avg:91809,city:'North Royalton',state:'OH',market:'Cleveland',email:'samar.jundi@yahoo.com'},{name:'Scott Lurie',company:'F STREET INVESTMENTS, LLC',phone:'4144051668',purchases:9,avg:70405,city:'Milwaukee',state:'WI',market:'Cleveland',email:'scott@fstreetgroup.com'},{name:'Austin Lucas',company:'Mission Homes LLC',phone:'3173846861',purchases:9,avg:92222,city:'Carmel',state:'IN',market:'Indianapolis',email:'cgrunningback@aol.com'},{name:'Beverly Henderson',company:'510 SFR IN Operations I LLC',phone:'8503753000',purchases:9,avg:244544,city:'Parsippany',state:'NJ',market:'Indianapolis',email:'bhenders1968@gmail.com'},{name:'Che Halliburton',company:'Clayton Properties Group, Inc. dba Arbor Homes',phone:'3173616317',purchases:9,avg:118899,city:'Indianapolis',state:'IN',market:'Indianapolis',email:''},{name:'Chiquita Watkins',company:'Percentage Talks LLC',phone:'3177021096',purchases:9,avg:68544,city:'Indianapolis',state:'IN',market:'Indianapolis',email:'1chiq2many@gmail.com'},{name:'John Sherby',company:'HLGF INVESTMENTS, LLC',phone:'3174329382',purchases:9,avg:136666,city:'Indianapolis',state:'IN',market:'Indianapolis',email:'tomsherby5@gmail.com'},{name:'Mayra Diaz',company:'DIAZ INVESTMENTS LLC',phone:'3172894797',purchases:9,avg:167944,city:'Indianapolis',state:'IN',market:'Indianapolis',email:'mayradiaz00@hotmail.com'},{name:'PAOLO GIOVANNI KALLIMANIS',company:'PAOLO GIOVANNI KALLIMANIS',phone:'5596962360',purchases:9,avg:144277,city:'Redondo Beach',state:'CA',market:'Indianapolis',email:'pshisler@hotmail.com'},{name:'Rita Kirkman',company:'RET HOLDINGS II LLC',phone:'3174765935',purchases:9,avg:187555,city:'Greenwood',state:'IN',market:'Indianapolis',email:'tlkirk9@gmail.com'},{name:'Bruno Vargas',company:'NADLAN25 LLC',phone:'3146448127',purchases:9,avg:1477000,city:'Charlotte',state:'NC',market:'Charlotte',email:''},{name:'Abdul Khan',company:'DSM KHAN HOLDINGS LLC',phone:'6264948983',purchases:8,avg:86250,city:'Anaheim',state:'CA',market:'Cleveland',email:'cctvcali@hotmail.com'},{name:'Adam Rissmiller',company:'VISTA HOME BUYERS, LLC',phone:'3308149008',purchases:8,avg:124142,city:'Akron',state:'OH',market:'Cleveland',email:'adam.rissmiller@hawaii.rr.com'},{name:'Antonio Collins',company:'WINCHESTER, SHANNON & VAHIDI, NASIM',phone:'2163319781',purchases:8,avg:146875,city:'San Diego',state:'CA',market:'Cleveland',email:'antoniocollins73@gmail.com'},{name:'Bin Han',company:'APEX PROPERTY GROUP OHIO LLC',phone:'7187755223',purchases:8,avg:111812,city:'Newark',state:'CA',market:'Cleveland',email:'hanbin8332927@hotmail.com'},{name:'Brian Robinson',company:'FARM 51 HOLDINGS LLC',phone:'8645615169',purchases:8,avg:113688,city:'Hts',state:'OH',market:'Cleveland',email:'gggbbd6@gmail.com'},{name:'Charles Ficklin',company:'CNT CONSTRUCTION COMPANY',phone:'2162993577',purchases:8,avg:46362,city:'Cleveland',state:'OH',market:'Cleveland',email:'devantefickin@yahoo.com'},{name:'Deborah Boozer',company:'FAM DIRECT INCORPORATED',phone:'2168674278',purchases:8,avg:418438,city:'Irvine',state:'CA',market:'Cleveland',email:'deborahboozer@yahoo.com'},{name:'Doris Gaddis',company:'DCL ENTERPRISES OHIO PROPERTIES, LLC',phone:'3304191223',purchases:8,avg:118188,city:'Wrightsville Beach',state:'NC',market:'Cleveland',email:'doris.gaddis@gmail.com'},{name:'Erin Wynn',company:'REIMAGINED HOME SOLUTIONS LLC',phone:'2165433753',purchases:8,avg:63012,city:'Pittsburgh',state:'PA',market:'Cleveland',email:'erinwynn1994@gmail.com'},{name:'Giorgio Tramonto',company:'MOHAMMED, MOIZ',phone:'8478479699',purchases:8,avg:122652,city:'Chantilly',state:'VA',market:'Cleveland',email:'gtramonto18@wooster.edu'},{name:'James Gerrick',company:'SPERRY HOLDINGS LLC',phone:'2163137076',purchases:8,avg:143394,city:'Chesterland',state:'OH',market:'Cleveland',email:'jim.gerrick@yahoo.com'},{name:'Kevin Tate',company:'LEADIMIZE MANAGEMENT LLC',phone:'8503233768',purchases:8,avg:98938,city:'Birmingham',state:'MI',market:'Cleveland',email:'griz23@hotmail.com'},{name:'Keyontae Grays',company:'BZDEL REAL ESTATE, LLC',phone:'2164595615',purchases:8,avg:81500,city:'Lake',state:'OH',market:'Cleveland',email:'armstrongkeyontae118@gmail.com'},{name:'Monterae Harden',company:'SEAWAVE 3 LLC',phone:'6142904591',purchases:8,avg:49125,city:'Cleveland',state:'OH',market:'Cleveland',email:'malikharden1@yahoo.com'},{name:'Abigail Brown',company:'CARPHOMES, LLC',phone:'3174577425',purchases:8,avg:162437,city:'Carmel',state:'IN',market:'Indianapolis',email:'abby.b07@gmail.com'},{name:'Adkin Properties, LLC',company:'Adkin Properties, LLC',phone:'2544219900',purchases:8,avg:78800,city:'Indianapolis',state:'IN',market:'Indianapolis',email:'aljohn1978@gmail.com'},{name:'Ajay Koduri',company:'Scholtens LLC',phone:'2022465448',purchases:8,avg:87200,city:'Indianapolis',state:'IN',market:'Indianapolis',email:'ajay.koduri@gmail.com'},{name:'Andre Jackson',company:'EL FERREIRO, LLC',phone:'3176538388',purchases:8,avg:92213,city:'Indianapolis',state:'IN',market:'Indianapolis',email:'andre92178@gmail.com'},{name:'Bilal Siddiqui',company:'Infinite Batteries Inc.',phone:'3179036046',purchases:8,avg:24548,city:'Munster',state:'IN',market:'Indianapolis',email:''},{name:'Camille Stephens',company:'Stephens Holdings LLC',phone:'3175179689',purchases:8,avg:40550,city:'Indianapolis',state:'IN',market:'Indianapolis',email:'hayes_camille@yahoo.com'},{name:'Fred Collins',company:'Davis Management LLC',phone:'3175507105',purchases:8,avg:80100,city:'Indianapolis',state:'IN',market:'Indianapolis',email:'drakencollins80@gmail.com'},{name:'Joshua Perez',company:'Central Region Tax Auction, LLC',phone:'2405073703',purchases:8,avg:60134,city:'Teaneck',state:'NJ',market:'Indianapolis',email:'jp254676@gmail.com'},{name:'Juli Vierthaler',company:'Powderhouse Indy LLC',phone:'3126369236',purchases:8,avg:18999,city:'Zionsville',state:'IN',market:'Indianapolis',email:'jvierthaler418@gmail.com'},{name:'Noel Gomez',company:'SFR JV-3 Property, LLC',phone:'7867186137',purchases:8,avg:249487,city:'Tustin',state:'CA',market:'Indianapolis',email:'gonzaleznoel123@gmail.com'},{name:'Alan Porter',company:'THR DESIGN BUILD INC',phone:'2073930610',purchases:8,avg:803188,city:'Charlotte',state:'NC',market:'Charlotte',email:'bishopagp@aol.com'},{name:'Amit Patel',company:'WAYFARE HOMES LLC',phone:'7044494693',purchases:8,avg:416250,city:'Charlotte',state:'NC',market:'Charlotte',email:''},{name:'Basil Bratton',company:'GRIER FUNERAL SERVICES REAL ESTATE HOLDINGS LLC',phone:'5409401027',purchases:8,avg:1200000,city:'Charlotte',state:'NC',market:'Charlotte',email:'lawdawg4me@yahoo.com'},{name:'Edward Roper',company:'NORTHWAY HOMES 2025 LLC',phone:'7042581531',purchases:8,avg:390571,city:'Charlotte',state:'NC',market:'Charlotte',email:'edroper@ncat.edu'},{name:'Jagadeeswara Yannam',company:'JANITH INVESTMENTS LLC',phone:'3473872773',purchases:8,avg:305000,city:'Waxhaw',state:'NC',market:'Charlotte',email:'jagadishyannam@gmail.com'},{name:'Teresa Woods',company:'AYAT LLC',phone:'2525318371',purchases:8,avg:80929,city:'GREENVILLE',state:'NC',market:'Greenville',email:'twoodecu@yahoo.com'},{name:'Altaf Shaik',company:'ZEMRAN GLOBAL LLC',phone:'6149008066',purchases:7,avg:108550,city:'Chantilly',state:'VA',market:'Cleveland',email:'carpool_2006@yahoo.com'},{name:'Anna Virgili',company:'SUVA HOLDINGS OHIO LLC',phone:'2169569945',purchases:7,avg:146079,city:'Tucson',state:'AZ',market:'Cleveland',email:'avirgili@yahoo.com'},{name:'Connie Biancalana',company:'CASALANA LLC',phone:'2199519996',purchases:7,avg:251429,city:'Terrace',state:'IL',market:'Cleveland',email:'lizv80@hotmail.com'},{name:'Donald Kasper',company:'TGIF PROPERTIES LLC',phone:'2164965445',purchases:7,avg:680429,city:'Seven Hills',state:'OH',market:'Cleveland',email:'tusharvic@gmail.com'},{name:'Fernando Gana',company:'CASCADE PROPERTY HOLDINGS LLC',phone:'8327267810',purchases:7,avg:134500,city:'Canton',state:'OH',market:'Cleveland',email:'fernando_gana@yahoo.com'},{name:'Paul Duda',company:'HILL TOP HOMES LLC',phone:'4405702960',purchases:7,avg:168214,city:'Brecksville',state:'OH',market:'Cleveland',email:'paul.duda@mindspring.com'},{name:'Akram Mahfouz',company:'Akram Abu-Mahfouz',phone:'3175314985',purchases:7,avg:8607,city:'Carmel',state:'IN',market:'Indianapolis',email:'akramabu601@yahoo.com'},{name:'Allen Spencer',company:'SeniorLife Solutions Inc',phone:'3177896074',purchases:7,avg:135071,city:'Indianapolis',state:'IN',market:'Indianapolis',email:'alexiaspencer1213@icloud.com'},{name:'Andrew Streif',company:'Trident Realty Investments, LLC',phone:'5129237139',purchases:7,avg:257015,city:'Dallas',state:'TX',market:'Indianapolis',email:'andrewstreif@gmail.com'},{name:'Angelita Taylor',company:'F2SM LLC',phone:'3174355245',purchases:7,avg:128192,city:'Carmel',state:'IN',market:'Indianapolis',email:''},{name:'Anthony Mimms',company:'Steinhaus LLC',phone:'3174502112',purchases:7,avg:147785,city:'Indianapolis',state:'IN',market:'Indianapolis',email:'mimmsmd@yahoo.com'},{name:'Audrey Isham',company:'Moore & Moore Properties LLC',phone:'2626728798',purchases:7,avg:82700,city:'Indianapolis',state:'IN',market:'Indianapolis',email:'aicheddar@yahoo.com'},{name:'Brandy Fields',company:'EVOE LLC',phone:'3174074349',purchases:7,avg:10,city:'Los Angeles',state:'CA',market:'Indianapolis',email:'brandyfields74@yahoo.com'},{name:'Brenda Flanagan',company:'CAB Investment Properties LLC',phone:'3174025978',purchases:7,avg:96142,city:'Westfield',state:'IN',market:'Indianapolis',email:'rickyd0910@yahoo.com'},{name:'Brett Patrick',company:'Brett Patrick as Trustee of the BMP 1988 Revocable Trust dated June 5, 2019 and',phone:'7607449252',purchases:7,avg:389857,city:'San Diego',state:'CA',market:'Indianapolis',email:'brettpatrick@netscape.net'},{name:'Diego Gomez Lara',company:'FTF REO LLC',phone:'3174809628',purchases:7,avg:10,city:'Chicago',state:'IL',market:'Indianapolis',email:'ddlara6000@gmail.com'},{name:'Donna Jackson',company:'Ironstone Capital LLC',phone:'3173840382',purchases:7,avg:117914,city:'Westfield',state:'IN',market:'Indianapolis',email:''},{name:'Edward Gamory',company:'PennyMac Loan Services, LLC',phone:'6785209488',purchases:7,avg:155546,city:'Westlake Village',state:'CA',market:'Indianapolis',email:'mila6535@yahoo.com'},{name:'Fatima Diaz',company:'R&F Properties & Rentals LLC',phone:'3179925188',purchases:7,avg:42576,city:'Avon',state:'IN',market:'Indianapolis',email:'fatima.diaz98@gmail.com'},{name:'Lakeview Loan Servicing, LLC',company:'Lakeview Loan Servicing, LLC',phone:'3179892963',purchases:7,avg:217678,city:'Virginia Beach',state:'VI',market:'Indianapolis',email:'jjohnboy69@aol.com'},{name:'Reymundo Perez',company:'Homes Constructions RMP LLC, an Indiana limited liability company',phone:'3176577518',purchases:7,avg:46214,city:'Greenwood',state:'IN',market:'Indianapolis',email:'rayflaco@att.net'},{name:'Christy Forbes',company:'PRINCE ADAM MOTU LLC',phone:'9802135910',purchases:7,avg:271917,city:'Concord',state:'NC',market:'Charlotte',email:'perfectsieteocho@gmail.com'},{name:'Yolanda Sanchez',company:'JDY PROPERTIES LLC',phone:'7048310856',purchases:7,avg:280583,city:'Charlotte',state:'NC',market:'Charlotte',email:''},{name:'Yancy Morris',company:'SPORTS MANIAC LLC',phone:'9197569162',purchases:7,avg:91767,city:'GREENVILLE',state:'NC',market:'Greenville',email:'tfmorris@suddenlink.net'},{name:'Caleb Williams',company:'NewRez LLC',phone:'8035465161',purchases:6,avg:180617,city:'Greenville',state:'SC',market:'Indianapolis',email:'dswllms247@gmail.com'},{name:'Chandra Alokam',company:'Forthright Real Estate LLC',phone:'3179892165',purchases:6,avg:149783,city:'Carmel',state:'IN',market:'Indianapolis',email:''},{name:'Charles Tucker',company:'Eventus Capital LLC',phone:'3174168993',purchases:6,avg:110250,city:'Cedarhurst',state:'NY',market:'Indianapolis',email:''},{name:'David Johnes',company:'RLC Investments LLC-S',phone:'3179466633',purchases:6,avg:120566,city:'Danville',state:'IN',market:'Indianapolis',email:'djohnes@hotmail.com'},{name:'Hartinder Sidhu',company:'Crossroads Solutions LLC',phone:'7328955264',purchases:6,avg:150400,city:'Ocean Grove',state:'NJ',market:'Indianapolis',email:'heerasidhu4@gmail.com'},{name:'Jose Castillo',company:'RCA Properties LLC',phone:'3174393798',purchases:6,avg:162966,city:'Indianapolis',state:'IN',market:'Indianapolis',email:'castillojose99@icloud.com'},{name:'Joseph Obrien',company:'O\'Brien Real Estate LLC',phone:'3178625246',purchases:6,avg:193416,city:'Indianapolis',state:'IN',market:'Indianapolis',email:'josephobrien585@hotmail.com'},{name:'Paolo Kallimanis',company:'Paolo Kallimanis',phone:'8084897412',purchases:6,avg:125500,city:'Redondo Beach',state:'CA',market:'Indianapolis',email:'bluehazardsurf@yahoo.com'},{name:'Sarada Kesari',company:'THIRU ASSOCIATES LLC',phone:'2489965595',purchases:6,avg:128333,city:'Indianapolis',state:'IN',market:'Indianapolis',email:''},{name:'Alvin Shepherd',company:'TCG MU HOLDINGS LLC',phone:'3363405368',purchases:6,avg:16250250,city:'New York',state:'NY',market:'Charlotte',email:''},{name:'Charles Felts',company:'H AND F PROPERTY HOLDINGS LLC',phone:'7042415947',purchases:6,avg:525000,city:'Matthews',state:'NC',market:'Charlotte',email:'charles.felts@yahoo.com'},{name:'Charles Lockhart',company:'KEEN HOMECRAFTERS LLC',phone:'7044588521',purchases:6,avg:955000,city:'Charlotte',state:'NC',market:'Charlotte',email:'trheelz419@aol.com'},{name:'Christine Wigand',company:'NOVANT PROPERTIES LLC',phone:'3366016484',purchases:6,avg:9916667,city:'Winston Salem',state:'NC',market:'Charlotte',email:'christineeee_xo@yahoo.com'},{name:'Dianne Short',company:'SFR CROWN JEWEL BORROWER LP',phone:'2147289860',purchases:6,avg:951500,city:'Dallas',state:'TX',market:'Charlotte',email:'dianneshort@msn.com'},{name:'Don Edwards',company:'TRIPLE WING PLANTATION LLC',phone:'6786143611',purchases:6,avg:3200000,city:'Charlotte',state:'NC',market:'Charlotte',email:'fallenshadow@yahoo.com'},{name:'Eric Wagner',company:'CLASSICA HOMES LLC',phone:'7049893010',purchases:6,avg:870800,city:'Charlotte',state:'NC',market:'Charlotte',email:''},{name:'Jackson Hopper',company:'HC MONTCLAIRE TERRACES LLC',phone:'7049061386',purchases:6,avg:1131000,city:'Charlotte',state:'NC',market:'Charlotte',email:'bs.momma5292011@gmail.com'},{name:'Jay Bonakdar',company:'JAY M BONAKDAR',phone:'7049751990',purchases:6,avg:479167,city:'Charlotte',state:'NC',market:'Charlotte',email:'jbonakdar@netzero.net'},{name:'Kaila Cantillas',company:'CPT-ASL SFR PROPCO LLC',phone:'9373133223',purchases:6,avg:274250,city:'Portsmouth',state:'NH',market:'Charlotte',email:'kgcantillas@gmail.com'},{name:'Margaret Person',company:'EAST 9TH LLC',phone:'3308079069',purchases:6,avg:5000,city:'Girard',state:'OH',market:'Charlotte',email:'dperson@columbus.rr.com'},{name:'Andrew Theriault',company:'EBAUT PROPERTIES LLC',phone:'6172122131',purchases:6,avg:141667,city:'GREENVILLE',state:'NC',market:'Greenville',email:''},{name:'Bradley Brenton',company:'VERANDA PROPERTIES LLC',phone:'9196198728',purchases:6,avg:121333,city:'GOLDSBORO',state:'NC',market:'Greenville',email:'bradleybrenton@yahoo.com'},{name:'Donald Baker',company:'D & J BAKER HOLDINGS LLC',phone:'2524146571',purchases:6,avg:365333,city:'GREENVILLE',state:'NC',market:'Greenville',email:'bball21hoopsstar@yahoo.com'},{name:'Gang Zhang',company:'LONGFOR LLC',phone:'9797395922',purchases:6,avg:123333,city:'WINTERVILLE',state:'NC',market:'Greenville',email:'tiweishenghuo@gmail.com'},{name:'Justin Turner',company:'TURNER HOME TEAM INC',phone:'9107706422',purchases:6,avg:151250,city:'FARMVILLE',state:'NC',market:'Greenville',email:'turnerju19@students.ecu.edu'},{name:'Robert Coggins',company:'COGGINS INVESTMENTS LLC',phone:'2527141988',purchases:6,avg:220000,city:'ROCKY MOUNT',state:'NC',market:'Greenville',email:'mrose@dancobuildersinc.com'},{name:'Anthony Moore',company:'PIKE DEVELOPMENT COMPANY LLC',phone:'5616032544',purchases:5,avg:718500,city:'Charlotte',state:'NC',market:'Charlotte',email:'anthony_moore18@yahoo.com'},{name:'EUGENE MILBURN JR DAVANT',company:'EUGENE MILBURN JR DAVANT',phone:'7044589024',purchases:5,avg:401000,city:'Charlotte',state:'NC',market:'Charlotte',email:''},{name:'Francis Teague',company:'CHIOTT LLC',phone:'7049755010',purchases:5,avg:1421400,city:'Charlotte',state:'NC',market:'Charlotte',email:'jteague@trammellcrow.com'},{name:'Jacob Lanier',company:'IIF VISTA SFR LP',phone:'7043526170',purchases:5,avg:1666000,city:'Dallas',state:'TX',market:'Charlotte',email:'jacob.lanier15@gmail.com'},{name:'Jerome Davis',company:'DONNA JOWERS',phone:'7045176074',purchases:5,avg:1359000,city:'Charlotte',state:'NC',market:'Charlotte',email:'jdtalk@gmail.com'},{name:'Martha Freeman',company:'NEWGEN BUILDERS LLC',phone:'7046196283',purchases:5,avg:389000,city:'Charlotte',state:'NC',market:'Charlotte',email:'mjnfreeman@gmail.com'},{name:'Rodricko Hill',company:'PURCHASING FUND 2025-1 LLC',phone:'7049659225',purchases:5,avg:562600,city:'Austin',state:'TX',market:'Charlotte',email:'redskins252002@yahoo.com'},{name:'William Carstarphen',company:'GLENEAGLES DAVIDSON LLC',phone:'7048307333',purchases:5,avg:25100000,city:'Mc Adenville',state:'NC',market:'Charlotte',email:'bill.carstarphen@pharryarns.com'},{name:'Angela Buckman',company:'BUCKMAN REALTY VENTURES LLC',phone:'9105992280',purchases:5,avg:164700,city:'WILMINGTON',state:'NC',market:'Greenville',email:'astevensrn@yahoo.com'},{name:'Bobby Mccullen',company:'CMA PROPERTIES LLC',phone:'7046168260',purchases:5,avg:177700,city:'BELMONT',state:'NC',market:'Greenville',email:'ccmccullen@gmail.com'},{name:'PRUITT HAL F JR',company:'PRUITT HAL F JR',phone:'2525312030',purchases:5,avg:130800,city:'GRIMESLAND',state:'NC',market:'Greenville',email:'ecpets@aol.com'},{name:'Steven Annis',company:'EAST ACRES LLC',phone:'9196221359',purchases:5,avg:163000,city:'GARNER',state:'NC',market:'Greenville',email:'sam27529@gmail.com'},{name:'Andrew Peterson',company:'PRIME MAKERS EQUITY GROUP LLC',phone:'2528147343',purchases:4,avg:65167,city:'WINTERVILLE',state:'NC',market:'Greenville',email:''},{name:'Carlton Waller',company:'NORTH HIGHLAND PROPERTIES INC',phone:'5043733642',purchases:4,avg:15000,city:'GRIFTON',state:'NC',market:'Greenville',email:''},{name:'Caroline Myers',company:'M2 SOUTHERN INVESTMENTS LLC',phone:'3366017437',purchases:4,avg:45000,city:'LUCAMA',state:'NC',market:'Greenville',email:''},{name:'En Zheng',company:'Y E RENTAL LLC',phone:'9177055684',purchases:4,avg:237500,city:'WINTERVILLE',state:'NC',market:'Greenville',email:'helianliangying123@163.com'},{name:'HAGAN CHARLES HUBERT JR',company:'HAGAN CHARLES HUBERT JR',phone:'2527140554',purchases:4,avg:1375,city:'WINTERVILLE',state:'NC',market:'Greenville',email:'jumranb@hotmail.com'},{name:'Markam Wheatley',company:'M & K INVESTMENTS',phone:'2522681271',purchases:4,avg:75250,city:'GRIFTON',state:'NC',market:'Greenville',email:'wheats27@gmail.com'},{name:'Ramesh Mishra',company:'NEP PROPERTIES LLC',phone:'6464681166',purchases:4,avg:125000,city:'GREENVILLE',state:'NC',market:'Greenville',email:''},{name:'Stephen Bond',company:'WALSTON EVANS LLC',phone:'2527242437',purchases:4,avg:144250,city:'WINTERVILLE',state:'NC',market:'Greenville',email:'drstephenlawrence@gmail.com'},{name:'Teresa Thomas Ross',company:'TERESA ELIZABETH THOMAS ROSS',phone:'7322364739',purchases:3,avg:178000,city:'Bradley Beach',state:'NJ',market:'Indianapolis',email:'shoppingdr@gmail.com'},{name:'Amy Kay',company:'MITZE NC LLC',phone:'2529170545',purchases:3,avg:208000,city:'GARDINER',state:'NY',market:'Greenville',email:''},{name:'Anias Harris',company:'IMPERIAL PROPERTIES ONE LLC',phone:'2528648837',purchases:3,avg:98125,city:'GREENVILLE',state:'NC',market:'Greenville',email:'trockharris1@gmail.com'},{name:'BAILEY ANTHONY W II',company:'BAILEY ANTHONY W II',phone:'6098920650',purchases:3,avg:206833,city:'GREENVILLE',state:'NC',market:'Greenville',email:'nkyoko@hotmail.com'},{name:'Bernadette Yarb',company:'EASTCARE PROPERTIES LLC',phone:'2522584227',purchases:3,avg:205000,city:'WILLIAMSTON',state:'NC',market:'Greenville',email:''},{name:'Brenda Proctor',company:'2020 GLOBAL INVESTMENTS LLC',phone:'2547609828',purchases:3,avg:20000,city:'GREENVILLE',state:'NC',market:'Greenville',email:''},{name:'Courtney Norman',company:'HARDY FLO LLC',phone:'2523415273',purchases:3,avg:156000,city:'GREENVILLE',state:'NC',market:'Greenville',email:'courtneyn@netzero.net'},{name:'DIETRICH DOUGLAS HAROLD',company:'DIETRICH DOUGLAS HAROLD',phone:'2525081364',purchases:3,avg:19333,city:'GRIFTON',state:'NC',market:'Greenville',email:'dietrichproperties@gmail.com'},{name:'Douglas Dupree',company:'JACOBSEN PROPERTIES LLC',phone:'6238536254',purchases:3,avg:124333,city:'GREENVILLE',state:'NC',market:'Greenville',email:''},{name:'EVANS LYNN',company:'EVANS LYNN',phone:'8045363472',purchases:3,avg:206000,city:'GREENVILLE',state:'NC',market:'Greenville',email:''},{name:'FAULKNER EVELYN ALLISON',company:'FAULKNER EVELYN ALLISON',phone:'2527255457',purchases:3,avg:190000,city:'GREENVILLE',state:'NC',market:'Greenville',email:''},{name:'Fred Wainright',company:'WAINRIGHT HOLDINGS LLC',phone:'9197562735',purchases:3,avg:173333,city:'GREENVILLE',state:'NC',market:'Greenville',email:'karenjbaseballmom@yahoo.com'},{name:'GUTMANN DANIEL',company:'GUTMANN DANIEL',phone:'6038979491',purchases:3,avg:66666,city:'WINTERVILLE',state:'NC',market:'Greenville',email:'gutmanndt@gmail.com'},{name:'Haritha Ackula',company:'ACKULA HARITHA',phone:'4062812730',purchases:3,avg:343333,city:'WINTERVILLE',state:'NC',market:'Greenville',email:'amalapaul263@gmail.com'},{name:'Jack Embree',company:'EAST SUQ PROPERTIES LLC',phone:'3363022728',purchases:3,avg:235333,city:'GREENVILLE',state:'NC',market:'Greenville',email:'jembree@aol.com'},{name:'Jarred Purvis',company:'REYNOLDS SCOTT L',phone:'2527147630',purchases:3,avg:92833,city:'GRIMESLAND',state:'NC',market:'Greenville',email:'jarredpurvis@yahoo.com'},{name:'Jarrod Williams',company:'SWECKER GLEN K',phone:'4106930671',purchases:3,avg:360000,city:'GRIMESLAND',state:'NC',market:'Greenville',email:'k8_williams@verizon.net'},{name:'Jonathan Taft',company:'MINOGUE KYLE',phone:'9192599360',purchases:3,avg:80000,city:'GREENVILLE',state:'NC',market:'Greenville',email:'jonathangtaft@gmail.com'},{name:'Kevin Brighton',company:'ENC HOME SOLUTIONS LLC',phone:'2523272444',purchases:3,avg:59833,city:'GREENVILLE',state:'NC',market:'Greenville',email:'curlykev@yahoo.com'},{name:'Paul Hassel',company:'WEST ELECTRIC SERVICES LLC',phone:'9895298804',purchases:3,avg:113333,city:'FARMVILLE',state:'NC',market:'Greenville',email:'hassel1833@gmail.com'},{name:'Seth Pierce',company:'SECU*RE INC',phone:'8284607025',purchases:3,avg:132500,city:'RALEIGH',state:'NC',market:'Greenville',email:'sethpierce@aol.com'}];
+const HEDGE_FUNDS=[{name:'Rajendra Donepudi',company:'LENNAR HOMES LLC',phone:'9524540552',purchases:381,avg:617422,city:'Miami',state:'FL',market:'Jacksonville',email:'rajendra.donepudi@bcbsfl.com'},{name:'Beth Adams',company:'MERITAGE HOMES OF FLORIDA INC',phone:'9042946973',purchases:211,avg:1166330,city:'Jacksonville',state:'FL',market:'Jacksonville',email:'dadams130@yahoo.com'},{name:'Stephon Shocks',company:'KB HOME JACKSONVILLE LLC',phone:'5735145222',purchases:114,avg:100,city:'Jacksonville',state:'FL',market:'Jacksonville',email:'stephonshocks@gmail.com'},{name:'D Poindexter',company:'OPENDOOR PROPERTY TRUST I, a Delaware statutory trust',phone:'3176548822',purchases:102,avg:251450,city:'Tempe',state:'AZ',market:'Indianapolis',email:''},{name:'Jason Runner',company:'STF CAPITAL GROUP LLC',phone:'7039997289',purchases:93,avg:34802,city:'Jacksonville',state:'FL',market:'Jacksonville',email:'jrunner@zensearch.com'},{name:'Brittain Hughes',company:'SFR FUND VI BORROWER LLC',phone:'8642423366',purchases:82,avg:18526000,city:'City',state:'UT',market:'Charlotte',email:''},{name:'Abey Dessie',company:'TRI POINTE HOMES HOLDINGS INC',phone:'9194526818',purchases:66,avg:1738900,city:'Charlotte',state:'NC',market:'Charlotte',email:''},{name:'Joshua Goldstein',company:'GS REP FUND I LOC, LLC',phone:'9174532950',purchases:52,avg:366220,city:'Beachwood',state:'OH',market:'Cleveland',email:''},{name:'JAX CONSTRUCTION HOLDINGS LLC',company:'JAX CONSTRUCTION HOLDINGS LLC',phone:'9043033396',purchases:49,avg:1227950,city:'Daytona Beach',state:'FL',market:'Jacksonville',email:'williebryant333@yahoo.com'},{name:'Alvin Gay',company:'OPENDOOR PROPERTY TRUST I',phone:'9044017463',purchases:36,avg:248097,city:'Jacksonville',state:'FL',market:'Jacksonville',email:'fredrock1@cfl.rr.com'},{name:'Brooks Holdings, LLC',company:'Brooks Holdings, LLC',phone:'3175173032',purchases:34,avg:181938,city:'Carmel',state:'IN',market:'Indianapolis',email:''},{name:'Graciela Ibarra',company:'OPENDOOR PROPERTY J LLC',phone:'4805600998',purchases:28,avg:497857,city:'Tempe',state:'AZ',market:'Charlotte',email:'graciela.ibarra@primatechengineers.com'},{name:'Javier Morgan',company:'DOORS HOLDINGS 2025-2 LLC',phone:'7862539707',purchases:28,avg:333375,city:'Tustin',state:'CA',market:'Charlotte',email:'candace.clark143@gmail.com'},{name:'Aaron Houser',company:'AARON J HOUSER TRUST',phone:'9044650995',purchases:24,avg:100,city:'Jacksonville Beach',state:'FL',market:'Jacksonville',email:'nickhosuer@yahoo.com'},{name:'Arlene Ortiz',company:'MARATHON GROUP RE INVESTMENTS',phone:'3057757569',purchases:22,avg:630000,city:'Jacksonville',state:'FL',market:'Jacksonville',email:'missaortiz@hotmail.com'},{name:'Akela Thigpen',company:'GMF INVESTMENTS LLC',phone:'2523205351',purchases:22,avg:133333,city:'GREENVILLE',state:'NC',market:'Greenville',email:'akelathigpen@yahoo.com'},{name:'Scott Sailor',company:'Power House Holdings LLC',phone:'3179399776',purchases:21,avg:115828,city:'Irving',state:'TX',market:'Indianapolis',email:'motnippot@aol.com'},{name:'Amber Clark',company:'Opendoor Property J LLC, a Delaware Limited Liability Company',phone:'7344977042',purchases:20,avg:248561,city:'Tempe',state:'AZ',market:'Indianapolis',email:'ab85032003@yahoo.com'},{name:'Clyde Orr',company:'Indianapolis Real Estate Investments LLC',phone:'3177147487',purchases:20,avg:107170,city:'Fishers',state:'IN',market:'Indianapolis',email:'c.orr@orrpaving.com'},{name:'Dennis Sundh',company:'GRANDVIEW CAPITAL, LLC',phone:'7085578608',purchases:19,avg:138632,city:'Saint Charles',state:'IL',market:'Cleveland',email:'dennis.sundh@yahoo.com'},{name:'Clovis Assaad',company:'BBNC INVESTMENTS LLC',phone:'2162352459',purchases:18,avg:169318,city:'Lakewood',state:'OH',market:'Cleveland',email:'assaadc@yahoo.com'},{name:'Avraham Jacobovitz',company:'BLU J HOLDINGS LLC',phone:'2487899199',purchases:17,avg:136433,city:'Ridge',state:'NY',market:'Jacksonville',email:'baylaj@gmail.com'},{name:'Deborah Meyer',company:'QUEST PROPERTY HOLDINGS LLC',phone:'4405323453',purchases:16,avg:119125,city:'North Royalton',state:'OH',market:'Cleveland',email:'debmeyer1025@hotmail.com'},{name:'Angelin Ho',company:'Cedar Brook Properties Funding 3, LLC',phone:'3174300493',purchases:16,avg:161704,city:'Coral Gables',state:'FL',market:'Indianapolis',email:''},{name:'Jordan Burch',company:'Power House Holdings LLC, a Texas limited liability company',phone:'3177922740',purchases:15,avg:138036,city:'Irving',state:'TX',market:'Indianapolis',email:'jordanburch@gmail.com'},{name:'Anna Wintour',company:'ASL PROPERTY HOLDINGS II LLC',phone:'9177443125',purchases:15,avg:322500,city:'New York',state:'NY',market:'Charlotte',email:''},{name:'Lilly Maslak',company:'GS REP FUND I JV, LLC',phone:'2163891349',purchases:14,avg:717321,city:'Beachwood',state:'OH',market:'Cleveland',email:'lillymaslak@yahoo.com'},{name:'Robert Eala',company:'NEXT CHAPTER CAPITAL LLC',phone:'3234595811',purchases:14,avg:65716,city:'Costa Mesa',state:'CA',market:'Cleveland',email:''},{name:'DR HORTON INC JACKSONVILLE',company:'DR HORTON INC JACKSONVILLE',phone:'9049620119',purchases:14,avg:775900,city:'Johns',state:'FL',market:'Jacksonville',email:'adt2277@yahoo.com'},{name:'Kristi Bennett',company:'JACKSONVILLE 50 LAND TRUST',phone:'9045825648',purchases:14,avg:380500,city:'Mary',state:'FL',market:'Jacksonville',email:'mudder0169@gmail.com'},{name:'Bernice Flemister',company:'Trident Realty Investments REO, LLC',phone:'3179851512',purchases:14,avg:240998,city:'Dallas',state:'TX',market:'Indianapolis',email:'dgaustin1@gmail.com'},{name:'Eric Banks',company:'SERAGLIO HOLDINGS LLC',phone:'2164508374',purchases:13,avg:75303,city:'Eastlake',state:'OH',market:'Cleveland',email:'liledub187@yahoo.com'},{name:'Payal Shah',company:'KITTY REAL ESTATE INVESTMENTS 2 LLC',phone:'5104496378',purchases:13,avg:681923,city:'North Olmsted',state:'OH',market:'Cleveland',email:'payal@bombaymehndi.com'},{name:'Rivka Cohen',company:'CRCO HOLDINGS 2, LLC',phone:'2167768012',purchases:13,avg:195385,city:'Hts',state:'OH',market:'Cleveland',email:'rivka.cohen82@gmail.com'},{name:'Davione Howard',company:'CRC FUND II INVESTMENT PROPERTIES LLC',phone:'2167991407',purchases:12,avg:854206,city:'Lakewood',state:'OH',market:'Cleveland',email:'howarddavione@gmail.com'},{name:'Justin Wolf',company:'WOLF CAPITAL PARTNERS LLC',phone:'5163200035',purchases:12,avg:54880,city:'Columbus',state:'OH',market:'Cleveland',email:'baseball427@aol.com'},{name:'Gladys Callahan',company:'GLADYS CALLAHAN LIVING TRUST',phone:'9043147220',purchases:12,avg:100,city:'Jacksonville',state:'FL',market:'Jacksonville',email:'gcallahan28@gmail.com'},{name:'Alexis Drew',company:'EQUITY TRUST CO. CUSTODIAN FBO MICHAEL DREW IRA',phone:'6149298640',purchases:12,avg:77616,city:'Powell',state:'OH',market:'Indianapolis',email:'alexisdrew459@gmail.com'},{name:'Alexey Sweet',company:'CAROLINA CAPITAL RESERVE FUND I LLC',phone:'8033748946',purchases:12,avg:325000,city:'Rock Hill',state:'SC',market:'Charlotte',email:''},{name:'Julie Shortes',company:'LDS GLOBAL INVESTMENTS LLC',phone:'8455535520',purchases:11,avg:102272,city:'Indianapolis',state:'IN',market:'Indianapolis',email:''},{name:'Cynthia Davis',company:'BD VENTURES LLC',phone:'7047241475',purchases:11,avg:389000,city:'Charlotte',state:'NC',market:'Charlotte',email:'cynsative@gmail.com'},{name:'Jeffrey Adams',company:'3S FUND I LLC',phone:'3136320686',purchases:10,avg:95620,city:'Saint Clair Shores',state:'MI',market:'Cleveland',email:'jeffadams@apandwlaw.com'},{name:'John Hollett',company:'DECLARATION OF TRUST',phone:'9044340072',purchases:10,avg:100,city:'Ponte Vedra Beach',state:'FL',market:'Jacksonville',email:'jshollett@aol.com'},{name:'Rashida Bedgood',company:'RCF 2 ACQUISITION TRUST',phone:'2512098985',purchases:10,avg:141800,city:'Orlando',state:'FL',market:'Jacksonville',email:'rashijacobs@gmail.com'},{name:'Aaron Adams',company:'Goodeagle Investments LLC',phone:'8017870294',purchases:10,avg:84350,city:'Indianapolis',state:'IN',market:'Indianapolis',email:'aarona@dell.com'},{name:'Anna Lafave',company:'AMERIFUND2.0, LLC',phone:'3179194812',purchases:10,avg:171348,city:'Indianapolis',state:'IN',market:'Indianapolis',email:'annlafave58@gmail.com'},{name:'Gregory White',company:'Grandview Capital, LLC, an Illinois limited liability company',phone:'2485144590',purchases:10,avg:121000,city:'Saint Charles',state:'IL',market:'Indianapolis',email:'gwaynewhite@live.com'},{name:'Myke Kiley',company:'OFFERPAD POINT LLC',phone:'8084762485',purchases:8,avg:317000,city:'Tempe',state:'AZ',market:'Charlotte',email:'myke_boi21@icloud.con'}];
+</script></body></html>
