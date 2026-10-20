@@ -581,6 +581,38 @@ tr.clickable{cursor:pointer}
           <div id="psStatus" style="margin-top:8px;font-size:13px"></div>
         </div>
         <div id="psResults" style="margin-top:12px"></div>
+
+        <div class="sec-title" style="margin-top:22px">🔎 Lookup Tools <span class="badge green" style="font-size:10px">DEALMACHINE · LIVE DATA</span></div>
+        <div class="card" style="margin-bottom:14px">
+          <p style="color:var(--muted);font-size:13px;margin-bottom:12px">Reverse lookups — when all you have is a phone number, an email, or a parcel number (APN). A seller texts you from an unknown number? Run the phone. No match = free. Person lookups cost 1 credit per matched person (+1 per property shown); APN costs 1 credit per matched property.</p>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
+            <div>
+              <label class="lbl">📱 Phone Number</label>
+              <input class="field" id="rvPhone" placeholder="919-939-7586" style="max-width:180px" onkeypress="if(event.key==='Enter')dmReverseLookup('phone')" />
+            </div>
+            <button class="btn" onclick="dmReverseLookup('phone')">🔎 Lookup by Phone</button>
+          </div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
+            <div>
+              <label class="lbl">✉️ Email Address</label>
+              <input class="field" id="rvEmail" placeholder="seller@example.com" style="max-width:240px" onkeypress="if(event.key==='Enter')dmReverseLookup('email')" />
+            </div>
+            <button class="btn" onclick="dmReverseLookup('email')">🔎 Lookup by Email</button>
+          </div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+            <div>
+              <label class="lbl">🗂️ APN / Parcel Number</label>
+              <input class="field" id="rvApn" placeholder="49-06-13-121-001" style="max-width:200px" onkeypress="if(event.key==='Enter')dmReverseLookup('apn')" />
+            </div>
+            <div>
+              <label class="lbl">State *</label>
+              <input class="field" id="rvApnState" placeholder="IN" maxlength="2" style="max-width:80px" />
+            </div>
+            <button class="btn" onclick="dmReverseLookup('apn')">🔎 Lookup by APN</button>
+          </div>
+          <div id="rvStatus" style="margin-top:10px;font-size:13px"></div>
+        </div>
+        <div id="rvResults" style="margin-top:12px"></div>
       </div>
 
 <!-- COMPS TAB -->
@@ -602,6 +634,12 @@ tr.clickable{cursor:pointer}
         <div class="card" style="margin-bottom:14px">
           <div class="sec-title" style="font-size:14px">📊 Data Source <span class="badge green" style="font-size:10px">DEALMACHINE</span></div>
           <p style="color:var(--muted);font-size:13px;margin-bottom:10px">All property data, skip tracing, and mortgage info now comes from DealMachine via secure server. No API keys needed in your browser.</p>
+        </div>
+        <div class="card" style="margin-bottom:14px">
+          <div class="sec-title" style="font-size:14px">💳 DealMachine Credits <span class="badge orange" style="font-size:10px">LIVE</span></div>
+          <div id="dmCreditsBox"><p style="color:var(--muted);font-size:13px">Loading credits…</p></div>
+          <div style="margin-top:10px"><button class="btn small" onclick="dmLoadCredits(true)">🔄 Refresh Credits</button></div>
+          <p style="color:var(--muted2);font-size:11px;margin-top:8px">Credits are free to check. 1 credit per property lookup and per person; re-lookups in the same billing month are free.</p>
         </div>
         <div class="card" style="margin-bottom:14px">
           <div class="sec-title" style="font-size:14px">🛰️ Default Property View</div>
@@ -730,6 +768,7 @@ function showPage(name){
   const el = document.getElementById('page-'+name);
   if(el) el.classList.add('active');
   document.querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active', b.dataset.nav===name));
+  if(name === 'settings') dmLoadCredits();
 }
 
 /* ============ GLOBAL SEARCH ============ */
@@ -821,25 +860,35 @@ function dealMachineToLead(d){
       return {};
     })(),
     bedrooms: d.bedrooms, bathrooms: d.bathrooms, sqft: d.sqft,
-    lotSqft: d.lotSqft, yearBuilt: d.yearBuilt, propertyType: d.propertyType,
-    lastSaleDate: d.lastSaleDate, lastSalePrice: d.lastSaleAmount,
-    assessedValue: d.assessedValue, annualTax: d.annualTax,
-    ownerOccupied: d.ownerOccupied, apn: d.apn,
+    lotSqft: d.lotSqft, lotAcres: d.lotAcres, yearBuilt: d.yearBuilt, propertyType: d.propertyType,
+    lastSaleDate: d.lastSaleDate, lastSalePrice: d.lastSalePrice ?? d.lastSaleAmount,
+    assessedValue: d.assessedValue, annualTax: d.annualTax ?? d.taxAmount, taxYear: d.taxYear,
+    ownerOccupied: d.ownerOccupied ?? d.isOwnerOccupied, apn: d.apn || d.parcelNumber,
+    owner1Name: d.owner1Name, owner2Name: d.owner2Name,
+    ownershipEntityType: d.ownershipEntityType, absenteeOwner: d.absenteeOwner,
+    outOfStateOwner: d.outOfStateOwner, legalDescription: d.legalDescription,
+    zoning: d.zoning, floodZone: d.floodZone,
     latitude: d.latitude, longitude: d.longitude,
     ownerName: d.ownerName || null,
     estimatedValue: d.estimatedValue || null,
     arv: d.estimatedValue || null,
     // Mortgage data from DealMachine
     dmMortgage: d.primaryMortgage || null,
+    dmMortgages: d.mortgages || [],
     dmNumMortgages: d.numMortgages || 0,
     dmTotalBalance: d.totalLoanBalance || null,
+    dmTotalOriginalLoan: d.totalOriginalLoanAmount || null,
+    dmTotalMonthlyPayment: d.totalMonthlyPayment || null,
     dmEquity: d.estimatedEquity || null,
     dmEquityPct: d.estimatedEquityPct || null,
+    dmLtvPct: d.estimatedLtvPct ?? null,
     // Distress flags
-    preforeclosure: d.preforeclosureStatus || null,
+    preforeclosure: d.preforeclosureStatus || (d.isPreforeclosure ? 'Yes' : null),
     foreclosureStatus: d.foreclosureStatus || null,
-    taxDelinquentYear: d.taxDelinquentYear || null,
-    numLiens: d.numLiens || null,
+    taxDelinquentYear: d.taxDelinquentYear ?? (d.taxDelinquent ? 'Yes' : null),
+    numLiens: d.numLiens ?? null,
+    dmNumOpenLiens: d.numOpenLiens ?? null,
+    dmOpenLienAmount: d.totalOpenLienAmount ?? null,
     // Phones (populated via skip trace)
     phones: [],
     owner: d.ownerName ? { names: [d.ownerName] } : null,
@@ -1417,6 +1466,194 @@ function addPersonPropertyToLeads(pi, ri){
   toast('Added to My Leads: ' + (pr.address || ''));
 }
 
+/* ============ DEALMACHINE CREDITS METER (GET /v1/usage — FREE) ============ */
+let dmCreditsLoading = false;
+async function dmLoadCredits(force){
+  const box = document.getElementById('dmCreditsBox');
+  if(!box || dmCreditsLoading) return;
+  dmCreditsLoading = true;
+  try{
+    const resp = await fetch('/.netlify/functions/dealmachine-lookup?usage=1');
+    const d = await resp.json();
+    if(!resp.ok) throw new Error(d.detail || d.error || 'HTTP ' + resp.status);
+    const u = d.usage || {};
+    const used = u.used ?? '—', rem = u.remaining ?? '—', total = u.total ?? '—';
+    const pct = (typeof u.used === 'number' && typeof u.total === 'number' && u.total > 0) ? Math.round(u.used / u.total * 100) : 0;
+    const bd = u.breakdown || {};
+    const cycleEnd = u.billingCycle && u.billingCycle.end ? new Date(u.billingCycle.end).toLocaleDateString() : '—';
+    box.innerHTML = '<div style="display:flex;align-items:baseline;gap:10px;margin-bottom:8px">'
+      + '<span style="font-size:28px;font-weight:800;color:var(--green)">' + (typeof rem === 'number' ? rem.toLocaleString() : rem) + '</span>'
+      + '<span style="color:var(--muted);font-size:13px">of ' + (typeof total === 'number' ? total.toLocaleString() : total) + ' credits remaining</span></div>'
+      + '<div style="background:var(--panel2,#2a2a2a);border-radius:6px;height:10px;overflow:hidden;margin-bottom:8px">'
+      + '<div style="height:100%;width:' + pct + '%;background:var(--orange,#ff7a1a);border-radius:6px"></div></div>'
+      + '<div style="font-size:13px;color:var(--muted);line-height:1.8">'
+      + 'Used this cycle: <b style="color:var(--text)">' + used + '</b>'
+      + (bd.properties != null ? ' · 🏠 Properties: <b style="color:var(--text)">' + bd.properties + '</b>' : '')
+      + (bd.people != null ? ' · 👤 People: <b style="color:var(--text)">' + bd.people + '</b>' : '')
+      + '<br>Plan: <b style="color:var(--text)">' + esc(u.planName || '—') + '</b> · Renews: <b style="color:var(--text)">' + cycleEnd + '</b></div>';
+  }catch(e){
+    box.innerHTML = '<p style="color:var(--red);font-size:13px">Could not load credits: ' + esc(e.message) + '</p>';
+  }
+  dmCreditsLoading = false;
+}
+
+/* ============ DEALMACHINE REVERSE LOOKUPS (phone / email / APN) ============ */
+let rvPeopleCache = [];
+let rvPropertyCache = null;
+function rvPhoneBadges(p){
+  return (p.phones || []).map(ph => {
+    const tl = String(ph.type || '').toLowerCase();
+    const isMob = tl.indexOf('wireless') !== -1 || tl.indexOf('mobile') !== -1 || tl.indexOf('cell') !== -1;
+    return '<span class="badge ' + (ph.doNotCall ? 'red' : (isMob ? 'green' : 'gray')) + '" style="margin:2px">' +
+      (ph.doNotCall ? '📵 DNC ' : (isMob ? '📱 ' : '☎️ ')) + esc(ph.number || '') +
+      (ph.carrier ? ' · ' + esc(ph.carrier) : '') + '</span>';
+  }).join('') || '<span style="color:var(--muted);font-size:12px">No phones found</span>';
+}
+function rvPersonCardHtml(p, pi){
+  const emails = (p.emails || []).map(e => '<span class="badge gray" style="margin:2px">✉️ ' + esc(e) + '</span>').join('');
+  const res = p.residence ? '<div style="font-size:12px;color:var(--muted);margin-top:6px">🏠 ' + esc(p.residence.fullAddress || [p.residence.address, p.residence.city, p.residence.state, p.residence.zip].filter(Boolean).join(', ')) + '</div>' : '';
+  const income = p.householdIncome ? '<span class="badge gray">💵 Est. household income ' + fmtMoney(p.householdIncome) + '</span>' : '';
+  const props = (p.properties || []).map((pr, ri) =>
+    '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--line)">' +
+      '<div style="font-size:13px"><b>' + esc(pr.address || pr.fullAddress || '') + '</b><br><span style="color:var(--muted)">' + esc([pr.city, pr.state, pr.zip].filter(Boolean).join(', ')) +
+      (pr.estimatedValue ? ' · 💰 ' + fmtMoney(pr.estimatedValue) : '') +
+      (pr.equityPct != null ? ' · ' + Math.round(pr.equityPct) + '% equity' : '') + '</span></div>' +
+      '<button class="btn small" onclick="addReversePropertyToLeads(' + pi + ',' + ri + ')">➕ Add to Leads</button>' +
+    '</div>').join('') || '<div style="font-size:12px;color:var(--muted)">No properties tied to this person</div>';
+  return '<div class="card" style="margin-bottom:12px">' +
+    '<div style="font-size:16px;font-weight:700;margin-bottom:6px">👤 ' + esc(p.fullName || '') + '</div>' +
+    '<div style="margin-bottom:4px">' + rvPhoneBadges(p) + '</div>' +
+    ((emails || income) ? '<div style="margin-bottom:4px">' + emails + ' ' + income + '</div>' : '') + res +
+    '<div style="margin-top:10px;font-size:13px;font-weight:700">🏘️ Properties (' + (p.propertyCount ?? (p.properties || []).length) + ')</div>' +
+    '<div>' + props + '</div></div>';
+}
+function rvPropertyCardHtml(pr, showAdd){
+  const val = pr.estimatedValue ? fmtMoney(pr.estimatedValue) : '—';
+  const badges = [
+    '<span class="badge orange">💰 ' + val + '</span>',
+    pr.equityPct != null ? '<span class="badge green">' + Math.round(pr.equityPct) + '% equity</span>' : '',
+    pr.propertyType ? '<span class="badge gray">' + esc(pr.propertyType) + '</span>' : '',
+    pr.preforeclosureStatus ? '<span class="badge red">⚠️ ' + esc(pr.preforeclosureStatus) + '</span>' : '',
+    pr.taxDelinquent ? '<span class="badge red">🧾 Tax Delinquent</span>' : ''
+  ].filter(Boolean).join(' ');
+  const contacts = (pr.contacts || []).map(c =>
+    '<div style="font-size:13px;margin-bottom:4px">👤 <b>' + esc(c.fullName || '') + '</b>' +
+    '<div style="margin-top:4px">' + rvPhoneBadges({ phones: c.phones }) + '</div></div>'
+  ).join('');
+  const addr = esc(pr.fullAddress || [pr.address, pr.city, pr.state, pr.zip].filter(Boolean).join(', '));
+  return '<div class="card" style="margin-bottom:12px">' +
+    '<div style="font-size:16px;font-weight:700;margin-bottom:8px">🏠 ' + addr + '</div>' +
+    '<div class="lead-badges" style="margin-bottom:8px">' + badges + '</div>' +
+    '<div class="prop-grid">'
+    + '<div class="prop-chip"><span class="k">Beds / Baths</span><span class="v">' + (pr.bedrooms ?? '—') + ' / ' + (pr.bathrooms ?? '—') + '</span></div>'
+    + '<div class="prop-chip"><span class="k">Sq Ft</span><span class="v">' + (pr.sqft ? Number(pr.sqft).toLocaleString() : '—') + '</span></div>'
+    + '<div class="prop-chip"><span class="k">Lot</span><span class="v">' + (pr.lotSqft ? Number(pr.lotSqft).toLocaleString() + ' sqft' : '—') + '</span></div>'
+    + '<div class="prop-chip"><span class="k">Year Built</span><span class="v">' + (pr.yearBuilt ?? '—') + '</span></div>'
+    + '<div class="prop-chip"><span class="k">Owner</span><span class="v">' + esc([pr.owner1Name, pr.owner2Name].filter(Boolean).join(' & ') || '—') + '</span></div>'
+    + '<div class="prop-chip"><span class="k">APN</span><span class="v">' + esc(pr.apn || '—') + '</span></div>'
+    + '<div class="prop-chip"><span class="k">Last Sale</span><span class="v">' + (pr.lastSaleDate ? fmtDate(pr.lastSaleDate) + (pr.lastSalePrice ? ' · ' + fmtMoney(pr.lastSalePrice) : '') : '—') + '</span></div>'
+    + '<div class="prop-chip"><span class="k">Occupied</span><span class="v">' + (pr.ownerOccupied === true ? 'Owner' : pr.ownerOccupied === false ? 'Non-owner' : '—') + '</span></div>'
+    + '</div>' +
+    (contacts ? '<div style="margin-top:10px">' + contacts + '</div>' : '') +
+    (showAdd ? '<div style="margin-top:10px"><button class="btn small" onclick="addReversePropertyOnly()">➕ Add to Leads</button></div>' : '') +
+    '</div>';
+}
+async function dmReverseLookup(mode){
+  const statusEl = document.getElementById('rvStatus');
+  const resultsEl = document.getElementById('rvResults');
+  const payload = { mode };
+  if(mode === 'phone'){
+    const digits = (document.getElementById('rvPhone').value || '').replace(/\D/g, '');
+    if(digits.length < 10){ statusEl.innerHTML = '<span style="color:var(--red)">Enter a 10-digit phone number.</span>'; return; }
+    payload.phone = digits;
+  }else if(mode === 'email'){
+    const email = (document.getElementById('rvEmail').value || '').trim();
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ statusEl.innerHTML = '<span style="color:var(--red)">Enter a valid email address.</span>'; return; }
+    payload.email = email;
+  }else if(mode === 'apn'){
+    const apn = (document.getElementById('rvApn').value || '').trim();
+    const state = (document.getElementById('rvApnState').value || '').trim().toUpperCase();
+    if(!apn){ statusEl.innerHTML = '<span style="color:var(--red)">Enter a parcel number (APN).</span>'; return; }
+    if(!/^[A-Z]{2}$/.test(state)){ statusEl.innerHTML = '<span style="color:var(--red)">Enter the 2-letter state for the APN.</span>'; return; }
+    payload.apn = apn; payload.state = state;
+  }else return;
+  const labels = { phone: 'phone number', email: 'email address', apn: 'APN' };
+  statusEl.innerHTML = '<span style="color:var(--muted)">🔍 Looking up ' + labels[mode] + ' via DealMachine…</span>';
+  resultsEl.innerHTML = '';
+  rvPeopleCache = []; rvPropertyCache = null;
+  try{
+    const resp = await fetch('/.netlify/functions/dealmachine-reverse', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    });
+    const d = await resp.json();
+    if(!resp.ok) throw new Error(d.detail || d.error || 'HTTP ' + resp.status);
+    if(!d.matched){
+      const why = d.matchFailure && d.matchFailure.reason ? ' (' + esc(d.matchFailure.reason) + ')' : '';
+      statusEl.innerHTML = '<span style="color:var(--muted)">No match found' + why + ' — no credits used.</span>';
+      return;
+    }
+    if(mode === 'apn'){
+      rvPropertyCache = d.property;
+      statusEl.innerHTML = '<span style="color:var(--green)">✓ Property matched</span>';
+      resultsEl.innerHTML = rvPropertyCardHtml(d.property, true);
+      recentSearches.unshift({q:'APN lookup: ' + payload.apn, at:new Date().toISOString()});
+    }else{
+      rvPeopleCache = d.people || [];
+      if(!rvPeopleCache.length){
+        statusEl.innerHTML = '<span style="color:var(--muted)">Match found but no person details returned.</span>';
+        return;
+      }
+      statusEl.innerHTML = '<span style="color:var(--green)">✓ Found ' + rvPeopleCache.length + ' ' + (rvPeopleCache.length === 1 ? 'person' : 'people') + '</span>';
+      resultsEl.innerHTML = rvPeopleCache.map((p, pi) => rvPersonCardHtml(p, pi)).join('');
+      recentSearches.unshift({q:'Reverse ' + mode + ' lookup', at:new Date().toISOString()});
+    }
+    recentSearches = recentSearches.slice(0,8); saveState(); renderRecentSearches();
+  }catch(e){
+    statusEl.innerHTML = '<span style="color:var(--red)">Lookup failed: ' + esc(e.message) + '</span>';
+  }
+}
+function addReversePropertyToLeads(pi, ri){
+  const person = rvPeopleCache[pi]; const pr = person && person.properties[ri];
+  if(!pr) return;
+  addReverseLead(pr, person);
+}
+function addReversePropertyOnly(){
+  if(!rvPropertyCache) return;
+  addReverseLead(rvPropertyCache, null);
+}
+function addReverseLead(pr, person){
+  const key = (pr.address || pr.fullAddress || '').toLowerCase() + '|' + (pr.zip || '');
+  if(leads.some(l=>(l.address||'').toLowerCase()+'|'+(l.zip||'')===key)){ toast('Already in My Leads'); return; }
+  const phones = (person ? person.phones : []).map(ph => ({
+    number: ph.number, type: /wireless|mobile|cell/i.test(ph.type||'') ? 'Mobile' : (ph.type || 'Unknown'),
+    dnc: !!ph.doNotCall, carrier: ph.carrier || '', owner: person.fullName || ''
+  }));
+  const name = person ? person.fullName : ([pr.owner1Name, pr.owner2Name].filter(Boolean).join(' & ') || null);
+  leads.push({
+    id: 'dmr_' + Date.now() + '_' + Math.random().toString(36).slice(2,7),
+    address: pr.address || (pr.fullAddress || '').split(',')[0] || '',
+    city: pr.city || '', state: pr.state || '', zip: pr.zip || '',
+    latitude: pr.latitude, longitude: pr.longitude,
+    bedrooms: pr.bedrooms, bathrooms: pr.bathrooms, sqft: pr.sqft,
+    lotSqft: pr.lotSqft, yearBuilt: pr.yearBuilt, propertyType: pr.propertyType,
+    estimatedValue: pr.estimatedValue || null, arv: pr.estimatedValue || null,
+    dmEquityPct: pr.equityPct ?? null, dmEquity: pr.equityAmount ?? null,
+    apn: pr.apn || null,
+    ownerName: name,
+    owner: name ? { names: [name] } : null,
+    preforeclosure: pr.preforeclosureStatus || null,
+    taxDelinquentYear: pr.taxDelinquent ? 'Yes' : null,
+    ownerOccupied: pr.ownerOccupied,
+    lastSaleDate: pr.lastSaleDate || null, lastSalePrice: pr.lastSalePrice || null,
+    phones, traced: phones.length > 0,
+    distressSignal: 'Reverse Lookup', status: 'New Lead',
+    addedAt: new Date().toISOString(), source: 'dealmachine-reverse'
+  });
+  saveState(); renderLeads(); updateStats();
+  toast('Added to My Leads: ' + (pr.address || pr.fullAddress || ''));
+}
+
 /* Single-address lookup via RentCast AVM + property records */
 async function searchPropertyByAddress(raw, key, statusEl, resultsEl){
   statusEl.innerHTML = '<span style="color:var(--muted)">🔍 Looking up ' + esc(raw) + '…</span>';
@@ -1725,18 +1962,68 @@ function savePropNotes(id){
   l.propNotes = document.getElementById('propNotes').value;
   saveState(); toast('Notes saved');
 }
+function ownershipYears(l){
+  if(!l.lastSaleDate) return '—';
+  const d = new Date(l.lastSaleDate);
+  if(isNaN(d)) return '—';
+  const yrs = (Date.now() - d.getTime()) / (365.25 * 24 * 3600 * 1000);
+  if(yrs < 0) return '—';
+  return yrs < 1 ? '<1 yr' : Math.floor(yrs) + ' yr' + (Math.floor(yrs) === 1 ? '' : 's');
+}
+function mortgageTableHtml(mortgages){
+  if(!mortgages || !mortgages.length) return '';
+  const rows = mortgages.map((m, i) => '<tr>'
+    + '<td><b>#' + (m.lienPosition ?? (i + 1)) + '</b></td>'
+    + '<td>' + esc(m.lender || '—') + '</td>'
+    + '<td>' + (m.interestRate != null ? m.interestRate + '%' : '—') + '</td>'
+    + '<td>' + fmtMoney(m.balance) + '</td>'
+    + '<td>' + fmtMoney(m.originalAmount) + '</td>'
+    + '<td>' + esc([m.financingType, m.loanType && m.loanType !== 'Unknown Type' ? m.loanType : ''].filter(Boolean).join(' · ') || '—') + '</td>'
+    + '<td>' + (m.startDate ? fmtDate(m.startDate) : '—') + '</td>'
+    + '<td>' + fmtMoney(m.paymentAmount) + '</td>'
+    + '</tr>').join('');
+  return '<div class="sec-title" style="font-size:14px;margin-top:14px">🏦 All Mortgages (' + mortgages.length + ') — DealMachine</div>'
+    + '<div class="tbl-wrap"><table><thead><tr><th>Lien</th><th>Lender</th><th>Rate</th><th>Balance</th><th>Original</th><th>Type</th><th>Started</th><th>Payment</th></tr></thead>'
+    + '<tbody>' + rows + '</tbody></table></div>';
+}
 function propIntelHtml(l){
   const p = l.propIntel || {};
-  const chip = (k,v)=>'<div class="prop-chip"><span class="k">'+k+'</span><span class="v">'+(v||'—')+'</span></div>';
-  return '<div class="sec-title" style="font-size:14px;margin-top:14px">🏠 Property Intel</div>'
+  const chip = (k,v)=>'<div class="prop-chip"><span class="k">'+k+'</span><span class="v">'+(v==null||v===''?'—':v)+'</span></div>';
+  const occ = (l.ownerOccupied === true || l.ownerOccupied === 'Yes' || l.dmOwnerOccupied === true) ? 'Owner occupied'
+    : (l.ownerOccupied === false || l.ownerOccupied === 'No' || l.absenteeOwner === 'Yes') ? 'Non-owner occupied (absentee)' : '—';
+  const lotStr = (l.lotSqft ? Number(l.lotSqft).toLocaleString() + ' sqft' : null) || (p.lot) || (l.lotAcres ? l.lotAcres + ' acres' : '—');
+  const saleStr = l.lastSaleDate ? fmtDate(l.lastSaleDate) + (l.lastSalePrice ? ' · ' + fmtMoney(l.lastSalePrice) : '') : '—';
+  const taxStr = l.assessedValue != null ? fmtMoney(l.assessedValue) + (l.annualTax ? ' · tax ' + fmtMoney(l.annualTax) + (l.taxYear ? ' (' + l.taxYear + ')' : '') : '') : '—';
+  const equityStr = (l.dmEquity != null || l.dmEquityPct != null)
+    ? (l.dmEquity != null ? fmtMoney(l.dmEquity) : '') + (l.dmEquityPct != null ? ' (' + Math.round(l.dmEquityPct) + '%)' : '') : '—';
+  const ownerStr = [l.owner1Name, l.owner2Name].filter(Boolean).join(' & ') || l.ownerName || '—';
+  let html = '<div class="sec-title" style="font-size:14px;margin-top:14px">🏠 Property Intel <span class="badge green" style="font-size:10px">DEALMACHINE · FULL DETAIL</span></div>'
     +'<div class="prop-grid">'
-    + chip('Beds', p.beds || l.beds) + chip('Baths', p.baths || l.baths)
-    + chip('Sq Ft', p.sqft || l.sqft) + chip('Lot Size', p.lot || l.lot)
-    + chip('Year Built', p.yearBuilt || l.yearBuilt) + chip('Type', p.type || l.propType || '—')
+    + chip('Beds', p.beds || l.bedrooms) + chip('Baths', p.baths || l.bathrooms)
+    + chip('Sq Ft', (p.sqft ? Number(p.sqft).toLocaleString() : (l.sqft ? Number(l.sqft).toLocaleString() : null)))
+    + chip('Lot Size', lotStr)
+    + chip('Year Built', p.yearBuilt || l.yearBuilt) + chip('Type', p.type || l.propertyType || l.propType)
+    + chip('Est. Value', l.estimatedValue != null ? fmtMoney(l.estimatedValue) : (l.arv != null ? fmtMoney(l.arv) : null))
+    + chip('Equity', equityStr)
+    + chip('LTV', l.dmLtvPct != null ? l.dmLtvPct + '%' : null)
+    + chip('Owner', ownerStr)
+    + chip('Occupancy', occ)
+    + chip('Ownership', l.ownershipEntityType)
+    + chip('Owned For', ownershipYears(l))
+    + chip('Last Sale', saleStr)
+    + chip('Tax Assessed', taxStr)
+    + chip('APN / Parcel', l.apn)
+    + chip('Zoning', l.zoning)
+    + chip('Flood Zone', l.floodZone)
+    + chip('Total Liens', l.numLiens != null ? l.numLiens : (l.dmNumOpenLiens != null ? l.dmNumOpenLiens + ' open' : null))
+    + chip('Total Loan Balance', l.dmTotalBalance != null ? fmtMoney(l.dmTotalBalance) : null)
     +'</div>'
+    + mortgageTableHtml(l.dmMortgages)
+    + ((l.legalDescription) ? '<div style="margin-top:10px;font-size:12px;color:var(--muted)"><strong>📜 Legal:</strong> ' + esc(String(l.legalDescription).slice(0, 300)) + '</div>' : '')
     +'<div style="margin-top:10px"><label class="lbl" style="font-size:12px;color:var(--muted)">👁️ Exterior condition notes (roof, siding, yard, vacancy signs)</label>'
     +'<textarea class="notes-area" id="propNotes" placeholder="e.g. Roof looks worn, overgrown yard, boarded side window — likely vacant…">'+esc(l.propNotes||'')+'</textarea>'
     +'<div style="margin-top:8px"><button class="btn small" onclick="savePropNotes(\''+l.id+'\')">💾 Save Notes</button></div></div>';
+  return html;
 }
 
 /* ============ 🤖 AI DEAL ANALYSIS (rule-based, uses DealMachine data on the lead) ============ */
@@ -1860,6 +2147,16 @@ async function loadMortgageInfo(l){
   const box = document.getElementById('mortgageInfoBox');
   if(!box) return;
   // If lead already has DealMachine mortgage data, use it directly
+  if(l.dmMortgages && l.dmMortgages.length){
+    const totalBal = l.dmTotalBalance ?? l.dmMortgages.reduce((s,m)=>s+(Number(m.balance)||0),0);
+    box.innerHTML = '<div class="prop-grid">'
+      + '<div class="prop-chip"><span class="k">Total Balance (all liens)</span><span class="v">' + fmtMoney(totalBal) + '</span></div>'
+      + '<div class="prop-chip"><span class="k">Total Monthly Payment</span><span class="v">' + fmtMoney(l.dmTotalMonthlyPayment) + '</span></div>'
+      + '<div class="prop-chip"><span class="k">Original Loans Total</span><span class="v">' + fmtMoney(l.dmTotalOriginalLoan) + '</span></div>'
+      + '<div class="prop-chip"><span class="k">Foreclosure</span><span class="v">' + (l.preforeclosure ? '<span class="badge red">⚠️ Pre-Foreclosure</span>' : '<span class="badge gray">No foreclosure</span>') + '</span></div>'
+      + '</div><p style="color:var(--muted);font-size:11px;margin-top:8px">Full per-mortgage detail is in Property Intel above. Data via DealMachine</p>';
+    return;
+  }
   if(l.dmMortgage || l.dmNumMortgages !== undefined){
     box.innerHTML = mortgageInfoHtml({
       hasData: l.dmNumMortgages > 0,
@@ -1880,6 +2177,10 @@ async function loadMortgageInfo(l){
       box.innerHTML = '<p style="color:var(--muted);font-size:13px">No property data found.</p>';
       return;
     }
+    // Persist the full enrichment on the lead and refresh the whole modal body
+    applyEnrichmentToLead(l, d);
+    saveState();
+    if(currentLeadId === l.id){ openLead(l.id); return; }
     box.innerHTML = mortgageInfoHtml({
       hasData: (d.numMortgages || 0) > 0,
       primaryMortgage: d.primaryMortgage,
@@ -2200,6 +2501,50 @@ function extractPhones(traceResult){
   });
   return out;
 }
+/* Map a dealmachine-lookup response onto the lead (XLeads-style density).
+   Used by skip trace AND the on-open mortgage fetch. */
+function applyEnrichmentToLead(l, d){
+  l.estimatedValue = d.estimatedValue ?? l.estimatedValue ?? null;
+  l.arv = d.estimatedValue ?? l.arv ?? null;
+  l.bedrooms = d.bedrooms ?? l.bedrooms ?? null;
+  l.bathrooms = d.bathrooms ?? l.bathrooms ?? null;
+  l.sqft = d.sqft ?? l.sqft ?? null;
+  l.lotSqft = d.lotSqft ?? l.lotSqft ?? null;
+  l.lotAcres = d.lotAcres ?? l.lotAcres ?? null;
+  l.yearBuilt = d.yearBuilt ?? l.yearBuilt ?? null;
+  l.propertyType = d.propertyType || l.propertyType || null;
+  l.lastSaleDate = d.lastSaleDate || l.lastSaleDate || null;
+  l.lastSalePrice = d.lastSalePrice ?? d.lastSaleAmount ?? l.lastSalePrice ?? null;
+  l.assessedValue = d.assessedValue ?? l.assessedValue ?? null;
+  l.annualTax = d.annualTax ?? d.taxAmount ?? l.annualTax ?? null;
+  l.taxYear = d.taxYear ?? l.taxYear ?? null;
+  l.ownerOccupied = d.ownerOccupied ?? d.isOwnerOccupied ?? l.ownerOccupied ?? null;
+  l.owner1Name = d.owner1Name || d.ownerName || l.owner1Name || null;
+  l.owner2Name = d.owner2Name || l.owner2Name || null;
+  l.ownershipEntityType = d.ownershipEntityType || l.ownershipEntityType || null;
+  l.absenteeOwner = d.absenteeOwner ?? l.absenteeOwner ?? null;
+  l.outOfStateOwner = d.outOfStateOwner ?? l.outOfStateOwner ?? null;
+  l.apn = d.apn || d.parcelNumber || l.apn || null;
+  l.legalDescription = d.legalDescription || l.legalDescription || null;
+  l.zoning = d.zoning || l.zoning || null;
+  l.floodZone = d.floodZone || l.floodZone || null;
+  l.dmMortgages = d.mortgages || l.dmMortgages || [];
+  l.dmMortgage = d.primaryMortgage || l.dmMortgage || null;
+  l.dmNumMortgages = d.numMortgages ?? ((d.mortgages || []).length) ?? l.dmNumMortgages ?? null;
+  l.dmTotalBalance = d.totalLoanBalance ?? l.dmTotalBalance ?? null;
+  l.dmTotalOriginalLoan = d.totalOriginalLoanAmount ?? l.dmTotalOriginalLoan ?? null;
+  l.dmTotalMonthlyPayment = d.totalMonthlyPayment ?? l.dmTotalMonthlyPayment ?? null;
+  l.dmEquity = d.estimatedEquity ?? l.dmEquity ?? null;
+  l.dmEquityPct = d.estimatedEquityPct ?? l.dmEquityPct ?? null;
+  l.dmLtvPct = d.estimatedLtvPct ?? l.dmLtvPct ?? null;
+  l.numLiens = d.numLiens ?? l.numLiens ?? null;
+  l.dmNumOpenLiens = d.numOpenLiens ?? l.dmNumOpenLiens ?? null;
+  l.dmOpenLienAmount = d.totalOpenLienAmount ?? l.dmOpenLienAmount ?? null;
+  l.preforeclosure = d.preforeclosureStatus || (d.isPreforeclosure ? 'Yes' : null) || l.preforeclosure || null;
+  l.foreclosureStatus = d.foreclosureStatus || l.foreclosureStatus || null;
+  l.taxDelinquentYear = d.taxDelinquentYear ?? (d.taxDelinquent ? 'Yes' : null) ?? l.taxDelinquentYear ?? null;
+  if(d.ownerName && !l.ownerName) l.ownerName = d.ownerName;
+}
 async function traceLead(id){
   const l = leads.find(x=>x.id===id); if(!l) return;
   toast('Tracing '+l.address+' via DealMachine...');
@@ -2219,7 +2564,7 @@ async function traceLead(id){
     }));
     l.phones = phones;
     l.traced = true;
-    if(d.ownerName && !l.ownerName) l.ownerName = d.ownerName;
+    applyEnrichmentToLead(l, d);
     if(l.status==='New Lead') l.status = 'Skip Traced';
     traceHistory.unshift({address:l.address, hit:phones.length>0, mobiles:phones.filter(p=>!p.dnc).length, at:new Date().toISOString()});
     saveState(); renderLeads(); renderRecentLeads(); updateStats(); renderTraceHistory();
