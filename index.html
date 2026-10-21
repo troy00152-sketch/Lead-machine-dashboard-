@@ -1251,7 +1251,7 @@ function renderPropSearchResults(){
       <div id="propDetail${i}" style="display:none">${propDetailHtml(p,i)}</div>
       <div class="lead-status-row">
         <span class="badge orange">Tap card for details</span>
-        <div class="lead-actions"><button class="btn small primary" onclick="event.stopPropagation();addPropSearchToLeads(${i})">➕ Add to Leads</button></div>
+        <div class="lead-actions"><button class="btn small" onclick="event.stopPropagation();sendPropToGHL(${i})">📤 Send to GHL</button> <button class="btn small primary" onclick="event.stopPropagation();addPropSearchToLeads(${i})">➕ Add to Leads</button></div>
       </div>
     </div>`;
   }).join('');
@@ -1355,6 +1355,13 @@ function addPropSearchToLeads(i){
   const p = propSearchCache[i]; if(!p) return;
   leads.push(propToLead(p)); saveState(); renderLeads(); updateStats();
   toast('Added to My Leads: ' + (p.addressLine1 || ''));
+}
+function sendPropToGHL(i){
+  const p = propSearchCache[i]; if(!p) return;
+  const key = ((p.addressLine1 || p.address || '') + '|' + (p.zipCode || p.zip || '')).toLowerCase();
+  let l = leads.find(x=>(((x.address||'') + '|' + (x.zip||'')).toLowerCase())===key);
+  if(!l){ l = propToLead(p); leads.push(l); saveState(); renderLeads(); updateStats(); }
+  pushToGHL(l.id);
 }
 function addAllPropSearchToLeads(){
   if(!propSearchCache.length) return;
@@ -2052,7 +2059,7 @@ function renderLeads(){
         <div class="lead-actions">
           <button class="btn small" onclick="event.stopPropagation();getARV('${l.id}')" title="Get ARV">💰</button>
           <button class="btn small" onclick="event.stopPropagation();traceLead('${l.id}')">🔍</button>
-          <button class="btn small primary" onclick="event.stopPropagation();doPushSingle('${l.id}')">📤</button>
+          <button class="btn small primary" onclick="event.stopPropagation();doPushSingle('${l.id}')" title="Send to GHL">📤</button>
           <button class="btn small" onclick="event.stopPropagation();deleteLead('${l.id}')" title="Delete lead" style="color:var(--red)">🗑️</button>
         </div>
       </div>
@@ -2339,7 +2346,7 @@ function openLead(id){
       <button class="btn primary" onclick="traceLead('${l.id}')">🔍 Skip Trace</button>
       <button class="btn" onclick="analyzeDeal('${l.id}')">🤖 Analyze Deal</button>
       <button class="btn" onclick="matchLeadToBuyers('${l.id}')">🤝 Buyer Match Ai</button>
-      <button class="btn ghost" onclick="pushToGHL('${l.id}')">📤 Push to HighLevel</button>
+      <button class="btn ghost" onclick="pushToGHL('${l.id}')">📤 Send to GHL</button>
     </div>
     <div id="analysisBox"></div>`;
   document.getElementById('leadModal').classList.add('open');
@@ -2470,11 +2477,23 @@ function leadPhoneBadge(l){
   if(l.traced) return '<span class="badge orange">&#9888;&#65039; no mobile</span>';
   return '<span class="badge orange">&#9888;&#65039; trace</span>';
 }
+function leadMaoLao(l){
+  const arv = Number(l.value) || null;
+  if(!arv) return { mao: null, lao: null };
+  const t = maoTier(arv);
+  if(!t || t.tier == null) return { mao: null, lao: null };
+  const repairs = Number(l.repairs) || 0;
+  const mao = Math.max(0, Math.round((arv - repairs) * t.tier));
+  return { mao: mao, lao: Math.round(mao * 0.70) };
+}
 function leadToPayload(l){
   const mobiles = leadMobilePhones(l);
   const phones = mobiles.map(p=>p.number||p).filter(Boolean);
   const withOwner = mobiles.find(p=>p.owner);
-  const owner = withOwner ? withOwner.owner : '';
+  const owner = withOwner ? withOwner.owner : (l.owner || '');
+  const ml = leadMaoLao(l);
+  const morts = l.dmMortgages || [];
+  const totalBal = (l.dmTotalBalance != null) ? Number(l.dmTotalBalance) : morts.reduce((s,m)=>s+(Number(m.balance)||0),0);
   return {
     address: l.address||'',
     city: l.city||'',
@@ -2484,7 +2503,14 @@ function leadToPayload(l){
     market_tag: marketToTag(l.market),
     distress_signal: l.distressSignal||'',
     phones: phones,
-    owner_name: owner
+    owner_name: owner,
+    email: (l.emails && l.emails[0]) || l.email || '',
+    arv: Number(l.value) || null,
+    mao: ml.mao,
+    lao: ml.lao,
+    mortgage_balance: totalBal || null,
+    lender_name: (morts[0] && morts[0].lender) || '',
+    interest_rate: (morts[0] && morts[0].interestRate != null) ? morts[0].interestRate : null
   };
 }
 async function pushLeadToGHL(l){
