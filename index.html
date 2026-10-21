@@ -1235,6 +1235,7 @@ function propToLead(p){
     owner: getOwnerName(p),
     status: 'New Lead', addedAt: new Date().toISOString(), source: 'rentcast-search',
     beds: p.bedrooms, baths: p.bathrooms, sqft: p.squareFootage, yearBuilt: p.yearBuilt,
+    latitude: p.latitude ?? null, longitude: p.longitude ?? null,
     phones: [], traced: false
   };
 }
@@ -1951,19 +1952,24 @@ let imgMode = 'street'; // current modal view; reset to saved default on open
 function leadGeoQuery(l){
   return encodeURIComponent((l.address||'')+', '+(l.city||'')+', '+(l.state||'')+' '+(l.zip||''));
 }
+function leadGeoLoc(l){
+  // Coordinates are the reliable input for the static imagery APIs; address text is the fallback.
+  return (l.latitude != null && l.longitude != null && l.latitude !== '' && l.longitude !== '')
+    ? (l.latitude + ',' + l.longitude) : leadGeoQuery(l);
+}
 function streetViewUrl(l, size){
   return 'https://maps.googleapis.com/maps/api/streetview?size='+(size||'800x500')
-    +'&location='+leadGeoQuery(l)+'&key='+GOOGLE_MAPS_KEY;
+    +'&location='+leadGeoLoc(l)+'&key='+GOOGLE_MAPS_KEY;
 }
 function satelliteUrl(l, size){
   // Static Maps satellite = drone-like aerial view
   return 'https://maps.googleapis.com/maps/api/staticmap?size='+(size||'800x500')
-    +'&maptype=satellite&zoom=19&markers=color:red%7C'+leadGeoQuery(l)
+    +'&maptype=satellite&zoom=19&markers=color:red%7C'+leadGeoLoc(l)
     +'&key='+GOOGLE_MAPS_KEY;
 }
 function mapUrl(l, size){
   return 'https://maps.googleapis.com/maps/api/staticmap?size='+(size||'800x500')
-    +'&maptype=roadmap&zoom=16&markers=color:red%7C'+leadGeoQuery(l)
+    +'&maptype=roadmap&zoom=16&markers=color:red%7C'+leadGeoLoc(l)
     +'&key='+GOOGLE_MAPS_KEY;
 }
 function setImgMode(mode){
@@ -2045,7 +2051,7 @@ function propIntelHtml(l){
     + chip('Year Built', p.yearBuilt || l.yearBuilt) + chip('Type', p.type || l.propertyType || l.propType)
     + chip('Est. Value', l.estimatedValue != null ? fmtMoney(l.estimatedValue) : (l.arv != null ? fmtMoney(l.arv) : null))
     + chip('Equity', equityStr)
-    + chip('LTV', l.dmLtvPct != null ? l.dmLtvPct + '%' : null)
+    + chip('LTV', l.dmLtvPct != null ? (l.dmLtvPct <= 1.5 ? Math.round(l.dmLtvPct*100) : Math.round(l.dmLtvPct)) + '%' : null)
     + chip('Owner', ownerStr)
     + chip('Occupancy', occ)
     + chip('Ownership', l.ownershipEntityType)
@@ -2544,6 +2550,8 @@ function extractPhones(traceResult){
 /* Map a dealmachine-lookup response onto the lead (XLeads-style density).
    Used by skip trace AND the on-open mortgage fetch. */
 function applyEnrichmentToLead(l, d){
+  l.latitude = d.latitude ?? l.latitude ?? null;
+  l.longitude = d.longitude ?? l.longitude ?? null;
   l.estimatedValue = d.estimatedValue ?? l.estimatedValue ?? null;
   l.arv = d.estimatedValue ?? l.arv ?? null;
   l.bedrooms = d.bedrooms ?? l.bedrooms ?? null;
