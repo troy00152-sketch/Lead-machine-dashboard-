@@ -188,6 +188,10 @@ tr.clickable{cursor:pointer}
 .img-frame{position:relative;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#0a0e1a;min-height:220px;cursor:zoom-in}
 .img-frame img{width:100%;height:auto;max-height:320px;object-fit:cover;display:block}
 .img-frame .img-fallback{display:flex;align-items:center;justify-content:center;min-height:220px;color:var(--muted);font-size:13px;text-align:center;padding:20px}
+.img-thumbs{display:flex;gap:6px;margin-top:8px}
+.img-thumbs img{width:33.33%;height:62px;object-fit:cover;border-radius:8px;cursor:pointer;border:2px solid var(--line);display:block}
+.img-thumbs img.active{border-color:var(--accent)}
+.img-listing-link{display:inline-block;margin-top:10px;font-size:12.5px;font-weight:700;color:var(--accent);text-decoration:none}
 .img-zoom-hint{position:absolute;bottom:8px;right:10px;background:rgba(0,0,0,.65);color:#fff;font-size:11px;padding:4px 10px;border-radius:20px}
 /* Prominent sticky segmented view toggle — always visible in the lead modal */
 .img-toggle-bar{position:sticky;top:-20px;z-index:6;background:var(--bg2);padding:12px 0 8px;margin:0}
@@ -1019,6 +1023,7 @@ function dealMachineToLead(d){
     outOfStateOwner: d.outOfStateOwner, legalDescription: d.legalDescription,
     zoning: d.zoning, floodZone: d.floodZone,
     latitude: d.latitude, longitude: d.longitude,
+    images: d.images || null,
     ownerName: d.ownerName || null,
     estimatedValue: d.estimatedValue || null,
     arv: d.estimatedValue || null,
@@ -1498,6 +1503,7 @@ function dmListSearchToLead(p){
     id: 'dml_' + Date.now() + '_' + Math.random().toString(36).slice(2,7),
     address: p.address || '', city: p.city || '', state: p.state || '', zip: p.zip || '',
     latitude: p.latitude, longitude: p.longitude,
+    images: p.images || null,
     bedrooms: p.bedrooms, bathrooms: p.bathrooms, sqft: p.sqft,
     yearBuilt: p.yearBuilt, propertyType: p.propertyType,
     estimatedValue: p.estimatedValue || null, arv: p.estimatedValue || null,
@@ -2124,18 +2130,49 @@ function setImgMode(mode){
   const l = leads.find(x=>x.id===currentLeadId); if(!l) return;
   renderImgFrame(l);
 }
+function dmImgUrl(l, mode){
+  // DealMachine imagery (street_view / satellite / roadmap) — key-free URLs:
+  // the property's own images object when present, else derived from its coordinates.
+  const key = mode==='satellite' ? 'satellite' : (mode==='map' ? 'roadmap' : 'street_view');
+  if(l.images && l.images[key]) return l.images[key];
+  if(l.latitude != null && l.longitude != null && l.latitude !== '' && l.longitude !== ''){
+    const seg = mode==='satellite' ? 'sat' : (mode==='map' ? 'map' : 'sv');
+    return 'https://img.dealmachine.com/'+seg+'/'+l.latitude+','+l.longitude+'.jpg';
+  }
+  return null;
+}
+function zillowUrl(l){
+  const slug = [l.address, l.city, l.state, l.zip].filter(Boolean).join(' ').replace(/,/g,'').trim().replace(/\s+/g,'-');
+  return 'https://www.zillow.com/homes/'+slug+'_rb/';
+}
 function renderImgFrame(l){
   const frame = document.getElementById('imgFrame'); if(!frame) return;
-  const q = leadGeoQuery(l);
-  let url, label;
-  if(imgMode==='satellite'){ url = satelliteUrl(l); label = 'Satellite / aerial view'; }
-  else if(imgMode==='map'){ url = mapUrl(l); label = 'Map view'; }
-  else { url = streetViewUrl(l); label = 'Street view — house exterior'; }
-  frame.innerHTML = '<img id="imgMain" src="'+url+'" alt="'+label+'" onclick="openLightbox(\''+url.replace(/800x500/g,'1600x1000')+'\')"'
+  let url = dmImgUrl(l, imgMode), label;
+  if(imgMode==='satellite'){ label = 'Satellite / aerial view'; }
+  else if(imgMode==='map'){ label = 'Map view'; }
+  else { label = 'Street view — house exterior'; }
+  if(!url){
+    if(imgMode==='satellite') url = satelliteUrl(l);
+    else if(imgMode==='map') url = mapUrl(l);
+    else url = streetViewUrl(l);
+  }
+  frame.innerHTML = '<img id="imgMain" src="'+url+'" alt="'+label+'" onclick="openLightbox(\''+url+'\')"'
     +' onerror="this.outerHTML=\'<div class=&quot;img-fallback&quot;>'+(imgMode==='street'
       ? '📷 No Street View imagery for this address yet.<br>Try Satellite view for the aerial look.'
-      : '⚠️ Imagery failed to load — check the Google Maps key / billing.')+'</div>\'">'
+      : '⚠️ Imagery failed to load for this view.')+'</div>\'">'
     +'<span class="img-zoom-hint">🔍 Tap to enlarge</span>';
+  const gal = document.getElementById('imgGallery');
+  if(gal){
+    const tStreet = dmImgUrl(l,'street') || streetViewUrl(l);
+    const tSat = dmImgUrl(l,'satellite') || satelliteUrl(l);
+    const tMap = dmImgUrl(l,'map') || mapUrl(l);
+    gal.innerHTML = '<div class="img-thumbs">'
+      +'<img src="'+tStreet+'" class="'+(imgMode==='street'?'active':'')+'" onclick="setImgMode(\'street\')" title="Street view">'
+      +'<img src="'+tSat+'" class="'+(imgMode==='satellite'?'active':'')+'" onclick="setImgMode(\'satellite\')" title="Satellite view">'
+      +'<img src="'+tMap+'" class="'+(imgMode==='map'?'active':'')+'" onclick="setImgMode(\'map\')" title="Map view">'
+      +'</div>'
+      +'<a class="img-listing-link" href="'+zillowUrl(l)+'" target="_blank" rel="noopener">🏠 Listing photos — inside the house, when it was listed (Zillow) ↗</a>';
+  }
 }
 function openLightbox(url){
   const lb = document.getElementById('lightbox');
@@ -2337,6 +2374,7 @@ function openLead(id){
       </div>
     </div>
     <div class="img-frame" id="imgFrame"></div>
+    <div id="imgGallery"></div>
     ${propIntelHtml(l)}
     <div class="sec-title" style="font-size:14px;margin-top:14px">🏦 Mortgage Info</div>
     <div id="mortgageInfoBox"><p style="color:var(--muted);font-size:13px">Loading mortgage data…</p></div>
@@ -2736,6 +2774,7 @@ function extractPhones(traceResult){
 function applyEnrichmentToLead(l, d){
   l.latitude = d.latitude ?? l.latitude ?? null;
   l.longitude = d.longitude ?? l.longitude ?? null;
+  if(d.images) l.images = d.images;
   // Heal identity fields on leads saved before the address-parser fix
   if(d.address && (!l.address || !l.city || !l.zip)){
     const _pa = parseDmAddress(d.address);
