@@ -2849,7 +2849,7 @@ async function traceLead(id){
     traceHistory.unshift({address:l.address, hit:phones.length>0, mobiles:phones.filter(p=>!p.dnc).length, at:new Date().toISOString()});
     saveState(); renderLeads(); renderRecentLeads(); updateStats(); renderTraceHistory();
     if(currentLeadId===id) openLead(id); // refresh modal
-    toast(phones.length ? `Found ${phones.filter(p=>!p.dnc).length} mobile number(s) via DealMachine` : 'No phones found');
+    toast(phones.length ? `Found ${phones.filter(p=>!p.dnc).length} mobile number(s)` : 'No phones found');
   }catch(e){
     toast('Trace failed: '+e.message);
   }
@@ -2861,7 +2861,7 @@ async function runSkipTrace(){
   const zip = document.getElementById('stZip').value.trim();
   if(!address||!city||!state||!zip){ toast('Fill in all address fields'); return; }
   const box = document.getElementById('stResults');
-  box.innerHTML = '<p style="color:var(--muted)">Tracing via DealMachine...</p>';
+  box.innerHTML = '<p style="color:var(--muted)">Tracing...</p>';
   try{
     const fullAddr = [address, city, state, zip].join(', ');
     const resp = await fetch('/.netlify/functions/dealmachine-lookup?address=' + encodeURIComponent(fullAddr) + '&phones=true');
@@ -2874,7 +2874,7 @@ async function runSkipTrace(){
     traceHistory.unshift({address, hit:phones.length>0, mobiles:phones.filter(p=>!p.dnc).length, at:new Date().toISOString()});
     saveState(); renderTraceHistory();
     box.innerHTML = phones.length
-      ? `<div class="sec-title" style="font-size:14px">✓ Owner found via DealMachine</div>` + phones.map(p=>`<div class="phone-item"><span class="pn">${esc(p.number)}</span><span><span class="badge green">Mobile</span> ${p.dnc?'<span class="badge red">DNC</span>':''}<br><small style="color:var(--muted)">${esc(p.owner)} ${p.carrier?'· '+esc(p.carrier):''}</small></span></div>`).join('')
+      ? `<div class="sec-title" style="font-size:14px">✓ Owner found</div>` + phones.map(p=>`<div class="phone-item"><span class="pn">${esc(p.number)}</span><span><span class="badge green">Mobile</span> ${p.dnc?'<span class="badge red">DNC</span>':''}<br><small style="color:var(--muted)">${esc(p.owner)} ${p.carrier?'· '+esc(p.carrier):''}</small></span></div>`).join('')
       : '<p style="color:var(--muted)">No phones found for this address.</p>';
   }catch(e){
     box.innerHTML = `<p style="color:var(--red)">Trace failed: ${esc(e.message)}</p>`;
