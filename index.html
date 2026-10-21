@@ -317,9 +317,9 @@ tr.clickable{cursor:pointer}
           </video>
           <div style="color:var(--muted);font-size:13px;margin-top:8px">Watch this first — a quick walkthrough of every tab in your command center.</div>
         </div>
-        <div class="sec-title">🏠 Property Search <span class="badge green" style="font-size:10px">DEALMACHINE · LIVE DATA</span></div>
+        <div class="sec-title">🏠 Property Search <span class="badge green" style="font-size:10px">LIVE DATA</span></div>
         <div class="card" style="margin-bottom:8px">
-          <p style="color:var(--muted);font-size:13px;margin-bottom:12px">Enter a full property address to pull live data — property details, owner, phones, mortgage & distress. All from one DealMachine lookup.</p>
+          <p style="color:var(--muted);font-size:13px;margin-bottom:12px">Enter a full property address to pull live data — property details, owner, phones, mortgage & distress. All from one live lookup.</p>
           <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
             <input class="field" id="propSearchZip" placeholder="Full address (e.g. 123 Main St, Indianapolis, IN 46201)" style="max-width:320px;flex:1" onkeypress="if(event.key==='Enter')searchPropertiesByZip()" />
             <button class="btn" onclick="openPropFilters()">🎛️ Filters <span class="badge orange" id="propFilterCount" style="display:none;font-size:10px">0</span></button>
@@ -510,7 +510,7 @@ tr.clickable{cursor:pointer}
         <div class="sec-title">🔍 Skip Trace</div>
         <div class="card" style="margin-bottom:14px">
           <div style="display:flex;gap:12px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
-            <div style="padding-top:4px"><span class="badge green">DealMachine · Mobile-only</span> <span id="stKeyStatus"></span></div>
+            <div style="padding-top:4px"><span class="badge green">Mobile-only</span> <span id="stKeyStatus"></span></div>
           </div>
           <p style="color:var(--muted);font-size:13px;margin-bottom:12px">Trace any address to find owner phone numbers.</p>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
@@ -528,7 +528,7 @@ tr.clickable{cursor:pointer}
         </div>
         
         <div class="card" style="margin-bottom:14px">
-          <div class="sec-title" style="margin-bottom:8px">📵 DNC Bulk Check <span class="badge green" style="font-size:10px">DEALMACHINE</span></div>
+          <div class="sec-title" style="margin-bottom:8px">📵 DNC Bulk Check <span class="badge green" style="font-size:10px">LIVE</span></div>
           <p style="color:var(--muted);font-size:13px;margin-bottom:12px">Check every phone on your leads against the National Do Not Call registry in one shot. Flagged numbers get marked so you never text them. <span style="color:var(--muted)">1 credit per matched number · re-checks are free.</span></p>
           <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
             <button class="btn primary" onclick="dmCheckDnc()">📵 Check All Lead Phones</button>
@@ -542,9 +542,9 @@ tr.clickable{cursor:pointer}
       
       <!-- LIST BUILDER TAB -->
       <div class="tab-page" id="page-listsearch">
-        <div class="sec-title">🎯 List Builder <span class="badge green" style="font-size:10px">DEALMACHINE · LIVE DATA</span></div>
+        <div class="sec-title">🎯 List Builder <span class="badge green" style="font-size:10px">LIVE DATA</span></div>
         <div class="card" style="margin-bottom:14px">
-          <p style="color:var(--muted);font-size:13px;margin-bottom:12px">Build a targeted seller list straight from DealMachine's 150M+ property database. Pick a ZIP, stack your distress filters, preview the cost free — then pull the list.</p>
+          <p style="color:var(--muted);font-size:13px;margin-bottom:12px">Build a targeted seller list straight from a 150M+ property database. Pick a ZIP, stack your distress filters, preview the cost free — then pull the list.</p>
           <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px">
             <div>
               <label class="lbl">ZIP Code</label>
@@ -589,7 +589,7 @@ tr.clickable{cursor:pointer}
 
       <!-- PEOPLE SEARCH TAB -->
       <div class="tab-page" id="page-people">
-        <div class="sec-title">👥 People Search <span class="badge green" style="font-size:10px">DEALMACHINE · LIVE DATA</span></div>
+        <div class="sec-title">👥 People Search <span class="badge green" style="font-size:10px">LIVE DATA</span></div>
         <div class="card" style="margin-bottom:14px">
           <p style="color:var(--muted);font-size:13px;margin-bottom:12px">Look up a person by name — get their phones, emails, and every property tied to them. Perfect when a seller gives you a name on a call.</p>
           <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
@@ -611,7 +611,7 @@ tr.clickable{cursor:pointer}
         </div>
         <div id="psResults" style="margin-top:12px"></div>
 
-        <div class="sec-title" style="margin-top:22px">🔎 Lookup Tools <span class="badge green" style="font-size:10px">DEALMACHINE · LIVE DATA</span></div>
+        <div class="sec-title" style="margin-top:22px">🔎 Lookup Tools <span class="badge green" style="font-size:10px">LIVE DATA</span></div>
         <div class="card" style="margin-bottom:14px">
           <p style="color:var(--muted);font-size:13px;margin-bottom:12px">Reverse lookups — when all you have is a phone number, an email, or a parcel number (APN). A seller texts you from an unknown number? Run the phone. No match = free. Person lookups cost 1 credit per matched person (+1 per property shown); APN costs 1 credit per matched property.</p>
           <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
@@ -661,11 +661,11 @@ tr.clickable{cursor:pointer}
       <div class="tab-page" id="page-settings">
         <div class="sec-title">⚙️ Settings</div>
         <div class="card" style="margin-bottom:14px">
-          <div class="sec-title" style="font-size:14px">📊 Data Source <span class="badge green" style="font-size:10px">DEALMACHINE</span></div>
-          <p style="color:var(--muted);font-size:13px;margin-bottom:10px">All property data, skip tracing, and mortgage info now comes from DealMachine via secure server. No API keys needed in your browser.</p>
+          <div class="sec-title" style="font-size:14px">📊 Data Source <span class="badge green" style="font-size:10px">LIVE</span></div>
+          <p style="color:var(--muted);font-size:13px;margin-bottom:10px">All property data, skip tracing, and mortgage info comes through our secure data feed. No API keys needed in your browser.</p>
         </div>
         <div class="card" style="margin-bottom:14px">
-          <div class="sec-title" style="font-size:14px">💳 DealMachine Credits <span class="badge orange" style="font-size:10px">LIVE</span></div>
+          <div class="sec-title" style="font-size:14px">💳 Data Credits <span class="badge orange" style="font-size:10px">LIVE</span></div>
           <div id="dmCreditsBox"><p style="color:var(--muted);font-size:13px">Loading credits…</p></div>
           <div style="margin-top:10px"><button class="btn small" onclick="dmLoadCredits(true)">🔄 Refresh Credits</button></div>
           <p style="color:var(--muted2);font-size:11px;margin-top:8px">Credits are free to check. 1 credit per property lookup and per person; re-lookups in the same billing month are free.</p>
@@ -944,13 +944,13 @@ async function searchPropertiesByZip(){
   if(!raw){ statusEl.innerHTML = '<span style="color:var(--red)">Enter a full property address.</span>'; return; }
   // If it's just a 5-digit ZIP, prompt for full address (DealMachine is address-based)
   if(/^\d{5}$/.test(raw)){
-    statusEl.innerHTML = '<span style="color:var(--muted)">DealMachine looks up by full address. Try "123 Main St, City, ST ' + esc(raw) + '" format.</span>';
+    statusEl.innerHTML = '<span style="color:var(--muted)">Search looks up by full address. Try "123 Main St, City, ST ' + esc(raw) + '" format.</span>';
     return;
   }
   return searchPropertyByDealMachine(raw, statusEl, resultsEl);
 }
 async function searchPropertyByDealMachine(address, statusEl, resultsEl){
-  statusEl.innerHTML = '<span style="color:var(--muted)">🔍 Looking up via DealMachine…</span>';
+  statusEl.innerHTML = '<span style="color:var(--muted)">🔍 Looking up property…</span>';
   resultsEl.innerHTML = '';
   try{
     const resp = await fetch('/.netlify/functions/dealmachine-lookup?address=' + encodeURIComponent(address));
@@ -964,7 +964,7 @@ async function searchPropertyByDealMachine(address, statusEl, resultsEl){
     const lead = dealMachineToLead(d);
     propSearchCache = [lead];
     propSearchExact = true;
-    statusEl.innerHTML = '<span style="color:var(--green)">✓ Found property via DealMachine</span> <button class="btn small primary" style="margin-left:10px" onclick="addAllPropSearchToLeads()">➕ Add to My Leads</button>';
+    statusEl.innerHTML = '<span style="color:var(--green)">✓ Property found</span> <button class="btn small primary" style="margin-left:10px" onclick="addAllPropSearchToLeads()">➕ Add to My Leads</button>';
     renderPropSearchResults();
     // Exact search: bring the FULL property view straight up — reuse the converted lead
     // (already lead-shaped), dedupe by address or coordinates, enrich, and open it.
@@ -983,7 +983,7 @@ async function searchPropertyByDealMachine(address, statusEl, resultsEl){
       saveState(); renderLeads(); updateStats();
       openLead(_t.id);
     }catch(e){}
-    recentSearches.unshift({q:'DealMachine: ' + address, at:new Date().toISOString()});
+    recentSearches.unshift({q:'Search: ' + address, at:new Date().toISOString()});
     recentSearches = recentSearches.slice(0,8); saveState(); renderRecentSearches();
   }catch(e){
     statusEl.innerHTML = '<span style="color:var(--red)">Lookup failed: ' + esc(e.message) + '</span>';
@@ -1437,7 +1437,7 @@ async function dmRunListSearch(){
   const resultsEl = document.getElementById('lbResults');
   const zip = (document.getElementById('lbZip').value || '').trim();
   if(!/^\d{5}$/.test(zip)){ statusEl.innerHTML = '<span style="color:var(--red)">Enter a valid 5-digit ZIP.</span>'; return; }
-  statusEl.innerHTML = '<span style="color:var(--muted)">🔍 Pulling list from DealMachine…</span>';
+  statusEl.innerHTML = '<span style="color:var(--muted)">🔍 Pulling list…</span>';
   resultsEl.innerHTML = '';
   try{
     const resp = await fetch('/.netlify/functions/dealmachine-search', {
@@ -1587,7 +1587,7 @@ async function dmPersonSearch(){
   const state = (document.getElementById('psState').value || '').trim().toUpperCase();
   if(!last){ statusEl.innerHTML = '<span style="color:var(--red)">Enter a last name.</span>'; return; }
   if(state && !/^[A-Z]{2}$/.test(state)){ statusEl.innerHTML = '<span style="color:var(--red)">State must be 2 letters (e.g. NC).</span>'; return; }
-  statusEl.innerHTML = '<span style="color:var(--muted)">🔍 Searching DealMachine for ' + esc((first + ' ' + last).trim()) + '…</span>';
+  statusEl.innerHTML = '<span style="color:var(--muted)">🔍 Searching for ' + esc((first + ' ' + last).trim()) + '…</span>';
   resultsEl.innerHTML = '';
   try{
     const resp = await fetch('/.netlify/functions/dealmachine-person', {
@@ -1767,7 +1767,7 @@ async function dmReverseLookup(mode){
     payload.apn = apn; payload.state = state;
   }else return;
   const labels = { phone: 'phone number', email: 'email address', apn: 'APN' };
-  statusEl.innerHTML = '<span style="color:var(--muted)">🔍 Looking up ' + labels[mode] + ' via DealMachine…</span>';
+  statusEl.innerHTML = '<span style="color:var(--muted)">🔍 Looking up ' + labels[mode] + '…</span>';
   resultsEl.innerHTML = '';
   rvPeopleCache = []; rvPropertyCache = null;
   try{
@@ -2211,7 +2211,7 @@ function mortgageTableHtml(mortgages){
     + '<td>' + (m.startDate ? fmtDate(m.startDate) : '—') + '</td>'
     + '<td>' + fmtMoney(m.paymentAmount) + '</td>'
     + '</tr>').join('');
-  return '<div class="sec-title" style="font-size:14px;margin-top:14px">🏦 All Mortgages (' + mortgages.length + ') — DealMachine</div>'
+  return '<div class="sec-title" style="font-size:14px;margin-top:14px">🏦 All Mortgages (' + mortgages.length + ')</div>'
     + '<div class="tbl-wrap"><table><thead><tr><th>Lien</th><th>Lender</th><th>Rate</th><th>Balance</th><th>Original</th><th>Type</th><th>Started</th><th>Payment</th></tr></thead>'
     + '<tbody>' + rows + '</tbody></table></div>';
 }
@@ -2227,7 +2227,7 @@ function propIntelHtml(l){
   const equityStr = (l.dmEquity != null || l.dmEquityPct != null)
     ? (l.dmEquity != null ? fmtMoney(l.dmEquity) : '') + (l.dmEquityPct != null ? ' (' + Math.round(l.dmEquityPct) + '%)' : '') : '—';
   const ownerStr = [l.owner1Name, l.owner2Name].filter(Boolean).join(' & ') || l.ownerName || '—';
-  let html = '<div class="sec-title" style="font-size:14px;margin-top:14px">🏠 Property Intel <span class="badge green" style="font-size:10px">DEALMACHINE · FULL DETAIL</span></div>'
+  let html = '<div class="sec-title" style="font-size:14px;margin-top:14px">🏠 Property Intel <span class="badge green" style="font-size:10px">FULL DETAIL</span></div>'
     +'<div class="prop-grid">'
     + chip('🎯 Motivation Score', _ws.score + ' / 100 · ' + _ws.label)
     + chip('Beds', p.beds || l.bedrooms) + chip('Baths', p.baths || l.bathrooms)
@@ -2338,7 +2338,7 @@ function analyzeDeal(id){
     <div class="sec-title" style="font-size:14px;margin-top:14px">🤖 Deal Analysis</div>
     <div style="background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;font-size:13px;line-height:1.6">
       <div style="font-weight:700;color:${vColor};font-size:15px;margin-bottom:8px">${verdict}</div>
-      <div style="margin-bottom:6px"><strong>Value (ARV proxy):</strong> ${fmtMoney(arv)}${arv ? ' <span style="color:var(--muted)">(DealMachine estimate)</span>' : ''}</div>
+      <div style="margin-bottom:6px"><strong>Value (ARV proxy):</strong> ${fmtMoney(arv)}${arv ? ' <span style="color:var(--muted)">(data estimate)</span>' : ''}</div>
       <div style="margin-bottom:6px"><strong>🎯 Motivation Score:</strong> <span class="badge ${_ws.color}">${_ws.score} · ${_ws.label}</span> <span style="color:var(--muted)">Distress ${_ws.distressPts}/45 · Equity ${_ws.equityPts}/35 · Ownership ${_ws.ownPts}/20</span></div>
       <div style="margin-bottom:6px"><strong>Equity:</strong> ${numMort === 0 ? '<span style="color:var(--green);font-weight:700">Free & clear — no payoff friction</span>' : fmtMoney(eq) + (eqPct != null ? ' (' + Math.round(eqPct) + '%)' : '') + ' across ' + numMort + ' mortgage(s), balance ' + fmtMoney(bal)}</div>
       <div style="margin-bottom:6px"><strong>Repairs ($):</strong> <input id="anRepairs" type="number" min="0" step="500" value="${repairs}" style="width:110px;padding:4px 8px;border-radius:6px" oninput="setLeadRepairs('${l.id}', this.value)"> <span style="color:var(--muted)">type your repair estimate — MAO/LAO update instantly and stay saved on this lead</span></div>
@@ -2403,7 +2403,7 @@ async function loadMortgageInfo(l){
       + '<div class="prop-chip"><span class="k">Total Monthly Payment</span><span class="v">' + fmtMoney(l.dmTotalMonthlyPayment) + '</span></div>'
       + '<div class="prop-chip"><span class="k">Original Loans Total</span><span class="v">' + fmtMoney(l.dmTotalOriginalLoan) + '</span></div>'
       + '<div class="prop-chip"><span class="k">Foreclosure</span><span class="v">' + (l.preforeclosure ? '<span class="badge red">⚠️ Pre-Foreclosure</span>' : '<span class="badge gray">No foreclosure</span>') + '</span></div>'
-      + '</div><p style="color:var(--muted);font-size:11px;margin-top:8px">Full per-mortgage detail is in Property Intel above. Data via DealMachine</p>';
+      + '</div><p style="color:var(--muted);font-size:11px;margin-top:8px">Full per-mortgage detail is in Property Intel above.</p>';
     return;
   }
   if(l.dmMortgage || l.dmNumMortgages !== undefined){
@@ -2462,7 +2462,7 @@ function mortgageInfoHtml(d){
     + '<div class="prop-chip"><span class="k">Foreclosure</span><span class="v">' + fcBadge + '</span></div>'
     + numLine
     + '</div>'
-    + '<p style="color:var(--muted);font-size:11px;margin-top:8px">Data via DealMachine</p>';
+    + '';
 }
 function closeModal(){ document.getElementById('leadModal').classList.remove('open'); }
 document.getElementById('leadModal').addEventListener('click', e=>{ if(e.target.id==='leadModal') closeModal(); });
@@ -2603,7 +2603,7 @@ async function pushAllToGHL(){
 async function traceAllLeads(){
   const untraced = leads.filter(l=>!l.traced && l.status!=='Pushed to CRM');
   if(!untraced.length){ toast('All leads already traced'); return; }
-  if(!confirm('Skip trace '+untraced.length+' lead(s) via DealMachine? Each trace uses data credits.')) return;
+  if(!confirm('Skip trace '+untraced.length+' lead(s)? Each trace uses data credits.')) return;
   let ok=0, fail=0;
   for(let i=0;i<untraced.length;i++){
     const l = untraced[i];
@@ -2681,10 +2681,10 @@ async function getARV(id){
   // Use DealMachine estimated value if already available
   if(l.estimatedValue || l.arv){
     const val = l.estimatedValue || l.arv;
-    toast('ARV: $'+Number(val).toLocaleString()+' (DealMachine estimate)');
+    toast('ARV: $'+Number(val).toLocaleString()+' (data estimate)');
     return;
   }
-  toast('Getting ARV for '+l.address+' via DealMachine...');
+  toast('Getting ARV for '+l.address+'...');
   try{
     const fullAddr = [l.address, l.city, l.state, l.zip].filter(Boolean).join(', ');
     const resp = await fetch('/.netlify/functions/dealmachine-lookup?address=' + encodeURIComponent(fullAddr));
@@ -2699,7 +2699,7 @@ async function getARV(id){
     if(d.sqft) l.sqft = d.sqft;
     saveState(); renderLeads();
     if(currentLeadId===id) openLead(id);
-    toast('ARV: $'+d.estimatedValue.toLocaleString()+' (DealMachine)');
+    toast('ARV: $'+d.estimatedValue.toLocaleString());
   }catch(e){
     toast('ARV lookup failed: '+e.message);
   }
@@ -2707,7 +2707,7 @@ async function getARV(id){
 function getTraceProvider(){ return 'dealmachine'; }
 function updateProviderStatus(){
   const el = document.getElementById('stKeyStatus');
-  if(el) el.innerHTML = '<span class="badge green">DealMachine active</span>';
+  if(el) el.innerHTML = '<span class="badge green">Data feed active</span>';
 }
 async function callAvaData(first, last, address, city, state, zip){
   const key = getAvaKey();
@@ -2827,7 +2827,7 @@ function applyEnrichmentToLead(l, d){
 }
 async function traceLead(id){
   const l = leads.find(x=>x.id===id); if(!l) return;
-  toast('Tracing '+l.address+' via DealMachine...');
+  toast('Tracing '+l.address+'...');
   try{
     const fullAddr = [l.address, l.city, l.state, l.zip].filter(Boolean).join(', ');
     const resp = await fetch('/.netlify/functions/dealmachine-lookup?address=' + encodeURIComponent(fullAddr) + '&phones=true');
