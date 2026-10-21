@@ -452,6 +452,7 @@ tr.clickable{cursor:pointer}
           <select class="field" id="filterSignal" onchange="renderLeads()"><option value="">All Signals</option></select>
           <select class="field" id="filterStatus" onchange="renderLeads()"><option value="">All Statuses</option><option>New Lead</option><option>Skip Traced</option><option>Pushed to CRM</option><option>Contacted</option><option>Appointment Set</option><option>Dead</option></select>
           <input class="field" id="filterSearch" placeholder="Search address..." oninput="renderLeads()" style="min-width:180px" />
+          <select class="field" id="sortLeads" onchange="renderLeads()"><option value="">Sort: Newest First</option><option value="score">🎯 Score: High → Low</option><option value="value">💰 Value: High → Low</option></select>
         </div>
         <div class="bulk-bar" id="bulkBar" style="display:none">
           <strong id="bulkCount">0 selected</strong>
@@ -756,6 +757,101 @@ function selectSignal(name){
   renderSignalChips();
   toast(selectedSignal ? 'Category set: '+selectedSignal : 'Category cleared');
 }
+/* ============ WHOLESALE MOTIVATION SCORE (our own Sellability Score) ============
+   0-100, built on the Super Stack method: Distress /45 · Equity /35 · Ownership /20.
+   Rules-based from data already pulled on every property — every point is explainable. */
+function dmAffirmative(v){
+  if(v === true || v === 1) return true;
+  if(v == null) return false;
+  const s = String(v).trim().toLowerCase();
+  return !['','no','n','false','0','none','n/a','na'].includes(s);
+}
+function dmAffirmativeLabel(v){
+  if(v === true || v === 1) return 'Yes';
+  if(v == null) return null;
+  const s = String(v).trim();
+  return ['','no','n','false','0','none','n/a','na'].includes(s.toLowerCase()) ? null : s;
+}
+const SCORE_KNOWN_SIGNALS = ['Pre-Foreclosure','Foreclosure','Tax Delinquent','Delinquent Tax Activity','Code Violations','Vacant / Abandoned','Vacancy','Probate / Inherited','Deceased / Probate','Divorce','Bankruptcy','Liens / Judgments','Absentee Owner','Tired Landlord'];
+function scoreSignalList(x){
+  const out = [];
+  const add = s => { if(s && !out.includes(s)) out.push(s); };
+  if(dmAffirmative(x.preforeclosure) || dmAffirmative(x.isPreforeclosure) || dmAffirmative(x.preforeclosureStatus)) add('Pre-Foreclosure');
+  if(dmAffirmative(x.foreclosureStatus)) add('Foreclosure');
+  if(dmAffirmative(x.taxDelinquentYear) || dmAffirmative(x.taxDelinquent)) add('Tax Delinquent');
+  if((Number(x.numLiens) || 0) > 0) add('Liens / Judgments');
+  (x._stackSignals || x.stackSignals || []).forEach(s => { if(SCORE_KNOWN_SIGNALS.includes(s)) add(s); });
+  const sig = String(x.distressSignal || '');
+  if(SCORE_KNOWN_SIGNALS.includes(sig)) add(sig);
+  else if(/probate|deceased/i.test(sig)) add('Probate / Inherited');
+  else if(/code violation/i.test(sig)) add('Code Violations');
+  else if(/vacan/i.test(sig)) add('Vacant / Abandoned');
+  else if(/tax/i.test(sig)) add('Tax Delinquent');
+  else if(/divorce/i.test(sig)) add('Divorce');
+  else if(/bankrupt/i.test(sig)) add('Bankruptcy');
+  else if(/pre-?foreclos/i.test(sig)) add('Pre-Foreclosure');
+  else if(/lien/i.test(sig)) add('Liens / Judgments');
+  if(dmAffirmative(x.absenteeOwner) || x.ownerOccupied === false || x.ownerOccupied === 'No') add('Absentee Owner');
+  return out;
+}
+function scoreEquityPct(x){
+  let pct = x.dmEquityPct ?? x.equityPct ?? x.estimatedEquityPct ?? null;
+  if(pct != null){ pct = Number(pct); if(!isNaN(pct)){ return pct > 0 && pct <= 1.5 ? pct * 100 : pct; } }
+  const val = Number(x.estimatedValue ?? x.arv) || null;
+  const eq = Number(x.dmEquity ?? x.equityAmount);
+  if(val && !isNaN(eq) && (x.dmEquity != null || x.equityAmount != null)) return Math.max(0, Math.min(100, eq / val * 100));
+  if((x.dmNumMortgages != null && Number(x.dmNumMortgages) === 0) || x._freeAndClear) return 100;
+  return null;
+}
+function wholesaleScore(x){
+  if(!x) return { score:0, label:'NO DATA', color:'gray', parts:[], signals:[], distressPts:0, equityPts:0, ownPts:0 };
+  const signals = scoreSignalList(x);
+  const parts = [];
+  const weights = { 'Pre-Foreclosure':18, 'Foreclosure':18, 'Tax Delinquent':16, 'Delinquent Tax Activity':14, 'Probate / Inherited':16, 'Deceased / Probate':16, 'Divorce':14, 'Bankruptcy':14, 'Code Violations':12, 'Vacant / Abandoned':12, 'Vacancy':12, 'Liens / Judgments':10, 'Tired Landlord':10, 'Absentee Owner':8 };
+  let distressPts = 0;
+  signals.slice().sort((a,b)=>(weights[b]||8)-(weights[a]||8)).forEach((s,i)=>{
+    const w = weights[s] || 8;
+    const pts = i === 0 ? w : Math.round(w / 2);
+    distressPts += pts; parts.push({ label:s, pts });
+  });
+  distressPts = Math.min(45, distressPts);
+  const pct = scoreEquityPct(x);
+  let equityPts = 0;
+  if(pct != null){
+    equityPts = pct >= 90 ? 35 : pct >= 75 ? 31 : pct >= 60 ? 26 : pct >= 50 ? 21 : pct >= 35 ? 15 : pct >= 20 ? 9 : pct > 0 ? 4 : 0;
+    if(equityPts) parts.push({ label:'Equity ' + Math.round(pct) + '%', pts:equityPts });
+  }
+  let ownPts = 0;
+  if(signals.includes('Absentee Owner')){ ownPts += 6; parts.push({ label:'Owner lives elsewhere', pts:6 }); }
+  if(dmAffirmative(x.outOfStateOwner)){ ownPts += 4; parts.push({ label:'Out-of-state owner', pts:4 }); }
+  let yrs = null;
+  if(x.lastSaleDate){ const d = new Date(x.lastSaleDate); if(!isNaN(d)) yrs = (Date.now() - d.getTime()) / (365.25 * 24 * 3600 * 1000); }
+  if(yrs != null && yrs >= 1){ const pts = yrs >= 20 ? 6 : yrs >= 10 ? 5 : yrs >= 5 ? 3 : 1; ownPts += pts; parts.push({ label:'Owned ' + Math.floor(yrs) + ' yrs', pts }); }
+  const rawStack = x._stackSignals || x.stackSignals || [];
+  if((x.dmNumMortgages != null && Number(x.dmNumMortgages) === 0) || x._freeAndClear || rawStack.includes('Free & Clear')){ ownPts += 4; parts.push({ label:'Free & clear', pts:4 }); }
+  ownPts = Math.min(20, ownPts);
+  const score = Math.max(0, Math.min(100, distressPts + equityPts + ownPts));
+  const label = score >= 75 ? 'LAYUP — HIT HARD' : score >= 55 ? 'HOT' : score >= 35 ? 'WARM' : score >= 15 ? 'COOL' : 'COLD';
+  const color = score >= 75 ? 'red' : score >= 55 ? 'orange' : score >= 35 ? 'blue' : 'gray';
+  parts.sort((a,b)=>b.pts-a.pts);
+  return { score, label, color, parts, signals, distressPts, equityPts, ownPts };
+}
+function scoreBadgeHtml(x, withLabel){
+  const s = wholesaleScore(x);
+  const tip = s.parts.length ? s.parts.map(p=>p.label + ' +' + p.pts).join(' · ') : 'No scoring signals yet';
+  return '<span class="badge ' + s.color + '" title="Wholesale Motivation Score: ' + esc(tip) + '">🎯 ' + s.score + (withLabel ? ' · ' + s.label : '') + '</span>';
+}
+function scoreBreakdownHtml(x){
+  const s = wholesaleScore(x);
+  const rows = s.parts.length
+    ? s.parts.map(p=>'<div style="display:flex;justify-content:space-between;gap:12px"><span>' + esc(p.label) + '</span><strong>+' + p.pts + '</strong></div>').join('')
+    : '<div style="color:var(--muted)">No scoring signals on this property yet — a full lookup fills in equity, distress and ownership.</div>';
+  const numColor = s.color === 'gray' ? 'var(--muted)' : s.color === 'blue' ? 'var(--blue)' : s.color === 'orange' ? 'var(--accent)' : 'var(--red)';
+  return '<div style="background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;font-size:13px;line-height:1.65">'
+    + '<div style="display:flex;align-items:center;gap:12px;margin-bottom:6px"><span style="font-size:30px;font-weight:800;color:' + numColor + '">' + s.score + '</span><div><div style="font-weight:700">🎯 Wholesale Motivation Score</div><div><span class="badge ' + s.color + '">' + s.label + '</span></div></div></div>'
+    + rows
+    + '<div style="margin-top:8px;color:var(--muted);font-size:12px">Distress ' + s.distressPts + '/45 · Equity ' + s.equityPts + '/35 · Ownership ' + s.ownPts + '/20 — our own model, built on the Super Stack method. 75+ = layup, hit it hard.</div></div>';
+}
 function signalBadge(signal){
   const s = DISTRESS_SIGNALS.find(x=>x.name===signal);
   if(!s) return `<span class="badge gray">${esc(signal||'General')}</span>`;
@@ -937,9 +1033,9 @@ function dealMachineToLead(d){
     dmEquityPct: d.estimatedEquityPct || null,
     dmLtvPct: d.estimatedLtvPct ?? null,
     // Distress flags
-    preforeclosure: d.preforeclosureStatus || (d.isPreforeclosure ? 'Yes' : null),
-    foreclosureStatus: d.foreclosureStatus || null,
-    taxDelinquentYear: d.taxDelinquentYear ?? (d.taxDelinquent ? 'Yes' : null),
+    preforeclosure: dmAffirmativeLabel(d.preforeclosureStatus) || dmAffirmativeLabel(d.isPreforeclosure),
+    foreclosureStatus: dmAffirmativeLabel(d.foreclosureStatus),
+    taxDelinquentYear: d.taxDelinquentYear ?? dmAffirmativeLabel(d.taxDelinquent),
     numLiens: d.numLiens ?? null,
     dmNumOpenLiens: d.numOpenLiens ?? null,
     dmOpenLienAmount: d.totalOpenLienAmount ?? null,
@@ -1131,6 +1227,7 @@ function applyPropFiltersToResults(props){
 function renderPropSearchResults(){
   const el = document.getElementById('propSearchResults');
   const filtered = propSearchExact ? propSearchCache.slice() : applyPropFiltersToResults(propSearchCache);
+  if(!propSearchExact) filtered.sort((a,b)=>wholesaleScore(b).score - wholesaleScore(a).score);
   const skipped = propSearchCache.length - filtered.length;
   if(propView === 'map'){ syncPropView(); return; } // map view handles its own display
   el.innerHTML = (skipped > 0 ? `<div style="font-size:12px;color:var(--muted);margin-bottom:8px">Filtered out ${skipped} ${skipped===1?'property':'properties'} by your filters</div>` : '') + filtered.map((p)=>{
@@ -1147,6 +1244,7 @@ function renderPropSearchResults(){
       </div></div>
       <div class="lead-badges">
         ${absentee?'<span class="badge blue">✈️ Absentee Owner</span>':''}
+        ${scoreBadgeHtml(p, true)}
         <span class="badge gray">${beds}bd / ${baths}ba · ${sqft} sqft · ${year}</span>
       </div>
       ${owner?`<div class="lead-owner">👤 ${esc(owner)}</div>`:''}
@@ -1337,6 +1435,23 @@ async function dmRunListSearch(){
     const d = await resp.json();
     if(!resp.ok) throw new Error(d.detail || d.error || 'HTTP ' + resp.status);
     lbSearchCache = d.data || [];
+    // Stamp the pull's filter signals onto each record so the Motivation Score
+    // (and the lead created from it) knows why this property was pulled.
+    const lf = lbGetFilters();
+    const pullSignals = [];
+    if(lf.absentee) pullSignals.push('Absentee Owner');
+    if(lf.preforeclosure) pullSignals.push('Pre-Foreclosure');
+    if(lf.taxDelinquent) pullSignals.push('Tax Delinquent');
+    if(lf.freeAndClear) pullSignals.push('Free & Clear');
+    if(lf.highEquity) pullSignals.push('High Equity');
+    lbSearchCache.forEach(p => {
+      p._stackSignals = pullSignals.slice();
+      if(lf.absentee){ p.absenteeOwner = 'Yes'; p.ownerOccupied = false; }
+      if(lf.preforeclosure) p.preforeclosure = 'Yes';
+      if(lf.taxDelinquent) p.taxDelinquentYear = 'Yes';
+      if(lf.freeAndClear) p._freeAndClear = true;
+    });
+    lbSearchCache.sort((a,b)=>wholesaleScore(b).score - wholesaleScore(a).score);
     const total = (d.totals && (d.totals.properties ?? d.totals.total)) ?? lbSearchCache.length;
     statusEl.innerHTML = '<span style="color:var(--green)">✓ Pulled <b>' + lbSearchCache.length + '</b> of <b>' + esc(String(total)) + '</b> matching properties</span> <button class="btn small primary" style="margin-left:10px" onclick="addAllListResultsToLeads()">➕ Add All to My Leads</button>';
     renderListBuilderResults();
@@ -1362,6 +1477,7 @@ function renderListBuilderResults(){
       </div></div>
       <div class="lead-badges">
         <span class="badge orange">💰 ${val}</span>
+        ${scoreBadgeHtml(p, true)}
         ${eq ? '<span class="badge green">' + esc(eq) + '</span>' : ''}
         ${p.propertyType ? '<span class="badge gray">' + esc(p.propertyType) + '</span>' : ''}
         <span class="badge gray">${beds}bd / ${baths}ba · ${sqft} sqft · ${year}</span>
@@ -1380,6 +1496,10 @@ function dmListSearchToLead(p){
     estimatedValue: p.estimatedValue || null, arv: p.estimatedValue || null,
     dmEquityPct: p.equityPct ?? null, dmEquity: p.equityAmount ?? null,
     dmPropertyId: p.dmPropertyId || null,
+    stackSignals: p._stackSignals || [],
+    preforeclosure: p.preforeclosure || null, taxDelinquentYear: p.taxDelinquentYear || null,
+    absenteeOwner: p.absenteeOwner ?? null, ownerOccupied: p.ownerOccupied ?? null,
+    dmNumMortgages: p._freeAndClear ? 0 : null,
     distressSignal: 'List Builder', status: 'New Lead',
     addedAt: new Date().toISOString(), source: 'dealmachine-list-builder',
     phones: [], traced: false
@@ -1892,6 +2012,11 @@ function renderLeads(){
     if(!leadPassesTypeFilter(l)) return false;
     return true;
   });
+  const sortSel = document.getElementById('sortLeads');
+  const sortVal = sortSel ? sortSel.value : '';
+  if(sortVal === 'score') rows.sort((a,b)=>wholesaleScore(b).score - wholesaleScore(a).score);
+  else if(sortVal === 'value') rows.sort((a,b)=>((b.estimatedValue||b.arv||0) - (a.estimatedValue||a.arv||0)));
+  else rows.sort((a,b)=>new Date(b.addedAt||0) - new Date(a.addedAt||0));
   const el = document.getElementById('leadsBody');
   if(!rows.length){
     const hasQuery = fq || fm || fs || fst;
@@ -1918,7 +2043,7 @@ function renderLeads(){
           <div class="lead-sub">${esc(l.city)}, ${esc(l.state)} ${esc(l.zip)} · ${esc(l.market)}</div>
         </div>
       </div>
-      <div class="lead-badges">${signalBadge(l.distressSignal)}</div>
+      <div class="lead-badges">${signalBadge(l.distressSignal)} ${scoreBadgeHtml(l, true)}</div>
       ${l.owner?`<div class="lead-owner">👤 ${esc(l.owner)}</div>`:''}
       ${arvHtml}
       <div class="lead-phones">${phonesHtml}</div>
@@ -1941,7 +2066,7 @@ function renderRecentLeads(){
   if(!recent.length){ tb.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--muted)">No leads yet — paste some in!</td></tr>'; return; }
   tb.innerHTML = recent.map(l=>`<tr class="clickable" onclick="openLead('${l.id}')">
     <td><strong>${esc(l.address)}</strong><br><span style="color:var(--muted);font-size:12px">${esc(l.city)}, ${esc(l.state)}</span></td>
-    <td>${esc(l.market)}</td><td><span class="badge gray">${esc(l.distressSignal)}</span></td>
+    <td>${esc(l.market)}</td><td><span class="badge gray">${esc(l.distressSignal)}</span> ${scoreBadgeHtml(l)}</td>
     <td><span class="badge orange">${esc(l.status)}</span></td><td style="color:var(--muted)">${fmtDate(l.addedAt)}</td></tr>`).join('');
 }
 function updateStats(){
@@ -2049,6 +2174,7 @@ function mortgageTableHtml(mortgages){
 function propIntelHtml(l){
   const p = l.propIntel || {};
   const chip = (k,v)=>'<div class="prop-chip"><span class="k">'+k+'</span><span class="v">'+(v==null||v===''?'—':v)+'</span></div>';
+  const _ws = wholesaleScore(l);
   const occ = (l.ownerOccupied === true || l.ownerOccupied === 'Yes' || l.dmOwnerOccupied === true) ? 'Owner occupied'
     : (l.ownerOccupied === false || l.ownerOccupied === 'No' || l.absenteeOwner === 'Yes') ? 'Non-owner occupied (absentee)' : '—';
   const lotStr = (l.lotSqft ? Number(l.lotSqft).toLocaleString() + ' sqft' : null) || (p.lot) || (l.lotAcres ? l.lotAcres + ' acres' : '—');
@@ -2059,6 +2185,7 @@ function propIntelHtml(l){
   const ownerStr = [l.owner1Name, l.owner2Name].filter(Boolean).join(' & ') || l.ownerName || '—';
   let html = '<div class="sec-title" style="font-size:14px;margin-top:14px">🏠 Property Intel <span class="badge green" style="font-size:10px">DEALMACHINE · FULL DETAIL</span></div>'
     +'<div class="prop-grid">'
+    + chip('🎯 Motivation Score', _ws.score + ' / 100 · ' + _ws.label)
     + chip('Beds', p.beds || l.bedrooms) + chip('Baths', p.baths || l.bathrooms)
     + chip('Sq Ft', (p.sqft ? Number(p.sqft).toLocaleString() : (l.sqft ? Number(l.sqft).toLocaleString() : null)))
     + chip('Lot Size', lotStr)
@@ -2078,6 +2205,7 @@ function propIntelHtml(l){
     + chip('Total Liens', l.numLiens != null ? l.numLiens : (l.dmNumOpenLiens != null ? l.dmNumOpenLiens + ' open' : null))
     + chip('Total Loan Balance', l.dmTotalBalance != null ? fmtMoney(l.dmTotalBalance) : null)
     +'</div>'
+    + '<div style="margin-top:12px">' + scoreBreakdownHtml(l) + '</div>'
     + mortgageTableHtml(l.dmMortgages)
     + ((l.legalDescription) ? '<div style="margin-top:10px;font-size:12px;color:var(--muted)"><strong>📜 Legal:</strong> ' + esc(String(l.legalDescription).slice(0, 300)) + '</div>' : '')
     +'<div style="margin-top:10px"><label class="lbl" style="font-size:12px;color:var(--muted)">👁️ Exterior condition notes (roof, siding, yard, vacancy signs)</label>'
@@ -2123,6 +2251,7 @@ function analyzeDeal(id){
   const { tier, label } = maoTier(arv);
   const mao = (arv != null && tier) ? Math.max(0, Math.round((arv - repairs) * tier)) : null;
   const lao = mao != null ? Math.round(mao * 0.70) : null;
+  const _ws = wholesaleScore(l);
 
   // Equity
   const numMort = l.dmNumMortgages || 0;
@@ -2166,6 +2295,7 @@ function analyzeDeal(id){
     <div style="background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;font-size:13px;line-height:1.6">
       <div style="font-weight:700;color:${vColor};font-size:15px;margin-bottom:8px">${verdict}</div>
       <div style="margin-bottom:6px"><strong>Value (ARV proxy):</strong> ${fmtMoney(arv)}${arv ? ' <span style="color:var(--muted)">(DealMachine estimate)</span>' : ''}</div>
+      <div style="margin-bottom:6px"><strong>🎯 Motivation Score:</strong> <span class="badge ${_ws.color}">${_ws.score} · ${_ws.label}</span> <span style="color:var(--muted)">Distress ${_ws.distressPts}/45 · Equity ${_ws.equityPts}/35 · Ownership ${_ws.ownPts}/20</span></div>
       <div style="margin-bottom:6px"><strong>Equity:</strong> ${numMort === 0 ? '<span style="color:var(--green);font-weight:700">Free & clear — no payoff friction</span>' : fmtMoney(eq) + (eqPct != null ? ' (' + Math.round(eqPct) + '%)' : '') + ' across ' + numMort + ' mortgage(s), balance ' + fmtMoney(bal)}</div>
       <div style="margin-bottom:6px"><strong>Repairs ($):</strong> <input id="anRepairs" type="number" min="0" step="500" value="${repairs}" style="width:110px;padding:4px 8px;border-radius:6px" oninput="setLeadRepairs('${l.id}', this.value)"> <span style="color:var(--muted)">type your repair estimate — MAO/LAO update instantly and stay saved on this lead</span></div>
       <div style="margin-bottom:6px"><strong>MAO / LAO:</strong> ${mao != null ? '<span id="anMaoLao">' + fmtMoney(mao) + ' / ' + fmtMoney(lao) + ' <span style="color:var(--muted)">(' + label + ' tier, ' + fmtMoney(repairs) + ' repairs)</span></span><br><span style="color:var(--muted)">LAO = your opening offer · MAO = your ceiling — never offer above it</span>' : '<span style="color:var(--muted)">Need ARV to calculate</span>'}</div>
@@ -2625,9 +2755,9 @@ function applyEnrichmentToLead(l, d){
   l.numLiens = d.numLiens ?? l.numLiens ?? null;
   l.dmNumOpenLiens = d.numOpenLiens ?? l.dmNumOpenLiens ?? null;
   l.dmOpenLienAmount = d.totalOpenLienAmount ?? l.dmOpenLienAmount ?? null;
-  l.preforeclosure = d.preforeclosureStatus || (d.isPreforeclosure ? 'Yes' : null) || l.preforeclosure || null;
-  l.foreclosureStatus = d.foreclosureStatus || l.foreclosureStatus || null;
-  l.taxDelinquentYear = d.taxDelinquentYear ?? (d.taxDelinquent ? 'Yes' : null) ?? l.taxDelinquentYear ?? null;
+  if(d.preforeclosureStatus !== undefined || d.isPreforeclosure !== undefined) l.preforeclosure = dmAffirmativeLabel(d.preforeclosureStatus) || dmAffirmativeLabel(d.isPreforeclosure);
+  if(d.foreclosureStatus !== undefined) l.foreclosureStatus = dmAffirmativeLabel(d.foreclosureStatus);
+  if(d.taxDelinquentYear !== undefined || d.taxDelinquent !== undefined) l.taxDelinquentYear = d.taxDelinquentYear ?? dmAffirmativeLabel(d.taxDelinquent);
   if(d.ownerName && !l.ownerName) l.ownerName = d.ownerName;
 }
 async function traceLead(id){
