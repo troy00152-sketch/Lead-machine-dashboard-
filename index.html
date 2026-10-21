@@ -881,24 +881,29 @@ async function searchPropertyByDealMachine(address, statusEl, resultsEl){
   }
 }
 /* Convert DealMachine API result to internal lead format */
+/* Parse DealMachine's full_address — "229 Plaza Ave Waterbury, CT 06710" or "229 Plaza Ave, Waterbury, CT 06710" */
+function parseDmAddress(addr){
+  const out = { street:'', city:'', state:'', zip:'' };
+  if(!addr) return out;
+  let head = String(addr).trim();
+  const sz = head.match(/,?\s*([A-Za-z]{2})\s+(\d{5})(?:-\d{4})?\s*$/);
+  if(sz){ out.state = sz[1].toUpperCase(); out.zip = sz[2]; head = head.slice(0, sz.index).replace(/,\s*$/,'').trim(); }
+  const parts = head.split(',').map(s=>s.trim()).filter(Boolean);
+  if(parts.length >= 2){ out.city = parts[parts.length-1]; out.street = parts.slice(0,-1).join(', '); return out; }
+  const SUF = ['ave','avenue','st','street','rd','road','dr','drive','ln','lane','blvd','boulevard','ct','court','way','pl','place','ter','terrace','cir','circle','hwy','highway','pkwy','parkway','aly','alley','trl','trail','sq','square','xing','crossing','pt','point','cove','cv','row','run','walk','path','ext'];
+  const words = head.split(/\s+/);
+  for(let i=1;i<words.length-1;i++){
+    if(SUF.includes(words[i].toLowerCase().replace(/\.$/,''))){ out.street = words.slice(0,i+1).join(' '); out.city = words.slice(i+1).join(' '); return out; }
+  }
+  out.street = head;
+  return out;
+}
 function dealMachineToLead(d){
+  const _pa = parseDmAddress(d.address || '');
   return {
     id: 'dm_' + Date.now() + '_' + Math.random().toString(36).slice(2,7),
-    address: d.address ? d.address.split(',')[0].trim() : '',
-    city: '', state: '', zip: '',
-    // Parse city/state/zip from full address if available
-    ...(function(){
-      const parts = (d.address || '').split(',').map(s=>s.trim());
-      if(parts.length >= 3){
-        const lastPart = parts[parts.length-1].split(' ');
-        return {
-          city: parts[parts.length-2] || '',
-          state: lastPart[0] || '',
-          zip: lastPart[1] || ''
-        };
-      }
-      return {};
-    })(),
+    address: _pa.street,
+    city: _pa.city, state: _pa.state, zip: _pa.zip,
     bedrooms: d.bedrooms, bathrooms: d.bathrooms, sqft: d.sqft,
     lotSqft: d.lotSqft, lotAcres: d.lotAcres, yearBuilt: d.yearBuilt, propertyType: d.propertyType,
     lastSaleDate: d.lastSaleDate, lastSalePrice: d.lastSalePrice ?? d.lastSaleAmount,
@@ -1128,8 +1133,8 @@ function renderPropSearchResults(){
     const year = numOrDash(p.yearBuilt);
     return `<div class="lead-card" onclick="togglePropDetail(${i})" style="cursor:pointer">
       <div class="lead-card-top"><div style="flex:1">
-        <div class="lead-addr">${esc(p.addressLine1 || '')}</div>
-        <div class="lead-sub">${esc(p.city || '')}, ${esc(p.state || '')} ${esc(p.zipCode || '')}</div>
+        <div class="lead-addr">${esc(p.addressLine1 || p.address || '')}</div>
+        <div class="lead-sub">${esc(p.city || '')}, ${esc(p.state || '')} ${esc(p.zipCode || p.zip || '')}</div>
       </div></div>
       <div class="lead-badges">
         ${absentee?'<span class="badge blue">✈️ Absentee Owner</span>':''}
@@ -1230,11 +1235,11 @@ function propToLead(p){
   const absentee = isAbsenteeProp(p);
   return {
     id: 'rc' + Date.now() + Math.floor(Math.random()*9999),
-    address: p.addressLine1 || '', city: p.city || '', state: p.state || '', zip: p.zipCode || '',
+    address: p.addressLine1 || p.address || '', city: p.city || '', state: p.state || '', zip: p.zipCode || p.zip || '',
     market: p.city || '', distressSignal: absentee ? 'Absentee Owner' : 'General',
     owner: getOwnerName(p),
     status: 'New Lead', addedAt: new Date().toISOString(), source: 'rentcast-search',
-    beds: p.bedrooms, baths: p.bathrooms, sqft: p.squareFootage, yearBuilt: p.yearBuilt,
+    beds: p.bedrooms ?? p.beds, baths: p.bathrooms ?? p.baths, sqft: p.squareFootage ?? p.sqft, yearBuilt: p.yearBuilt,
     latitude: p.latitude ?? null, longitude: p.longitude ?? null,
     phones: [], traced: false
   };
@@ -1248,8 +1253,8 @@ function addAllPropSearchToLeads(){
   if(!propSearchCache.length) return;
   let added = 0;
   propSearchCache.forEach(p=>{
-    const key = (p.addressLine1||'').toLowerCase() + '|' + (p.zipCode||'');
-    if(!leads.some(l=>(l.address||'').toLowerCase()+'|'+(l.zip||'')===key)){ leads.push(propToLead(p)); added++; }
+    const key = ((p.addressLine1 || p.address || '') + '|' + (p.zipCode || p.zip || '')).toLowerCase();
+    if(!leads.some(l=>((l.address||'') + '|' + (l.zip||'')).toLowerCase()===key)){ leads.push(propToLead(p)); added++; }
   });
   saveState(); renderLeads(); updateStats();
   toast('Added ' + added + ' properties to My Leads');
@@ -2552,6 +2557,15 @@ function extractPhones(traceResult){
 function applyEnrichmentToLead(l, d){
   l.latitude = d.latitude ?? l.latitude ?? null;
   l.longitude = d.longitude ?? l.longitude ?? null;
+  // Heal identity fields on leads saved before the address-parser fix
+  if(d.address && (!l.address || !l.city || !l.zip)){
+    const _pa = parseDmAddress(d.address);
+    if(!l.address && _pa.street) l.address = _pa.street;
+    if(!l.city && _pa.city) l.city = _pa.city;
+    if(!l.state && _pa.state) l.state = _pa.state;
+    if(!l.zip && _pa.zip) l.zip = _pa.zip;
+  }
+  if(!l.market && l.city) l.market = l.city;
   l.estimatedValue = d.estimatedValue ?? l.estimatedValue ?? null;
   l.arv = d.estimatedValue ?? l.arv ?? null;
   l.bedrooms = d.bedrooms ?? l.bedrooms ?? null;
@@ -2910,4 +2924,4 @@ function leadPassesTypeFilter(l){
   </div>
 </div>
 <script>
-</script><style>iframe[src*="netlify"],div[class*="netlify-badge"],a[href*="netlify.com"]:has(img){display:none!important}</style><div style="position:fixed;bottom:8px;right:12px;font-size:11px;color:var(--muted);opacity:0.7;z-index:1000;pointer-events:none">© Direct Property Buyers</div></body></html>
+</script><style>iframe[src*="netlify"],div[class*="netlify-badge"],a[href*="netlify.com"]:has(img){display:none!important}</style><div style="position:fixed;bottom:8px;right:12px;font-size:11px;color:var(--muted);opacity:0.7;z-index:1000;pointer-events:none">© Direct Property Buyer
