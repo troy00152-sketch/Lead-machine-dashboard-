@@ -466,7 +466,7 @@ tr.clickable{cursor:pointer}
       <div class="tab-page" id="page-buyers">
         <div class="sec-title">🤝 Buyer Match Ai <span class="badge green" id="bmDbBadge" style="font-size:10px">NATIONAL BUYER DATABASE</span></div>
         <div class="card" style="margin-bottom:14px">
-          <p style="color:var(--muted);font-size:13px;margin-bottom:12px">Enter a property address — Buyer Match Ai ranks up to 100 real cash buyers who buy properties like it, scored by location, price fit, portfolio strength and strategy. Same system as XLeads, running on your own buyer database.</p>
+          <p style="color:var(--muted);font-size:13px;margin-bottom:12px">Enter a property address — Buyer Match Ai ranks up to 100 real cash buyers who buy properties like it, scored by location, price fit, portfolio strength and strategy. Running on your own buyer database.</p>
           <div style="margin-bottom:12px"><label class="lbl">Property Address</label><input class="field" id="bmAddress" placeholder="123 Main St, Indianapolis, IN 46201" /></div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
             <div><label class="lbl">Your Asking Price ($) <span style="color:var(--muted);font-weight:400">— optional, defaults to property value</span></label><input class="field" id="bmPrice" type="number" min="0" step="1000" placeholder="e.g. 120000" /></div>
@@ -474,7 +474,7 @@ tr.clickable{cursor:pointer}
           </div>
           <div id="bmPropSummary"></div>
           <details style="margin-top:6px">
-            <summary style="cursor:pointer;font-size:13px;color:var(--accent);font-weight:600">🎛️ Buyer Filters (XLeads)</summary>
+            <summary style="cursor:pointer;font-size:13px;color:var(--accent);font-weight:600">🎛️ Buyer Filters</summary>
             <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-top:12px">
               <div><label class="lbl">Investor Type</label><select class="field" id="bmFInvestor"><option value="all">All Investors</option><option value="flipper">Flipper</option><option value="landlord">Landlord</option></select></div>
               <div><label class="lbl">Entity Type</label><select class="field" id="bmFEntity"><option value="all">All</option><option value="individual">Individual</option><option value="entity">Entity / LLC</option></select></div>
@@ -866,13 +866,22 @@ async function searchPropertyByDealMachine(address, statusEl, resultsEl){
     propSearchExact = true;
     statusEl.innerHTML = '<span style="color:var(--green)">✓ Found property via DealMachine</span> <button class="btn small primary" style="margin-left:10px" onclick="addAllPropSearchToLeads()">➕ Add to My Leads</button>';
     renderPropSearchResults();
-    // Exact search: bring the FULL property view straight up — save the lead (deduped),
-    // enrich it with this lookup (no extra credits), and open it (street view, intel, mortgages).
+    // Exact search: bring the FULL property view straight up — reuse the converted lead
+    // (already lead-shaped), dedupe by address or coordinates, enrich, and open it.
     try{
-      addAllPropSearchToLeads();
-      const _k = (lead.addressLine1||'').toLowerCase(), _z = lead.zipCode||'';
-      const _m = leads.find(x => (x.address||'').toLowerCase()===_k && (x.zip||'')===_z);
-      if(_m){ applyEnrichmentToLead(_m, d); saveState(); openLead(_m.id); }
+      let _t = null;
+      if(lead.address) _t = leads.find(x => (x.address||'').toLowerCase() === lead.address.toLowerCase() && (x.zip||'') === (lead.zip||''));
+      if(!_t && lead.latitude != null) _t = leads.find(x => x.latitude === lead.latitude && x.longitude === lead.longitude);
+      if(!_t){
+        lead.market = lead.city || '';
+        lead.distressSignal = lead.absenteeOwner ? 'Absentee Owner' : 'General';
+        lead.traced = false;
+        leads.push(lead);
+        _t = lead;
+      }
+      applyEnrichmentToLead(_t, d);
+      saveState(); renderLeads(); updateStats();
+      openLead(_t.id);
     }catch(e){}
     recentSearches.unshift({q:'DealMachine: ' + address, at:new Date().toISOString()});
     recentSearches = recentSearches.slice(0,8); saveState(); renderRecentSearches();
@@ -2090,6 +2099,19 @@ function fmtMoney(n){
   if(n == null || isNaN(n)) return '—';
   return '$' + Math.round(n).toLocaleString();
 }
+function setLeadRepairs(id, val){
+  const l = leads.find(x=>x.id===id); if(!l) return;
+  l.repairs = Math.max(0, Number(val) || 0);
+  saveState();
+  const arv = l.estimatedValue || l.arv || null;
+  const { tier, label } = maoTier(arv);
+  const el = document.getElementById('anMaoLao');
+  if(el && arv != null && tier){
+    const mao = Math.max(0, Math.round((arv - l.repairs) * tier));
+    const lao = Math.round(mao * 0.70);
+    el.innerHTML = fmtMoney(mao) + ' / ' + fmtMoney(lao) + ' <span style="color:var(--muted)">(' + label + ' tier, ' + fmtMoney(l.repairs) + ' repairs)</span>';
+  }
+}
 function analyzeDeal(id){
   const l = leads.find(x=>x.id===id);
   if(!l) return;
@@ -2097,9 +2119,9 @@ function analyzeDeal(id){
   if(!box) return;
 
   const arv = l.estimatedValue || l.arv || null;
-  const repairs = 0; // placeholder — Troy enters repair estimate at offer time
+  const repairs = Math.max(0, Number(l.repairs) || 0);
   const { tier, label } = maoTier(arv);
-  const mao = (arv != null && tier) ? Math.round((arv - repairs) * tier) : null;
+  const mao = (arv != null && tier) ? Math.max(0, Math.round((arv - repairs) * tier)) : null;
   const lao = mao != null ? Math.round(mao * 0.70) : null;
 
   // Equity
@@ -2145,7 +2167,8 @@ function analyzeDeal(id){
       <div style="font-weight:700;color:${vColor};font-size:15px;margin-bottom:8px">${verdict}</div>
       <div style="margin-bottom:6px"><strong>Value (ARV proxy):</strong> ${fmtMoney(arv)}${arv ? ' <span style="color:var(--muted)">(DealMachine estimate)</span>' : ''}</div>
       <div style="margin-bottom:6px"><strong>Equity:</strong> ${numMort === 0 ? '<span style="color:var(--green);font-weight:700">Free & clear — no payoff friction</span>' : fmtMoney(eq) + (eqPct != null ? ' (' + Math.round(eqPct) + '%)' : '') + ' across ' + numMort + ' mortgage(s), balance ' + fmtMoney(bal)}</div>
-      <div style="margin-bottom:6px"><strong>MAO / LAO:</strong> ${mao != null ? fmtMoney(mao) + ' / ' + fmtMoney(lao) + ' <span style="color:var(--muted)">(' + label + ' tier, $0 repairs — enter real repair number at offer time)</span>' : '<span style="color:var(--muted)">Need ARV to calculate</span>'}</div>
+      <div style="margin-bottom:6px"><strong>Repairs ($):</strong> <input id="anRepairs" type="number" min="0" step="500" value="${repairs}" style="width:110px;padding:4px 8px;border-radius:6px" oninput="setLeadRepairs('${l.id}', this.value)"> <span style="color:var(--muted)">type your repair estimate — MAO/LAO update instantly and stay saved on this lead</span></div>
+      <div style="margin-bottom:6px"><strong>MAO / LAO:</strong> ${mao != null ? '<span id="anMaoLao">' + fmtMoney(mao) + ' / ' + fmtMoney(lao) + ' <span style="color:var(--muted)">(' + label + ' tier, ' + fmtMoney(repairs) + ' repairs)</span></span><br><span style="color:var(--muted)">LAO = your opening offer · MAO = your ceiling — never offer above it</span>' : '<span style="color:var(--muted)">Need ARV to calculate</span>'}</div>
       ${distress.length ? '<div style="margin-bottom:6px"><strong>🚨 Distress:</strong> ' + distress.map(esc).join(' · ') + '</div>' : '<div style="margin-bottom:6px"><strong>Distress:</strong> <span style="color:var(--muted)">None flagged</span></div>'}
       ${flags.length ? '<div style="margin-bottom:6px"><strong>Flags:</strong> ' + flags.map(esc).join(' · ') + '</div>' : ''}
       <div style="margin-bottom:8px"><strong>Phones:</strong> ${mobiles.length ? '<span style="color:var(--green)">' + mobiles.length + ' mobile number(s) ready for outreach</span>' : '<span style="color:var(--muted)">No mobile numbers — run Skip Trace</span>'}</div>
@@ -2924,4 +2947,4 @@ function leadPassesTypeFilter(l){
   </div>
 </div>
 <script>
-</script><style>iframe[src*="netlify"],div[class*="netlify-badge"],a[href*="netlify.com"]:has(img){display:none!important}</style><div style="position:fixed;bottom:8px;right:12px;font-size:11px;color:var(--muted);opacity:0.7;z-index:1000;pointer-events:none">© Direct Property Buyer
+</script><style>iframe[src*="netlify"],div[class*="netlify-badge"],a[href*="netlify.com"]:has(img){display:none!important}</style><div style="position:fixed;bottom:8px;right:12px;font-size:11px;color:var(--muted);opacity:0.7;z-index:1000;pointer-events:none">© Direct Property Buyers</div></body></html>
