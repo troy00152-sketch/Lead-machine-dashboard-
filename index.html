@@ -801,6 +801,13 @@ function doGlobalSearch(){
   recentSearches.unshift({q, at:new Date().toISOString()});
   recentSearches = recentSearches.slice(0,8);
   saveState(); renderRecentSearches();
+  // Address-like query (starts with a house number or is a ZIP) -> live DealMachine property lookup on the Dashboard page
+  if(/^\d/.test(q)){
+    showPage('dashboard');
+    const ps = document.getElementById('propSearchZip');
+    if(ps){ ps.value = q; searchPropertiesByZip(); }
+    return;
+  }
   // Search leads
   const ql = q.toLowerCase();
   const hits = leads.filter(l => (l.address+' '+l.city+' '+l.zip).toLowerCase().includes(ql));
@@ -829,6 +836,7 @@ function renderRecentSearches(){
 
 
 let propSearchCache = [];
+let propSearchExact = false; // true when the cache is a single exact-address lookup: never hide it behind browse filters
 async function searchPropertiesByZip(){
   const raw = (document.getElementById('propSearchZip').value || '').trim();
   const statusEl = document.getElementById('propSearchStatus');
@@ -855,8 +863,17 @@ async function searchPropertyByDealMachine(address, statusEl, resultsEl){
     // Convert DealMachine result to internal lead format
     const lead = dealMachineToLead(d);
     propSearchCache = [lead];
+    propSearchExact = true;
     statusEl.innerHTML = '<span style="color:var(--green)">✓ Found property via DealMachine</span> <button class="btn small primary" style="margin-left:10px" onclick="addAllPropSearchToLeads()">➕ Add to My Leads</button>';
     renderPropSearchResults();
+    // Exact search: bring the FULL property view straight up — save the lead (deduped),
+    // enrich it with this lookup (no extra credits), and open it (street view, intel, mortgages).
+    try{
+      addAllPropSearchToLeads();
+      const _k = (lead.addressLine1||'').toLowerCase(), _z = lead.zipCode||'';
+      const _m = leads.find(x => (x.address||'').toLowerCase()===_k && (x.zip||'')===_z);
+      if(_m){ applyEnrichmentToLead(_m, d); saveState(); openLead(_m.id); }
+    }catch(e){}
     recentSearches.unshift({q:'DealMachine: ' + address, at:new Date().toISOString()});
     recentSearches = recentSearches.slice(0,8); saveState(); renderRecentSearches();
   }catch(e){
@@ -930,6 +947,7 @@ async function searchPropertiesByZipCode(zip, key, statusEl, resultsEl){
     if(!resp.ok){ statusEl.innerHTML = '<span style="color:var(--red)">RentCast error ' + resp.status + '. Try again.</span>'; return; }
     const props = await resp.json();
     propSearchCache = Array.isArray(props) ? props : [];
+    propSearchExact = false;
     if(!propSearchCache.length){ statusEl.innerHTML = '<span style="color:var(--muted)">No properties returned for ' + esc(zip) + '.</span>'; return; }
     statusEl.innerHTML = '<span style="color:var(--green)">✓ Found ' + propSearchCache.length + ' properties in ' + esc(zip) + '</span> <button class="btn small primary" style="margin-left:10px" onclick="addAllPropSearchToLeads()">➕ Add All to My Leads</button>';
     renderPropSearchResults();
@@ -1098,7 +1116,7 @@ function applyPropFiltersToResults(props){
 }
 function renderPropSearchResults(){
   const el = document.getElementById('propSearchResults');
-  const filtered = applyPropFiltersToResults(propSearchCache);
+  const filtered = propSearchExact ? propSearchCache.slice() : applyPropFiltersToResults(propSearchCache);
   const skipped = propSearchCache.length - filtered.length;
   if(propView === 'map'){ syncPropView(); return; } // map view handles its own display
   el.innerHTML = (skipped > 0 ? `<div style="font-size:12px;color:var(--muted);margin-bottom:8px">Filtered out ${skipped} ${skipped===1?'property':'properties'} by your filters</div>` : '') + filtered.map((p)=>{
@@ -1164,7 +1182,7 @@ function renderPropMap(){
     if(note) note.textContent = 'Map needs an internet connection to load.';
     return;
   }
-  const all = applyPropFiltersToResults(propSearchCache);
+  const all = propSearchExact ? propSearchCache.slice() : applyPropFiltersToResults(propSearchCache);
   const pinned = all.filter(p => p.latitude !== null && p.latitude !== undefined && p.longitude !== null && p.longitude !== undefined);
   const noCoords = all.length - pinned.length;
   if(note) note.textContent = pinned.length
