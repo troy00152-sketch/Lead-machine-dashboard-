@@ -283,6 +283,14 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
 .pill-draft{background:var(--chip);color:var(--muted)}
 .rs-item .rs-x{margin-left:auto;color:var(--muted);font-size:14px;padding:2px 6px;cursor:pointer;flex-shrink:0}
 .rs-item .rs-x:hover{color:var(--red)}
+.hit-row{display:flex;align-items:center;gap:12px;padding:9px 4px;border-bottom:1px solid var(--line);cursor:pointer}
+.hit-row:last-child{border-bottom:0}
+.hit-row:hover{background:var(--panel2)}
+.hit-addr{font-weight:600;font-size:14px}
+.hit-meta{margin-left:auto;color:var(--muted);font-size:12px;white-space:nowrap}
+.cmdk-item{padding:10px 12px;border-radius:8px;cursor:pointer;font-size:14px}
+.cmdk-item:hover{background:var(--panel2)}
+.cmdk-item.sel{background:var(--panel2);outline:1px solid var(--accent)}
 /* Deal spotlight */
 .spot-nums{display:flex;gap:22px;flex-wrap:wrap}
 .spot-nums .num{font-size:22px}
@@ -362,6 +370,8 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
           <div class="mkt"><div class="mkt-name">Jacksonville</div><span class="pill pill-draft">DRAFT</span></div>
         </div>
         <div id="spotlightZone"></div>
+        <div id="hitListZone"></div>
+        <div id="contractZone"></div>
         <div class="sec-title">📊 Overview</div>
         <div class="cards">
           <div class="card"><div class="num" id="statLeads">0</div><div class="lbl">My Leads</div></div>
@@ -749,6 +759,21 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
             <button class="img-tab theme-btn" data-mode="dark" onclick="setTheme('dark')">🌙 Dark</button>
             <button class="img-tab theme-btn" data-mode="light" onclick="setTheme('light')">☀️ Light</button>
             <button class="img-tab theme-btn" data-mode="system" onclick="setTheme('system')">💻 System</button>
+          </div>
+        </div>
+        <div class="card" style="margin-bottom:14px">
+          <div class="sec-title" style="font-size:14px">🏷️ Branding</div>
+          <p style="color:var(--muted);font-size:13px;margin-bottom:10px">Your business name and accent color, shown across the Command Center and on deal sheets. Saved on this device.</p>
+          <label class="lbl">Business name</label>
+          <input class="field" id="brandNameInput" placeholder="Direct Property Buyers" style="margin-bottom:12px">
+          <label class="lbl">Accent color</label>
+          <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px">
+            <input type="color" id="brandColorInput" value="#ff6b1a" style="width:56px;height:38px;border:1px solid var(--line);border-radius:8px;background:var(--panel);padding:2px;cursor:pointer">
+            <span style="color:var(--muted);font-size:12px">Buttons, highlights and active states follow this color.</span>
+          </div>
+          <div style="display:flex;gap:10px">
+            <button class="btn primary" onclick="saveBrand()">Save Branding</button>
+            <button class="btn ghost" onclick="resetBrand()">Reset</button>
           </div>
         </div>
         <div class="card">
@@ -2476,8 +2501,10 @@ function openLead(id){
     <div class="detail-row"><span class="k">City / State / ZIP</span><span class="v">${esc(l.city)}, ${esc(l.state)} ${esc(l.zip)}</span></div>
     <div class="detail-row"><span class="k">Market</span><span class="v">${esc(l.market)}</span></div>
     <div class="detail-row"><span class="k">Distress Signal</span><span class="v">${esc(l.distressSignal)}</span></div>
-    <div class="detail-row"><span class="k">Status</span><span class="v"><select class="field" style="width:auto;padding:4px 8px" onchange="setLeadStatus('${l.id}',this.value)">${['New Lead','Skip Traced','Contacted','Appointment Set','Dead'].map(s=>`<option ${l.status===s?'selected':''}>${s}</option>`).join('')}</select></span></div>
+    <div class="detail-row"><span class="k">Status</span><span class="v"><select class="field" style="width:auto;padding:4px 8px" onchange="setLeadStatus('${l.id}',this.value)">${['New Lead','Skip Traced','Contacted','Appointment Set','Under Contract','Closed','Dead'].map(s=>`<option ${l.status===s?'selected':''}>${s}</option>`).join('')}</select></span></div>
     <div class="detail-row"><span class="k">Added</span><span class="v">${fmtDate(l.addedAt)}</span></div>
+    <div class="detail-row"><span class="k">EMD ($)</span><span class="v"><input type="number" min="0" step="50" value="${l.emd||''}" placeholder="—" style="width:110px;padding:4px 8px;border-radius:6px" onchange="setLeadField('${l.id}','emd',this.value)"></span></div>
+    <div class="detail-row"><span class="k">Closing Date</span><span class="v"><input type="date" value="${l.closingDate||''}" style="padding:4px 8px;border-radius:6px" onchange="setLeadField('${l.id}','closingDate',this.value)"></span></div>
     <div class="img-toggle-bar">
       <div class="sec-title" style="font-size:14px;margin:0 0 8px">🛰️ Property Views</div>
       <div class="img-seg">
@@ -2583,6 +2610,10 @@ function setLeadStatus(id, status){
   const l = leads.find(x=>x.id===id); if(!l) return;
   l.status = status; saveState(); renderLeads(); renderRecentLeads(); updateStats();
   toast('Status → '+status);
+}
+function setLeadField(id, field, val){
+  const l = leads.find(x=>x.id===id); if(!l) return;
+  l[field] = val; saveState();
 }
 function deleteLead(id){
   const l = leads.find(x=>x.id===id);
@@ -3324,4 +3355,202 @@ function saveSpotlight(){
 }
 document.addEventListener("DOMContentLoaded", renderSpotlight);
 </script>
+<div class="modal-overlay" id="cmdkOverlay" style="align-items:flex-start;padding-top:10vh">
+  <div class="modal" style="max-width:560px">
+    <div style="padding:14px 16px;border-bottom:1px solid var(--line)">
+      <input class="field" id="cmdkInput" placeholder="Type an address, a lead, or a page…" autocomplete="off">
+    </div>
+    <div id="cmdkResults" style="max-height:50vh;overflow-y:auto;padding:8px"></div>
+    <div style="padding:8px 16px;border-top:1px solid var(--line);color:var(--muted);font-size:11px">↑↓ navigate · Enter open · Esc close</div>
+  </div>
+</div>
+<script>
+/* ============ COMMAND CENTER EXTRAS — batch 2 (Hit List, Contracts, Coach, Deal Sheet, Cmd-K, Branding) ============ */
+function ccEl(i){ return document.getElementById(i); }
+function daysSince(iso){ const t = new Date(iso).getTime(); if(isNaN(t)) return 0; return Math.floor((Date.now() - t) / 86400000); }
+function daysUntil(dateStr){ if(!dateStr) return null; const t = new Date(dateStr + 'T12:00:00').getTime(); if(isNaN(t)) return null; return Math.ceil((t - Date.now()) / 86400000); }
+
+/* ---- Hit List + Under Contract strip ---- */
+function renderHitList(){
+  const zone = ccEl('hitListZone'); if(!zone) return;
+  const all = (typeof leads !== 'undefined' && leads) ? leads : [];
+  const open = all.filter(l => l.status !== 'Dead' && l.status !== 'Closed');
+  const scored = open.map(l => ({ l: l, ws: wholesaleScore(l) })).filter(x => x.ws.score >= 55).sort((a, b) => b.ws.score - a.ws.score).slice(0, 5);
+  const stale = open.filter(l => l.status === 'New Lead' && daysSince(l.addedAt) >= 3).sort((a, b) => new Date(a.addedAt) - new Date(b.addedAt)).slice(0, 5);
+  if(!scored.length && !stale.length){ zone.innerHTML = ''; return; }
+  let h = '<div class="sec-title">🎯 Today\'s Hit List</div><div class="card" style="margin-bottom:8px">';
+  if(scored.length){
+    h += '<div style="font-size:11px;color:var(--muted);letter-spacing:.06em;margin-bottom:4px">HOTTEST — HIT THESE FIRST</div>';
+    h += scored.map(x => '<div class="hit-row" onclick="openLead(\'' + x.l.id + '\')"><span class="badge ' + x.ws.color + '">' + x.ws.score + ' · ' + x.ws.label + '</span><span class="hit-addr">' + esc(x.l.address) + '</span><span class="hit-meta">' + esc(x.l.market || '') + '</span></div>').join('');
+  }
+  if(stale.length){
+    h += '<div style="font-size:11px;color:var(--muted);letter-spacing:.06em;margin:' + (scored.length ? '12px' : '0') + ' 0 4px">UNTOUCHED 3+ DAYS — TRIPLE TAP DUE</div>';
+    h += stale.map(l => '<div class="hit-row" onclick="openLead(\'' + l.id + '\')"><span class="badge gray">' + daysSince(l.addedAt) + 'd old</span><span class="hit-addr">' + esc(l.address) + '</span><span class="hit-meta">' + esc(l.market || '') + '</span></div>').join('');
+  }
+  zone.innerHTML = h + '</div>';
+}
+function renderContracts(){
+  const zone = ccEl('contractZone'); if(!zone) return;
+  const all = (typeof leads !== 'undefined' && leads) ? leads : [];
+  const ucs = all.filter(l => l.status === 'Under Contract');
+  if(!ucs.length){ zone.innerHTML = ''; return; }
+  let h = '<div class="sec-title">📝 Under Contract</div><div class="cards" style="margin-bottom:8px">';
+  h += ucs.map(l => {
+    const du = daysUntil(l.closingDate);
+    const ml = leadMaoLao(l);
+    let when = '<span style="color:var(--muted)">No closing date set — open the lead to add one</span>';
+    if(du !== null){
+      if(du < 0) when = '<span style="color:var(--red);font-weight:700">Closing ' + Math.abs(du) + 'd overdue</span>';
+      else if(du === 0) when = '<span style="color:var(--red);font-weight:700">Closes TODAY</span>';
+      else when = '<span' + (du <= 7 ? ' style="color:var(--accent2);font-weight:700"' : '') + '>Closes in ' + du + 'd · ' + fmtDate(l.closingDate) + '</span>';
+    }
+    return '<div class="card" style="cursor:pointer" onclick="openLead(\'' + l.id + '\')"><div style="font-weight:700;font-size:14px">' + esc(l.address) + '</div><div style="color:var(--muted);font-size:12px;margin:4px 0">' + esc(l.market || '') + (l.emd ? ' · EMD ' + fmtMoney(Number(l.emd) || 0) : '') + (ml.mao ? ' · MAO ' + fmtMoney(ml.mao) : '') + '</div><div style="font-size:13px">' + when + '</div></div>';
+  }).join('');
+  zone.innerHTML = h + '</div>';
+}
+function renderExtras(){ renderHitList(); renderContracts(); }
+
+/* ---- Seller Call Coach + Deal Sheet (injected into the lead view) ---- */
+function printDealSheet(){
+  const all = (typeof leads !== 'undefined' && leads) ? leads : [];
+  const l = all.find(x => x.id === currentLeadId);
+  if(!l){ alert('Open a lead first.'); return; }
+  const ml = leadMaoLao(l);
+  const ws = wholesaleScore(l);
+  const brand = brandLoad();
+  const withOwner = (l.phones || []).find(p => p && p.owner);
+  const owner = withOwner ? withOwner.owner : (l.owner || '—');
+  const rows = [
+    ['Address', l.address],
+    ['City / State / ZIP', [l.city, l.state, l.zip].filter(Boolean).join(' ')],
+    ['Market', l.market || '—'],
+    ['Owner', owner],
+    ['Status', l.status || '—'],
+    ['Distress Signal', l.distressSignal || '—'],
+    ['Motivation Score', ws.score + ' · ' + ws.label],
+    ['Property Value (est.)', l.value ? fmtMoney(Number(l.value)) : '—'],
+    ['Repairs', fmtMoney(Number(l.repairs) || 0)],
+    ['MAO (ceiling)', ml.mao ? fmtMoney(ml.mao) : '—'],
+    ['LAO (opening offer)', ml.lao ? fmtMoney(ml.lao) : '—']
+  ];
+  const w = window.open('', '_blank');
+  if(!w){ alert('Pop-up blocked — allow pop-ups for this site to print the deal sheet.'); return; }
+  w.document.write('<html><head><title>Deal Sheet — ' + esc(l.address) + '</title><style>body{font-family:Arial,sans-serif;margin:40px;color:#111}h1{font-size:20px;margin:0 0 4px}h2{font-size:13px;color:#666;font-weight:normal;margin:0 0 24px}table{width:100%;border-collapse:collapse}td{padding:9px 6px;border-bottom:1px solid #ddd;font-size:14px}td.k{color:#666;width:190px}.foot{margin-top:28px;font-size:11px;color:#999}</style></head><body>'
+    + '<h1>' + esc(brand.name) + '</h1><h2>Deal Sheet · ' + esc(l.address) + ' · ' + new Date().toLocaleDateString() + '</h2>'
+    + '<table>' + rows.map(r => '<tr><td class="k">' + esc(r[0]) + '</td><td><strong>' + esc(String(r[1])) + '</strong></td></tr>').join('') + '</table>'
+    + '<div class="foot">LAO = opening offer · MAO = ceiling, never offer above it. Numbers from the Command Center analysis.</div>'
+    + '<' + 'script>window.onload=function(){window.print();};<' + '/script></body></html>');
+  w.document.close();
+}
+const coachObs = new MutationObserver(function(){
+  const modal = ccEl('leadModal');
+  if(modal && modal.classList.contains('open')){
+    const body = ccEl('lmBody');
+    if(body && !ccEl('coachCard') && typeof currentLeadId !== 'undefined' && currentLeadId){
+      const d = document.createElement('div');
+      d.id = 'coachCard';
+      d.innerHTML = '<div class="sec-title" style="font-size:14px;margin-top:16px">🎧 Seller Call Coach — MCTP</div>'
+        + '<div style="font-size:13px;line-height:1.65">'
+        + '<div><strong>Motivation</strong> — Why are they selling? What happens if it doesn\'t sell?</div>'
+        + '<div><strong>Condition</strong> — Roof, HVAC, kitchen, baths. Get the condition BEFORE any number.</div>'
+        + '<div><strong>Timeline</strong> — When does this need to be done by? What\'s driving that date?</div>'
+        + '<div><strong>Price</strong> — They name a number first. Write it down before you counter.</div>'
+        + '<div style="margin-top:6px;color:var(--muted)">Open at the <strong>LAO</strong>. The <strong>MAO</strong> is your ceiling — never offer above it.</div></div>'
+        + '<div style="display:flex;gap:10px;margin-top:12px;flex-wrap:wrap"><button class="btn" onclick="printDealSheet()">🖨 Print Deal Sheet</button></div>';
+      body.appendChild(d);
+    }
+  }
+});
+
+/* ---- Command palette (Cmd/Ctrl + K) ---- */
+const CMDK_PAGES = [['dashboard','🏠 Dashboard'],['paste','📋 Paste Leads'],['myleads','📁 My Leads'],['buyers','🤝 Buyer Match Ai'],['skiptrace','🔍 Skip Trace'],['listsearch','🏗️ List Builder'],['people','👤 People Search'],['comps','📊 Comps'],['settings','⚙️ Settings']];
+let cmdkSel = 0;
+let cmdkItems = [];
+function cmdkOpen(){ const o = ccEl('cmdkOverlay'); if(!o) return; o.classList.add('open'); const i = ccEl('cmdkInput'); i.value = ''; cmdkRender(''); setTimeout(function(){ i.focus(); }, 50); }
+function cmdkClose(){ const o = ccEl('cmdkOverlay'); if(o) o.classList.remove('open'); }
+function cmdkRender(q){
+  q = (q || '').trim().toLowerCase();
+  const items = [];
+  CMDK_PAGES.forEach(p => { if(!q || p[1].toLowerCase().indexOf(q) >= 0) items.push({ kind: 'page', key: p[0], label: p[1] }); });
+  if(q && typeof leads !== 'undefined' && leads){
+    leads.filter(l => (l.address + ' ' + (l.city || '') + ' ' + (l.market || '')).toLowerCase().indexOf(q) >= 0).slice(0, 8).forEach(l => items.push({ kind: 'lead', id: l.id, label: '🏠 ' + l.address + (l.market ? ' · ' + l.market : '') }));
+  }
+  cmdkItems = items; cmdkSel = 0;
+  const box = ccEl('cmdkResults'); if(!box) return;
+  box.innerHTML = items.length ? items.map((it, i) => '<div class="cmdk-item' + (i === 0 ? ' sel' : '') + '" data-i="' + i + '">' + esc(it.label) + '</div>').join('') : '<div style="padding:12px;color:var(--muted);font-size:13px">No matches</div>';
+  box.querySelectorAll('.cmdk-item').forEach(el => { el.onclick = function(){ cmdkRun(Number(el.getAttribute('data-i'))); }; });
+}
+function cmdkPaint(){ const box = ccEl('cmdkResults'); if(!box) return; box.querySelectorAll('.cmdk-item').forEach((el, i) => { el.classList.toggle('sel', i === cmdkSel); }); }
+function cmdkRun(i){
+  const it = cmdkItems[i]; if(!it) return;
+  cmdkClose();
+  if(it.kind === 'page') showPage(it.key); else openLead(it.id);
+}
+document.addEventListener('keydown', function(e){
+  if((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')){
+    e.preventDefault();
+    const o = ccEl('cmdkOverlay');
+    if(o && o.classList.contains('open')) cmdkClose(); else cmdkOpen();
+    return;
+  }
+  const o = ccEl('cmdkOverlay'); if(!o || !o.classList.contains('open')) return;
+  if(e.key === 'Escape') cmdkClose();
+  else if(e.key === 'ArrowDown'){ e.preventDefault(); cmdkSel = Math.min(cmdkSel + 1, cmdkItems.length - 1); cmdkPaint(); }
+  else if(e.key === 'ArrowUp'){ e.preventDefault(); cmdkSel = Math.max(cmdkSel - 1, 0); cmdkPaint(); }
+  else if(e.key === 'Enter'){ cmdkRun(cmdkSel); }
+});
+
+/* ---- Branding ---- */
+const BRAND_KEY = 'lm_brand_v1';
+function brandLoad(){
+  try{ const b = JSON.parse(localStorage.getItem(BRAND_KEY)); if(b && b.name) return b; }catch(e){}
+  return { name: 'Direct Property Buyers', color: '#ff6b1a' };
+}
+function applyBrand(){
+  const b = brandLoad();
+  const small = document.querySelector('.brand small');
+  if(small && b.name) small.textContent = b.name;
+  if(b.color){
+    document.documentElement.style.setProperty('--accent', b.color);
+    document.documentElement.style.setProperty('--accent2', b.color);
+  }
+  const ni = ccEl('brandNameInput'); if(ni) ni.value = b.name || '';
+  const ci = ccEl('brandColorInput'); if(ci && b.color) ci.value = b.color;
+}
+function saveBrand(){
+  const name = ((ccEl('brandNameInput') || {}).value || '').trim() || 'Direct Property Buyers';
+  const color = (ccEl('brandColorInput') || {}).value || '#ff6b1a';
+  try{ localStorage.setItem(BRAND_KEY, JSON.stringify({ name: name, color: color })); }catch(e){}
+  applyBrand();
+  if(typeof toast === 'function') toast('Branding saved');
+}
+function resetBrand(){
+  try{ localStorage.removeItem(BRAND_KEY); }catch(e){}
+  document.documentElement.style.removeProperty('--accent');
+  document.documentElement.style.removeProperty('--accent2');
+  applyBrand();
+  if(typeof toast === 'function') toast('Branding reset');
+}
+
+/* ---- init + refresh hooks ---- */
+document.addEventListener('DOMContentLoaded', function(){
+  renderExtras();
+  applyBrand();
+  const m = ccEl('leadModal');
+  if(m) coachObs.observe(m, { attributes: true, attributeFilter: ['class'] });
+  const ci = ccEl('cmdkInput');
+  if(ci) ci.addEventListener('input', function(){ cmdkRender(ci.value); });
+  const o = ccEl('cmdkOverlay');
+  if(o) o.addEventListener('click', function(e){ if(e.target === o) cmdkClose(); });
+  if(typeof saveState === 'function'){
+    const _ss = saveState;
+    saveState = function(){ _ss(); renderExtras(); };
+  }
+  if(typeof showPage === 'function'){
+    const _sp = showPage;
+    showPage = function(p){ _sp(p); if(p === 'dashboard') renderExtras(); };
+  }
+});
+</script>
+
 </body></html>
