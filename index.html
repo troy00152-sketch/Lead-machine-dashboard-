@@ -244,6 +244,48 @@ tr.clickable{cursor:pointer}
 .chip span{display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}
 .chip b{font-size:14px}
 </style>
+<style>
+/* ============ REDESIGN 2026-10-22 (approved demo look) ============ */
+:root{--radius:14px}
+body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+.content{background:radial-gradient(ellipse at 15% -5%,rgba(255,107,26,.05),transparent 55%)}
+.sec-title{font-size:17px;letter-spacing:.01em;margin:26px 0 14px}
+.sec-title::before{content:'';width:4px;height:18px;border-radius:99px;background:linear-gradient(180deg,var(--accent),var(--accent2));flex-shrink:0}
+.card{background:linear-gradient(180deg,var(--panel),var(--bg2));border:1px solid var(--line);border-radius:var(--radius);box-shadow:0 6px 18px rgba(0,0,0,.22);transition:transform .15s,box-shadow .15s,border-color .15s}
+.card:hover{transform:translateY(-1px);box-shadow:0 10px 24px rgba(0,0,0,.28)}
+[data-theme="light"] .card{box-shadow:0 4px 14px rgba(24,34,52,.08)}
+.card .num{font-size:32px;font-weight:800;background:linear-gradient(120deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:var(--accent)}
+.card .lbl{font-size:12px;letter-spacing:.05em;text-transform:uppercase}
+.btn{border-radius:10px;transition:transform .15s,box-shadow .15s,background .15s}
+.btn:hover{transform:translateY(-1px);box-shadow:0 6px 14px rgba(0,0,0,.25)}
+.btn.primary{background:linear-gradient(135deg,var(--accent),var(--accent2));border-color:transparent;box-shadow:0 6px 16px rgba(255,107,26,.30)}
+.btn.primary:hover{background:linear-gradient(135deg,var(--accent2),var(--accent))}
+.qs-card{background:linear-gradient(180deg,var(--panel),var(--bg2));border-radius:var(--radius);box-shadow:0 4px 12px rgba(0,0,0,.18);transition:transform .15s,box-shadow .15s,border-color .15s}
+.qs-card:hover{transform:translateY(-2px);box-shadow:0 10px 22px rgba(0,0,0,.26)}
+.qs-card .t{font-size:14px}
+.field{border-radius:10px}
+.field:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(255,107,26,.18)}
+.nav-item{border-radius:10px;transition:background .15s,color .15s}
+.nav-item.active{background:linear-gradient(90deg,rgba(255,107,26,.18),rgba(255,107,26,.03));box-shadow:inset 3px 0 0 var(--accent)}
+.topbar h2{font-size:22px;letter-spacing:.01em}
+.search-box{border-radius:12px;box-shadow:0 8px 20px rgba(0,0,0,.25)}
+.search-box button{background:linear-gradient(135deg,var(--accent),var(--accent2))}
+.badge{letter-spacing:.03em}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:var(--line);border-radius:99px}
+::-webkit-scrollbar-track{background:transparent}
+/* Market status strip */
+.mkts{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:8px}
+.mkt{background:linear-gradient(180deg,var(--panel),var(--bg2));border:1px solid var(--line);border-radius:var(--radius);padding:14px;box-shadow:0 4px 12px rgba(0,0,0,.18)}
+.mkt-name{font-weight:700;font-size:14px;margin-bottom:8px}
+.pill{display:inline-block;border-radius:99px;padding:3px 10px;font-size:10px;font-weight:700;letter-spacing:.05em;white-space:nowrap}
+.pill-live{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;box-shadow:0 4px 10px rgba(255,107,26,.35)}
+.pill-draft{background:var(--chip);color:var(--muted)}
+/* Deal spotlight */
+.spot-nums{display:flex;gap:22px;flex-wrap:wrap}
+.spot-nums .num{font-size:22px}
+.spot-nums .lbl{color:var(--muted);font-size:11px;letter-spacing:.05em;text-transform:uppercase;margin-top:2px}
+</style>
 </head>
 <body>
 <button class="menu-btn" id="menuBtn" onclick="document.querySelector('.sidebar').classList.toggle('open')">☰</button>
@@ -292,6 +334,47 @@ tr.clickable{cursor:pointer}
     <div class="content" id="content">
       <!-- DASHBOARD TAB -->
       <div class="tab-page active" id="page-dashboard">
+        <div class="card" style="padding:0;overflow:hidden;margin-bottom:20px">
+          <div style="display:flex;flex-wrap:wrap">
+            <div style="flex:2 1 420px;min-width:300px;background:#000">
+              <video controls preload="metadata" style="width:100%;height:100%;max-height:440px;display:block;object-fit:contain" src="training-video-web.mp4">
+                Your browser does not support the video tag.
+              </video>
+            </div>
+            <div style="flex:1 1 260px;padding:18px;display:flex;flex-direction:column;gap:10px">
+              <div style="font-size:17px;font-weight:700">🎓 Start Here — Command Center Walkthrough</div>
+              <div style="color:var(--muted);font-size:13px;line-height:1.5">New here or need a refresher? This quick walkthrough tours every tab — searching properties, working leads, matching buyers, and running comps. The whole machine in a few minutes.</div>
+              <button class="btn primary" onclick="showPage('myleads')">📁 Open My Leads</button>
+              <button class="btn" onclick="showPage('buyers')">🤝 Buyer Match Ai</button>
+              <button class="btn" onclick="showPage('comps')">📊 Run Comps</button>
+              <div style="color:var(--muted);font-size:12px;margin-top:auto">Parts 2 and 3 of the training series will land here as they're released.</div>
+            </div>
+          </div>
+        </div>
+        <div class="sec-title">🗺️ Markets</div>
+        <div class="mkts">
+          <div class="mkt"><div class="mkt-name">Indianapolis</div><span class="pill pill-live">● RELAUNCHING FRI OCT 23</span></div>
+          <div class="mkt"><div class="mkt-name">Cleveland</div><span class="pill pill-draft">DRAFT</span></div>
+          <div class="mkt"><div class="mkt-name">Kansas City</div><span class="pill pill-draft">DRAFT</span></div>
+          <div class="mkt"><div class="mkt-name">Charlotte · Carolina</div><span class="pill pill-draft">DRAFT</span></div>
+          <div class="mkt"><div class="mkt-name">Jacksonville</div><span class="pill pill-draft">DRAFT</span></div>
+        </div>
+        <div class="sec-title">🔥 Deal Spotlight</div>
+        <div class="card" style="margin-bottom:8px">
+          <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:center">
+            <div style="flex:1 1 260px">
+              <div style="font-size:16px;font-weight:700">303 Elizabeth St — Greenville, NC</div>
+              <div style="color:var(--muted);font-size:13px;margin-top:4px;line-height:1.5">Top deal on the board. Numbers verified airtight — open at the LAO when the seller's timeline firms up.</div>
+            </div>
+            <div class="spot-nums">
+              <div><div class="num">$150K</div><div class="lbl">ARV</div></div>
+              <div><div class="num">$50K</div><div class="lbl">Repairs</div></div>
+              <div><div class="num">$80K</div><div class="lbl">MAO</div></div>
+              <div><div class="num">$56K</div><div class="lbl">LAO · Open</div></div>
+            </div>
+            <button class="btn primary" onclick="showPage('comps')">📊 Run Comps</button>
+          </div>
+        </div>
         <div class="sec-title">📊 Overview</div>
         <div class="cards">
           <div class="card"><div class="num" id="statLeads">0</div><div class="lbl">My Leads</div></div>
@@ -309,13 +392,6 @@ tr.clickable{cursor:pointer}
           <div class="qs-card" onclick="quickSearch('Jacksonville')"><div class="t">🏘️ Jacksonville Leads</div><div class="d">View all Jax leads</div></div>
           <div class="qs-card" onclick="showPage('buyers')"><div class="t">🤝 Buyer Match Ai</div><div class="d">AI-ranked cash buyers for any property</div></div>
           <div class="qs-card" onclick="showPage('paste')"><div class="t">📋 Paste New Leads</div><div class="d">Import from spreadsheet</div></div>
-        </div>
-        <div class="sec-title">📺 Training Video</div>
-        <div class="card" style="padding:16px">
-          <video controls preload="metadata" style="width:100%;max-width:640px;border-radius:12px;display:block" src="training-video-web.mp4">
-            Your browser does not support the video tag.
-          </video>
-          <div style="color:var(--muted);font-size:13px;margin-top:8px">Watch this first — a quick walkthrough of every tab in your command center.</div>
         </div>
         <div class="sec-title">🏠 Property Search <span class="badge green" style="font-size:10px">LIVE DATA</span></div>
         <div class="card" style="margin-bottom:8px">
