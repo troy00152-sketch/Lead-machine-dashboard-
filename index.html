@@ -281,6 +281,8 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
 .pill{display:inline-block;border-radius:99px;padding:3px 10px;font-size:10px;font-weight:700;letter-spacing:.05em;white-space:nowrap}
 .pill-live{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;box-shadow:0 4px 10px rgba(255,107,26,.35)}
 .pill-draft{background:var(--chip);color:var(--muted)}
+.rs-item .rs-x{margin-left:auto;color:var(--muted);font-size:14px;padding:2px 6px;cursor:pointer;flex-shrink:0}
+.rs-item .rs-x:hover{color:var(--red)}
 /* Deal spotlight */
 .spot-nums{display:flex;gap:22px;flex-wrap:wrap}
 .spot-nums .num{font-size:22px}
@@ -359,22 +361,7 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
           <div class="mkt"><div class="mkt-name">Charlotte · Carolina</div><span class="pill pill-draft">DRAFT</span></div>
           <div class="mkt"><div class="mkt-name">Jacksonville</div><span class="pill pill-draft">DRAFT</span></div>
         </div>
-        <div class="sec-title">🔥 Deal Spotlight</div>
-        <div class="card" style="margin-bottom:8px">
-          <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:center">
-            <div style="flex:1 1 260px">
-              <div style="font-size:16px;font-weight:700">303 Elizabeth St — Greenville, NC</div>
-              <div style="color:var(--muted);font-size:13px;margin-top:4px;line-height:1.5">Top deal on the board. Numbers verified airtight — open at the LAO when the seller's timeline firms up.</div>
-            </div>
-            <div class="spot-nums">
-              <div><div class="num">$150K</div><div class="lbl">ARV</div></div>
-              <div><div class="num">$50K</div><div class="lbl">Repairs</div></div>
-              <div><div class="num">$80K</div><div class="lbl">MAO</div></div>
-              <div><div class="num">$56K</div><div class="lbl">LAO · Open</div></div>
-            </div>
-            <button class="btn primary" onclick="showPage('comps')">📊 Run Comps</button>
-          </div>
-        </div>
+        <div id="spotlightZone"></div>
         <div class="sec-title">📊 Overview</div>
         <div class="cards">
           <div class="card"><div class="num" id="statLeads">0</div><div class="lbl">My Leads</div></div>
@@ -781,6 +768,28 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
     <div class="modal-body" id="lmBody"></div>
   </div>
 </div>
+<!-- SPOTLIGHT EDITOR -->
+<div class="modal-overlay" id="spotModal">
+  <div class="modal">
+    <div class="modal-head"><h3>⭐ Spotlight Deal</h3><button class="modal-x" onclick="closeSpotEditor()">✕</button></div>
+    <div class="modal-body">
+      <label class="lbl">Property address</label>
+      <input class="field" id="spAddress" placeholder="e.g. 123 Main St — City, ST" style="margin-bottom:12px">
+      <label class="lbl">Note (optional)</label>
+      <input class="field" id="spNote" placeholder="Why this deal is hot" style="margin-bottom:12px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div><label class="lbl">ARV ($)</label><input class="field" id="spArv" type="number" min="0" placeholder="150000"></div>
+        <div><label class="lbl">Repairs ($)</label><input class="field" id="spRepairs" type="number" min="0" placeholder="50000"></div>
+        <div><label class="lbl">MAO ($)</label><input class="field" id="spMao" type="number" min="0" placeholder="80000"></div>
+        <div><label class="lbl">LAO ($)</label><input class="field" id="spLao" type="number" min="0" placeholder="56000"></div>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:16px">
+        <button class="btn primary" onclick="saveSpotlight()">Save Spotlight</button>
+        <button class="btn ghost" onclick="closeSpotEditor()">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
 <!-- IMAGE LIGHTBOX -->
 <div class="lightbox-overlay" id="lightbox" onclick="closeLightbox()">
   <button class="lightbox-close" onclick="closeLightbox()">✕</button>
@@ -950,8 +959,24 @@ function toast(msg){
 function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function normAddr(a){ return String(a||'').toLowerCase().replace(/[^a-z0-9]/g,''); }
 function fmtDate(iso){ try{ return new Date(iso).toLocaleDateString(); }catch(e){ return ''; } }
-function saveState(){ try{ localStorage.setItem('acc_leads', JSON.stringify(leads)); localStorage.setItem('acc_searches', JSON.stringify(recentSearches)); localStorage.setItem('acc_traces', JSON.stringify(traceHistory)); localStorage.setItem('acc_counter', String(leadIdCounter)); }catch(e){} }
-function loadState(){ try{ leads = JSON.parse(localStorage.getItem('acc_leads')||'[]'); recentSearches = JSON.parse(localStorage.getItem('acc_searches')||'[]'); traceHistory = JSON.parse(localStorage.getItem('acc_traces')||'[]'); leadIdCounter = parseInt(localStorage.getItem('acc_counter')||'1'); }catch(e){ leads=[]; } }
+function cleanRecent(list){
+  const cutoff = Date.now() - 30*24*60*60*1000;
+  const seen = {}; const out = [];
+  for(const s of (list||[])){
+    if(!s || !s.q) continue;
+    const t = new Date(s.at).getTime();
+    if(!isNaN(t) && t < cutoff) continue;
+    const key = String(s.q).trim().toLowerCase();
+    if(seen[key]) continue;
+    seen[key] = 1; out.push(s);
+    if(out.length >= 8) break;
+  }
+  return out;
+}
+function removeRecent(i){ recentSearches.splice(i,1); saveState(); renderRecentSearches(); }
+function clearRecent(){ recentSearches = []; saveState(); renderRecentSearches(); }
+function saveState(){ try{ localStorage.setItem('acc_leads', JSON.stringify(leads)); localStorage.setItem('acc_searches', JSON.stringify(recentSearches=cleanRecent(recentSearches))); localStorage.setItem('acc_traces', JSON.stringify(traceHistory)); localStorage.setItem('acc_counter', String(leadIdCounter)); }catch(e){} }
+function loadState(){ try{ leads = JSON.parse(localStorage.getItem('acc_leads')||'[]'); recentSearches = cleanRecent(JSON.parse(localStorage.getItem('acc_searches')||'[]')); traceHistory = JSON.parse(localStorage.getItem('acc_traces')||'[]'); leadIdCounter = parseInt(localStorage.getItem('acc_counter')||'1'); }catch(e){ leads=[]; } }
 
 /* ============ NAVIGATION ============ */
 document.querySelectorAll('.nav-item').forEach(btn=>{
@@ -1005,9 +1030,21 @@ function quickSearch(market){
   showPage('myleads'); renderLeads();
 }
 function renderRecentSearches(){
+  recentSearches = cleanRecent(recentSearches);
   const el = document.getElementById('recentSearches');
   if(!recentSearches.length){ el.innerHTML = '<div class="rs-item"><span class="meta">No recent searches yet</span></div>'; return; }
   el.innerHTML = recentSearches.map(s=>`<div class="rs-item" onclick="document.getElementById('globalSearch').value='${esc(s.q)}';doGlobalSearch()"><span>🔍</span><div><div class="addr">${esc(s.q)}</div><div class="meta">${fmtDate(s.at)}</div></div></div>`).join('');
+  el.querySelectorAll('.rs-item').forEach(function(it, i){
+    const x = document.createElement('span');
+    x.className = 'rs-x'; x.textContent = '\u2715'; x.title = 'Remove';
+    x.onclick = function(ev){ ev.stopPropagation(); removeRecent(i); };
+    it.appendChild(x);
+  });
+  const clr = document.createElement('div');
+  clr.className = 'rs-item'; clr.style.justifyContent = 'center';
+  clr.innerHTML = '<span class="meta">Clear all recent searches</span>';
+  clr.onclick = clearRecent;
+  el.appendChild(clr);
 }
 
 
@@ -3218,4 +3255,73 @@ function leadPassesTypeFilter(l){
   </div>
 </div>
 <script>
-</script><style>iframe[src*="netlify"],div[class*="netlify-badge"],a[href*="netlify.com"]:has(img){display:none!important}</style><div style="position:fixed;bottom:8px;right:12px;font-size:11px;color:var(--muted);opacity:0.7;z-index:1000;pointer-events:none">© Direct Property Buyers</div></body></html>
+</script><style>iframe[src*="netlify"],div[class*="netlify-badge"],a[href*="netlify.com"]:has(img){display:none!important}</style><div style="position:fixed;bottom:8px;right:12px;font-size:11px;color:var(--muted);opacity:0.7;z-index:1000;pointer-events:none">© Direct Property Buyers</div>
+<script>
+/* ============ DEAL SPOTLIGHT (user-controlled, saved in browser) ============ */
+const SPOT_KEY = "lm_spotlight_v1";
+const SPOT_DEFAULT = {address: "303 Elizabeth St — Greenville, NC", note: "Top deal on the board. Numbers verified airtight — open at the LAO when the seller's timeline firms up.", arv: 150000, repairs: 50000, mao: 80000, lao: 56000};
+function spotLoad(){
+  try{
+    const raw = localStorage.getItem(SPOT_KEY);
+    if(raw === null) return SPOT_DEFAULT;
+    return JSON.parse(raw);
+  }catch(e){ return SPOT_DEFAULT; }
+}
+function spotSave(v){ try{ localStorage.setItem(SPOT_KEY, JSON.stringify(v)); }catch(e){} }
+function spotFmt(n){ n = Number(n) || 0; if(n >= 1000 && n % 1000 === 0) return "$" + (n / 1000) + "K"; return "$" + n.toLocaleString("en-US"); }
+function spotEsc(s){ return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){ return {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]; }); }
+function renderSpotlight(){
+  const zone = document.getElementById("spotlightZone");
+  if(!zone) return;
+  const s = spotLoad();
+  if(!s){
+    zone.innerHTML = '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:6px 0 2px">'
+      + '<span style="color:var(--muted);font-size:13px">🔥 No deal spotlight right now.</span>'
+      + '<button class="btn small" onclick="openSpotEditor()">⭐ Set a Spotlight Deal</button></div>';
+    return;
+  }
+  zone.innerHTML = '<div class="sec-title">🔥 Deal Spotlight</div>'
+    + '<div class="card" style="margin-bottom:8px">'
+    + '<div style="display:flex;flex-wrap:wrap;gap:16px;align-items:center">'
+    + '<div style="flex:1 1 260px"><div style="font-size:16px;font-weight:700">' + spotEsc(s.address) + '</div>'
+    + (s.note ? '<div style="color:var(--muted);font-size:13px;margin-top:4px;line-height:1.5">' + spotEsc(s.note) + '</div>' : '')
+    + '</div>'
+    + '<div class="spot-nums">'
+    + '<div><div class="num">' + spotFmt(s.arv) + '</div><div class="lbl">ARV</div></div>'
+    + '<div><div class="num">' + spotFmt(s.repairs) + '</div><div class="lbl">Repairs</div></div>'
+    + '<div><div class="num">' + spotFmt(s.mao) + '</div><div class="lbl">MAO</div></div>'
+    + '<div><div class="num">' + spotFmt(s.lao) + '</div><div class="lbl">LAO · Open</div></div>'
+    + '</div>'
+    + '<div style="display:flex;gap:8px;flex-wrap:wrap">'
+    + '<button class="btn primary" onclick="showPage(\'comps\')">📊 Run Comps</button>'
+    + '<button class="btn small" onclick="openSpotEditor()">✎ Edit</button>'
+    + '<button class="btn small" onclick="removeSpotlight()">✕ Remove</button>'
+    + '</div></div></div>';
+}
+function removeSpotlight(){
+  if(!confirm("Remove the deal spotlight? You can set a new one anytime.")) return;
+  spotSave(null);
+  renderSpotlight();
+}
+function openSpotEditor(){
+  const s = spotLoad() || {address: "", note: "", arv: "", repairs: "", mao: "", lao: ""};
+  document.getElementById("spAddress").value = s.address || "";
+  document.getElementById("spNote").value = s.note || "";
+  document.getElementById("spArv").value = s.arv || "";
+  document.getElementById("spRepairs").value = s.repairs || "";
+  document.getElementById("spMao").value = s.mao || "";
+  document.getElementById("spLao").value = s.lao || "";
+  document.getElementById("spotModal").classList.add("open");
+}
+function closeSpotEditor(){ document.getElementById("spotModal").classList.remove("open"); }
+function saveSpotlight(){
+  const addr = document.getElementById("spAddress").value.trim();
+  if(!addr){ alert("Enter the property address first."); return; }
+  const num = function(id){ const v = parseFloat(document.getElementById(id).value); return isNaN(v) ? 0 : v; };
+  spotSave({address: addr, note: document.getElementById("spNote").value.trim(), arv: num("spArv"), repairs: num("spRepairs"), mao: num("spMao"), lao: num("spLao")});
+  closeSpotEditor();
+  renderSpotlight();
+}
+document.addEventListener("DOMContentLoaded", renderSpotlight);
+</script>
+</body></html>
