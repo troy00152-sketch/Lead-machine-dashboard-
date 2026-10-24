@@ -2518,6 +2518,7 @@ function openLead(id){
     ${propIntelHtml(l)}
     <div class="sec-title" style="font-size:14px;margin-top:14px">🏦 Mortgage Info</div>
     <div id="mortgageInfoBox"><p style="color:var(--muted);font-size:13px">Loading mortgage data…</p></div>
+    <div id="attomBox"></div>
     <div class="sec-title" style="font-size:14px;margin-top:14px">📱 Phone Numbers</div>
     ${phones}
     <div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap">
@@ -2530,6 +2531,7 @@ function openLead(id){
   document.getElementById('leadModal').classList.add('open');
   renderImgFrame(l);
   loadMortgageInfo(l);
+  loadAttomPanel(l);
 }
 /* ============ DEALMACHINE MORTGAGE LOOKUP (via Netlify function) ============ */
 async function loadMortgageInfo(l){
@@ -2603,6 +2605,104 @@ function mortgageInfoHtml(d){
     + numLine
     + '</div>'
     + '';
+}
+/* ============ PROPERTY RECORDS & VERIFIED COMPS (via Netlify function) ============ */
+async function loadAttomPanel(l){
+  const box = document.getElementById('attomBox');
+  if(!box) return;
+  const title = '<div class="sec-title" style="font-size:14px;margin-top:14px">📋 Property Records</div>';
+  box.innerHTML = title + '<p style="color:var(--muted);font-size:13px">Loading ownership records & verified comps…</p>';
+  const fullAddr = [l.address, l.city, l.state, l.zip].filter(Boolean).join(', ');
+  if(!fullAddr){
+    box.innerHTML = title + '<p style="color:var(--muted);font-size:13px">No address to look up.</p>';
+    return;
+  }
+  try{
+    const resp = await fetch('/.netlify/functions/attom-lookup?address=' + encodeURIComponent(fullAddr));
+    if(!resp.ok) throw new Error('HTTP ' + resp.status);
+    const d = await resp.json();
+    if(!d.matched){
+      box.innerHTML = title + '<p style="color:var(--muted);font-size:13px">No ownership records found for this address.</p>';
+      return;
+    }
+    box.innerHTML = attomPanelHtml(d);
+  }catch(e){
+    box.innerHTML = title + '<p style="color:var(--muted);font-size:13px">Ownership records unavailable right now.</p>';
+  }
+}
+function attomPanelHtml(d){
+  const p = d.property || {};
+  const chip = (k,v)=>'<div class="prop-chip"><span class="k">'+k+'</span><span class="v">'+(v==null||v===''?'—':v)+'</span></div>';
+  const owner = [p.owner1, p.owner2].filter(Boolean).join(' & ');
+  const mortVal = p.freeAndClear
+    ? '<span style="color:var(--green)">✓ Free & Clear</span>'
+    : (p.mortgage ? esc(p.mortgage.lender || '—') + (p.mortgage.amount != null ? ' · ' + fmtMoney(p.mortgage.amount) : '') : null);
+  const taxVal = p.assessedValue != null
+    ? fmtMoney(p.assessedValue) + (p.taxAmount != null ? ' · tax ' + fmtMoney(p.taxAmount) + (p.taxYear ? ' (' + p.taxYear + ')' : '') : '')
+    : null;
+  const lotVal = p.lotSqft ? Number(p.lotSqft).toLocaleString() + ' sqft' : (p.lotAcres ? p.lotAcres + ' acres' : null);
+  const saleVal = p.lastSaleDate ? fmtDate(p.lastSaleDate) + (p.lastSaleAmount != null ? ' · ' + fmtMoney(p.lastSaleAmount) : '') : null;
+  const flagLabels = { absentee_owner:['Absentee owner','orange'], free_and_clear:['Free & clear','green'], mortgage_on_record:['Mortgage on record','gray'], long_term_owner:['Long-term owner (10+ yrs)','gray'], vacant_land:['Vacant land','orange'], two_owners_on_record:['Two owners on record','gray'] };
+  const flagBadges = (p.flags || []).map(f => { const fl = flagLabels[f]; return fl ? '<span class="badge ' + fl[1] + '" style="font-size:10px">' + fl[0] + '</span>' : ''; }).filter(Boolean).join(' ');
+
+  let html = '<div class="sec-title" style="font-size:14px;margin-top:14px">📋 Property Records</div>'
+    + '<div class="prop-grid">'
+    + chip('Owner', owner ? esc(owner) : null)
+    + chip('Owner Mailing', p.mailingAddress ? esc(p.mailingAddress) : null)
+    + chip('Occupancy', p.absentee ? 'Absentee owner' : 'Owner occupied')
+    + chip('Mortgage', mortVal)
+    + chip('County Market Value', p.marketValue != null ? fmtMoney(p.marketValue) : null)
+    + chip('Tax Assessed', taxVal)
+    + chip('APN / Parcel', p.apn ? esc(p.apn) : null)
+    + chip('Beds / Baths', (p.beds != null || p.baths != null) ? (p.beds != null ? p.beds : '—') + ' bd · ' + (p.baths != null ? p.baths : '—') + ' ba' : null)
+    + chip('Sq Ft', p.sqft ? Number(p.sqft).toLocaleString() : null)
+    + chip('Year Built', p.yearBuilt || null)
+    + chip('Lot Size', lotVal)
+    + chip('Last Sale', saleVal)
+    + '</div>'
+    + (flagBadges ? '<div style="margin-top:8px">' + flagBadges + '</div>' : '')
+    + (p.legalDescription ? '<div style="margin-top:10px;font-size:12px;color:var(--muted)"><strong>📜 Legal:</strong> ' + esc(String(p.legalDescription).slice(0, 300)) + '</div>' : '');
+
+  /* Value estimate — automated fast screen only */
+  html += '<div class="sec-title" style="font-size:14px;margin-top:14px">💵 Value Estimate <span class="badge gray" style="font-size:10px">FAST SCREEN ONLY</span></div>';
+  if(d.avm){
+    html += '<div style="background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;font-size:13px;line-height:1.6">'
+      + '<div style="font-size:20px;font-weight:800">' + fmtMoney(d.avm.value) + '</div>'
+      + '<div style="color:var(--muted)">Likely range ' + fmtMoney(d.avm.low) + ' – ' + fmtMoney(d.avm.high) + (d.avm.score != null ? ' · estimate confidence ' + d.avm.score + '/100' : '') + '</div>'
+      + '<div style="color:var(--muted);margin-top:6px">Automated estimate for quick screening only — always run the full verified comp check before making an offer.</div>'
+      + '</div>';
+  } else {
+    html += '<p style="color:var(--muted);font-size:13px">No automated estimate for this property (common for vacant land) — the verified comps below carry the value.</p>';
+  }
+
+  /* Verified comps — filtered best 3 with logged exclusions */
+  const c = d.comps;
+  const confColor = c ? ({ 'HIGH':'green', 'MEDIUM':'orange', 'LOW-MEDIUM':'orange', 'LOW':'red' }[c.confidence] || 'gray') : 'gray';
+  html += '<div class="sec-title" style="font-size:14px;margin-top:14px">🏘️ Verified Comps' + (c && c.best && c.best.length ? ' <span class="badge ' + confColor + '" style="font-size:10px">' + c.confidence + ' CONFIDENCE</span>' : '') + '</div>';
+  if(!c || !c.best || !c.best.length){
+    html += '<p style="color:var(--muted);font-size:13px">No verified comparable sales found for this property yet.</p>';
+    return html;
+  }
+  const rows = c.best.map(x => '<tr>'
+    + '<td>' + esc(x.address) + (x.deviations && x.deviations.length ? '<br><small style="color:var(--muted)">' + x.deviations.map(esc).join('; ') + '</small>' : '') + '</td>'
+    + '<td>' + (x.date ? fmtDate(x.date) : '—') + '</td>'
+    + '<td><b>' + fmtMoney(x.amount) + '</b></td>'
+    + '<td>' + (x.distance != null ? Number(x.distance).toFixed(2) + ' mi' : '—') + '</td>'
+    + '<td>' + (x.sqft ? Number(x.sqft).toLocaleString() : '—') + '</td>'
+    + '<td>' + (x.beds != null ? x.beds : '—') + ' / ' + (x.baths != null ? x.baths : '—') + '</td>'
+    + '</tr>').join('');
+  html += '<div style="background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;font-size:13px;line-height:1.6">'
+    + '<div style="margin-bottom:6px"><strong>Comp indication:</strong> <span style="font-size:16px;font-weight:800">' + fmtMoney(c.indication) + '</span>'
+    + (c.range ? ' <span style="color:var(--muted)">avg of best 3 verified sales · range ' + fmtMoney(c.range.low) + ' – ' + fmtMoney(c.range.high) + '</span>' : '')
+    + '</div>'
+    + (c.ppsfCheck ? '<div style="margin-bottom:6px"><strong>$/sqft cross-check:</strong> ' + fmtMoney(c.ppsfCheck) + '</div>' : '')
+    + '<div style="color:var(--muted);margin-bottom:8px">' + esc(c.confidenceText || '') + '</div>'
+    + '<div class="tbl-wrap"><table><thead><tr><th>Address</th><th>Sold</th><th>Price</th><th>Dist</th><th>Sq Ft</th><th>Bd/Ba</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
+    + (c.upperPocket && c.upperPocket.length ? '<div style="margin-top:8px"><strong>Upper-pocket sales nearby (excluded):</strong> ' + c.upperPocket.map(x => esc(x.address) + ' — ' + fmtMoney(x.amount)).join(' · ') + '</div>' : '')
+    + (c.asIsAnchor ? '<div style="margin-top:8px"><strong>As-is anchor:</strong> ' + esc(c.asIsAnchor.address) + ' at ' + fmtMoney(c.asIsAnchor.amount) + ' <span style="color:var(--muted)">(lowest $/sqft verified sale — distressed-condition evidence)</span></div>' : '')
+    + (c.excluded && c.excluded.length ? '<details style="margin-top:8px"><summary style="cursor:pointer;color:var(--muted);font-size:12px">' + c.excluded.length + ' nearby sale(s) excluded — see why</summary><ul style="margin:6px 0 0 18px;padding:0;color:var(--muted);font-size:12px">' + c.excluded.map(x => '<li><strong style="color:var(--text)">' + esc(x.address) + ' · ' + fmtMoney(x.amount) + '</strong> — ' + esc(x.reason) + '</li>').join('') + '</ul></details>' : '')
+    + '</div>';
+  return html;
 }
 function closeModal(){ document.getElementById('leadModal').classList.remove('open'); }
 document.getElementById('leadModal').addEventListener('click', e=>{ if(e.target.id==='leadModal') closeModal(); });
