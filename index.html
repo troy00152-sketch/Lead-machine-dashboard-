@@ -344,6 +344,7 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
     <div class="content" id="content">
       <!-- DASHBOARD TAB -->
       <div class="tab-page active" id="page-dashboard">
+        <div id="pipelineStripZone"></div>
         <div class="card" style="padding:0;overflow:hidden;margin-bottom:20px">
           <div style="display:flex;flex-wrap:wrap">
             <div style="flex:2 1 420px;min-width:300px;background:#000">
@@ -3508,7 +3509,93 @@ function renderContracts(){
   }).join('');
   zone.innerHTML = h + '</div>';
 }
-function renderExtras(){ renderHitList(); renderContracts(); }
+function renderExtras(){ renderHitList(); renderContracts(); renderPipelineStrip(); }
+
+/* ---- Pipeline strip: today's LIVE action from the new HighLevel CRM ----
+   Data comes from a function on the BOT site (profound-nasturtium-bdce9c),
+   which already holds the HighLevel token — this dashboard holds NO token.
+   The strip key lives ONLY in this browser's localStorage (lm_pipeline_key):
+   it is never written into this file. No key / no function / wrong key all
+   degrade to a quiet note — the rest of the dashboard never breaks. */
+function pipelineStripUrl(){ return 'https://profound-nasturtium-bdce9c.netlify.app/.netlify/functions/pipeline-activity'; }
+function pipelineStripKey(){ try{ return (localStorage.getItem('lm_pipeline_key') || '').trim(); }catch(e){ return ''; } }
+function pipelineStripSaveKey(){
+  const inp = document.getElementById('psKeyInput'); if(!inp) return;
+  const k = inp.value.trim(); if(!k) return;
+  try{ localStorage.setItem('lm_pipeline_key', k); }catch(e){}
+  renderPipelineStrip();
+}
+function pipelineStripForgetKey(){ try{ localStorage.removeItem('lm_pipeline_key'); }catch(e){} renderPipelineStrip(); }
+function pipelineStripTime(iso){
+  if(!iso) return '';
+  const d = new Date(iso); if(isNaN(d.getTime())) return '';
+  return d.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' });
+}
+function pipelineStripConnectNote(msg, showInput){
+  const zone = ccEl('pipelineStripZone'); if(!zone) return;
+  let h = '<div class="sec-title">📡 Today\'s Pipeline <span class="badge gray" style="font-size:10px">NOT CONNECTED</span></div>';
+  h += '<div class="card" style="margin-bottom:8px"><div style="font-size:13px;color:var(--muted)">' + esc(msg) + '</div>';
+  if(showInput){
+    h += '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center">'
+      + '<input class="field" id="psKeyInput" type="password" placeholder="Paste the pipeline strip key" style="max-width:280px;flex:1" onkeypress="if(event.key===\'Enter\')pipelineStripSaveKey()" />'
+      + '<button class="btn primary" onclick="pipelineStripSaveKey()">Connect</button></div>'
+      + '<div style="font-size:11px;color:var(--muted2);margin-top:8px">The key is saved only in this browser. Troy adds it as PIPELINE_STRIP_KEY on the bot site first — then paste the same value here.</div>';
+  }
+  h += '</div>';
+  zone.innerHTML = h;
+}
+async function renderPipelineStrip(){
+  const zone = ccEl('pipelineStripZone'); if(!zone) return;
+  const key = pipelineStripKey();
+  if(!key){ pipelineStripConnectNote('Live pipeline is not connected yet. Add PIPELINE_STRIP_KEY to the bot site, then paste it here to switch this strip on.', true); return; }
+  zone.innerHTML = '<div class="sec-title">📡 Today\'s Pipeline <span class="badge gray" style="font-size:10px">LOADING…</span></div>';
+  let resp;
+  try{
+    resp = await fetch(pipelineStripUrl(), { headers: { 'x-pipeline-key': key } });
+  }catch(e){
+    zone.innerHTML = '<div class="sec-title">📡 Today\'s Pipeline <span class="badge gray" style="font-size:10px">UNAVAILABLE</span></div>'
+      + '<div class="card" style="margin-bottom:8px"><div style="font-size:13px;color:var(--muted)">Live pipeline is unreachable right now — your saved leads below are unaffected.</div>'
+      + '<div style="margin-top:10px"><button class="btn small" onclick="renderPipelineStrip()">🔄 Retry</button></div></div>';
+    return;
+  }
+  if(resp.status === 401){ pipelineStripForgetKey(); pipelineStripConnectNote('That strip key was rejected. Paste the current key to reconnect.', true); return; }
+  if(resp.status === 503){ pipelineStripConnectNote('The bot site does not have PIPELINE_STRIP_KEY set yet. Add it in Netlify, redeploy the bot site, then come back here.', false); return; }
+  let d;
+  try{ d = await resp.json(); }catch(e){ d = null; }
+  if(!d || (d.outcome !== 'ok' && d.outcome !== 'partial')){
+    zone.innerHTML = '<div class="sec-title">📡 Today\'s Pipeline <span class="badge gray" style="font-size:10px">UNAVAILABLE</span></div>'
+      + '<div class="card" style="margin-bottom:8px"><div style="font-size:13px;color:var(--muted)">Live pipeline returned an unexpected response — your saved leads below are unaffected.</div>'
+      + '<div style="margin-top:10px"><button class="btn small" onclick="renderPipelineStrip()">🔄 Retry</button></div></div>';
+    return;
+  }
+  const liveBadge = d.partial ? '<span class="badge orange" style="font-size:10px">PARTIAL</span>' : '<span class="badge green" style="font-size:10px">LIVE FROM HIGHLEVEL</span>';
+  const num = function(v){ return (v === null || v === undefined) ? '—' : v; };
+  let h = '<div class="sec-title">📡 Today\'s Pipeline ' + liveBadge + '</div><div class="cards" style="margin-bottom:8px">';
+  h += '<div class="card"><div class="num">' + num(d.repliesToday) + '</div><div class="lbl">💬 Seller replies today</div></div>';
+  let bookedDetail = '';
+  if(d.bookedToday && d.bookedToday.length){
+    bookedDetail = '<div style="font-size:12px;color:var(--muted);margin-top:8px">' + d.bookedToday.map(function(b){
+      return '<div>' + esc(b.title) + (b.startTime ? ' · ' + esc(pipelineStripTime(b.startTime)) : '') + '</div>';
+    }).join('') + '</div>';
+  } else if(d.bookedCount === 0){
+    bookedDetail = '<div style="font-size:12px;color:var(--muted);margin-top:8px">Nothing booked yet today' + (d.happeningToday ? ' · ' + d.happeningToday + ' happening today' : '') + '</div>';
+  }
+  h += '<div class="card"><div class="num">' + num(d.bookedCount) + '</div><div class="lbl">📅 Booked today</div>' + bookedDetail + '</div>';
+  let ucDetail = '';
+  if(d.underContract && d.underContract.length){
+    ucDetail = '<div style="font-size:12px;color:var(--muted);margin-top:8px">' + d.underContract.map(function(u){
+      return '<div>' + esc(u.name) + '</div>';
+    }).join('') + '</div>';
+  }
+  h += '<div class="card"><div class="num">' + num(d.underContractCount) + '</div><div class="lbl">📝 Under Contract — CRM</div>' + ucDetail + '</div>';
+  h += '</div>';
+  let foot = 'As of ' + esc(pipelineStripTime(d.generatedAt) || '') + ' ET';
+  if(d.notes && d.notes.length) foot += ' · ' + esc(d.notes.join(' · '));
+  h += '<div style="display:flex;gap:10px;align-items:center;margin:-2px 0 8px;flex-wrap:wrap"><span style="font-size:11px;color:var(--muted2)">' + foot + '</span>'
+    + '<button class="btn small ghost" onclick="renderPipelineStrip()">🔄 Refresh</button>'
+    + '<button class="btn small ghost" onclick="pipelineStripForgetKey()">Forget key</button></div>';
+  zone.innerHTML = h;
+}
 
 /* ---- Seller Call Coach + Deal Sheet (injected into the lead view) ---- */
 function printDealSheet(){
