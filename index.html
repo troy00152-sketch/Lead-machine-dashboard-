@@ -310,6 +310,7 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
       <button class="nav-item active" data-nav="dashboard"><span class="ico">🏠</span> Dashboard</button>
       <button class="nav-item" data-nav="paste"><span class="ico">📋</span> Paste Leads</button>
       <button class="nav-item" data-nav="myleads"><span class="ico">📁</span> My Leads <span class="cnt" id="leadCountNav">0</span></button>
+      <button class="nav-item" data-nav="listimport"><span class="ico">📥</span> List Import</button>
       <div class="nav-sec">Tools</div>
       <button class="nav-item" data-nav="buyers"><span class="ico">🤝</span> Buyer Match Ai</button>
       <button class="nav-item" data-nav="skiptrace"><span class="ico">🔍</span> Skip Trace</button>
@@ -523,6 +524,7 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
         <div class="sec-title">📁 My Leads <span class="badge orange" id="leadCountBadge">0</span>
           <button class="btn" style="margin-left:auto" onclick="traceAllLeads()">🔍 Skip Trace All</button>
           <button class="btn primary" onclick="pushAllToGHL()">📤 Push All to HighLevel</button>
+          <button class="btn" onclick="exportLeadsCSV()">📥 Download CSV</button>
         </div>
         <div class="filter-bar">
           <button class="btn" onclick="openFilterDrawer()">🎛️ Filters<span class="filter-count-badge" id="filterCountBadge" style="display:none">0</span></button>
@@ -728,6 +730,30 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
           </div>
           <div id="compResult" style="margin-top:14px"></div>
           <p style="color:var(--muted2);font-size:11px;margin-top:12px">MAO tiers: 70% under $120K · 80% $120–220K · 81.5% $220–300K · 82.9% $300–400K · 84.9% $400K+. LAO = MAO × 70%.</p>
+        </div>
+      </div>
+
+      <!-- LIST IMPORT TAB -->
+      <div class="tab-page" id="page-listimport">
+        <div class="sec-title">📥 List Import <span class="badge orange" style="margin-left:8px">Screened · No raw loads</span></div>
+        <div class="card" style="margin-bottom:14px">
+          <p style="color:var(--muted);font-size:13px;margin-bottom:12px">Upload a CSV of leads from anywhere. Every row is screened in order — duplicate guard, mobile-only phones, DNC, FTC — and only rows that pass get the market texting tag. Nothing here sends a text; passed rows enter that market's drip at its next window.</p>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+            <div><label class="lbl">Market (one per run)</label><select class="field" id="liMarket"><option>Indianapolis</option><option>Cleveland</option><option>Kansas City</option><option>Carolina</option><option>Florida</option></select></div>
+            <div><label class="lbl">CSV file</label><input class="field" id="liFile" type="file" accept=".csv,text/csv" /></div>
+          </div>
+          <label style="display:flex;gap:8px;align-items:center;font-size:13px;cursor:pointer;margin-bottom:12px"><input type="checkbox" id="liDryRun" checked style="width:16px;height:16px" /> Dry run — screen and report only, write nothing (uncheck to write)</label>
+          <button class="btn primary" onclick="runListImport()">📥 Run List Import</button>
+          <div id="liStatus" style="font-size:13px;margin-top:10px"></div>
+          <div id="liReport" style="margin-top:12px"></div>
+        </div>
+        <div class="card">
+          <div class="sec-title" style="font-size:14px">⚙️ Import Connection</div>
+          <p style="color:var(--muted);font-size:12px;margin-bottom:12px">The import function URL and its secret live only in this browser's localStorage — never in this page. Set them once; the deploy step gives you both values.</p>
+          <div style="margin-bottom:12px"><label class="lbl">Import function URL</label><input class="field" id="liFuncUrl" placeholder="https://command-center-dpb.netlify.app/.netlify/functions/list-import" /></div>
+          <div style="margin-bottom:12px"><label class="lbl">Function secret (x-cc-secret)</label><input class="field" id="liSecret" type="password" placeholder="Saved in this browser only" /></div>
+          <button class="btn" onclick="saveListImportConn()">Save Connection</button>
+          <span id="liConnMsg" style="font-size:12px;margin-left:8px"></span>
         </div>
       </div>
 
@@ -1019,6 +1045,7 @@ function showPage(name){
   if(el) el.classList.add('active');
   document.querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active', b.dataset.nav===name));
   if(name === 'settings') dmLoadCredits();
+  if(name === 'listimport') liLoadConn();
 }
 
 /* ============ GLOBAL SEARCH ============ */
@@ -2873,15 +2900,124 @@ async function traceAllLeads(){
   var mobCt = untraced.reduce(function(n,l){ return n + leadMobilePhones(l).length; }, 0);
   toast('Traced '+ok+' lead(s)'+(fail?' — '+fail+' failed':'')+' — '+mobCt+' mobile number(s) found');
 }
-function exportLeadsCSV(){
-  if(!leads.length){ toast('No leads to export'); return; }
-  const rows = [['Address','City','State','ZIP','Market','Signal','Status','Phones']];
-  leads.forEach(l=>rows.push([l.address,l.city,l.state,l.zip,l.market,l.distressSignal,l.status,(l.phones||[]).map(p=>p.number).join(';')]));
-  const csv = rows.map(r=>r.map(c=>'"'+String(c).replace(/"/g,'""')+'"').join(',')).join('\n');
+/* ============ CSV EXPORT — import-shape columns (List Import round-trip) ============
+   Header mirrors the List Import slice's expected shape exactly, so an
+   exported file re-imports cleanly: Address, City, State, ZIP,
+   Distress Signal, Owner First, Owner Last, Phone 1, Phone 1 Type,
+   Phone 2, Phone 2 Type, Email, List Source. Phone types are lowercased
+   ('mobile'/'landline'); a missing type exports blank (import treats
+   blank as unknown — never guessed). Pure function: no DOM, no network,
+   safe to unit-test by extraction. */
+function buildImportShapeCSV(list){
+  const header = ['Address','City','State','ZIP','Distress Signal','Owner First','Owner Last','Phone 1','Phone 1 Type','Phone 2','Phone 2 Type','Email','List Source'];
+  function esc(v){ return '"' + String(v === undefined || v === null ? '' : v).replace(/"/g, '""') + '"'; }
+  function splitOwner(l){
+    const full = (l.owner1Name || l.ownerName || '').trim();
+    if(!full) return ['', ''];
+    const sp = full.indexOf(' ');
+    if(sp < 0) return [full, ''];
+    return [full.slice(0, sp), full.slice(sp + 1).trim()];
+  }
+  function normType(t){
+    const s = String(t || '').trim().toLowerCase();
+    if(s === 'mobile') return 'mobile';
+    if(s === 'landline') return 'landline';
+    return '';
+  }
+  const rows = [header];
+  (list || []).forEach(l=>{
+    const o = splitOwner(l);
+    const ph = l.phones || [];
+    const em = (l.emails && l.emails[0]) || l.email || '';
+    const src = l.listSource || l.source || '';
+    rows.push([l.address || '', l.city || '', l.state || '', l.zip || '', l.distressSignal || '', o[0], o[1], ph[0] ? ph[0].number : '', ph[0] ? normType(ph[0].type) : '', ph[1] ? ph[1].number : '', ph[1] ? normType(ph[1].type) : '', em, src]);
+  });
+  return rows.map(r=>r.map(esc).join(',')).join('\n');
+}
+function downloadCSVText(csv, filename){
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
-  a.download = 'acquisition-leads.csv'; a.click();
+  a.download = filename; a.click();
+}
+function exportLeadsCSV(){
+  if(!leads.length){ toast('No leads to export'); return; }
+  downloadCSVText(buildImportShapeCSV(leads), 'acquisition-leads.csv');
   toast('Exported '+leads.length+' leads');
+}
+function hitListLeads(){
+  const all = (typeof leads !== 'undefined' && leads) ? leads : [];
+  const open = all.filter(l => l.status !== 'Dead' && l.status !== 'Closed');
+  const scored = open.map(l => ({ l: l, ws: wholesaleScore(l) })).filter(x => x.ws.score >= 55).sort((a, b) => b.ws.score - a.ws.score).slice(0, 5).map(x => x.l);
+  const stale = open.filter(l => l.status === 'New Lead' && daysSince(l.addedAt) >= 3).sort((a, b) => new Date(a.addedAt) - new Date(b.addedAt)).slice(0, 5);
+  const seen = {};
+  const out = [];
+  scored.concat(stale).forEach(l => { if(!seen[l.id]){ seen[l.id] = 1; out.push(l); } });
+  return out;
+}
+function exportHitListCSV(){
+  const hl = hitListLeads();
+  if(!hl.length){ toast('Hit List is empty'); return; }
+  downloadCSVText(buildImportShapeCSV(hl), 'hit-list.csv');
+  toast('Exported '+hl.length+' Hit List leads');
+}
+
+/* ============ LIST IMPORT (screened CSV import, List Import slice) ============
+   Uploads a CSV to the list-import function, which screens every row
+   (duplicate guard → mobile-only → DNC → FTC → pass) and reports counts
+   + per-row outcomes. The function URL and secret live ONLY in this
+   browser's localStorage (cc_import_url / cc_import_secret) — never in
+   this file, never in a URL. Dry run is ON by default: screen and
+   report only, write nothing, until the operator unchecks it. */
+function liFuncUrl(){ try{ return (localStorage.getItem('cc_import_url') || '').trim() || 'https://command-center-dpb.netlify.app/.netlify/functions/list-import'; }catch(e){ return 'https://command-center-dpb.netlify.app/.netlify/functions/list-import'; } }
+function liSecret(){ try{ return (localStorage.getItem('cc_import_secret') || '').trim(); }catch(e){ return ''; } }
+function saveListImportConn(){
+  const u = document.getElementById('liFuncUrl').value.trim();
+  const s = document.getElementById('liSecret').value.trim();
+  try{ if(u) localStorage.setItem('cc_import_url', u); if(s) localStorage.setItem('cc_import_secret', s); }catch(e){}
+  document.getElementById('liConnMsg').innerHTML = '<span style="color:var(--green)">✓ Saved in this browser</span>';
+  toast('Import connection saved');
+}
+function liLoadConn(){
+  const u = document.getElementById('liFuncUrl'); if(u && !u.value) u.value = liFuncUrl();
+}
+async function runListImport(){
+  const file = document.getElementById('liFile').files[0];
+  const market = document.getElementById('liMarket').value;
+  const dryRun = document.getElementById('liDryRun').checked;
+  const statusEl = document.getElementById('liStatus');
+  const reportEl = document.getElementById('liReport');
+  if(!file){ statusEl.innerHTML = '<span style="color:var(--red)">Choose a CSV file first.</span>'; return; }
+  const secret = liSecret();
+  if(!secret){ statusEl.innerHTML = '<span style="color:var(--red)">Save the import connection (function secret) first.</span>'; return; }
+  statusEl.textContent = 'Uploading and screening…';
+  reportEl.innerHTML = '';
+  try{
+    const csv = await file.text();
+    const resp = await fetch(liFuncUrl(), { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-cc-secret': secret }, body: JSON.stringify({ market, csv, dryRun }) });
+    const rep = await resp.json();
+    if(rep.outcome === 'unauthorized'){ statusEl.innerHTML = '<span style="color:var(--red)">Unauthorized — check the saved function secret.</span>'; return; }
+    if(rep.outcome === 'refused'){ statusEl.innerHTML = '<span style="color:var(--red)">Refused: ' + esc(rep.reason || 'unknown') + (rep.cap ? ' (cap ' + rep.cap + ')' : '') + '</span>'; return; }
+    if(rep.outcome !== 'completed'){ statusEl.innerHTML = '<span style="color:var(--red)">Import failed: ' + esc(rep.outcome || 'unknown') + '</span>'; return; }
+    const t = rep.totals;
+    statusEl.innerHTML = '<span style="color:var(--green)">✓ Done' + (rep.dryRun ? ' (dry run — nothing written)' : '') + '</span> · Batch tag: ' + esc(rep.batchTag) + ' · FTC coverage: ' + esc(rep.ftcCoverage) + (rep.providerOutage ? ' · ⚠️ Provider outage — affected rows failed closed' : '');
+    let h = '<table style="width:100%;font-size:12px;border-collapse:collapse"><tr><th align="left">Row</th><th align="left">Address</th><th align="left">Outcome</th><th align="left">Tags</th></tr>';
+    h += (rep.rows || []).map(r => '<tr><td>' + r.rowNumber + '</td><td>' + esc(r.normalizedAddress) + '</td><td>' + esc(r.outcome) + '</td><td>' + esc((r.tags || []).join(', ')) + '</td></tr>').join('');
+    h += '</table>';
+    reportEl.innerHTML = '<div style="font-size:13px;margin-bottom:8px">Rows: ' + t.rowsReceived + ' · Passed: ' + t.passed + ' · DNC: ' + t.failDnc + ' · FTC: ' + t.failFtc + ' · Landline-only: ' + t.failLandlineOnly + ' · No phone: ' + t.failNoPhone + ' · Unknown: ' + t.failUnknown + ' · Duplicates skipped: ' + t.duplicateSkipped + ' · Bad rows: ' + t.rejectedBad + ' · Reconciled: ' + (rep.reconciled ? 'yes' : 'NO — MISMATCH') + '</div>' + h + '<div style="margin-top:10px"><button class="btn" onclick="downloadListImportOutcome()">📥 Download Per-Row Outcome CSV</button></div>';
+    window._liOutcome = rep.rows || [];
+  }catch(e){
+    statusEl.innerHTML = '<span style="color:var(--red)">Import request failed: ' + esc(String(e && e.message || e)) + '</span>';
+  }
+}
+function downloadListImportOutcome(){
+  const rows = window._liOutcome || [];
+  if(!rows.length){ toast('No import outcome to download'); return; }
+  const header = ['Row','Normalized Address','Outcome','Tags'];
+  const esc2 = v => '"' + String(v === undefined || v === null ? '' : v).replace(/"/g, '""') + '"';
+  const csv = [header].concat(rows.map(r => [r.rowNumber, r.normalizedAddress, r.outcome, (r.tags || []).join(';')])).map(r => r.map(esc2).join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+  a.download = 'list-import-outcome.csv'; a.click();
 }
 
 /* ============ SKIP TRACE (Tracerfy) ============ */
@@ -3479,7 +3615,7 @@ function renderHitList(){
   const scored = open.map(l => ({ l: l, ws: wholesaleScore(l) })).filter(x => x.ws.score >= 55).sort((a, b) => b.ws.score - a.ws.score).slice(0, 5);
   const stale = open.filter(l => l.status === 'New Lead' && daysSince(l.addedAt) >= 3).sort((a, b) => new Date(a.addedAt) - new Date(b.addedAt)).slice(0, 5);
   if(!scored.length && !stale.length){ zone.innerHTML = ''; return; }
-  let h = '<div class="sec-title">🎯 Today\'s Hit List</div><div class="card" style="margin-bottom:8px">';
+  let h = '<div class="sec-title">🎯 Today\'s Hit List<button class="btn small" style="float:right" onclick="exportHitListCSV()">📥 Download CSV</button></div><div class="card" style="margin-bottom:8px">';
   if(scored.length){
     h += '<div style="font-size:11px;color:var(--muted);letter-spacing:.06em;margin-bottom:4px">HOTTEST — HIT THESE FIRST</div>';
     h += scored.map(x => '<div class="hit-row" onclick="openLead(\'' + x.l.id + '\')"><span class="badge ' + x.ws.color + '">' + x.ws.score + ' · ' + x.ws.label + '</span><span class="hit-addr">' + esc(x.l.address) + '</span><span class="hit-meta">' + esc(x.l.market || '') + '</span></div>').join('');
@@ -3650,7 +3786,7 @@ const coachObs = new MutationObserver(function(){
 });
 
 /* ---- Command palette (Cmd/Ctrl + K) ---- */
-const CMDK_PAGES = [['dashboard','🏠 Dashboard'],['paste','📋 Paste Leads'],['myleads','📁 My Leads'],['buyers','🤝 Buyer Match Ai'],['skiptrace','🔍 Skip Trace'],['listsearch','🏗️ List Builder'],['people','👤 People Search'],['comps','📊 Comps'],['settings','⚙️ Settings']];
+const CMDK_PAGES = [['dashboard','🏠 Dashboard'],['paste','📋 Paste Leads'],['myleads','📁 My Leads'],['listimport','📥 List Import'],['buyers','🤝 Buyer Match Ai'],['skiptrace','🔍 Skip Trace'],['listsearch','🏗️ List Builder'],['people','👤 People Search'],['comps','📊 Comps'],['settings','⚙️ Settings']];
 let cmdkSel = 0;
 let cmdkItems = [];
 function cmdkOpen(){ const o = ccEl('cmdkOverlay'); if(!o) return; o.classList.add('open'); const i = ccEl('cmdkInput'); i.value = ''; cmdkRender(''); setTimeout(function(){ i.focus(); }, 50); }
