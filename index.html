@@ -755,7 +755,7 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
           <div class="sec-title" style="font-size:14px">🗺️ Map — comps near the subject</div>
           <div id="compMap" style="height:320px;border-radius:10px;border:1px solid var(--line);margin-bottom:8px"></div>
           <div id="compMapNote" style="color:var(--muted);font-size:12px;margin-bottom:6px"></div>
-          <div style="font-size:12px;color:var(--muted);margin-bottom:10px">🟠 Subject &nbsp; 🟢 Sold comp &nbsp; 🟡 Pending &nbsp; ✓ In ARV</div>
+          <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Map key: <span style="display:inline-block;background:#ff6b1a;color:#fff;font-weight:800;font-size:11px;padding:3px 8px;border-radius:8px">SUBJECT</span> &nbsp; <span style="display:inline-block;background:#2ecc71;color:#fff;font-weight:800;font-size:11px;padding:3px 8px;border-radius:8px">✓ picked comp — in ARV</span> &nbsp; <span style="display:inline-block;background:#1e8449;color:#fff;font-weight:800;font-size:11px;padding:3px 8px;border-radius:8px">comp</span> &nbsp; <span style="display:inline-block;background:#e6a200;color:#fff;font-weight:800;font-size:11px;padding:3px 8px;border-radius:8px">pending</span></div>
           <div id="compListBox"></div>
           <div id="compPickBar" style="margin:12px 0"></div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
@@ -1512,7 +1512,7 @@ function renderPropMap(){
   const pinned = all.filter(p => p.latitude !== null && p.latitude !== undefined && p.longitude !== null && p.longitude !== undefined);
   const noCoords = all.length - pinned.length;
   if(note) note.textContent = pinned.length
-    ? pinned.length + ' pinned' + (noCoords ? ' (' + noCoords + ' without coordinates)' : '') + ' · 🔵 absentee · 🟠 other'
+    ? pinned.length + ' price tags' + (noCoords ? ' (' + noCoords + ' without coordinates)' : '') + ' · 🔵 absentee · 🟠 other · tag shows estimated value, or No value'
     : 'No coordinates on these results.';
   if(!propMap){
     propMap = L.map('propSearchMap', { scrollWheelZoom: false });
@@ -1527,7 +1527,7 @@ function renderPropMap(){
       maxZoom: 19
     }).addTo(propMap);
   }
-  propMap.eachLayer(l=>{ if(l instanceof L.CircleMarker) propMap.removeLayer(l); });
+  propMap.eachLayer(l=>{ if(l instanceof L.Marker) propMap.removeLayer(l); });
   if(!pinned.length) return;
   const bounds = L.latLngBounds();
   pinned.forEach(p=>{
@@ -1535,10 +1535,8 @@ function renderPropMap(){
     const abs = isAbsenteeProp(p);
     const owner = getOwnerName(p);
     const beds = numOrDash(p.bedrooms), baths = numOrDash(p.bathrooms);
-    const m = L.circleMarker([p.latitude, p.longitude], {
-      radius: 8, color: '#0d1117', weight: 2,
-      fillColor: abs ? '#3498db' : '#ff6b1a', fillOpacity: 0.9
-    }).addTo(propMap);
+    const tagLabel = (p._avm != null && p._avm !== '') ? compMapPriceLabel(p._avm) : 'No value';
+    const m = L.marker([p.latitude, p.longitude], { icon: priceTagIcon(tagLabel, abs ? '#3498db' : '#ff6b1a') }).addTo(propMap);
     m.bindPopup('<div style="font-size:13px;line-height:1.7;min-width:180px;color:#182234">'
       + '<div style="font-weight:700">' + esc(p.addressLine1 || '') + '</div>'
       + '<div style="color:#666">' + esc((p.city||'') + ', ' + (p.state||'') + ' ' + (p.zipCode||'')) + '</div>'
@@ -4043,8 +4041,18 @@ function compMapPriceLabel(amount){
   if(amount >= 1000) return '$' + Math.round(amount/1000) + 'k';
   return '$' + Number(amount).toLocaleString();
 }
-function compPinIcon(label, bg){
-  return L.divIcon({ className: '', html: '<div style="transform:translate(-50%,-50%);background:' + bg + ';color:#fff;font-weight:800;font-size:11px;padding:4px 9px;border-radius:999px;border:2px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.45);white-space:nowrap">' + esc(label) + '</div>' });
+/* DealMachine-style price tags: rounded tag with the price printed on it
+   and a pointer tail landing on the location. Colors are OUR legend —
+   DealMachine's pin-color meanings are not publicly documented, so no
+   meaning is copied: orange = subject, green = picked comp (in ARV),
+   dark green = unpicked comp, amber = pending. Search-map tags reuse this
+   same renderer (blue = absentee, orange = other). */
+function priceTagIcon(label, bg){
+  return L.divIcon({ className: '', iconSize: [0, 0], iconAnchor: [0, 0],
+    html: '<div style="transform:translate(-50%,-100%);text-align:center;line-height:1">'
+      + '<div style="display:inline-block;background:' + bg + ';color:#fff;font-weight:800;font-size:11px;padding:5px 9px;border-radius:8px;border:2px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.45);white-space:nowrap">' + esc(label) + '</div>'
+      + '<div style="width:10px;height:10px;background:' + bg + ';transform:rotate(45deg);margin:-5px auto 0;border-right:2px solid #fff;border-bottom:2px solid #fff"></div>'
+      + '</div>' });
 }
 function renderCompMap(){
   const el = document.getElementById('compMap');
@@ -4074,7 +4082,7 @@ function renderCompMap(){
   const bounds = L.latLngBounds();
   let hasPin = false;
   if(subjLat != null && subjLng != null){
-    const m = L.marker([subjLat, subjLng], { icon: compPinIcon('SUBJECT', '#ff6b1a') }).addTo(compMap);
+    const m = L.marker([subjLat, subjLng], { icon: priceTagIcon('SUBJECT', '#ff6b1a') }).addTo(compMap);
     const addr = (document.getElementById('compListAddr')||{}).value || 'Subject property';
     m.bindPopup('<div style="font-size:13px;line-height:1.7;color:#182234"><b>' + esc(addr) + '</b><div>Subject property</div></div>');
     compMapMarkers.push(m); bounds.extend([subjLat, subjLng]); hasPin = true;
@@ -4084,7 +4092,7 @@ function renderCompMap(){
     const status = String(r.status || 'sold').toLowerCase();
     const bg = status === 'pending' ? '#e6a200' : (picked ? '#2ecc71' : '#1e8449');
     const label = (picked ? '✓ ' : '') + compMapPriceLabel(r.amount);
-    const m = L.marker([num(r.latitude), num(r.longitude)], { icon: compPinIcon(label, bg) }).addTo(compMap);
+    const m = L.marker([num(r.latitude), num(r.longitude)], { icon: priceTagIcon(label, bg) }).addTo(compMap);
     m.bindPopup('<div style="font-size:13px;line-height:1.7;min-width:170px;color:#182234">'
       + '<div style="font-weight:700">' + esc(r.address || '') + '</div>'
       + '<div>' + (r.amount != null ? '$' + Number(r.amount).toLocaleString() : '—') + (r.distance != null ? ' · ' + Number(r.distance).toFixed(2) + ' mi' : '') + '</div>'
