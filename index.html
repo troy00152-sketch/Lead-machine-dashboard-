@@ -729,7 +729,7 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
             <div style="font-weight:800;font-size:13px;margin-bottom:4px">🚦 Listing Check — FIRST, before any comp math</div>
             <p style="color:var(--muted);font-size:12px;margin:0 0 10px">If it's listed with a realtor, PASS immediately — no MAO, no LAO, no offer. Check the listing, then set the status here. Listing fields are set by hand from the check — no feed supplies them.</p>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px">
-              <div><label class="lbl">Property address (for listing links)</label><input class="field" id="compListAddr" placeholder="123 Main St, City, ST ZIP" oninput="updateCompLinks()" /></div>
+              <div><label class="lbl">Property address (for listing links)</label><input class="field" id="compListAddr" placeholder="123 Main St, City, ST ZIP" oninput="updateCompLinks()" onkeydown="if(event.key==='Enter'){event.preventDefault();loadCompsForAddress();}" /><button class="btn primary" style="margin-top:8px" onclick="loadCompsForAddress()" title="Load everything for this address — comps, map, mortgage, and offer math">🔍 Search</button></div>
               <div><label class="lbl">Listing status *</label><select class="field" id="compListStatus" onchange="calcComp()"><option value="">Not checked yet</option><option value="not-listed">Not listed — clear to comp</option><option value="listed">Listed with a realtor — PASS</option></select></div>
               <div><label class="lbl">Listing agent</label><input class="field" id="compListAgent" placeholder="Agent name / brokerage" oninput="calcComp()" /></div>
               <div><label class="lbl">List price ($)</label><input class="field" id="compListPrice" type="number" placeholder="115000" oninput="calcComp()" /></div>
@@ -1092,11 +1092,18 @@ function doGlobalSearch(){
   recentSearches.unshift({q, at:new Date().toISOString()});
   recentSearches = recentSearches.slice(0,8);
   saveState(); renderRecentSearches();
-  // Address-like query (starts with a house number or is a ZIP) -> live DealMachine property lookup on the Dashboard page
+  // Address-like query (starts with a house number) -> ONE-PAGE flow: land
+  // on the Comps page with everything auto-loading. No lead-modal detour,
+  // no extra lookup. A bare 5-digit ZIP keeps the old dashboard prompt
+  // (a ZIP alone is not a property address).
   if(/^\d/.test(q)){
-    showPage('dashboard');
-    const ps = document.getElementById('propSearchZip');
-    if(ps){ ps.value = q; searchPropertiesByZip(); }
+    if(/^\d{5}$/.test(q)){
+      showPage('dashboard');
+      const ps = document.getElementById('propSearchZip');
+      if(ps){ ps.value = q; searchPropertiesByZip(); }
+      return;
+    }
+    openCompsForAddress(q);
     return;
   }
   // Search leads
@@ -3553,11 +3560,14 @@ function updateCompLinks(){
   }
   if(addrChanged){
     /* Stale offer math belongs to the old address: clear the ARV field and
-       the MAO/LAO/spread display. This runs AFTER the gate reset above, so a
-       calcComp inside the reset cannot re-render stale cards from the old ARV. */
+       the MAO/LAO/spread display, plus the "Loaded N verified sale(s)"
+       label (label text only — it must clear like everything else). This
+       runs AFTER the gate reset above, so a calcComp inside the reset
+       cannot re-render stale cards from the old ARV. */
     const arvEl = document.getElementById('compARV'); if(arvEl) arvEl.value = '';
     const res = document.getElementById('compResult'); if(res) res.innerHTML = '';
     const tt = document.getElementById('compTierTable'); if(tt) tt.innerHTML = '';
+    const lm = document.getElementById('compLoadMsg'); if(lm) lm.textContent = '';
   }
   compLastAddr = v;
   if(!compListingGroupSet()) compGateAddr = '';
@@ -4107,6 +4117,20 @@ function toggleCompPick(i){
   if(avg && arvEl) arvEl.value = avg;
   renderCompList();
   calcComp();
+}
+/* ONE-PAGE FLOW: one search lands on the Comps page with everything
+   auto-loading — verified comps, map pins, mortgage, offer math. Forces
+   the address-change reset path first (sentinel last-address, so stale
+   gate/math/label from a previous property can never survive), then runs
+   the comps load, which fills mortgage, map, picks/ARV, and math from the
+   same response. No lead-modal detour, no extra lookup. */
+function openCompsForAddress(addr){
+  const a = document.getElementById('compListAddr');
+  if(a) a.value = addr;
+  compLastAddr = '__force_reset__';
+  showPage('comps');
+  updateCompLinks();
+  loadCompsForAddress();
 }
 async function loadCompsForAddress(){
   const addrEl = document.getElementById('compListAddr');
