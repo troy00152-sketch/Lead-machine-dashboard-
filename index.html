@@ -724,6 +724,19 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
       <div class="tab-page" id="page-comps">
         <div class="sec-title">📊 Quick Comp Calculator</div>
         <div class="card">
+          <div style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:12px">
+            <div style="font-weight:800;font-size:13px;margin-bottom:4px">🚦 Listing Check — FIRST, before any comp math</div>
+            <p style="color:var(--muted);font-size:12px;margin:0 0 10px">If it's listed with a realtor, PASS immediately — no MAO, no LAO, no offer. Check the listing on DealMachine or Zillow, then set the status here.</p>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px">
+              <div><label class="lbl">Property address (for listing links)</label><input class="field" id="compListAddr" placeholder="123 Main St, City, ST ZIP" oninput="updateCompLinks()" /></div>
+              <div><label class="lbl">Listing status *</label><select class="field" id="compListStatus" onchange="calcComp()"><option value="">Not checked yet</option><option value="not-listed">Not listed — clear to comp</option><option value="listed">Listed with a realtor — PASS</option></select></div>
+              <div><label class="lbl">Listing agent</label><input class="field" id="compListAgent" placeholder="Agent name / brokerage" /></div>
+              <div><label class="lbl">List price ($)</label><input class="field" id="compListPrice" type="number" placeholder="115000" /></div>
+              <div><label class="lbl">Days on market</label><input class="field" id="compListDom" type="number" placeholder="2" /></div>
+              <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap"><a id="compZillowLink" class="btn" href="https://www.zillow.com/" target="_blank" rel="noopener" style="text-decoration:none">🏠 Check on Zillow ↗</a><a class="btn" href="https://dealmachine.com/" target="_blank" rel="noopener" style="text-decoration:none">Open DealMachine ↗</a></div>
+            </div>
+            <div id="compGateMsg"></div>
+          </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
             <div><label class="lbl">ARV ($)</label><input class="field" id="compARV" type="number" placeholder="150000" oninput="calcComp()" /></div>
             <div><label class="lbl">Repairs ($)</label><input class="field" id="compRepairs" type="number" placeholder="30000" oninput="calcComp()" /></div>
@@ -2455,6 +2468,11 @@ function analyzeDeal(id){
   if(!l) return;
   const box = document.getElementById('analysisBox');
   if(!box) return;
+  if(l.listingStatus === 'listed'){
+    box.innerHTML = '<div class="sec-title" style="font-size:14px;margin-top:14px">🤖 Deal Analysis</div>' + listingPassBanner(l);
+    box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    return;
+  }
 
   const arv = l.estimatedValue || l.arv || null;
   const repairs = Math.max(0, Number(l.repairs) || 0);
@@ -2543,6 +2561,7 @@ function openLead(id){
     </div>
     <div class="img-frame" id="imgFrame"></div>
     <div id="imgGallery"></div>
+    <div id="listingGateBox" style="margin-top:12px"></div>
     ${propIntelHtml(l)}
     <div class="sec-title" style="font-size:14px;margin-top:14px">🏦 Mortgage Info</div>
     <div id="mortgageInfoBox"><p style="color:var(--muted);font-size:13px">Loading mortgage data…</p></div>
@@ -2558,8 +2577,60 @@ function openLead(id){
     <div id="analysisBox"></div>`;
   document.getElementById('leadModal').classList.add('open');
   renderImgFrame(l);
+  renderListingGate(l);
   loadMortgageInfo(l);
   loadAttomPanel(l);
+}
+/* ============ LISTING GATE — listed-first hard lock (Troy, Oct 28, 2026) ============ */
+/* The photo above the gate is the house (street view). Listing status is NOT in the
+   DealMachine API or ATTOM — it comes from the DealMachine/Zillow listing page, checked
+   by hand (free view) and set here. A realtor listing = PASS, enforced everywhere comp
+   math runs (this gate, the Comp Calculator, Analyze Deal, and the Verified Comps panel). */
+function listingPassBanner(l){
+  if(!l || l.listingStatus !== 'listed') return '';
+  return '<div style="background:#3d0d0d;border:1px solid #ff4d4d;border-radius:10px;padding:12px;font-size:13px;font-weight:800;color:#ff8080;margin-bottom:12px">⛔ PASS — Listed with a realtor'
+    + (l.listingAgent ? ' · ' + esc(l.listingAgent) : '')
+    + (l.listingPrice ? ' · list ' + fmtMoney(l.listingPrice) : '')
+    + (l.listingDom ? ' · ' + esc(String(l.listingDom)) + ' days on market' : '')
+    + '<br><span style="font-weight:400;color:var(--muted)">No MAO, no LAO, no offer. Comps below are reference only.</span></div>';
+}
+function listingGateFields(l){
+  return '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:10px">'
+    + '<input class="field" placeholder="Listing agent" value="' + esc(l.listingAgent || '') + '" onchange="setListingField(\'' + l.id + '\',\'listingAgent\',this.value)" />'
+    + '<input class="field" type="number" placeholder="List price $" value="' + (l.listingPrice || '') + '" onchange="setListingField(\'' + l.id + '\',\'listingPrice\',this.value)" />'
+    + '<input class="field" type="number" placeholder="Days on market" value="' + (l.listingDom || '') + '" onchange="setListingField(\'' + l.id + '\',\'listingDom\',this.value)" />'
+    + '</div>';
+}
+function listingGateHtml(l){
+  const links = '<div style="font-size:12px;color:var(--muted)">Photo above is the house. <a href="' + zillowUrl(l) + '" target="_blank" rel="noopener">Check listing on Zillow ↗</a> · <a href="https://dealmachine.com/" target="_blank" rel="noopener">Open DealMachine ↗</a></div>';
+  if(l.listingStatus === 'listed') return listingPassBanner(l) + links
+    + '<div style="margin-top:8px"><button class="btn ghost" style="padding:4px 8px" onclick="setListingStatus(\'' + l.id + '\',\'\')">Clear status</button></div>'
+    + listingGateFields(l);
+  if(l.listingStatus === 'not-listed') return '<div style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px;font-size:13px"><span style="color:var(--green);font-weight:800">✓ Not listed — clear to comp</span> <span style="color:var(--muted)">(photo above is the house)</span> <button class="btn ghost" style="padding:4px 8px;margin-left:8px" onclick="setListingStatus(\'' + l.id + '\',\'listed\')">Mark listed</button></div>' + links;
+  return '<div style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px;font-size:13px">'
+    + '<div style="font-weight:800;margin-bottom:4px">🚦 Listing Check — FIRST, before any comp math</div>'
+    + '<div style="color:var(--muted);margin-bottom:8px">⚠️ Listing status not checked. If it\'s listed with a realtor, PASS immediately.</div>'
+    + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'
+    + '<a class="btn" href="' + zillowUrl(l) + '" target="_blank" rel="noopener" style="text-decoration:none">🏠 Check on Zillow ↗</a>'
+    + '<a class="btn" href="https://dealmachine.com/" target="_blank" rel="noopener" style="text-decoration:none">Open DealMachine ↗</a>'
+    + '<button class="btn" onclick="setListingStatus(\'' + l.id + '\',\'not-listed\')">✓ Not listed</button>'
+    + '<button class="btn" onclick="setListingStatus(\'' + l.id + '\',\'listed\')">⛔ Listed with realtor</button>'
+    + '</div>'
+    + listingGateFields(l) + '</div>';
+}
+function renderListingGate(l){
+  const box = document.getElementById('listingGateBox'); if(!box) return;
+  box.innerHTML = listingGateHtml(l);
+}
+function setListingStatus(id, status){
+  const l = leads.find(x=>x.id===id); if(!l) return;
+  l.listingStatus = status; saveState();
+  if(currentLeadId === id) openLead(id);
+}
+function setListingField(id, field, val){
+  const l = leads.find(x=>x.id===id); if(!l) return;
+  l[field] = val; saveState();
+  if(currentLeadId === id) openLead(id);
 }
 /* ============ DEALMACHINE MORTGAGE LOOKUP (via Netlify function) ============ */
 async function loadMortgageInfo(l){
@@ -2650,15 +2721,15 @@ async function loadAttomPanel(l){
     if(!resp.ok) throw new Error('HTTP ' + resp.status);
     const d = await resp.json();
     if(!d.matched){
-      box.innerHTML = title + '<p style="color:var(--muted);font-size:13px">No ownership records found for this address.</p>';
+      box.innerHTML = title + listingPassBanner(l) + '<p style="color:var(--muted);font-size:13px">No ownership records found for this address.</p>';
       return;
     }
-    box.innerHTML = attomPanelHtml(d);
+    box.innerHTML = listingPassBanner(l) + attomPanelHtml(d, l);
   }catch(e){
     box.innerHTML = title + '<p style="color:var(--muted);font-size:13px">Ownership records unavailable right now.</p>';
   }
 }
-function attomPanelHtml(d){
+function attomPanelHtml(d, l){
   const p = d.property || {};
   const chip = (k,v)=>'<div class="prop-chip"><span class="k">'+k+'</span><span class="v">'+(v==null||v===''?'—':v)+'</span></div>';
   const owner = [p.owner1, p.owner2].filter(Boolean).join(' & ');
@@ -2707,6 +2778,7 @@ function attomPanelHtml(d){
   const c = d.comps;
   const confColor = c ? ({ 'HIGH':'green', 'MEDIUM':'orange', 'LOW-MEDIUM':'orange', 'LOW':'red' }[c.confidence] || 'gray') : 'gray';
   html += '<div class="sec-title" style="font-size:14px;margin-top:14px">🏘️ Verified Comps' + (c && c.best && c.best.length ? ' <span class="badge ' + confColor + '" style="font-size:10px">' + c.confidence + ' CONFIDENCE</span>' : '') + '</div>';
+  if(l && l.listingStatus === 'listed') html += '<p style="color:#ff8080;font-size:12px;font-weight:700">⛔ PASS — reference only, do not offer.</p>';
   if(!c || !c.best || !c.best.length){
     html += '<p style="color:var(--muted);font-size:13px">No verified comparable sales found for this property yet.</p>';
     return html;
@@ -3392,10 +3464,28 @@ function compTier(arv){
   if(arv<400000) return .829;
   return .849;
 }
+function updateCompLinks(){
+  const a = document.getElementById('compListAddr');
+  const z = document.getElementById('compZillowLink');
+  if(!z) return;
+  const v = a ? a.value.trim() : '';
+  z.href = v ? 'https://www.zillow.com/homes/' + v.replace(/,/g,'').trim().replace(/\s+/g,'-') + '_rb/' : 'https://www.zillow.com/';
+}
 function calcComp(){
+  const st = document.getElementById('compListStatus');
+  const gate = document.getElementById('compGateMsg');
+  const el = document.getElementById('compResult');
+  if(st && st.value === 'listed'){
+    const agent = (document.getElementById('compListAgent')||{}).value || '';
+    const lp = (document.getElementById('compListPrice')||{}).value || '';
+    const dom = (document.getElementById('compListDom')||{}).value || '';
+    if(gate) gate.innerHTML = '<div style="background:#3d0d0d;border:1px solid #ff4d4d;border-radius:8px;padding:10px;font-size:13px;font-weight:800;color:#ff8080">⛔ PASS — Listed with a realtor' + (agent ? ' · ' + esc(agent) : '') + (lp ? ' · list $' + Number(lp).toLocaleString() : '') + (dom ? ' · ' + dom + ' days on market' : '') + '<br><span style="font-weight:400;color:var(--muted)">No MAO, no LAO, no offer. Move on.</span></div>';
+    if(el) el.innerHTML = '';
+    return;
+  }
+  if(gate) gate.innerHTML = (st && st.value === 'not-listed') ? '<div style="font-size:12px;color:var(--green)">✓ Not listed — clear to comp.</div>' : '<div style="font-size:12px;color:var(--muted)">⚠️ Listing status not checked — check before offering.</div>';
   const arv = parseFloat(document.getElementById('compARV').value)||0;
   const rep = parseFloat(document.getElementById('compRepairs').value)||0;
-  const el = document.getElementById('compResult');
   if(!arv){ el.innerHTML=''; return; }
   const tier = compTier(arv);
   const mao = Math.round((arv-rep)*tier);
