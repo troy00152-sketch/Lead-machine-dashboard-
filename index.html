@@ -1470,10 +1470,9 @@ let propView = 'list';
 let propMap = null;
 let propMapTileLayer = null;
 function propMapTiles(){
-  const light = document.documentElement.getAttribute('data-theme') === 'light';
-  return light
-    ? 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'
-    : 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
+  // OpenStreetMap standard tiles need no key. The previous basemap provider
+  // now gates tiles behind an API key and renders watermark tiles — do not use.
+  return 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
 }
 function setPropView(v){ propView = v; syncPropView(); }
 function syncPropView(){
@@ -1517,7 +1516,7 @@ function renderPropMap(){
   if(propMapTileLayer){ propMapTileLayer.setUrl(tileUrl); }
   else{
     propMapTileLayer = L.tileLayer(tileUrl, {
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
       maxZoom: 19
     }).addTo(propMap);
   }
@@ -3501,6 +3500,10 @@ function compTierLabel(arv){
 let compRows = [];
 let compPicks = [];
 let compLoadedAddr = '';
+/* Address the current listing-gate group belongs to. The gate fields are ONE
+   group (status, agent, price, DOM, date, sqft) — they reset together when
+   the address changes, never numbers without a status. */
+let compGateAddr = '';
 /* Live-map state on the Comps page. Pins render ONLY from coordinates already
    present in the data — comp row latitude/longitude when the feed supplies
    them, subject latitude/longitude from the lead or an already-fetched
@@ -3514,6 +3517,17 @@ function compStatus(){
   const st = document.getElementById('compListStatus');
   return st ? st.value : '';
 }
+function compListingGroupSet(){
+  const v = (id)=> (document.getElementById(id)||{}).value || '';
+  return compStatus() !== '' || v('compListAgent') !== '' || v('compListPrice') !== '' || v('compListDom') !== '' || v('compListDate') !== '' || v('compListSqft') !== '';
+}
+function resetCompListingGate(){
+  const st = document.getElementById('compListStatus'); if(st) st.value = '';
+  ['compListAgent','compListPrice','compListDom','compListDate','compListSqft'].forEach(id=>{ const el = document.getElementById(id); if(el) el.value = ''; });
+  const n = document.getElementById('compCheckedNote'); if(n) n.textContent = '';
+  compGateAddr = '';
+  calcComp();
+}
 function updateCompLinks(){
   const a = document.getElementById('compListAddr');
   const z = document.getElementById('compZillowLink');
@@ -3521,6 +3535,10 @@ function updateCompLinks(){
   if(z) z.href = v ? 'https://www.zillow.com/homes/' + v.replace(/,/g,'').trim().replace(/\s+/g,'-') + '_rb/' : 'https://www.zillow.com/';
   const head = document.getElementById('compSubjectHead');
   if(head) head.textContent = v ? '📍 ' + v : 'Comps — enter a property address below';
+  if(compGateAddr && v !== compGateAddr && compListingGroupSet()){
+    resetCompListingGate();
+  }
+  if(!compListingGroupSet()) compGateAddr = '';
   if(compRows.length && v !== compLoadedAddr){
     compRows = []; compPicks = []; compLoadedAddr = '';
     compSubjectLat = null; compSubjectLng = null;
@@ -3892,6 +3910,11 @@ function downloadCompReport(){
   w.document.write(html); w.document.close(); w.focus();
 }
 function calcComp(){
+  /* The listing group belongs to the address in the box right now. Stamp it
+     here — every listing-field edit runs calcComp — so an address change can
+     clear the whole group together in updateCompLinks. */
+  const addrNow = (document.getElementById('compListAddr')||{}).value.trim();
+  if(addrNow && compListingGroupSet()) compGateAddr = addrNow;
   renderCompMortgage();
   const st = document.getElementById('compListStatus');
   const gate = document.getElementById('compGateMsg');
@@ -4010,7 +4033,7 @@ function renderCompMap(){
   if(compMapTileLayer){ compMapTileLayer.setUrl(tileUrl); }
   else{
     compMapTileLayer = L.tileLayer(tileUrl, {
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
       maxZoom: 19
     }).addTo(compMap);
   }
@@ -4107,11 +4130,17 @@ function openCompsForLead(id){
   showPage('comps');
   const addr = [l.address, l.city, l.state, l.zip].filter(Boolean).join(', ');
   const addrEl = document.getElementById('compListAddr'); if(addrEl) addrEl.value = addr;
-  const st = document.getElementById('compListStatus'); if(st) st.value = l.listingStatus === 'listed' ? 'listed' : l.listingStatus === 'not-listed' ? 'not-listed' : '';
-  const ag = document.getElementById('compListAgent'); if(ag) ag.value = l.listingAgent || '';
-  const lp = document.getElementById('compListPrice'); if(lp) lp.value = l.listingPrice || '';
-  const dm = document.getElementById('compListDom'); if(dm) dm.value = l.listingDom || '';
+  /* A lead's listing set is carried ONLY as a whole: no status means no
+     price/DOM/agent either — never numbers without a status. */
+  const hasListingStatus = l.listingStatus === 'listed' || l.listingStatus === 'not-listed';
+  const st = document.getElementById('compListStatus'); if(st) st.value = hasListingStatus ? l.listingStatus : '';
+  const ag = document.getElementById('compListAgent'); if(ag) ag.value = hasListingStatus ? (l.listingAgent || '') : '';
+  const lp = document.getElementById('compListPrice'); if(lp) lp.value = hasListingStatus ? (l.listingPrice || '') : '';
+  const dm = document.getElementById('compListDom'); if(dm) dm.value = hasListingStatus ? (l.listingDom || '') : '';
+  const dt = document.getElementById('compListDate'); if(dt) dt.value = '';
+  const nn = document.getElementById('compCheckedNote'); if(nn) nn.textContent = '';
   const sq = document.getElementById('compListSqft'); if(sq && l.sqft) sq.value = l.sqft;
+  compGateAddr = addr;
   const ma = document.getElementById('compMortAmt');
   const ml = document.getElementById('compMortLender');
   compMortFreeClear = (l.dmNumMortgages === 0);
