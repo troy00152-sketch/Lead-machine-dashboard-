@@ -3504,6 +3504,14 @@ let compLoadedAddr = '';
    group (status, agent, price, DOM, date, sqft) — they reset together when
    the address changes, never numbers without a status. */
 let compGateAddr = '';
+/* Address last seen in the Comps address box, tracked on every address-box
+   event (and on lead prefill). The previous guard compared against
+   compGateAddr, which is only stamped when a gate field is edited while a
+   non-empty address sits in the box — so values that arrived any other way
+   (sqft filled by a comps load, values typed while the box was empty) never
+   reset live. Tracking the box value itself closes that hole: any box change
+   clears the gate group and the offer math together. */
+let compLastAddr = '';
 /* Live-map state on the Comps page. Pins render ONLY from coordinates already
    present in the data — comp row latitude/longitude when the feed supplies
    them, subject latitude/longitude from the lead or an already-fetched
@@ -3535,9 +3543,23 @@ function updateCompLinks(){
   if(z) z.href = v ? 'https://www.zillow.com/homes/' + v.replace(/,/g,'').trim().replace(/\s+/g,'-') + '_rb/' : 'https://www.zillow.com/';
   const head = document.getElementById('compSubjectHead');
   if(head) head.textContent = v ? '📍 ' + v : 'Comps — enter a property address below';
-  if(compGateAddr && v !== compGateAddr && compListingGroupSet()){
+  /* Reset trigger: the box value ITSELF changed since the last address-box
+     event. Never gate this on compGateAddr — that stamp only exists after a
+     gate-field edit, so load-filled or pre-typed values slipped through live.
+     First-ever entry (no last address) never wipes anything. */
+  const addrChanged = !!(compLastAddr && v !== compLastAddr);
+  if(addrChanged && compListingGroupSet()){
     resetCompListingGate();
   }
+  if(addrChanged){
+    /* Stale offer math belongs to the old address: clear the ARV field and
+       the MAO/LAO/spread display. This runs AFTER the gate reset above, so a
+       calcComp inside the reset cannot re-render stale cards from the old ARV. */
+    const arvEl = document.getElementById('compARV'); if(arvEl) arvEl.value = '';
+    const res = document.getElementById('compResult'); if(res) res.innerHTML = '';
+    const tt = document.getElementById('compTierTable'); if(tt) tt.innerHTML = '';
+  }
+  compLastAddr = v;
   if(!compListingGroupSet()) compGateAddr = '';
   if(compRows.length && v !== compLoadedAddr){
     compRows = []; compPicks = []; compLoadedAddr = '';
@@ -4141,6 +4163,10 @@ function openCompsForLead(id){
   const nn = document.getElementById('compCheckedNote'); if(nn) nn.textContent = '';
   const sq = document.getElementById('compListSqft'); if(sq && l.sqft) sq.value = l.sqft;
   compGateAddr = addr;
+  /* Prefill sets the box programmatically (no input event), so sync the
+     address tracker here BEFORE updateCompLinks() runs — otherwise the
+     prefilled group would read as "changed" and be wiped immediately. */
+  compLastAddr = addr;
   const ma = document.getElementById('compMortAmt');
   const ml = document.getElementById('compMortLender');
   compMortFreeClear = (l.dmNumMortgages === 0);
