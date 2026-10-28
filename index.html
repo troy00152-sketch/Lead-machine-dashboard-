@@ -742,13 +742,13 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
           </div>
           <div id="compInsights" style="margin-bottom:12px"></div>
           <div class="sec-title" style="font-size:14px">🏦 Mortgage — does the seller owe on the home?</div>
-          <p style="color:var(--muted);font-size:12px;margin:0 0 10px">Load it for the address above, or type it by hand. Empty means no data yet — never a guess. A $0 amount means free &amp; clear.</p>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px">
-            <div><label class="lbl">Mortgage amount owed ($)</label><input class="field" id="compMortAmt" type="number" placeholder="0 = free &amp; clear" oninput="compMortManual()" /></div>
-            <div><label class="lbl">Lender</label><input class="field" id="compMortLender" placeholder="Lender name" oninput="compMortManual()" /></div>
+          <p style="color:var(--muted);font-size:12px;margin:0 0 10px">Fills itself automatically when verified comps load — no typing needed. A $0 amount means free &amp; clear. The backup load below is only for when property records carry nothing.</p>
+          <div id="compMortManualWrap" style="display:none;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px">
+            <div><label class="lbl">Mortgage amount owed ($) — last resort, by hand only</label><input class="field" id="compMortAmt" type="number" placeholder="0 = free &amp; clear" oninput="compMortManual()" /></div>
+            <div><label class="lbl">Lender — last resort, by hand only</label><input class="field" id="compMortLender" placeholder="Lender name" oninput="compMortManual()" /></div>
           </div>
-          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px"><button class="btn" id="compMortBtn" onclick="loadCompMortgage()">🏦 Load mortgage data</button><span id="compMortMsg" style="font-size:12px;color:var(--muted)"></span></div>
-          <div id="compMortgageBox" style="margin-bottom:12px"><p style="color:var(--muted);font-size:13px">No mortgage data yet — load it for the address above, or type the amount and lender by hand.</p></div>
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px"><button class="btn" id="compMortBtn" onclick="loadCompMortgage()">🏦 Load mortgage data — backup only</button><span id="compMortMsg" style="font-size:12px;color:var(--muted)"></span></div>
+          <div id="compMortgageBox" style="margin-bottom:12px"><p style="color:var(--muted);font-size:13px">No mortgage data yet — it fills automatically when verified comps load.</p></div>
           <div class="sec-title" style="font-size:14px">🏘️ Verified Comps</div>
           <p style="color:var(--muted);font-size:12px;margin:0 0 10px">Live recorded sales for the address above. Pick your best 3 — ARV follows your picks. Listed properties show comps reference-only.</p>
           <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px"><button class="btn primary" id="compLoadBtn" onclick="loadCompsForAddress()">🏘️ Load verified comps</button><span id="compLoadMsg" style="font-size:12px;color:var(--muted)"></span></div>
@@ -765,6 +765,7 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
           <div id="compResult" style="margin-top:14px"></div>
           <div id="compTierTable" style="margin-top:14px"></div>
           <p style="color:var(--muted2);font-size:11px;margin-top:12px">MAO tiers: 70% under $120K · 80% $120–220K · 81.5% $220–300K · 82.9% $300–400K · 84.9% $400K+. LAO = MAO × 70%. Manual ARV always wins — typing your own ARV overrides the picks average until picks change.</p>
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:14px"><button class="btn primary" onclick="downloadCompReport()">📄 Download comp report</button><span style="font-size:12px;color:var(--muted)">Prints the current page state — picks, ARV, offer math, listing, and mortgage.</span></div>
         </div>
       </div>
 
@@ -3530,10 +3531,8 @@ function updateCompLinks(){
     renderCompMap();
   }
   if(compMortLoadedAddr && v !== compMortLoadedAddr){
-    compMortLoadedAddr = ''; compMortFreeClear = false;
-    const ma = document.getElementById('compMortAmt'); if(ma) ma.value = '';
-    const ml = document.getElementById('compMortLender'); if(ml) ml.value = '';
-    const mm = document.getElementById('compMortMsg'); if(mm) mm.textContent = 'Address changed — load mortgage data again for the new property.';
+    resetCompMortgage();
+    const mm = document.getElementById('compMortMsg'); if(mm) mm.textContent = 'Address changed — mortgage data refills automatically when verified comps load.';
     renderCompMortgage();
   }
 }
@@ -3581,36 +3580,125 @@ function renderCompInsights(){
     + abv
     + '</div>';
 }
-/* ---- Mortgage block on the Comps page: amount + lender, with a clear
-   free-and-clear state. Data comes from the same property lookup the lead
-   modal's Mortgage Info uses; manual inputs always win. Nothing is invented:
-   empty means no data yet, never free & clear. ---- */
+/* ---- Mortgage block on the Comps page: fills itself from the comps lookup
+   (property records already carry mortgage data at zero extra cost); the
+   backup lookup covers records gaps; hand entry is a labeled last resort
+   shown only when both automatic sources come back empty. Nothing is
+   invented: empty means no data yet, never free & clear. ---- */
 let compMortFreeClear = false;
 let compMortLoadedAddr = '';
+let compMortSource = ''; // '', 'attom', 'lead', 'lookup', 'manual', 'attom-none', 'lookup-none', 'none'
+let compMortDetail = null; // {lender, amount, loanType, termMonths, dueDate, recordedDate}
+let compMortManualMode = false; // manual inputs visible only as a last resort
+let compMortAttomTried = false;
+let compMortAttomEmpty = false;
+function resetCompMortgage(){
+  compMortFreeClear = false; compMortLoadedAddr = ''; compMortSource = ''; compMortDetail = null;
+  compMortManualMode = false; compMortAttomTried = false; compMortAttomEmpty = false;
+  const ma = document.getElementById('compMortAmt'); if(ma) ma.value = '';
+  const ml = document.getElementById('compMortLender'); if(ml) ml.value = '';
+}
 function compMortManual(){
-  compMortFreeClear = false;
+  compMortSource = 'manual';
   renderCompMortgage();
+}
+function compSafeDate(v){
+  if(!v) return '';
+  const s = String(v).slice(0, 10);
+  const p = s.split('-');
+  if(p.length === 3 && !isNaN(Number(p[0])) && !isNaN(Number(p[1])) && !isNaN(Number(p[2]))) return compFmtDate(s);
+  const t = new Date(v);
+  return isNaN(t) ? '' : fmtDate(v);
 }
 function renderCompMortgage(){
   const box = document.getElementById('compMortgageBox'); if(!box) return;
+  const wrap = document.getElementById('compMortManualWrap');
+  if(wrap) wrap.style.display = compMortManualMode ? 'grid' : 'none';
   const amtEl = document.getElementById('compMortAmt');
   const lenEl = document.getElementById('compMortLender');
   const amtRaw = amtEl ? amtEl.value : '';
   const amt = amtRaw === '' ? null : parseFloat(amtRaw);
   const lender = lenEl ? lenEl.value.trim() : '';
+  const arv = parseFloat((document.getElementById('compARV')||{}).value)||0;
+  const chip = (k,v)=> (v !== '' && v != null) ? '<div class="prop-chip"><span class="k">'+k+'</span><span class="v">'+v+'</span></div>' : '';
+  const equityChip = ()=>{
+    if(!arv) return '';
+    if(compMortFreeClear || amt === 0) return chip('Equity vs ARV', '$' + arv.toLocaleString() + ' (100%)');
+    if(amt != null){
+      const eq = arv - amt;
+      const pct = Math.round(eq/arv*100);
+      return chip('Equity vs ARV', '$' + eq.toLocaleString() + ' (' + pct + '%)');
+    }
+    return '';
+  };
   if(compMortFreeClear || amt === 0){
-    box.innerHTML = '<div style="padding:10px;background:var(--panel2);border-radius:8px"><span class="badge green">✓ Free &amp; Clear</span> <span style="color:var(--muted);font-size:13px">No mortgage on record — no payoff to clear at closing.</span></div>';
+    box.innerHTML = '<div style="padding:10px;background:var(--panel2);border-radius:8px"><span class="badge green">✓ Free &amp; Clear</span> <span style="color:var(--muted);font-size:13px">No mortgage on record — no payoff to clear at closing.</span></div>'
+      + (arv ? '<div class="prop-grid" style="margin-top:8px">' + equityChip() + '</div>' : '');
     return;
   }
-  if(amt != null || lender){
-    const chip = (k,v)=> v ? '<div class="prop-chip"><span class="k">'+k+'</span><span class="v">'+v+'</span></div>' : '';
-    box.innerHTML = '<div style="font-weight:700;font-size:13px;margin-bottom:6px">Mortgage on record</div><div class="prop-grid">'
+  if(amt != null || lender || compMortDetail){
+    const d = compMortDetail || {};
+    const term = d.termMonths != null ? (d.termMonths + ' mo' + (d.termMonths % 12 === 0 && d.termMonths > 0 ? ' (' + (d.termMonths/12) + ' yr)' : '')) : '';
+    const srcNote = compMortSource === 'attom' ? ' <span style="color:var(--muted);font-weight:400;font-size:12px">(filled automatically from property records)</span>'
+      : compMortSource === 'lookup' ? ' <span style="color:var(--muted);font-weight:400;font-size:12px">(filled automatically from backup lookup)</span>'
+      : compMortSource === 'lead' ? ' <span style="color:var(--muted);font-weight:400;font-size:12px">(from saved lead record)</span>' : '';
+    box.innerHTML = '<div style="font-weight:700;font-size:13px;margin-bottom:6px">Mortgage on record' + srcNote + '</div><div class="prop-grid">'
       + chip('Amount owed', amt != null ? '$' + amt.toLocaleString() : '')
       + chip('Lender', lender ? esc(lender) : '')
+      + chip('Loan type', d.loanType ? esc(String(d.loanType)) : '')
+      + chip('Term', term)
+      + chip('Recorded', compSafeDate(d.recordedDate))
+      + chip('Due', compSafeDate(d.dueDate))
+      + equityChip()
       + '</div>';
     return;
   }
-  box.innerHTML = '<p style="color:var(--muted);font-size:13px">No mortgage data yet — load it for the address above, or type the amount and lender by hand.</p>';
+  if(compMortSource === 'none'){
+    box.innerHTML = '<p style="color:var(--muted);font-size:13px">No mortgage data found — property records and the backup lookup both came back empty. Nothing invented. Enter the amount and lender by hand below as a last resort.</p>';
+  } else if(compMortSource === 'attom-none'){
+    box.innerHTML = '<p style="color:var(--muted);font-size:13px">No mortgage data in property records for this address. Use the backup load below — if that also finds nothing, hand entry opens as a last resort.</p>';
+  } else if(compMortSource === 'lookup-none'){
+    box.innerHTML = '<p style="color:var(--muted);font-size:13px">Backup lookup found nothing for this address. Load verified comps so property records can fill the mortgage block.</p>';
+  } else {
+    box.innerHTML = '<p style="color:var(--muted);font-size:13px">No mortgage data yet — it fills automatically when verified comps load.</p>';
+  }
+}
+/* Auto-fill the mortgage block from the comps lookup response: d.property
+   already carries freeAndClear + mortgage (lender, amount, loan type, term,
+   due date, recorded date), so this costs nothing extra. Runs on every
+   successful comps load, before the comp list renders. */
+function applyCompMortgageFromAttom(prop, addr){
+  compMortLoadedAddr = addr || '';
+  compMortAttomTried = true;
+  compMortManualMode = false;
+  const amtEl = document.getElementById('compMortAmt');
+  const lenEl = document.getElementById('compMortLender');
+  const msg = document.getElementById('compMortMsg');
+  if(!prop){
+    compMortAttomEmpty = true; compMortSource = 'attom-none'; compMortDetail = null; compMortFreeClear = false;
+    if(amtEl) amtEl.value = ''; if(lenEl) lenEl.value = '';
+    if(msg) msg.textContent = 'No mortgage data in property records.';
+    renderCompMortgage(); return;
+  }
+  if(prop.freeAndClear){
+    compMortAttomEmpty = false; compMortFreeClear = true; compMortDetail = null; compMortSource = 'attom';
+    if(amtEl) amtEl.value = 0; if(lenEl) lenEl.value = '';
+    if(msg) msg.textContent = 'Free & clear — no mortgage on record (property records).';
+    renderCompMortgage(); return;
+  }
+  const m = prop.mortgage;
+  if(m && (m.amount != null || m.lender)){
+    compMortAttomEmpty = false; compMortFreeClear = false; compMortSource = 'attom';
+    compMortDetail = { lender: m.lender || null, amount: m.amount != null ? m.amount : null, loanType: m.loanType || null, termMonths: m.termMonths != null ? m.termMonths : null, dueDate: m.dueDate || null, recordedDate: m.recordedDate || null };
+    if(amtEl && m.amount != null) amtEl.value = Math.round(m.amount);
+    if(lenEl) lenEl.value = m.lender || '';
+    if(msg) msg.textContent = 'Mortgage filled automatically from property records.';
+    renderCompMortgage(); return;
+  }
+  compMortAttomEmpty = true; compMortFreeClear = false; compMortDetail = null; compMortSource = 'attom-none';
+  if(amtEl) amtEl.value = ''; if(lenEl) lenEl.value = '';
+  if(msg) msg.textContent = 'No mortgage data in property records — backup load below.';
+  renderCompMortgage();
 }
 async function loadCompMortgage(){
   const addrEl = document.getElementById('compListAddr');
@@ -3618,23 +3706,33 @@ async function loadCompMortgage(){
   const addr = addrEl ? addrEl.value.trim() : '';
   if(!addr){ if(msg) msg.textContent = 'Enter the property address first.'; return; }
   if(msg) msg.textContent = 'Loading mortgage data…';
+  const backupEmpty = ()=>{
+    if(compMortAttomTried && compMortAttomEmpty){
+      compMortSource = 'none'; compMortManualMode = true;
+      if(msg) msg.textContent = 'No mortgage data found — property records and backup both empty.';
+    } else {
+      compMortSource = 'lookup-none'; compMortManualMode = false;
+      if(msg) msg.textContent = 'Backup lookup found nothing — load verified comps for the property-records check.';
+    }
+    renderCompMortgage();
+  };
   try{
     const resp = await fetch('/.netlify/functions/dealmachine-lookup?address=' + encodeURIComponent(addr));
     if(!resp.ok) throw new Error('HTTP ' + resp.status);
     const d = await resp.json();
     if(!d.matched){
-      compMortFreeClear = false; compMortLoadedAddr = '';
-      if(msg) msg.textContent = 'No property data found — type the amount and lender by hand.';
-      renderCompMortgage(); return;
+      compMortLoadedAddr = '';
+      backupEmpty(); return;
     }
     compMortLoadedAddr = addr;
+    compMortManualMode = false;
     if(d.latitude != null && d.longitude != null){ compSubjectLat = Number(d.latitude); compSubjectLng = Number(d.longitude); renderCompMap(); }
     const n = d.numMortgages;
     if(n === 0){
-      compMortFreeClear = true;
+      compMortFreeClear = true; compMortDetail = null; compMortSource = 'lookup';
       const a = document.getElementById('compMortAmt'); if(a) a.value = 0;
       const l = document.getElementById('compMortLender'); if(l) l.value = '';
-      if(msg) msg.textContent = 'No mortgages on record for this address.';
+      if(msg) msg.textContent = 'No mortgages on record for this address (backup lookup).';
       renderCompMortgage(); return;
     }
     compMortFreeClear = false;
@@ -3643,13 +3741,15 @@ async function loadCompMortgage(){
     const a = document.getElementById('compMortAmt'); if(a && bal != null) a.value = Math.round(bal);
     const l = document.getElementById('compMortLender'); if(l && pm.lender) l.value = pm.lender;
     if(bal == null && !pm.lender){
-      if(msg) msg.textContent = 'Mortgage detail not returned for this address — type the amount and lender by hand.';
+      backupEmpty();
     } else {
-      if(msg) msg.textContent = 'Loaded ' + (n != null ? n : (d.mortgages||[]).length) + ' mortgage(s) on record.';
+      compMortDetail = { lender: pm.lender || null, amount: bal != null ? Math.round(bal) : null, loanType: null, termMonths: null, dueDate: null, recordedDate: null };
+      compMortSource = 'lookup';
+      if(msg) msg.textContent = 'Loaded ' + (n != null ? n : (d.mortgages||[]).length) + ' mortgage(s) on record (backup lookup).';
+      renderCompMortgage();
     }
-    renderCompMortgage();
   }catch(e){
-    if(msg) msg.textContent = 'Mortgage lookup unavailable right now — type the amount and lender by hand.';
+    if(msg) msg.textContent = 'Mortgage backup lookup unavailable right now — try again.';
   }
 }
 function renderCompTierTable(){
@@ -3678,6 +3778,118 @@ function renderCompTierTable(){
     + '<div class="tbl-wrap"><table><thead><tr><th>MAO tier</th><th>MAO</th><th>LAO (70%)</th><th>Spread</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
     + '<div style="font-size:13px;margin-top:8px"><strong>Offer scenarios:</strong> open at <strong>$' + lao.toLocaleString() + '</strong> (LAO) · midpoint <strong>$' + mid.toLocaleString() + '</strong> · ceiling <strong>$' + mao.toLocaleString() + '</strong> (MAO — never offer above it).</div>'
     + '<div style="font-size:13px;color:var(--muted);margin-top:4px">Repairs sensitivity at this ARV: −$10K repairs → MAO $' + Math.round((arv-Math.max(0,rep-10000))*active).toLocaleString() + ' · as entered → MAO $' + mao.toLocaleString() + ' · +$10K repairs → MAO $' + Math.round((arv-(rep+10000))*active).toLocaleString() + '.</div>';
+}
+/* ---- Download comp report: a printable report of the CURRENT page state —
+   current picks, ARV, offer math, listing state, and mortgage. No sample
+   data, no vendor names, no new libraries: a clean document in a new window
+   with a Print / Save as PDF button. ---- */
+function downloadCompReport(){
+  const addr = (document.getElementById('compListAddr')||{}).value || 'Subject property';
+  const st = compStatus();
+  const agent = (document.getElementById('compListAgent')||{}).value || '';
+  const lp = parseFloat((document.getElementById('compListPrice')||{}).value)||0;
+  const dom = (document.getElementById('compListDom')||{}).value || '';
+  const dt = (document.getElementById('compListDate')||{}).value || '';
+  const sq = parseFloat((document.getElementById('compListSqft')||{}).value)||0;
+  const ppsf = compPpsf();
+  const arv = parseFloat((document.getElementById('compARV')||{}).value)||0;
+  const rep = parseFloat((document.getElementById('compRepairs')||{}).value)||0;
+  const listed = st === 'listed';
+  const statusLabel = listed ? 'Listed with a realtor — PASS' : st === 'not-listed' ? 'Not listed — clear to comp' : 'Not checked yet';
+  let abv = '—';
+  if(lp && arv){
+    const diff = lp - arv;
+    const pct = arv ? Math.abs(diff/arv*100) : 0;
+    abv = (diff>=0?'+':'−') + '$' + Math.abs(diff).toLocaleString() + ' (' + pct.toFixed(1) + '% ' + (diff>0?'above':diff<0?'below':'at') + ' value)';
+  }
+  const kv = (k,v)=> '<p style="margin:4px 0"><b>' + k + ':</b> ' + v + '</p>';
+  let listingHtml = kv('Listing status', esc(statusLabel))
+    + kv('List price', lp ? '$' + lp.toLocaleString() + (ppsf ? ' ($' + ppsf + '/sqft)' : '') : '—')
+    + kv('Listing date', dt ? compFmtDate(dt) : '—')
+    + kv('Days on market', dom ? dom + ' days' : '—')
+    + kv('Listing agent', agent ? esc(agent) : '—')
+    + kv('Above / below value', abv);
+  const amtEl = document.getElementById('compMortAmt');
+  const lenEl = document.getElementById('compMortLender');
+  const amtRaw = amtEl ? amtEl.value : '';
+  const amt = amtRaw === '' ? null : parseFloat(amtRaw);
+  const lender = lenEl ? lenEl.value.trim() : '';
+  let mortHtml = '';
+  if(compMortFreeClear || amt === 0){
+    mortHtml = '<p><b>Free &amp; Clear</b> — no mortgage on record, no payoff to clear at closing.</p>'
+      + (arv ? '<p><b>Equity vs ARV:</b> $' + arv.toLocaleString() + ' (100%)</p>' : '');
+  } else if(amt != null || lender || compMortDetail){
+    const d = compMortDetail || {};
+    const term = d.termMonths != null ? (d.termMonths + ' mo' + (d.termMonths % 12 === 0 && d.termMonths > 0 ? ' (' + (d.termMonths/12) + ' yr)' : '')) : '';
+    mortHtml = kv('Amount owed', amt != null ? '$' + amt.toLocaleString() : '—')
+      + kv('Lender', lender ? esc(lender) : '—')
+      + kv('Loan type', d.loanType ? esc(String(d.loanType)) : '—')
+      + kv('Term', term || '—')
+      + kv('Recorded', compSafeDate(d.recordedDate) || '—')
+      + kv('Due', compSafeDate(d.dueDate) || '—');
+    if(arv && amt != null){
+      const eq = arv - amt;
+      mortHtml += kv('Equity vs ARV', '$' + eq.toLocaleString() + ' (' + Math.round(eq/arv*100) + '%)');
+    }
+  } else if(compMortSource === 'none'){
+    mortHtml = '<p>No mortgage data found — property records and the backup lookup both came back empty.</p>';
+  } else {
+    mortHtml = '<p>No mortgage data on file for this address.</p>';
+  }
+  let compRowsHtml = '';
+  if(!compRows.length){
+    compRowsHtml = '<p>No verified comps loaded.</p>';
+  } else {
+    const rows = compRows.map(r=>{
+      const picked = compPicks.indexOf(r.address) >= 0;
+      return '<tr' + (picked ? ' style="background:#e8f7ee"' : '') + '><td>' + esc(r.address) + (picked ? ' ✓ In ARV' : '') + '</td><td>' + (r.distance != null ? Number(r.distance).toFixed(2) + ' mi' : '—') + '</td><td>Sold</td><td>Public Record</td><td>—</td><td>' + (r.beds != null ? r.beds : '—') + ' / ' + (r.baths != null ? r.baths : '—') + '</td><td>' + (r.sqft ? Number(r.sqft).toLocaleString() : '—') + '</td><td>' + (r.ppsf ? '$' + Number(r.ppsf).toLocaleString() : '—') + '</td><td>' + (r.date ? fmtDate(r.date) : '—') + '</td><td><b>' + (r.amount != null ? '$' + Number(r.amount).toLocaleString() : '—') + '</b></td></tr>';
+    }).join('');
+    compRowsHtml = '<table><thead><tr><th>Address</th><th>Dist</th><th>Status</th><th>Source</th><th>DOM</th><th>Bd/Ba</th><th>Sq Ft</th><th>$/Sqft</th><th>Sold</th><th>Price</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  }
+  let mathHtml = '';
+  if(listed){
+    mathHtml = '<p><b>PASS — Listed with a realtor. No MAO, no LAO, no offer.</b></p>';
+  } else if(arv){
+    const tier = compTier(arv);
+    const mao = Math.round((arv-rep)*tier);
+    const lao = Math.round(mao*.70);
+    const mid = Math.round((mao+lao)/2);
+    const tiers = [
+      { label: 'Under $120K', tier: .70 },
+      { label: '$120–220K', tier: .80 },
+      { label: '$220–300K', tier: .815 },
+      { label: '$300–400K', tier: .829 },
+      { label: '$400K+', tier: .849 },
+    ];
+    const tierRows = tiers.map(t=>{
+      const m = Math.round((arv-rep)*t.tier);
+      const l = Math.round(m*.70);
+      const on = t.tier === tier;
+      return '<tr' + (on ? ' style="background:#e8f7ee"' : '') + '><td>' + t.label + ' · ' + (t.tier*100).toFixed(1) + '%' + (on ? ' (ACTIVE)' : '') + '</td><td>$' + m.toLocaleString() + '</td><td>$' + l.toLocaleString() + '</td><td>$' + (m-l).toLocaleString() + '</td></tr>';
+    }).join('');
+    mathHtml = kv('ARV (from picks)', '$' + arv.toLocaleString())
+      + kv('Repairs', '$' + rep.toLocaleString())
+      + kv('MAO (ceiling)', '$' + mao.toLocaleString() + ' — ' + (tier*100).toFixed(1) + '% tier')
+      + kv('LAO (opening)', '$' + lao.toLocaleString())
+      + kv('Spread', '$' + (mao-lao).toLocaleString())
+      + kv('Offer scenarios', 'open at $' + lao.toLocaleString() + ' (LAO) · midpoint $' + mid.toLocaleString() + ' · ceiling $' + mao.toLocaleString() + ' (MAO)')
+      + '<table style="margin-top:10px"><thead><tr><th>MAO tier</th><th>MAO</th><th>LAO (70%)</th><th>Spread</th></tr></thead><tbody>' + tierRows + '</tbody></table>';
+  } else {
+    mathHtml = '<p>No ARV set — pick comps or enter an ARV to run the offer math.</p>';
+  }
+  const today = new Date().toLocaleDateString();
+  const html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Comp Report — ' + esc(addr) + '</title>'
+    + '<style>body{font-family:Arial,Helvetica,sans-serif;color:#182234;margin:32px}h1{font-size:22px}h2{font-size:16px;margin-top:24px;border-bottom:2px solid #ff6b1a;padding-bottom:4px}table{border-collapse:collapse;width:100%;font-size:13px}th,td{border:1px solid #ccc;padding:6px 8px;text-align:left}p{font-size:14px;line-height:1.6}@media print{button{display:none}}</style></head><body>'
+    + '<h1>Comp Report</h1><p>' + esc(addr) + ' · ' + esc(today) + '</p>'
+    + '<h2>Listing Check</h2>' + listingHtml
+    + '<h2>Mortgage</h2>' + mortHtml
+    + '<h2>Comparable Sales' + (compPicks.length ? ' — ' + compPicks.length + ' picked for ARV' : '') + '</h2>' + compRowsHtml
+    + '<h2>Offer Math</h2>' + mathHtml
+    + '<button onclick="window.print()" style="margin-top:24px;padding:10px 18px;font-size:15px">Print / Save as PDF</button>'
+    + '</body></html>';
+  const w = window.open('', '_blank');
+  if(!w){ alert('Allow pop-ups to download the comp report.'); return; }
+  w.document.write(html); w.document.close(); w.focus();
 }
 function calcComp(){
   renderCompMortgage();
@@ -3861,7 +4073,8 @@ async function loadCompsForAddress(){
     const resp = await fetch('/.netlify/functions/attom-lookup?address=' + encodeURIComponent(addr));
     if(!resp.ok) throw new Error('HTTP ' + resp.status);
     const d = await resp.json();
-    if(!d.matched){ compRows = []; compPicks = []; compLoadedAddr = ''; compSubjectLat = null; compSubjectLng = null; if(msg) msg.textContent = 'No ownership records found for this address — type an ARV below to run the math manually.'; renderCompList(); return; }
+    if(!d.matched){ compRows = []; compPicks = []; compLoadedAddr = ''; compSubjectLat = null; compSubjectLng = null; resetCompMortgage(); if(msg) msg.textContent = 'No ownership records found for this address — type an ARV below to run the math manually.'; renderCompList(); renderCompMortgage(); return; }
+    applyCompMortgageFromAttom(d.property || null, addr);
     const seen = {};
     const rows = [];
     const pushRow = (c)=>{ if(!c || !c.address || seen[c.address]) return; seen[c.address] = 1; rows.push(c); };
@@ -3911,6 +4124,9 @@ function openCompsForLead(id){
   }
   if(ml) ml.value = (l.dmMortgage && l.dmMortgage.lender) || '';
   compMortLoadedAddr = addr;
+  compMortManualMode = false;
+  compMortDetail = null;
+  compMortSource = (l.dmNumMortgages === 0 || (ma && ma.value !== '' && ma.value !== null) || (ml && ml.value !== '')) ? 'lead' : '';
   updateCompLinks();
   if(l.latitude != null && l.longitude != null){ compSubjectLat = Number(l.latitude); compSubjectLng = Number(l.longitude); }
   calcComp();
