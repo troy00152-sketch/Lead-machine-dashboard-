@@ -722,27 +722,49 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
 
 <!-- COMPS TAB -->
       <div class="tab-page" id="page-comps">
-        <div class="sec-title">📊 Quick Comp Calculator</div>
+        <div class="sec-title">📊 Comps</div>
         <div class="card">
+          <div id="compSubjectHead" style="font-size:17px;font-weight:800;margin-bottom:12px">Comps — enter a property address below</div>
           <div style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:12px">
             <div style="font-weight:800;font-size:13px;margin-bottom:4px">🚦 Listing Check — FIRST, before any comp math</div>
-            <p style="color:var(--muted);font-size:12px;margin:0 0 10px">If it's listed with a realtor, PASS immediately — no MAO, no LAO, no offer. Check the listing on DealMachine or Zillow, then set the status here.</p>
+            <p style="color:var(--muted);font-size:12px;margin:0 0 10px">If it's listed with a realtor, PASS immediately — no MAO, no LAO, no offer. Check the listing, then set the status here. Listing fields are set by hand from the check — no feed supplies them.</p>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px">
               <div><label class="lbl">Property address (for listing links)</label><input class="field" id="compListAddr" placeholder="123 Main St, City, ST ZIP" oninput="updateCompLinks()" /></div>
               <div><label class="lbl">Listing status *</label><select class="field" id="compListStatus" onchange="calcComp()"><option value="">Not checked yet</option><option value="not-listed">Not listed — clear to comp</option><option value="listed">Listed with a realtor — PASS</option></select></div>
-              <div><label class="lbl">Listing agent</label><input class="field" id="compListAgent" placeholder="Agent name / brokerage" /></div>
-              <div><label class="lbl">List price ($)</label><input class="field" id="compListPrice" type="number" placeholder="115000" /></div>
-              <div><label class="lbl">Days on market</label><input class="field" id="compListDom" type="number" placeholder="2" /></div>
-              <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap"><a id="compZillowLink" class="btn" href="https://www.zillow.com/" target="_blank" rel="noopener" style="text-decoration:none">🏠 Check on Zillow ↗</a><a class="btn" href="https://dealmachine.com/" target="_blank" rel="noopener" style="text-decoration:none">Open DealMachine ↗</a></div>
+              <div><label class="lbl">Listing agent</label><input class="field" id="compListAgent" placeholder="Agent name / brokerage" oninput="calcComp()" /></div>
+              <div><label class="lbl">List price ($)</label><input class="field" id="compListPrice" type="number" placeholder="115000" oninput="calcComp()" /></div>
+              <div><label class="lbl">Days on market</label><input class="field" id="compListDom" type="number" placeholder="2" oninput="calcComp()" /></div>
+              <div><label class="lbl">Listing date</label><input class="field" id="compListDate" type="date" onchange="calcComp()" /></div>
+              <div><label class="lbl">Home sq ft (optional — for $/sqft)</label><input class="field" id="compListSqft" type="number" placeholder="1056" oninput="calcComp()" /></div>
+              <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap"><a id="compZillowLink" class="btn" href="https://www.zillow.com/" target="_blank" rel="noopener" style="text-decoration:none" onclick="stampListingChecked()">🏠 Check on Zillow ↗</a><a id="compLookupLink" class="btn" href="https://dealmachine.com/" target="_blank" rel="noopener" style="text-decoration:none" onclick="stampListingChecked()">Open Property Lookup ↗</a><span id="compCheckedNote" style="font-size:12px;color:var(--muted)"></span></div>
             </div>
             <div id="compGateMsg"></div>
           </div>
+          <div id="compInsights" style="margin-bottom:12px"></div>
+          <div class="sec-title" style="font-size:14px">🏦 Mortgage — does the seller owe on the home?</div>
+          <p style="color:var(--muted);font-size:12px;margin:0 0 10px">Load it for the address above, or type it by hand. Empty means no data yet — never a guess. A $0 amount means free &amp; clear.</p>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px">
+            <div><label class="lbl">Mortgage amount owed ($)</label><input class="field" id="compMortAmt" type="number" placeholder="0 = free &amp; clear" oninput="compMortManual()" /></div>
+            <div><label class="lbl">Lender</label><input class="field" id="compMortLender" placeholder="Lender name" oninput="compMortManual()" /></div>
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px"><button class="btn" id="compMortBtn" onclick="loadCompMortgage()">🏦 Load mortgage data</button><span id="compMortMsg" style="font-size:12px;color:var(--muted)"></span></div>
+          <div id="compMortgageBox" style="margin-bottom:12px"><p style="color:var(--muted);font-size:13px">No mortgage data yet — load it for the address above, or type the amount and lender by hand.</p></div>
+          <div class="sec-title" style="font-size:14px">🏘️ Verified Comps</div>
+          <p style="color:var(--muted);font-size:12px;margin:0 0 10px">Live recorded sales for the address above. Pick your best 3 — ARV follows your picks. Listed properties show comps reference-only.</p>
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px"><button class="btn primary" id="compLoadBtn" onclick="loadCompsForAddress()">🏘️ Load verified comps</button><span id="compLoadMsg" style="font-size:12px;color:var(--muted)"></span></div>
+          <div class="sec-title" style="font-size:14px">🗺️ Map — comps near the subject</div>
+          <div id="compMap" style="height:320px;border-radius:10px;border:1px solid var(--line);margin-bottom:8px"></div>
+          <div id="compMapNote" style="color:var(--muted);font-size:12px;margin-bottom:6px"></div>
+          <div style="font-size:12px;color:var(--muted);margin-bottom:10px">🟠 Subject &nbsp; 🟢 Sold comp &nbsp; 🟡 Pending &nbsp; ✓ In ARV</div>
+          <div id="compListBox"></div>
+          <div id="compPickBar" style="margin:12px 0"></div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
             <div><label class="lbl">ARV ($)</label><input class="field" id="compARV" type="number" placeholder="150000" oninput="calcComp()" /></div>
             <div><label class="lbl">Repairs ($)</label><input class="field" id="compRepairs" type="number" placeholder="30000" oninput="calcComp()" /></div>
           </div>
           <div id="compResult" style="margin-top:14px"></div>
-          <p style="color:var(--muted2);font-size:11px;margin-top:12px">MAO tiers: 70% under $120K · 80% $120–220K · 81.5% $220–300K · 82.9% $300–400K · 84.9% $400K+. LAO = MAO × 70%.</p>
+          <div id="compTierTable" style="margin-top:14px"></div>
+          <p style="color:var(--muted2);font-size:11px;margin-top:12px">MAO tiers: 70% under $120K · 80% $120–220K · 81.5% $220–300K · 82.9% $300–400K · 84.9% $400K+. LAO = MAO × 70%. Manual ARV always wins — typing your own ARV overrides the picks average until picks change.</p>
         </div>
       </div>
 
@@ -1059,6 +1081,7 @@ function showPage(name){
   document.querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active', b.dataset.nav===name));
   if(name === 'settings') dmLoadCredits();
   if(name === 'listimport') liLoadConn();
+  if(name === 'comps'){ renderCompMap(); setTimeout(()=>{ if(compMap){ compMap.invalidateSize(); renderCompMap(); } }, 150); }
 }
 
 /* ============ GLOBAL SEARCH ============ */
@@ -2571,6 +2594,7 @@ function openLead(id){
     <div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap">
       <button class="btn primary" onclick="traceLead('${l.id}')">🔍 Skip Trace</button>
       <button class="btn" onclick="analyzeDeal('${l.id}')">🤖 Analyze Deal</button>
+      <button class="btn" onclick="openCompsForLead('${l.id}')">📊 Run Comps</button>
       <button class="btn" onclick="matchLeadToBuyers('${l.id}')">🤝 Buyer Match Ai</button>
       <button class="btn ghost" onclick="pushToGHL('${l.id}')">📤 Send to GHL</button>
     </div>
@@ -2602,7 +2626,7 @@ function listingGateFields(l){
     + '</div>';
 }
 function listingGateHtml(l){
-  const links = '<div style="font-size:12px;color:var(--muted)">Photo above is the house. <a href="' + zillowUrl(l) + '" target="_blank" rel="noopener">Check listing on Zillow ↗</a> · <a href="https://dealmachine.com/" target="_blank" rel="noopener">Open DealMachine ↗</a></div>';
+  const links = '<div style="font-size:12px;color:var(--muted)">Photo above is the house. <a href="' + zillowUrl(l) + '" target="_blank" rel="noopener">Check listing on Zillow ↗</a> · <a href="https://dealmachine.com/" target="_blank" rel="noopener">Open Property Lookup ↗</a></div>';
   if(l.listingStatus === 'listed') return listingPassBanner(l) + links
     + '<div style="margin-top:8px"><button class="btn ghost" style="padding:4px 8px" onclick="setListingStatus(\'' + l.id + '\',\'\')">Clear status</button></div>'
     + listingGateFields(l);
@@ -2612,7 +2636,7 @@ function listingGateHtml(l){
     + '<div style="color:var(--muted);margin-bottom:8px">⚠️ Listing status not checked. If it\'s listed with a realtor, PASS immediately.</div>'
     + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'
     + '<a class="btn" href="' + zillowUrl(l) + '" target="_blank" rel="noopener" style="text-decoration:none">🏠 Check on Zillow ↗</a>'
-    + '<a class="btn" href="https://dealmachine.com/" target="_blank" rel="noopener" style="text-decoration:none">Open DealMachine ↗</a>'
+    + '<a class="btn" href="https://dealmachine.com/" target="_blank" rel="noopener" style="text-decoration:none">Open Property Lookup ↗</a>'
     + '<button class="btn" onclick="setListingStatus(\'' + l.id + '\',\'not-listed\')">✓ Not listed</button>'
     + '<button class="btn" onclick="setListingStatus(\'' + l.id + '\',\'listed\')">⛔ Listed with realtor</button>'
     + '</div>'
@@ -3464,29 +3488,224 @@ function compTier(arv){
   if(arv<400000) return .829;
   return .849;
 }
+function compTierLabel(arv){
+  if(arv<120000) return '70% tier (under $120K)';
+  if(arv<220000) return '80% tier ($120–220K)';
+  if(arv<300000) return '81.5% tier ($220–300K)';
+  if(arv<400000) return '82.9% tier ($300–400K)';
+  return '84.9% tier ($400K+)';
+}
+/* Verified-comps state on the Comps page. Rows are live recorded sales from the
+   same attom-lookup endpoint the lead modal uses; nothing here is sample data. */
+let compRows = [];
+let compPicks = [];
+let compLoadedAddr = '';
+/* Live-map state on the Comps page. Pins render ONLY from coordinates already
+   present in the data — comp row latitude/longitude when the feed supplies
+   them, subject latitude/longitude from the lead or an already-fetched
+   property lookup. Nothing here geocodes, and no pin is ever invented. */
+let compMap = null;
+let compMapTileLayer = null;
+let compMapMarkers = [];
+let compSubjectLat = null;
+let compSubjectLng = null;
+function compStatus(){
+  const st = document.getElementById('compListStatus');
+  return st ? st.value : '';
+}
 function updateCompLinks(){
   const a = document.getElementById('compListAddr');
   const z = document.getElementById('compZillowLink');
-  if(!z) return;
   const v = a ? a.value.trim() : '';
-  z.href = v ? 'https://www.zillow.com/homes/' + v.replace(/,/g,'').trim().replace(/\s+/g,'-') + '_rb/' : 'https://www.zillow.com/';
+  if(z) z.href = v ? 'https://www.zillow.com/homes/' + v.replace(/,/g,'').trim().replace(/\s+/g,'-') + '_rb/' : 'https://www.zillow.com/';
+  const head = document.getElementById('compSubjectHead');
+  if(head) head.textContent = v ? '📍 ' + v : 'Comps — enter a property address below';
+  if(compRows.length && v !== compLoadedAddr){
+    compRows = []; compPicks = []; compLoadedAddr = '';
+    compSubjectLat = null; compSubjectLng = null;
+    const box = document.getElementById('compListBox');
+    if(box) box.innerHTML = '<p style="color:var(--muted);font-size:13px">Address changed — load verified comps again for the new property.</p>';
+    const bar = document.getElementById('compPickBar');
+    if(bar) bar.innerHTML = '';
+    renderCompMap();
+  }
+  if(compMortLoadedAddr && v !== compMortLoadedAddr){
+    compMortLoadedAddr = ''; compMortFreeClear = false;
+    const ma = document.getElementById('compMortAmt'); if(ma) ma.value = '';
+    const ml = document.getElementById('compMortLender'); if(ml) ml.value = '';
+    const mm = document.getElementById('compMortMsg'); if(mm) mm.textContent = 'Address changed — load mortgage data again for the new property.';
+    renderCompMortgage();
+  }
+}
+function stampListingChecked(){
+  const n = document.getElementById('compCheckedNote');
+  if(n) n.textContent = '✓ Listing checked ' + new Date().toLocaleString();
+}
+/* Date-only input values (YYYY-MM-DD) must not shift a day through UTC parsing. */
+function compFmtDate(v){
+  if(!v) return '';
+  const p = String(v).split('-');
+  if(p.length === 3) return p[1] + '/' + p[2] + '/' + p[0];
+  return fmtDate(v);
+}
+function compPpsf(){
+  const lp = parseFloat((document.getElementById('compListPrice')||{}).value)||0;
+  const sq = parseFloat((document.getElementById('compListSqft')||{}).value)||0;
+  return (lp && sq) ? Math.round(lp/sq) : null;
+}
+function renderCompInsights(){
+  const box = document.getElementById('compInsights'); if(!box) return;
+  const st = compStatus();
+  const agent = (document.getElementById('compListAgent')||{}).value || '';
+  const lp = parseFloat((document.getElementById('compListPrice')||{}).value)||0;
+  const dom = (document.getElementById('compListDom')||{}).value || '';
+  const dt = (document.getElementById('compListDate')||{}).value || '';
+  const arv = parseFloat((document.getElementById('compARV')||{}).value)||0;
+  const ppsf = compPpsf();
+  const statusLabel = st === 'listed' ? '⛔ Listed with a realtor — PASS' : st === 'not-listed' ? '✓ Not listed — clear to comp' : '⚠️ Not checked yet';
+  let abv = '';
+  if(lp && arv){
+    const diff = lp - arv;
+    const pct = arv ? (diff/arv*100) : 0;
+    const dir = diff > 0 ? 'above' : diff < 0 ? 'below' : 'at';
+    abv = '<div class="prop-chip"><span class="k">Above / Below Value</span><span class="v">' + (diff>=0?'+':'−') + '$' + Math.abs(diff).toLocaleString() + ' (' + Math.abs(pct).toFixed(1) + '% ' + dir + ' value)</span></div>';
+  }
+  const chip = (k,v)=> v ? '<div class="prop-chip"><span class="k">'+k+'</span><span class="v">'+v+'</span></div>' : '';
+  box.innerHTML = '<div class="sec-title" style="font-size:14px">📋 Listing Insights</div>'
+    + '<div class="prop-grid">'
+    + chip('Listing Status', statusLabel)
+    + chip('Listing Price', lp ? '$' + lp.toLocaleString() + (ppsf ? ' ($' + ppsf + '/sqft)' : '') : '')
+    + chip('Listing Date', dt ? compFmtDate(dt) : '')
+    + chip('Days On Market', dom ? dom + ' days' : '')
+    + chip('Listing Agent', agent ? esc(agent) : '')
+    + abv
+    + '</div>';
+}
+/* ---- Mortgage block on the Comps page: amount + lender, with a clear
+   free-and-clear state. Data comes from the same property lookup the lead
+   modal's Mortgage Info uses; manual inputs always win. Nothing is invented:
+   empty means no data yet, never free & clear. ---- */
+let compMortFreeClear = false;
+let compMortLoadedAddr = '';
+function compMortManual(){
+  compMortFreeClear = false;
+  renderCompMortgage();
+}
+function renderCompMortgage(){
+  const box = document.getElementById('compMortgageBox'); if(!box) return;
+  const amtEl = document.getElementById('compMortAmt');
+  const lenEl = document.getElementById('compMortLender');
+  const amtRaw = amtEl ? amtEl.value : '';
+  const amt = amtRaw === '' ? null : parseFloat(amtRaw);
+  const lender = lenEl ? lenEl.value.trim() : '';
+  if(compMortFreeClear || amt === 0){
+    box.innerHTML = '<div style="padding:10px;background:var(--panel2);border-radius:8px"><span class="badge green">✓ Free &amp; Clear</span> <span style="color:var(--muted);font-size:13px">No mortgage on record — no payoff to clear at closing.</span></div>';
+    return;
+  }
+  if(amt != null || lender){
+    const chip = (k,v)=> v ? '<div class="prop-chip"><span class="k">'+k+'</span><span class="v">'+v+'</span></div>' : '';
+    box.innerHTML = '<div style="font-weight:700;font-size:13px;margin-bottom:6px">Mortgage on record</div><div class="prop-grid">'
+      + chip('Amount owed', amt != null ? '$' + amt.toLocaleString() : '')
+      + chip('Lender', lender ? esc(lender) : '')
+      + '</div>';
+    return;
+  }
+  box.innerHTML = '<p style="color:var(--muted);font-size:13px">No mortgage data yet — load it for the address above, or type the amount and lender by hand.</p>';
+}
+async function loadCompMortgage(){
+  const addrEl = document.getElementById('compListAddr');
+  const msg = document.getElementById('compMortMsg');
+  const addr = addrEl ? addrEl.value.trim() : '';
+  if(!addr){ if(msg) msg.textContent = 'Enter the property address first.'; return; }
+  if(msg) msg.textContent = 'Loading mortgage data…';
+  try{
+    const resp = await fetch('/.netlify/functions/dealmachine-lookup?address=' + encodeURIComponent(addr));
+    if(!resp.ok) throw new Error('HTTP ' + resp.status);
+    const d = await resp.json();
+    if(!d.matched){
+      compMortFreeClear = false; compMortLoadedAddr = '';
+      if(msg) msg.textContent = 'No property data found — type the amount and lender by hand.';
+      renderCompMortgage(); return;
+    }
+    compMortLoadedAddr = addr;
+    if(d.latitude != null && d.longitude != null){ compSubjectLat = Number(d.latitude); compSubjectLng = Number(d.longitude); renderCompMap(); }
+    const n = d.numMortgages;
+    if(n === 0){
+      compMortFreeClear = true;
+      const a = document.getElementById('compMortAmt'); if(a) a.value = 0;
+      const l = document.getElementById('compMortLender'); if(l) l.value = '';
+      if(msg) msg.textContent = 'No mortgages on record for this address.';
+      renderCompMortgage(); return;
+    }
+    compMortFreeClear = false;
+    const pm = d.primaryMortgage || {};
+    const bal = (d.totalLoanBalance != null ? d.totalLoanBalance : (pm.balance != null ? pm.balance : pm.originalAmount));
+    const a = document.getElementById('compMortAmt'); if(a && bal != null) a.value = Math.round(bal);
+    const l = document.getElementById('compMortLender'); if(l && pm.lender) l.value = pm.lender;
+    if(bal == null && !pm.lender){
+      if(msg) msg.textContent = 'Mortgage detail not returned for this address — type the amount and lender by hand.';
+    } else {
+      if(msg) msg.textContent = 'Loaded ' + (n != null ? n : (d.mortgages||[]).length) + ' mortgage(s) on record.';
+    }
+    renderCompMortgage();
+  }catch(e){
+    if(msg) msg.textContent = 'Mortgage lookup unavailable right now — type the amount and lender by hand.';
+  }
+}
+function renderCompTierTable(){
+  const box = document.getElementById('compTierTable'); if(!box) return;
+  const arv = parseFloat((document.getElementById('compARV')||{}).value)||0;
+  const rep = parseFloat((document.getElementById('compRepairs')||{}).value)||0;
+  if(!arv){ box.innerHTML = ''; return; }
+  const tiers = [
+    { label: 'Under $120K', tier: .70 },
+    { label: '$120–220K', tier: .80 },
+    { label: '$220–300K', tier: .815 },
+    { label: '$300–400K', tier: .829 },
+    { label: '$400K+', tier: .849 },
+  ];
+  const active = compTier(arv);
+  const rows = tiers.map(t => {
+    const mao = Math.round((arv-rep)*t.tier);
+    const lao = Math.round(mao*.70);
+    const on = t.tier === active;
+    return '<tr' + (on ? ' style="background:var(--panel2)"' : '') + '><td>' + t.label + ' · ' + (t.tier*100).toFixed(1) + '%' + (on ? ' <span class="badge green" style="font-size:10px">ACTIVE</span>' : '') + '</td><td>$' + mao.toLocaleString() + '</td><td>$' + lao.toLocaleString() + '</td><td>$' + (mao-lao).toLocaleString() + '</td></tr>';
+  }).join('');
+  const mao = Math.round((arv-rep)*active);
+  const lao = Math.round(mao*.70);
+  const mid = Math.round((mao+lao)/2);
+  box.innerHTML = '<div class="sec-title" style="font-size:14px">📊 Offer Math</div>'
+    + '<div class="tbl-wrap"><table><thead><tr><th>MAO tier</th><th>MAO</th><th>LAO (70%)</th><th>Spread</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
+    + '<div style="font-size:13px;margin-top:8px"><strong>Offer scenarios:</strong> open at <strong>$' + lao.toLocaleString() + '</strong> (LAO) · midpoint <strong>$' + mid.toLocaleString() + '</strong> · ceiling <strong>$' + mao.toLocaleString() + '</strong> (MAO — never offer above it).</div>'
+    + '<div style="font-size:13px;color:var(--muted);margin-top:4px">Repairs sensitivity at this ARV: −$10K repairs → MAO $' + Math.round((arv-Math.max(0,rep-10000))*active).toLocaleString() + ' · as entered → MAO $' + mao.toLocaleString() + ' · +$10K repairs → MAO $' + Math.round((arv-(rep+10000))*active).toLocaleString() + '.</div>';
 }
 function calcComp(){
+  renderCompMortgage();
   const st = document.getElementById('compListStatus');
   const gate = document.getElementById('compGateMsg');
   const el = document.getElementById('compResult');
-  if(st && st.value === 'listed'){
+  const arvEl = document.getElementById('compARV');
+  const repEl = document.getElementById('compRepairs');
+  const listed = st && st.value === 'listed';
+  if(arvEl) arvEl.disabled = !!listed;
+  if(repEl) repEl.disabled = !!listed;
+  if(listed){
     const agent = (document.getElementById('compListAgent')||{}).value || '';
     const lp = (document.getElementById('compListPrice')||{}).value || '';
     const dom = (document.getElementById('compListDom')||{}).value || '';
-    if(gate) gate.innerHTML = '<div style="background:#3d0d0d;border:1px solid #ff4d4d;border-radius:8px;padding:10px;font-size:13px;font-weight:800;color:#ff8080">⛔ PASS — Listed with a realtor' + (agent ? ' · ' + esc(agent) : '') + (lp ? ' · list $' + Number(lp).toLocaleString() : '') + (dom ? ' · ' + dom + ' days on market' : '') + '<br><span style="font-weight:400;color:var(--muted)">No MAO, no LAO, no offer. Move on.</span></div>';
+    const dt = (document.getElementById('compListDate')||{}).value || '';
+    if(gate) gate.innerHTML = '<div style="background:#3d0d0d;border:1px solid #ff4d4d;border-radius:8px;padding:10px;font-size:13px;font-weight:800;color:#ff8080">⛔ PASS — Listed with a realtor' + (agent ? ' · ' + esc(agent) : '') + (lp ? ' · list $' + Number(lp).toLocaleString() : '') + (dom ? ' · ' + dom + ' days on market' : '') + (dt ? ' · listed ' + compFmtDate(dt) : '') + '<br><span style="font-weight:400;color:var(--muted)">No MAO, no LAO, no offer. Move on.</span></div>';
     if(el) el.innerHTML = '';
+    renderCompInsights();
+    const tt = document.getElementById('compTierTable'); if(tt) tt.innerHTML = '';
+    renderCompList();
     return;
   }
   if(gate) gate.innerHTML = (st && st.value === 'not-listed') ? '<div style="font-size:12px;color:var(--green)">✓ Not listed — clear to comp.</div>' : '<div style="font-size:12px;color:var(--muted)">⚠️ Listing status not checked — check before offering.</div>';
-  const arv = parseFloat(document.getElementById('compARV').value)||0;
-  const rep = parseFloat(document.getElementById('compRepairs').value)||0;
-  if(!arv){ el.innerHTML=''; return; }
+  renderCompInsights();
+  const arv = parseFloat(arvEl.value)||0;
+  const rep = parseFloat(repEl.value)||0;
+  if(!arv){ el.innerHTML=''; const tt = document.getElementById('compTierTable'); if(tt) tt.innerHTML=''; return; }
   const tier = compTier(arv);
   const mao = Math.round((arv-rep)*tier);
   const lao = Math.round(mao*.70);
@@ -3495,6 +3714,208 @@ function calcComp(){
     <div class="card"><div class="num" style="color:var(--green)">$${lao.toLocaleString()}</div><div class="lbl">LAO (opening)</div><div class="sub">70% of MAO</div></div>
     <div class="card"><div class="num" style="color:var(--blue)">$${(mao-lao).toLocaleString()}</div><div class="lbl">Negotiation Room</div></div>
   </div>`;
+  renderCompTierTable();
+}
+/* ---- Verified comps on the Comps page: same attom-lookup endpoint the lead
+   modal's Verified Comps panel uses, driven by the typed address. ATTOM rows are
+   recorded closed sales, so status is Sold and source is Public Record; ATTOM
+   supplies no DOM, so DOM renders as — (never invented). ---- */
+function compPickAvg(){
+  const picked = compRows.filter(r => compPicks.indexOf(r.address) >= 0 && r.amount != null);
+  if(!picked.length) return 0;
+  return Math.round(picked.reduce((s,r)=>s+r.amount,0)/picked.length);
+}
+function renderCompList(){
+  const box = document.getElementById('compListBox'); if(!box) return;
+  const bar = document.getElementById('compPickBar');
+  const listed = compStatus() === 'listed';
+  renderCompMap();
+  if(!compRows.length){
+    box.innerHTML = '<p style="color:var(--muted);font-size:13px">No verified comps loaded yet. Enter the property address above, then load verified comps — or type an ARV below to run the math manually.</p>';
+    if(bar) bar.innerHTML = '';
+    return;
+  }
+  let html = '';
+  if(listed) html += '<p style="color:#ff8080;font-size:12px;font-weight:700">⛔ PASS — comps below are reference only, do not offer.</p>';
+  const rows = compRows.map((r,i) => {
+    const picked = compPicks.indexOf(r.address) >= 0;
+    return '<tr>'
+      + '<td><input type="checkbox" ' + (picked ? 'checked' : '') + ' ' + (listed ? 'disabled' : '') + ' onchange="toggleCompPick(' + i + ')" /></td>'
+      + '<td>' + esc(r.address) + '</td>'
+      + '<td>' + (r.distance != null ? Number(r.distance).toFixed(2) + ' mi' : '—') + '</td>'
+      + '<td><span class="badge red">Sold</span></td>'
+      + '<td>Public Record</td>'
+      + '<td>—</td>'
+      + '<td>' + (r.beds != null ? r.beds : '—') + ' / ' + (r.baths != null ? r.baths : '—') + '</td>'
+      + '<td>' + (r.sqft ? Number(r.sqft).toLocaleString() : '—') + '</td>'
+      + '<td>' + (r.ppsf ? '$' + Number(r.ppsf).toLocaleString() : '—') + '</td>'
+      + '<td>' + (r.date ? fmtDate(r.date) : '—') + '</td>'
+      + '<td><b>' + (r.amount != null ? '$' + Number(r.amount).toLocaleString() : '—') + '</b></td>'
+      + '</tr>';
+  }).join('');
+  html += '<div class="tbl-wrap"><table><thead><tr><th>Pick</th><th>Address</th><th>Dist</th><th>Status</th><th>Source</th><th>DOM</th><th>Bd/Ba</th><th>Sq Ft</th><th>$/Sqft</th><th>Sold</th><th>Price</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+  box.innerHTML = html;
+  if(bar){
+    const picked = compRows.filter(r => compPicks.indexOf(r.address) >= 0 && r.amount != null);
+    if(!picked.length){ bar.innerHTML = '<p style="color:var(--muted);font-size:12px">Pick comps above — ARV follows the average of your picks.</p>'; return; }
+    const avg = compPickAvg();
+    const ps = picked.filter(r=>r.ppsf);
+    const avgPpsf = ps.length ? Math.round(ps.reduce((s,r)=>s+r.ppsf,0)/ps.length) : null;
+    const avgDist = (picked.reduce((s,r)=>s+(Number(r.distance)||0),0)/picked.length).toFixed(2);
+    bar.innerHTML = '<div style="background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px;font-size:13px"><strong>' + picked.length + ' picked · ARV from picks: $' + avg.toLocaleString() + '</strong> <span style="color:var(--muted)">· avg $/sqft ' + (avgPpsf ? '$' + avgPpsf.toLocaleString() : '—') + ' · avg distance ' + avgDist + ' mi</span></div>';
+  }
+}
+/* ---- Live map on the Comps page: same Leaflet approach as the property
+   search map. Pins render ONLY from coordinates already in the data — comp
+   row latitude/longitude (supplied by the feed when present) and subject
+   latitude/longitude (lead, or an already-fetched property lookup). No
+   geocoding, no new request, no invented pins: rows without coordinates
+   simply get no pin, and the note says so plainly. ---- */
+function compMapPriceLabel(amount){
+  if(amount == null) return '—';
+  if(amount >= 1000) return '$' + Math.round(amount/1000) + 'k';
+  return '$' + Number(amount).toLocaleString();
+}
+function compPinIcon(label, bg){
+  return L.divIcon({ className: '', html: '<div style="transform:translate(-50%,-50%);background:' + bg + ';color:#fff;font-weight:800;font-size:11px;padding:4px 9px;border-radius:999px;border:2px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.45);white-space:nowrap">' + esc(label) + '</div>' });
+}
+function renderCompMap(){
+  const el = document.getElementById('compMap');
+  const note = document.getElementById('compMapNote');
+  if(!el) return;
+  if(typeof L === 'undefined'){ if(note) note.textContent = 'Map needs an internet connection to load.'; return; }
+  const listed = compStatus() === 'listed';
+  const num = (v)=> (v != null && v !== '' && !isNaN(Number(v))) ? Number(v) : null;
+  const pinned = compRows.filter(r => num(r.latitude) != null && num(r.longitude) != null);
+  const noCoords = compRows.length - pinned.length;
+  const subjLat = num(compSubjectLat), subjLng = num(compSubjectLng);
+  if(!compMap){
+    compMap = L.map('compMap', { scrollWheelZoom: false });
+    compMap.on('focus', ()=> compMap.scrollWheelZoom.enable());
+    compMap.on('blur', ()=> compMap.scrollWheelZoom.disable());
+  }
+  const tileUrl = propMapTiles();
+  if(compMapTileLayer){ compMapTileLayer.setUrl(tileUrl); }
+  else{
+    compMapTileLayer = L.tileLayer(tileUrl, {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+      maxZoom: 19
+    }).addTo(compMap);
+  }
+  compMapMarkers.forEach(m => compMap.removeLayer(m));
+  compMapMarkers = [];
+  const bounds = L.latLngBounds();
+  let hasPin = false;
+  if(subjLat != null && subjLng != null){
+    const m = L.marker([subjLat, subjLng], { icon: compPinIcon('SUBJECT', '#ff6b1a') }).addTo(compMap);
+    const addr = (document.getElementById('compListAddr')||{}).value || 'Subject property';
+    m.bindPopup('<div style="font-size:13px;line-height:1.7;color:#182234"><b>' + esc(addr) + '</b><div>Subject property</div></div>');
+    compMapMarkers.push(m); bounds.extend([subjLat, subjLng]); hasPin = true;
+  }
+  pinned.forEach(r=>{
+    const picked = compPicks.indexOf(r.address) >= 0;
+    const status = String(r.status || 'sold').toLowerCase();
+    const bg = status === 'pending' ? '#e6a200' : (picked ? '#2ecc71' : '#1e8449');
+    const label = (picked ? '✓ ' : '') + compMapPriceLabel(r.amount);
+    const m = L.marker([num(r.latitude), num(r.longitude)], { icon: compPinIcon(label, bg) }).addTo(compMap);
+    m.bindPopup('<div style="font-size:13px;line-height:1.7;min-width:170px;color:#182234">'
+      + '<div style="font-weight:700">' + esc(r.address || '') + '</div>'
+      + '<div>' + (r.amount != null ? '$' + Number(r.amount).toLocaleString() : '—') + (r.distance != null ? ' · ' + Number(r.distance).toFixed(2) + ' mi' : '') + '</div>'
+      + '<div>' + (r.beds != null ? r.beds : '—') + 'bd / ' + (r.baths != null ? r.baths : '—') + 'ba' + (r.sqft ? ' · ' + Number(r.sqft).toLocaleString() + ' sqft' : '') + '</div>'
+      + '<div>' + (r.date ? fmtDate(r.date) : '') + (picked ? ' · ✓ In ARV' : '') + '</div>'
+      + '</div>');
+    compMapMarkers.push(m); bounds.extend([num(r.latitude), num(r.longitude)]); hasPin = true;
+  });
+  if(note){
+    const parts = [];
+    if(hasPin){
+      parts.push((subjLat != null ? 'Subject + ' : '') + pinned.length + ' comp pin' + (pinned.length === 1 ? '' : 's'));
+      if(noCoords) parts.push(noCoords + ' comp row' + (noCoords === 1 ? '' : 's') + ' without coordinates — no pin placed');
+    }else if(compRows.length){
+      parts.push('Map pins need coordinates — the comp feed does not include them yet, so no comp pins can be placed. The list below still works.');
+    }else{
+      parts.push('Load verified comps to place pins.');
+    }
+    if(listed && compRows.length) parts.push('Reference only — listed property, do not offer.');
+    note.textContent = parts.join(' · ');
+  }
+  if(hasPin && bounds.isValid()) compMap.fitBounds(bounds.pad(0.25));
+}
+function toggleCompPick(i){
+  const r = compRows[i]; if(!r) return;
+  const at = compPicks.indexOf(r.address);
+  if(at >= 0) compPicks.splice(at, 1); else compPicks.push(r.address);
+  const avg = compPickAvg();
+  const arvEl = document.getElementById('compARV');
+  if(avg && arvEl) arvEl.value = avg;
+  renderCompList();
+  calcComp();
+}
+async function loadCompsForAddress(){
+  const addrEl = document.getElementById('compListAddr');
+  const msg = document.getElementById('compLoadMsg');
+  const addr = addrEl ? addrEl.value.trim() : '';
+  if(!addr){ if(msg) msg.textContent = 'Enter the property address first.'; return; }
+  if(msg) msg.textContent = 'Loading verified comps…';
+  try{
+    const resp = await fetch('/.netlify/functions/attom-lookup?address=' + encodeURIComponent(addr));
+    if(!resp.ok) throw new Error('HTTP ' + resp.status);
+    const d = await resp.json();
+    if(!d.matched){ compRows = []; compPicks = []; compLoadedAddr = ''; compSubjectLat = null; compSubjectLng = null; if(msg) msg.textContent = 'No ownership records found for this address — type an ARV below to run the math manually.'; renderCompList(); return; }
+    const seen = {};
+    const rows = [];
+    const pushRow = (c)=>{ if(!c || !c.address || seen[c.address]) return; seen[c.address] = 1; rows.push(c); };
+    const c = d.comps || {};
+    (c.best || []).forEach(pushRow);
+    (c.upperPocket || []).forEach(pushRow);
+    if(c.asIsAnchor) pushRow(c.asIsAnchor);
+    compRows = rows;
+    compPicks = (c.best || []).map(x => x.address).filter(a => seen[a]);
+    compLoadedAddr = addr;
+    if(d.property && d.property.latitude != null && d.property.longitude != null){ compSubjectLat = Number(d.property.latitude); compSubjectLng = Number(d.property.longitude); }
+    if(d.property && d.property.sqft){
+      const sqEl = document.getElementById('compListSqft');
+      if(sqEl && !sqEl.value) sqEl.value = d.property.sqft;
+    }
+    if(!rows.length){ if(msg) msg.textContent = 'No verified comparable sales found — type an ARV below to run the math manually.'; renderCompList(); return; }
+    if(msg) msg.textContent = 'Loaded ' + rows.length + ' verified sale(s) — best ' + compPicks.length + ' pre-picked.';
+    const avg = compPickAvg();
+    const arvEl = document.getElementById('compARV');
+    if(avg && arvEl) arvEl.value = avg;
+    renderCompList();
+    calcComp();
+  }catch(e){
+    if(msg) msg.textContent = 'Verified comps unavailable right now — type an ARV below to run the math manually.';
+  }
+}
+function openCompsForLead(id){
+  const l = leads.find(x=>x.id===id); if(!l) return;
+  closeModal();
+  showPage('comps');
+  const addr = [l.address, l.city, l.state, l.zip].filter(Boolean).join(', ');
+  const addrEl = document.getElementById('compListAddr'); if(addrEl) addrEl.value = addr;
+  const st = document.getElementById('compListStatus'); if(st) st.value = l.listingStatus === 'listed' ? 'listed' : l.listingStatus === 'not-listed' ? 'not-listed' : '';
+  const ag = document.getElementById('compListAgent'); if(ag) ag.value = l.listingAgent || '';
+  const lp = document.getElementById('compListPrice'); if(lp) lp.value = l.listingPrice || '';
+  const dm = document.getElementById('compListDom'); if(dm) dm.value = l.listingDom || '';
+  const sq = document.getElementById('compListSqft'); if(sq && l.sqft) sq.value = l.sqft;
+  const ma = document.getElementById('compMortAmt');
+  const ml = document.getElementById('compMortLender');
+  compMortFreeClear = (l.dmNumMortgages === 0);
+  if(ma){
+    if(l.dmNumMortgages === 0) ma.value = 0;
+    else if(l.dmTotalBalance != null) ma.value = Math.round(l.dmTotalBalance);
+    else if(l.dmMortgage && l.dmMortgage.balance != null) ma.value = Math.round(l.dmMortgage.balance);
+    else if(l.dmMortgage && l.dmMortgage.originalAmount != null) ma.value = Math.round(l.dmMortgage.originalAmount);
+    else ma.value = '';
+  }
+  if(ml) ml.value = (l.dmMortgage && l.dmMortgage.lender) || '';
+  compMortLoadedAddr = addr;
+  updateCompLinks();
+  if(l.latitude != null && l.longitude != null){ compSubjectLat = Number(l.latitude); compSubjectLng = Number(l.longitude); }
+  calcComp();
+  renderCompMap();
+  loadCompsForAddress();
 }
 
 /* ============ THEME (dark/light) ============ */

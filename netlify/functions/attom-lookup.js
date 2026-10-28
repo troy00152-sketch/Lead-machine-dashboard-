@@ -103,8 +103,13 @@ function parseSubject(data, today) {
   const mort = assess.mortgage || {};
   const first = mort.FirstConcurrent || {};
   const lot = p.lot || {};
+  const loc = p.location || {};
+  const subjLat = (loc.latitude !== undefined && loc.latitude !== null && loc.latitude !== '') ? parseFloat(loc.latitude) : NaN;
+  const subjLng = (loc.longitude !== undefined && loc.longitude !== null && loc.longitude !== '') ? parseFloat(loc.longitude) : NaN;
   const subj = {
     address: (p.address || {}).oneLine || '',
+    latitude: isNaN(subjLat) ? null : subjLat,
+    longitude: isNaN(subjLng) ? null : subjLng,
     apn: (p.identifier || {}).apn || '',
     legalDescription: summ.legal1 || null,
     zoning: lot.siteZoningIdent || null,
@@ -171,6 +176,10 @@ function parseComps(data) {
       distance = isNaN(f) ? 99 : f;
     }
     const date = parseDateParts(sh['@TransferDate_ext']);
+    const latRaw = c['@LatitudeNumber'];
+    const lngRaw = c['@LongitudeNumber'];
+    const lat = (latRaw !== undefined && latRaw !== null && latRaw !== '') ? parseFloat(latRaw) : NaN;
+    const lng = (lngRaw !== undefined && lngRaw !== null && lngRaw !== '') ? parseFloat(lngRaw) : NaN;
     out.push({
       address: `${c['@_StreetAddress'] || ''}, ${c['@_City'] || ''} ${c['@_PostalCode'] || ''}`.replace(/,\s*$/, '').trim(),
       distance,
@@ -181,6 +190,8 @@ function parseComps(data) {
       sqft,
       beds: st['@TotalBedroomCount'] != null ? st['@TotalBedroomCount'] : null,
       baths: st['@TotalBathroomCount'] != null ? st['@TotalBathroomCount'] : null,
+      latitude: isNaN(lat) ? null : lat,
+      longitude: isNaN(lng) ? null : lng,
       arms: sh['@ArmsLengthTransactionIndicatorExt'] != null ? sh['@ArmsLengthTransactionIndicatorExt'] : null,
       seller: sh['@SellerUnparsedName'] || '',
     });
@@ -313,6 +324,8 @@ function compOut(c) {
     sqft: c.sqft || null,
     beds: c.beds != null && c.beds !== '' ? c.beds : null,
     baths: c.baths != null && c.baths !== '' ? c.baths : null,
+    latitude: c.latitude != null ? c.latitude : null,
+    longitude: c.longitude != null ? c.longitude : null,
     ppsf: c.ppsf ? Math.round(c.ppsf * 100) / 100 : null,
     score: c.score != null ? c.score : null,
     deviations: c.deviations || [],
@@ -499,6 +512,8 @@ exports.handler = async (event) => {
         yearBuilt: subject.yearBuilt,
         lotSqft: subject.lotSqft,
         lotAcres: subject.lotAcres,
+        latitude: subject.latitude,
+        longitude: subject.longitude,
         lastSaleAmount: subject.lastSaleAmount,
         lastSaleDate: subject.lastSaleDate,
         assessedValue: subject.assessedValue,
