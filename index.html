@@ -396,7 +396,7 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
         <div class="card" style="margin-bottom:8px">
           <p style="color:var(--muted);font-size:13px;margin-bottom:12px">Enter a full property address to pull live data — property details, owner, phones, mortgage & distress. All from one live lookup.</p>
           <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-            <input class="field" id="propSearchZip" placeholder="Full address (e.g. 123 Main St, Indianapolis, IN 46201)" style="max-width:320px;flex:1" onkeypress="if(event.key==='Enter')searchPropertiesByZip()" />
+            <input class="field" id="propSearchZip" placeholder="Enter full address" style="max-width:320px;flex:1" onkeypress="if(event.key==='Enter')searchPropertiesByZip()" />
             <button class="btn" onclick="openPropFilters()">🎛️ Filters <span class="badge orange" id="propFilterCount" style="display:none;font-size:10px">0</span></button>
             <button class="btn primary" onclick="searchPropertiesByZip()">🔍 Search Properties</button>
           </div>
@@ -505,7 +505,7 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
           <label class="lbl">Distress Category <span style="color:var(--muted2);font-weight:400">(click to apply to all pasted leads)</span></label>
           <div id="signalChips" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px"></div>
           <label class="lbl">Paste rows here</label>
-          <textarea class="field" id="pasteArea" placeholder="123 Main St&#9;Indianapolis&#9;IN&#9;46201&#9;Tax Delinquent&#10;456 Oak Ave&#9;Cleveland&#9;OH&#9;44101&#9;Pre-Foreclosure"></textarea>
+          <textarea class="field" id="pasteArea" placeholder="Address [tab] City [tab] State [tab] ZIP [tab] Distress Signal — one lead per line"></textarea>
           <div style="display:flex;gap:10px;margin-top:12px;flex-wrap:wrap">
             <button class="btn primary" onclick="ingestPastedLeads()">⚡ Ingest Leads</button>
             <button class="btn ghost" onclick="document.getElementById('pasteArea').value=''">Clear</button>
@@ -548,9 +548,9 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
         <div class="sec-title">🤝 Buyer Match Ai <span class="badge green" id="bmDbBadge" style="font-size:10px">NATIONAL BUYER DATABASE</span></div>
         <div class="card" style="margin-bottom:14px">
           <p style="color:var(--muted);font-size:13px;margin-bottom:12px">Enter a property address — Buyer Match Ai ranks up to 100 real cash buyers who buy properties like it, scored by location, price fit, portfolio strength and strategy. Running on your own buyer database.</p>
-          <div style="margin-bottom:12px"><label class="lbl">Property Address</label><input class="field" id="bmAddress" placeholder="123 Main St, Indianapolis, IN 46201" /></div>
+          <div style="margin-bottom:12px"><label class="lbl">Property Address</label><input class="field" id="bmAddress" placeholder="Enter property address" /></div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
-            <div><label class="lbl">Your Asking Price ($) <span style="color:var(--muted);font-weight:400">— optional, defaults to property value</span></label><input class="field" id="bmPrice" type="number" min="0" step="1000" placeholder="e.g. 120000" /></div>
+            <div><label class="lbl">Your Asking Price ($) <span style="color:var(--muted);font-weight:400">— optional, defaults to property value</span></label><input class="field" id="bmPrice" type="number" min="0" step="1000" placeholder="Enter asking price" /></div>
             <div style="display:flex;align-items:flex-end"><button class="btn primary" style="width:100%" onclick="runBuyerMatch()">🤖 Find Buyers</button></div>
           </div>
           <div id="bmPropSummary"></div>
@@ -559,7 +559,7 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
             <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-top:12px">
               <div><label class="lbl">Investor Type</label><select class="field" id="bmFInvestor"><option value="all">All Investors</option><option value="flipper">Flipper</option><option value="landlord">Landlord</option></select></div>
               <div><label class="lbl">Entity Type</label><select class="field" id="bmFEntity"><option value="all">All</option><option value="individual">Individual</option><option value="entity">Entity / LLC</option></select></div>
-              <div><label class="lbl">Properties Owned (min)</label><input class="field" id="bmFMinProps" type="number" min="0" placeholder="3" /></div>
+              <div><label class="lbl">Properties Owned (min)</label><input class="field" id="bmFMinProps" type="number" min="0" placeholder="Min" /></div>
               <div><label class="lbl">Properties Owned (max)</label><input class="field" id="bmFMaxProps" type="number" min="0" placeholder="Any" /></div>
               <div><label class="lbl">Avg Purchase Price (min $)</label><input class="field" id="bmFMinAvg" type="number" min="0" step="5000" placeholder="Any" /></div>
               <div><label class="lbl">Avg Purchase Price (max $)</label><input class="field" id="bmFMaxAvg" type="number" min="0" step="5000" placeholder="Any" /></div>
@@ -590,14 +590,14 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
           </div>
           <p style="color:var(--muted);font-size:13px;margin-bottom:12px">Trace any address to find owner phone numbers.</p>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
-            <div><label class="lbl">First Name (optional)</label><input class="field" id="stFirst" placeholder="John" /></div>
-            <div><label class="lbl">Last Name (optional)</label><input class="field" id="stLast" placeholder="Doe" /></div>
+            <div><label class="lbl">First Name (optional)</label><input class="field" id="stFirst" placeholder="First name" /></div>
+            <div><label class="lbl">Last Name (optional)</label><input class="field" id="stLast" placeholder="Last name" /></div>
           </div>
-          <div style="margin-bottom:12px"><label class="lbl">Street Address</label><input class="field" id="stAddress" placeholder="123 Main St" /></div>
+          <div style="margin-bottom:12px"><label class="lbl">Street Address</label><input class="field" id="stAddress" placeholder="Street address" /></div>
           <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:12px;margin-bottom:12px">
-            <div><label class="lbl">City</label><input class="field" id="stCity" placeholder="Indianapolis" /></div>
-            <div><label class="lbl">State</label><input class="field" id="stState" placeholder="IN" maxlength="2" /></div>
-            <div><label class="lbl">ZIP</label><input class="field" id="stZip" placeholder="46201" maxlength="5" /></div>
+            <div><label class="lbl">City</label><input class="field" id="stCity" placeholder="City" /></div>
+            <div><label class="lbl">State</label><input class="field" id="stState" placeholder="ST" maxlength="2" /></div>
+            <div><label class="lbl">ZIP</label><input class="field" id="stZip" placeholder="ZIP" maxlength="5" /></div>
           </div>
           <button class="btn primary" onclick="runSkipTrace()">⚡ Trace Address</button>
           <div id="stResults" style="margin-top:16px"></div>
@@ -624,7 +624,7 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
           <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px">
             <div>
               <label class="lbl">ZIP Code</label>
-              <input class="field" id="lbZip" placeholder="46201" maxlength="5" inputmode="numeric" style="max-width:130px" />
+              <input class="field" id="lbZip" placeholder="ZIP" maxlength="5" inputmode="numeric" style="max-width:130px" />
             </div>
             <div>
               <label class="lbl">Results per search</label>
@@ -636,11 +636,11 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
             </div>
             <div>
               <label class="lbl">Min Value ($)</label>
-              <input class="field" id="lbMinVal" type="number" min="0" step="5000" placeholder="50,000" style="max-width:150px" />
+              <input class="field" id="lbMinVal" type="number" min="0" step="5000" placeholder="Min value" style="max-width:150px" />
             </div>
             <div>
               <label class="lbl">Max Value ($)</label>
-              <input class="field" id="lbMaxVal" type="number" min="0" step="5000" placeholder="300,000" style="max-width:150px" />
+              <input class="field" id="lbMaxVal" type="number" min="0" step="5000" placeholder="Max value" style="max-width:150px" />
             </div>
           </div>
           <div style="margin-bottom:14px">
@@ -671,11 +671,11 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
           <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
             <div>
               <label class="lbl">First Name</label>
-              <input class="field" id="psFirst" placeholder="Chet" style="max-width:170px" />
+              <input class="field" id="psFirst" placeholder="First name" style="max-width:170px" />
             </div>
             <div>
               <label class="lbl">Last Name *</label>
-              <input class="field" id="psLast" placeholder="Mentlewski" style="max-width:170px" onkeypress="if(event.key==='Enter')dmPersonSearch()" />
+              <input class="field" id="psLast" placeholder="Last name" style="max-width:170px" onkeypress="if(event.key==='Enter')dmPersonSearch()" />
             </div>
             <div>
               <label class="lbl">State</label>
@@ -711,7 +711,7 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
             </div>
             <div>
               <label class="lbl">State *</label>
-              <input class="field" id="rvApnState" placeholder="IN" maxlength="2" style="max-width:80px" />
+              <input class="field" id="rvApnState" placeholder="ST" maxlength="2" style="max-width:80px" />
             </div>
             <button class="btn" onclick="dmReverseLookup('apn')">🔎 Lookup by APN</button>
           </div>
@@ -730,7 +730,7 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
             <div style="font-weight:800;font-size:13px;margin-bottom:4px">🚦 Listing Check — FIRST, before any comp math</div>
             <p style="color:var(--muted);font-size:12px;margin:0 0 10px">If it's listed with a realtor, PASS immediately — no MAO, no LAO, no offer. Check the listing, then set the status here. Listing fields are set by hand from the check — no feed supplies them.</p>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px">
-              <div><label class="lbl">Property address (for listing links)</label><input class="field" id="compListAddr" placeholder="123 Main St, City, ST ZIP" oninput="updateCompLinks()" onkeydown="if(event.key==='Enter'){event.preventDefault();loadCompsForAddress();}" /><button class="btn primary" style="margin-top:8px" onclick="loadCompsForAddress()" title="Load everything for this address — comps, map, mortgage, and offer math">🔍 Search</button></div>
+              <div><label class="lbl">Property address (for listing links)</label><input class="field" id="compListAddr" placeholder="Enter property address" oninput="updateCompLinks()" onkeydown="if(event.key==='Enter'){event.preventDefault();loadCompsForAddress();}" /><button class="btn primary" style="margin-top:8px" onclick="loadCompsForAddress()" title="Load everything for this address — comps, map, mortgage, and offer math">🔍 Search</button></div>
               <div><label class="lbl">Listing status *</label><select class="field" id="compListStatus" onchange="calcComp()"><option value="">Not checked yet</option><option value="not-listed">Not listed — clear to comp</option><option value="listed">Listed with a realtor — PASS</option></select></div>
               <div><label class="lbl">Listing agent</label><input class="field" id="compListAgent" placeholder="Agent name / brokerage" oninput="calcComp()" /></div>
               <div><label class="lbl">List price ($)</label><input class="field" id="compListPrice" type="number" placeholder="Enter list price" oninput="calcComp()" /></div>
