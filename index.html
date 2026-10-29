@@ -733,10 +733,10 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
               <div><label class="lbl">Property address (for listing links)</label><input class="field" id="compListAddr" placeholder="123 Main St, City, ST ZIP" oninput="updateCompLinks()" onkeydown="if(event.key==='Enter'){event.preventDefault();loadCompsForAddress();}" /><button class="btn primary" style="margin-top:8px" onclick="loadCompsForAddress()" title="Load everything for this address — comps, map, mortgage, and offer math">🔍 Search</button></div>
               <div><label class="lbl">Listing status *</label><select class="field" id="compListStatus" onchange="calcComp()"><option value="">Not checked yet</option><option value="not-listed">Not listed — clear to comp</option><option value="listed">Listed with a realtor — PASS</option></select></div>
               <div><label class="lbl">Listing agent</label><input class="field" id="compListAgent" placeholder="Agent name / brokerage" oninput="calcComp()" /></div>
-              <div><label class="lbl">List price ($)</label><input class="field" id="compListPrice" type="number" placeholder="115000" oninput="calcComp()" /></div>
-              <div><label class="lbl">Days on market</label><input class="field" id="compListDom" type="number" placeholder="2" oninput="calcComp()" /></div>
+              <div><label class="lbl">List price ($)</label><input class="field" id="compListPrice" type="number" placeholder="Enter list price" oninput="calcComp()" /></div>
+              <div><label class="lbl">Days on market</label><input class="field" id="compListDom" type="number" placeholder="Enter DOM" oninput="calcComp()" /></div>
               <div><label class="lbl">Listing date</label><input class="field" id="compListDate" type="date" onchange="calcComp()" /></div>
-              <div><label class="lbl">Home sq ft (optional — for $/sqft)</label><input class="field" id="compListSqft" type="number" placeholder="1056" oninput="calcComp()" /></div>
+              <div><label class="lbl">Home sq ft (optional — for $/sqft)</label><input class="field" id="compListSqft" type="number" placeholder="Auto-fills on load" oninput="calcComp()" /></div>
               <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap"><a id="compZillowLink" class="btn" href="https://www.zillow.com/" target="_blank" rel="noopener" style="text-decoration:none" onclick="stampListingChecked()">🏠 Check on Zillow ↗</a><a id="compLookupLink" class="btn" href="https://dealmachine.com/" target="_blank" rel="noopener" style="text-decoration:none" onclick="stampListingChecked()">Open Property Lookup ↗</a><span id="compCheckedNote" style="font-size:12px;color:var(--muted)"></span></div>
             </div>
             <div id="compGateMsg"></div>
@@ -761,8 +761,8 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
           <div id="compPickBar" style="margin:12px 0"></div>
           <div id="compWarnBar" style="margin:0 0 12px"></div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
-            <div><label class="lbl">ARV ($)</label><input class="field" id="compARV" type="number" placeholder="150000" oninput="calcComp()" /></div>
-            <div><label class="lbl">Repairs ($)</label><input class="field" id="compRepairs" type="number" placeholder="30000" oninput="calcComp()" /></div>
+            <div><label class="lbl">ARV ($)</label><input class="field" id="compARV" type="number" placeholder="Auto from comps" oninput="calcComp()" /></div>
+            <div><label class="lbl">Repairs ($)</label><input class="field" id="compRepairs" type="number" placeholder="Enter repairs" oninput="calcComp()" /></div>
           </div>
           <div id="compResult" style="margin-top:14px"></div>
           <div id="compTierTable" style="margin-top:14px"></div>
@@ -868,7 +868,7 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
       <label class="lbl">Note (optional)</label>
       <input class="field" id="spNote" placeholder="Why this deal is hot" style="margin-bottom:12px">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-        <div><label class="lbl">ARV ($)</label><input class="field" id="spArv" type="number" min="0" placeholder="150000"></div>
+        <div><label class="lbl">ARV ($)</label><input class="field" id="spArv" type="number" min="0" placeholder="Enter ARV"></div>
         <div><label class="lbl">Repairs ($)</label><input class="field" id="spRepairs" type="number" min="0" placeholder="50000"></div>
         <div><label class="lbl">MAO ($)</label><input class="field" id="spMao" type="number" min="0" placeholder="80000"></div>
         <div><label class="lbl">LAO ($)</label><input class="field" id="spLao" type="number" min="0" placeholder="56000"></div>
