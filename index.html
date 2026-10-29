@@ -737,7 +737,7 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
               <div><label class="lbl">Days on market</label><input class="field" id="compListDom" type="number" placeholder="Enter DOM" oninput="calcComp()" /></div>
               <div><label class="lbl">Listing date</label><input class="field" id="compListDate" type="date" onchange="calcComp()" /></div>
               <div><label class="lbl">Home sq ft (optional — for $/sqft)</label><input class="field" id="compListSqft" type="number" placeholder="Auto-fills on load" oninput="calcComp()" /></div>
-              <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap"><a id="compZillowLink" class="btn" href="https://www.zillow.com/" target="_blank" rel="noopener" style="text-decoration:none" onclick="stampListingChecked()">🏠 Check on Zillow ↗</a><a id="compLookupLink" class="btn" href="https://dealmachine.com/" target="_blank" rel="noopener" style="text-decoration:none" onclick="stampListingChecked()">Open Property Lookup ↗</a><span id="compCheckedNote" style="font-size:12px;color:var(--muted)"></span></div>
+              <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap"><a id="compZillowLink" class="btn" href="https://www.zillow.com/" target="_blank" rel="noopener" style="text-decoration:none" onclick="stampListingChecked()">🏠 Check on Zillow ↗</a><span id="compCheckedNote" style="font-size:12px;color:var(--muted)"></span></div>
             </div>
             <div id="compGateMsg"></div>
           </div>
@@ -757,9 +757,18 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
           <div id="compMap" style="height:320px;border-radius:10px;border:1px solid var(--line);margin-bottom:8px"></div>
           <div id="compMapNote" style="color:var(--muted);font-size:12px;margin-bottom:6px"></div>
           <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Map key: <span style="display:inline-block;background:#ff6b1a;color:#fff;font-weight:800;font-size:11px;padding:3px 8px;border-radius:8px">SUBJECT</span> &nbsp; <span style="display:inline-block;background:#2ecc71;color:#fff;font-weight:800;font-size:11px;padding:3px 8px;border-radius:8px">✓ picked comp — in ARV</span> &nbsp; <span style="display:inline-block;background:#1e8449;color:#fff;font-weight:800;font-size:11px;padding:3px 8px;border-radius:8px">comp</span> &nbsp; <span style="display:inline-block;background:#e6a200;color:#fff;font-weight:800;font-size:11px;padding:3px 8px;border-radius:8px">pending</span></div>
+          <div id="compFilterChips" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin:0 0 10px">
+            <div><label class="lbl">Radius</label><select class="field" id="compFRadius" onchange="setCompFilter('radius', this.value)"><option value="0">Any distance</option><option value="0.5">≤ 0.5 mi</option><option value="1">≤ 1 mi</option><option value="2">≤ 2 mi</option></select></div>
+            <div><label class="lbl">Sold within</label><select class="field" id="compFRecency" onchange="setCompFilter('recency', this.value)"><option value="0">Any date</option><option value="3">3 months</option><option value="6">6 months</option><option value="12">12 months</option></select></div>
+            <div><label class="lbl">Beds</label><select class="field" id="compFBeds" onchange="setCompFilter('beds', this.value)"><option value="any">Any beds</option><option value="same">Same as subject</option><option value="pm1">Subject ± 1</option></select></div>
+            <div><label class="lbl">Sqft band</label><select class="field" id="compFSqft" onchange="setCompFilter('sqft', this.value)"><option value="any">Any size</option><option value="10">Subject ± 10%</option><option value="20">Subject ± 20%</option></select></div>
+            <span style="font-size:11px;color:var(--muted)">Filters change the view, not your picks.</span>
+          </div>
           <div id="compListBox"></div>
+          <div id="compBest3" style="margin:12px 0"></div>
           <div id="compPickBar" style="margin:12px 0"></div>
           <div id="compWarnBar" style="margin:0 0 12px"></div>
+          <p style="color:var(--muted);font-size:12px;margin:0 0 10px">As-is screen only — NOT a renovated ARV. Real offers still get the airtight comp flow.</p>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
             <div><label class="lbl">ARV ($)</label><input class="field" id="compARV" type="number" placeholder="Auto from comps" oninput="calcComp()" /></div>
             <div><label class="lbl">Repairs ($)</label><input class="field" id="compRepairs" type="number" placeholder="Enter repairs" oninput="calcComp()" /></div>
@@ -3517,8 +3526,49 @@ let compLoadedAddr = '';
 let compConfidence = '';
 let compConfidenceText = '';
 let compSubjectSqft = null;
+let compSubjectBeds = null;
 let compStabilityWarns = [];
 let compPrevLoads = {};
+/* Display-only table filters (approved demo look, Oct 29). Filters change the
+   VIEW, never the picks: ARV, the 3-comp gate, and the pick bar always use the
+   full loaded set. Reset on every new load and every address change. */
+let compFilters = { radius: 0, recency: 0, beds: 'any', sqft: 'any' };
+function resetCompFilters(){
+  compFilters = { radius: 0, recency: 0, beds: 'any', sqft: 'any' };
+  syncCompFilterChips();
+}
+function syncCompFilterChips(){
+  const set = (id, v)=>{ const el = document.getElementById(id); if(el) el.value = v; };
+  set('compFRadius', String(compFilters.radius));
+  set('compFRecency', String(compFilters.recency));
+  set('compFBeds', compFilters.beds);
+  set('compFSqft', compFilters.sqft);
+}
+function setCompFilter(k, v){
+  if(k === 'radius') compFilters.radius = parseFloat(v) || 0;
+  else if(k === 'recency') compFilters.recency = parseFloat(v) || 0;
+  else compFilters[k] = v;
+  renderCompList();
+}
+function compRowPassesFilters(r){
+  const f = compFilters;
+  if(f.radius > 0 && (r.distance == null || Number(r.distance) > f.radius)) return false;
+  if(f.recency > 0 && r.date){
+    const t = new Date(r.date).getTime();
+    if(!isNaN(t) && (Date.now() - t) / (1000*60*60*24*30.44) > f.recency) return false;
+  }
+  if(f.beds !== 'any' && compSubjectBeds != null && r.beds != null){
+    const d = Math.abs(Number(r.beds) - compSubjectBeds);
+    if(f.beds === 'same' && d !== 0) return false;
+    if(f.beds === 'pm1' && d > 1) return false;
+  }
+  if(f.sqft !== 'any' && compSubjectSqft && r.sqft){
+    const pct = Math.abs(Number(r.sqft) - compSubjectSqft) / compSubjectSqft * 100;
+    if(f.sqft === '10' && pct > 10) return false;
+    if(f.sqft === '20' && pct > 20) return false;
+  }
+  return true;
+}
 /* Address the current listing-gate group belongs to. The gate fields are ONE
    group (status, agent, price, DOM, date, sqft) — they reset together when
    the address changes, never numbers without a status. */
@@ -3578,7 +3628,7 @@ function resetCompsPage(){
   compGateAddr = ''; compLastAddr = '';
   const sc = document.getElementById('compSubjectCard'); if(sc){ sc.innerHTML = ''; sc.style.display = 'none'; }
   compRows = []; compPicks = []; compLoadedAddr = '';
-  compConfidence = ''; compConfidenceText = ''; compSubjectSqft = null; compStabilityWarns = []; compPrevLoads = {};
+  compConfidence = ''; compConfidenceText = ''; compSubjectSqft = null; compSubjectBeds = null; resetCompFilters(); compStabilityWarns = []; compPrevLoads = {};
   const wb = document.getElementById('compWarnBar'); if(wb) wb.innerHTML = '';
   const arvEl = document.getElementById('compARV'); if(arvEl) arvEl.value = '';
   const repEl = document.getElementById('compRepairs'); if(repEl) repEl.value = '';
@@ -3621,7 +3671,7 @@ function updateCompLinks(){
        property under a new address. Confidence, subject sqft, and price
        warnings are load-derived too, so they clear here as well. */
     const sc = document.getElementById('compSubjectCard'); if(sc){ sc.innerHTML = ''; sc.style.display = 'none'; }
-    compConfidence = ''; compConfidenceText = ''; compSubjectSqft = null; compStabilityWarns = [];
+    compConfidence = ''; compConfidenceText = ''; compSubjectSqft = null; compSubjectBeds = null; resetCompFilters(); compStabilityWarns = [];
     const wb = document.getElementById('compWarnBar'); if(wb) wb.innerHTML = '';
   }
   compLastAddr = v;
@@ -3633,7 +3683,9 @@ function updateCompLinks(){
     if(box) box.innerHTML = '<p style="color:var(--muted);font-size:13px">Address changed — load verified comps again for the new property.</p>';
     const bar = document.getElementById('compPickBar');
     if(bar) bar.innerHTML = '';
-    compConfidence = ''; compConfidenceText = ''; compSubjectSqft = null; compStabilityWarns = [];
+    const b3 = document.getElementById('compBest3');
+    if(b3) b3.innerHTML = '';
+    compConfidence = ''; compConfidenceText = ''; compSubjectSqft = null; compSubjectBeds = null; resetCompFilters(); compStabilityWarns = [];
     const wb2 = document.getElementById('compWarnBar'); if(wb2) wb2.innerHTML = '';
     renderCompMap();
   }
@@ -3717,6 +3769,33 @@ function compSafeDate(v){
   const t = new Date(v);
   return isNaN(t) ? '' : fmtDate(v);
 }
+/* Our take + recommendation (approved demo look, Oct 29): computed from the
+   real mortgage state only. One real source exists (property records) — there
+   is no second feed to check against, so no parity block is ever rendered.
+   The recommendation is always the same: verify at county before quoting. */
+function compMortTakeHtml(){
+  const amtEl = document.getElementById('compMortAmt');
+  const lenEl = document.getElementById('compMortLender');
+  const amtRaw = amtEl ? amtEl.value : '';
+  const amt = amtRaw === '' ? null : parseFloat(amtRaw);
+  const lender = lenEl ? lenEl.value.trim() : '';
+  const arv = parseFloat((document.getElementById('compARV')||{}).value)||0;
+  let take;
+  if(compMortFreeClear || amt === 0){
+    take = 'Free & clear on property records — no payoff to clear at closing.';
+  } else if(amt != null){
+    take = '$' + amt.toLocaleString() + ' owed' + (lender ? ' to ' + esc(lender) : '') + ' on property records.';
+    if(arv){ const eq = arv - amt; take += ' Equity vs ARV: $' + eq.toLocaleString() + ' (' + Math.round(eq/arv*100) + '%).'; }
+  } else if(lender){
+    take = 'Lender on record (' + esc(lender) + ') but no amount — confirm the payoff before quoting.';
+  } else {
+    take = 'No mortgage amount on record yet.';
+  }
+  return '<div style="margin-top:10px;padding:10px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;font-size:13px">'
+    + '<div style="margin-bottom:6px"><strong>Our take:</strong> ' + take + '</div>'
+    + '<div><strong>Recommendation:</strong> verify at county before quoting — records can lag.</div>'
+    + '</div>';
+}
 function renderCompMortgage(){
   const box = document.getElementById('compMortgageBox'); if(!box) return;
   const wrap = document.getElementById('compMortManualWrap');
@@ -3740,7 +3819,8 @@ function renderCompMortgage(){
   };
   if(compMortFreeClear || amt === 0){
     box.innerHTML = '<div style="padding:10px;background:var(--panel2);border-radius:8px"><span class="badge green">✓ Free &amp; Clear</span> <span style="color:var(--muted);font-size:13px">No mortgage on record — no payoff to clear at closing.</span></div>'
-      + (arv ? '<div class="prop-grid" style="margin-top:8px">' + equityChip() + '</div>' : '');
+      + (arv ? '<div class="prop-grid" style="margin-top:8px">' + equityChip() + '</div>' : '')
+      + compMortTakeHtml();
     return;
   }
   if(amt != null || lender || compMortDetail){
@@ -3757,17 +3837,18 @@ function renderCompMortgage(){
       + chip('Recorded', compSafeDate(d.recordedDate))
       + chip('Due', compSafeDate(d.dueDate))
       + equityChip()
-      + '</div>';
+      + '</div>'
+      + compMortTakeHtml();
     return;
   }
   if(compMortSource === 'none'){
-    box.innerHTML = '<p style="color:var(--muted);font-size:13px">No mortgage data found — property records and the backup lookup both came back empty. Nothing invented. Enter the amount and lender by hand below as a last resort.</p>';
+    box.innerHTML = '<p style="color:var(--muted);font-size:13px">No mortgage data found — property records and the backup lookup both came back empty. Nothing invented. Enter the amount and lender by hand below as a last resort.</p>' + compMortTakeHtml();
   } else if(compMortSource === 'attom-none'){
-    box.innerHTML = '<p style="color:var(--muted);font-size:13px">No mortgage data in property records for this address. Use the backup load below — if that also finds nothing, hand entry opens as a last resort.</p>';
+    box.innerHTML = '<p style="color:var(--muted);font-size:13px">No mortgage data in property records for this address. Use the backup load below — if that also finds nothing, hand entry opens as a last resort.</p>' + compMortTakeHtml();
   } else if(compMortSource === 'lookup-none'){
-    box.innerHTML = '<p style="color:var(--muted);font-size:13px">Backup lookup found nothing for this address. Load verified comps so property records can fill the mortgage block.</p>';
+    box.innerHTML = '<p style="color:var(--muted);font-size:13px">Backup lookup found nothing for this address. Load verified comps so property records can fill the mortgage block.</p>' + compMortTakeHtml();
   } else {
-    box.innerHTML = '<p style="color:var(--muted);font-size:13px">No mortgage data yet — it fills automatically when verified comps load.</p>';
+    box.innerHTML = '<p style="color:var(--muted);font-size:13px">No mortgage data yet — it fills automatically when verified comps load.</p>' + compMortTakeHtml();
   }
 }
 /* Auto-fill the mortgage block from the comps lookup response: d.property
@@ -4101,11 +4182,44 @@ function compPickAvg(){
   if(!picked.length) return 0;
   return Math.round(picked.reduce((s,r)=>s+r.amount,0)/picked.length);
 }
+/* Best-3 card (approved demo look, Oct 29): the system's top 3 filter-best
+   rows with a one-line reason each, composed from REAL row data only — never
+   invented. This is the suggested starting point; the pick bar below reflects
+   the actual picks. */
+function renderCompBest3(){
+  const el = document.getElementById('compBest3'); if(!el) return;
+  const listed = compStatus() === 'listed';
+  const best = compRows.filter(r => (!r.kind || r.kind === 'best') && r.amount != null).slice(0,3);
+  if(!compRows.length || !best.length){ el.innerHTML = ''; return; }
+  const reason = (r)=>{
+    const parts = [];
+    if(r.distance != null) parts.push(Number(r.distance).toFixed(2) + ' mi');
+    if(r.beds != null || r.baths != null) parts.push((r.beds != null ? r.beds : '—') + 'bd/' + (r.baths != null ? r.baths : '—') + 'ba');
+    if(r.sqft) parts.push(Number(r.sqft).toLocaleString() + ' sqft');
+    if(r.date) parts.push('sold ' + fmtDate(r.date));
+    return parts.join(' · ') || 'recorded sale';
+  };
+  const avg = Math.round(best.reduce((s,r)=>s+Number(r.amount),0)/best.length);
+  let html = '<div style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px">'
+    + '<div style="font-weight:800;font-size:13px;margin-bottom:8px">⭐ Best 3 — suggested picks <span style="color:var(--muted);font-weight:400;font-size:12px">· average $' + avg.toLocaleString() + (listed ? ' · reference only' : '') + '</span></div>';
+  best.forEach((r,n)=>{
+    html += '<div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;font-size:13px;padding:6px 0;border-top:1px solid var(--line)">'
+      + '<span style="font-weight:800;color:var(--green)">#' + (n+1) + '</span>'
+      + '<span style="font-weight:700">' + esc(r.address) + '</span>'
+      + '<span><b>$' + Number(r.amount).toLocaleString() + '</b></span>'
+      + '<span style="color:var(--muted);font-size:12px">' + esc(reason(r)) + '</span>'
+      + '</div>';
+  });
+  if(best.length < 3) html += '<p style="color:var(--muted);font-size:12px;margin:8px 0 0">Only ' + best.length + ' filter-best sale(s) in this set — nothing filled in to reach 3.</p>';
+  html += '</div>';
+  el.innerHTML = html;
+}
 function renderCompList(){
   const box = document.getElementById('compListBox'); if(!box) return;
   const bar = document.getElementById('compPickBar');
   const listed = compStatus() === 'listed';
   renderCompMap();
+  renderCompBest3();
   if(!compRows.length){
     box.innerHTML = '<p style="color:var(--muted);font-size:13px">No verified comps loaded yet. Enter the property address above, then load verified comps — or type an ARV below to run the math manually.</p>';
     if(bar) bar.innerHTML = '';
@@ -4116,7 +4230,16 @@ function renderCompList(){
   if(compConfidence === 'LOW' || compConfidence === 'LOW-MEDIUM'){
     html += '<div style="background:#3d0d0d;border:1px solid #ff4d4d;border-radius:8px;padding:10px;font-size:13px;font-weight:800;color:#ff8080;margin-bottom:10px">⚠️ Confidence: ' + esc(compConfidence) + ' — ' + esc(compConfidenceText || '') + '</div>';
   }
-  const rows = compRows.map((r,i) => {
+  /* Display-only filters: the view narrows, the picks never do. Each entry
+     keeps its original compRows index so the pick checkbox toggles the
+     right row even when the view is filtered. */
+  const view = [];
+  compRows.forEach((r,i)=>{ if(compRowPassesFilters(r)) view.push({r:r, i:i}); });
+  if(view.length < compRows.length){
+    html += '<p style="color:var(--muted);font-size:12px;margin:0 0 8px">Showing ' + view.length + ' of ' + compRows.length + ' — filters change the view, not your picks.</p>';
+  }
+  const rows = view.map(o => {
+    const r = o.r, i = o.i;
     const picked = compPicks.indexOf(r.address) >= 0;
     const pickable = (!r.kind || r.kind === 'best') && !listed;
     const flags = [];
@@ -4130,19 +4253,20 @@ function renderCompList(){
     return '<tr>'
       + '<td>' + (pickable ? '<input type="checkbox" ' + (picked ? 'checked' : '') + ' onchange="toggleCompPick(' + i + ')" />' : '—') + '</td>'
       + '<td>' + esc(r.address) + '</td>'
+      + '<td><b>' + (r.amount != null ? '$' + Number(r.amount).toLocaleString() : '—') + '</b></td>'
+      + '<td>' + (r.date ? fmtDate(r.date) : '—') + '</td>'
       + '<td>' + (r.distance != null ? Number(r.distance).toFixed(2) + ' mi' : '—') + '</td>'
+      + '<td>' + (r.beds != null ? r.beds : '—') + '</td>'
+      + '<td>' + (r.baths != null ? r.baths : '—') + '</td>'
+      + '<td>' + (r.sqft ? Number(r.sqft).toLocaleString() : '—') + '</td>'
+      + '<td>' + (r.ppsf ? '$' + Number(r.ppsf).toLocaleString() : '—') + '</td>'
       + '<td><span class="badge red">Sold</span></td>'
       + '<td>Public Record</td>'
       + '<td>—</td>'
-      + '<td>' + (r.beds != null ? r.beds : '—') + ' / ' + (r.baths != null ? r.baths : '—') + '</td>'
-      + '<td>' + (r.sqft ? Number(r.sqft).toLocaleString() : '—') + '</td>'
-      + '<td>' + (r.ppsf ? '$' + Number(r.ppsf).toLocaleString() : '—') + '</td>'
-      + '<td>' + (r.date ? fmtDate(r.date) : '—') + '</td>'
-      + '<td><b>' + (r.amount != null ? '$' + Number(r.amount).toLocaleString() : '—') + '</b></td>'
       + '<td style="font-size:12px;color:var(--muted)">' + (flags.length ? esc(flags.join('; ')) : '—') + '</td>'
       + '</tr>';
   }).join('');
-  html += '<div class="tbl-wrap"><table><thead><tr><th>Pick</th><th>Address</th><th>Dist</th><th>Status</th><th>Source</th><th>DOM</th><th>Bd/Ba</th><th>Sq Ft</th><th>$/Sqft</th><th>Sold</th><th>Price</th><th>Flags</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+  html += '<div class="tbl-wrap"><table><thead><tr><th>Pick</th><th>Address</th><th>Sale price</th><th>Sale date</th><th>Distance</th><th>Beds</th><th>Baths</th><th>Sqft</th><th>$/Sqft</th><th>Status</th><th>Source</th><th>DOM</th><th>Flags</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
   box.innerHTML = html;
   if(bar){
     const picked = compPickedRows();
@@ -4339,12 +4463,14 @@ async function loadCompsForAddress(retryAttempt){
     const resp = await fetch('/.netlify/functions/attom-lookup?address=' + encodeURIComponent(addr));
     if(!resp.ok) throw new Error('HTTP ' + resp.status);
     const d = await resp.json();
-    if(!d.matched){ compRows = []; compPicks = []; compLoadedAddr = ''; compSubjectLat = null; compSubjectLng = null; compConfidence = ''; compConfidenceText = ''; compSubjectSqft = null; compStabilityWarns = []; resetCompMortgage(); renderCompSubjectCard(null, addr, ''); if(msg) msg.textContent = 'No ownership records found for this address — type an ARV below to run the math manually.'; renderCompList(); renderCompMortgage(); calcComp(); return; }
+    if(!d.matched){ compRows = []; compPicks = []; compLoadedAddr = ''; compSubjectLat = null; compSubjectLng = null; compConfidence = ''; compConfidenceText = ''; compSubjectSqft = null; compSubjectBeds = null; compStabilityWarns = []; resetCompFilters(); resetCompMortgage(); renderCompSubjectCard(null, addr, ''); if(msg) msg.textContent = 'No ownership records found for this address — type an ARV below to run the math manually.'; renderCompList(); renderCompMortgage(); calcComp(); return; }
     renderCompSubjectCard(d.property || null, addr, d.address || '');
     applyCompMortgageFromAttom(d.property || null, addr);
     compConfidence = (d.comps && d.comps.confidence) || '';
     compConfidenceText = (d.comps && d.comps.confidenceText) || '';
     compSubjectSqft = (d.property && d.property.sqft) ? Number(d.property.sqft) : null;
+    compSubjectBeds = (d.property && d.property.beds != null && d.property.beds !== '') ? Number(d.property.beds) : null;
+    resetCompFilters();
     const seen = {};
     const rows = [];
     const pushRow = (c, kind)=>{ if(!c || !c.address || seen[c.address]) return; seen[c.address] = 1; const row = Object.assign({}, c); row.kind = kind; rows.push(row); };
