@@ -4113,6 +4113,7 @@ function calcComp(){
   }
   if(gate) gate.innerHTML = (st && st.value === 'not-listed') ? '<div style="font-size:12px;color:var(--green)">✓ Not listed — clear to comp.</div>' : '<div style="font-size:12px;color:var(--muted)">⚠️ Listing status not checked — check before offering.</div>';
   renderCompInsights();
+  renderCompList(); /* re-render on every gate change: clears the listed-only "reference only" banners and restores pick checkboxes when switching back to not-listed */
   const arv = parseFloat(arvEl.value)||0;
   const rep = parseFloat(repEl.value)||0;
   /* MINIMUM-COUNT GATE: a loaded comp set with fewer than 3 picks renders
