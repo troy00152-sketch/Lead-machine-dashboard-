@@ -1078,6 +1078,7 @@ document.querySelectorAll('.nav-item').forEach(btn=>{
   });
 });
 function showPage(name){
+  const wasComps = ((document.querySelector('.tab-page.active')||{}).id === 'page-comps');
   document.querySelectorAll('.tab-page').forEach(p=>p.classList.remove('active'));
   const el = document.getElementById('page-'+name);
   if(el) el.classList.add('active');
@@ -1085,6 +1086,9 @@ function showPage(name){
   if(name === 'settings') dmLoadCredits();
   if(name === 'listimport') liLoadConn();
   if(name === 'comps'){ renderCompMap(); setTimeout(()=>{ if(compMap){ compMap.invalidateSize(); renderCompMap(); } }, 150); }
+  /* Leaving Comps wipes it (never on entering, never on a same-page
+     re-click): a return shows a blank page, never the previous property. */
+  if(wasComps && name !== 'comps') resetCompsPage();
 }
 
 /* ============ GLOBAL SEARCH ============ */
@@ -3550,6 +3554,43 @@ function resetCompListingGate(){
   const n = document.getElementById('compCheckedNote'); if(n) n.textContent = '';
   compGateAddr = '';
   calcComp();
+}
+/* NAVIGATION RESET (user screenshot, Oct 28): leaving the Comps page wipes
+   the WHOLE Comps state, unconditionally — address, gate group, subject
+   card, rows/picks, ARV/repairs/math, mortgage, map pins, Loaded label,
+   confidence/deviations, and the price-stability session memory. Returning
+   to Comps shows a blank page ready for a new search, never the previous
+   property. This runs ONLY on leaving Comps (hooked in showPage) — never
+   on entering — because the one-page flow (home search → Comps) sets the
+   address AFTER navigation, and an enter-reset would wipe it. Unlike the
+   address-change branches in updateCompLinks, nothing here is conditional
+   on rows existing or fields being set: a typed-but-never-loaded address,
+   a 0-row load, and a lead prefill all clear the same way. */
+function resetCompsPage(){
+  const a = document.getElementById('compListAddr'); if(a) a.value = '';
+  const head = document.getElementById('compSubjectHead');
+  if(head) head.textContent = 'Comps — enter a property address below';
+  const z = document.getElementById('compZillowLink');
+  if(z) z.href = 'https://www.zillow.com/';
+  const st = document.getElementById('compListStatus'); if(st) st.value = '';
+  ['compListAgent','compListPrice','compListDom','compListDate','compListSqft'].forEach(id=>{ const el = document.getElementById(id); if(el) el.value = ''; });
+  const n = document.getElementById('compCheckedNote'); if(n) n.textContent = '';
+  compGateAddr = ''; compLastAddr = '';
+  const sc = document.getElementById('compSubjectCard'); if(sc){ sc.innerHTML = ''; sc.style.display = 'none'; }
+  compRows = []; compPicks = []; compLoadedAddr = '';
+  compConfidence = ''; compConfidenceText = ''; compSubjectSqft = null; compStabilityWarns = []; compPrevLoads = {};
+  const wb = document.getElementById('compWarnBar'); if(wb) wb.innerHTML = '';
+  const arvEl = document.getElementById('compARV'); if(arvEl) arvEl.value = '';
+  const repEl = document.getElementById('compRepairs'); if(repEl) repEl.value = '';
+  const res = document.getElementById('compResult'); if(res) res.innerHTML = '';
+  const tt = document.getElementById('compTierTable'); if(tt) tt.innerHTML = '';
+  const lm = document.getElementById('compLoadMsg'); if(lm) lm.textContent = '';
+  const mm = document.getElementById('compMortMsg'); if(mm) mm.textContent = '';
+  compSubjectLat = null; compSubjectLng = null;
+  resetCompMortgage();
+  renderCompList();
+  renderCompMortgage();
+  renderCompWarnBar();
 }
 function updateCompLinks(){
   const a = document.getElementById('compListAddr');
