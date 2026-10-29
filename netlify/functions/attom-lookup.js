@@ -204,6 +204,7 @@ function parseComps(data) {
 function analyzeComps(subj, comps, today) {
   today = today || todayParts();
   const excluded = [];
+  const unverified = [];
   const candidates = [];
   const priced = comps.filter(c => c.amount);
   const med = priced.length ? median(priced.map(c => c.amount)) : null;
@@ -215,6 +216,13 @@ function analyzeComps(subj, comps, today) {
     }
     if (c.arms && c.arms !== 'A') {
       excluded.push({ comp: c, reason: `not arm's-length (indicator ${c.arms})` });
+      continue;
+    }
+    // Missing arm's-length indicator is UNVERIFIED, never silently clean:
+    // the row cannot be a pick (item 7). It stays visible, display-only.
+    if (c.arms === null || c.arms === undefined || c.arms === '') {
+      c.armsUnverified = true;
+      unverified.push(c);
       continue;
     }
     if (med && c.amount > 2.5 * med) {
@@ -232,11 +240,21 @@ function analyzeComps(subj, comps, today) {
   const candMed = candidates.length ? median(candidates.map(c => c.amount)) : null;
   const isVacant = String(subj.propertyType || '').toUpperCase().includes('VACANT');
 
+  // Thin-set low-outlier rule: with exactly 2 usable comps, a lower comp
+  // under 0.6x the higher is a possible distressed anchor, not a clean pick.
+  // The client count gate blocks offer math on 2-comp sets regardless; this
+  // flag makes the warning visible on the row itself.
+  if (candidates.length === 2) {
+    const sorted = [...candidates].sort((a, b) => a.amount - b.amount);
+    if (sorted[0].amount < 0.6 * sorted[1].amount) sorted[0].thinLowOutlier = true;
+  }
+
   for (const c of candidates) {
     let score = 0;
     const dev = [];
     score += c.distance * 10;
-    if (c.distance > 1) dev.push(`${c.distance.toFixed(2)} mi (>1 mi rule)`);
+    if (c.distance >= 99) dev.push('distance unknown');
+    else if (c.distance > 1) dev.push(`${c.distance.toFixed(2)} mi (>1 mi rule)`);
     if (candMed && Math.abs(c.amount - candMed) / candMed <= 0.20) {
       score -= 3; // price sits inside the pocket cluster
     }
@@ -271,9 +289,35 @@ function analyzeComps(subj, comps, today) {
   }
 
   candidates.sort((a, b) => a.score - b.score);
-  const best = candidates.slice(0, 3);
+  // Hard similarity rules: when at least 3 comps pass them, the best set
+  // comes ONLY from the hard-passing set. When fewer than 3 pass, fall back
+  // to the soft-scored set (violations already flagged as deviations) — never
+  // silently widen, and the client count gate still applies.
+  function hardFailReasons(c) {
+    const reasons = [];
+    if (subj.sqft && c.sqft && Math.abs(c.sqft - subj.sqft) / subj.sqft > 0.20) reasons.push('sqft outside ±20%');
+    const cbMissing = c.beds === null || c.beds === undefined || c.beds === '' || c.beds === '0' || c.beds === 0;
+    if (subj.beds && !cbMissing && Math.abs(Number(c.beds) - Number(subj.beds)) > 1) reasons.push('bed count differs by >1');
+    if (c.dateParts && monthsBetween(c.dateParts, today) > 12) reasons.push('sold >12 mo ago');
+    if (c.distance != null && c.distance < 99 && c.distance > 2) reasons.push('distance >2 mi');
+    return reasons;
+  }
+  const hardPassing = [];
+  const hardFailing = [];
+  for (const c of candidates) {
+    const r = hardFailReasons(c);
+    if (r.length) hardFailing.push({ comp: c, reason: 'hard rule: ' + r.join('; ') });
+    else hardPassing.push(c);
+  }
+  let best;
+  if (hardPassing.length >= 3) {
+    best = hardPassing.slice(0, 3);
+    for (const h of hardFailing) excluded.push(h);
+  } else {
+    best = candidates.slice(0, 3);
+  }
 
-  const result = { excluded, candidates, best };
+  const result = { excluded, candidates, best, unverified };
   if (best.length) {
     const prices = best.map(c => c.amount);
     result.indication = mean(prices);
@@ -329,6 +373,8 @@ function compOut(c) {
     ppsf: c.ppsf ? Math.round(c.ppsf * 100) / 100 : null,
     score: c.score != null ? c.score : null,
     deviations: c.deviations || [],
+    arms: c.arms != null ? c.arms : null,
+    thinLowOutlier: !!c.thinLowOutlier,
   };
 }
 
@@ -350,6 +396,7 @@ function shapeCompsResult(res, criteria, returnedCount) {
     })),
     upperPocket: (res.upperPocket || []).map(compOut),
     asIsAnchor: res.asIsAnchor ? compOut(res.asIsAnchor) : null,
+    unverified: (res.unverified || []).map(compOut),
   };
   return out;
 }
@@ -475,14 +522,26 @@ exports.handler = async (event) => {
       }
     }
 
-    // --- comps: standard criteria first, one wide retry on MinimumCompsNotMet ---
+    // --- comps: standard criteria first, wide retry on ANY empty/failed
+    // standard result (not only 206 / MinimumCompsNotMet) ---
     let compsPayload = null;
     let criteria = 'standard';
     if (parts.city && parts.state && parts.zip) {
       let r = await attomGet(compsUrl(parts, false), apiKey).catch(() => null);
-      if (r && (r.status === 206 || (r.text || '').includes('MinimumCompsNotMet'))) {
+      let stdCount = -1;
+      if (r && r.json) {
+        try { stdCount = parseComps(r.json).length; } catch (e) { stdCount = -1; }
+      }
+      console.log('[attom-lookup] comps standard status=' + (r ? r.status : 'fetch-failed') + ' returned=' + stdCount);
+      const needWide = !r || !r.ok || r.status === 206 || (r.text || '').includes('MinimumCompsNotMet') || stdCount === 0;
+      if (needWide) {
         criteria = 'wide';
         r = await attomGet(compsUrl(parts, true), apiKey).catch(() => null);
+        let wideCount = -1;
+        if (r && r.json) {
+          try { wideCount = parseComps(r.json).length; } catch (e) { wideCount = -1; }
+        }
+        console.log('[attom-lookup] comps wide status=' + (r ? r.status : 'fetch-failed') + ' returned=' + wideCount);
       }
       if (r && r.json) compsPayload = r.json;
     }
@@ -491,6 +550,7 @@ exports.handler = async (event) => {
     if (compsPayload) {
       const rawComps = parseComps(compsPayload);
       const res = analyzeComps(subject, rawComps, today);
+      console.log('[attom-lookup] comps criteria=' + criteria + ' raw=' + rawComps.length + ' candidates=' + res.candidates.length + ' best=' + res.best.length + ' unverified=' + (res.unverified || []).length);
       comps = shapeCompsResult(res, criteria, rawComps.length);
     }
 
