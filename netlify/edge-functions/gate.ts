@@ -72,10 +72,17 @@ button:hover{background:#e55f16}
 <div class="logo">Acquisition <span>Command Center</span></div>
 <div class="sub">Direct Property Buyers · Private</div>
 <div class="err">${error ? "Wrong password — try again." : ""}</div>
-<form method="POST" action="/__login">
+<form method="POST" action="/__login" id="loginForm">
 <input type="password" name="password" placeholder="Password" autocomplete="current-password" autofocus>
 <button type="submit">Sign in</button>
-</form></div></body></html>`;
+</form>
+<div id="frameNote" style="display:none;margin-top:16px;font-size:13px;color:#8b949e">Opening inside another site? <a href="https://leadmachineapp.com" target="_top" style="color:#ff6b1a">Open the dashboard directly</a> and sign in there.</div>
+<script>
+if (window.self !== window.top) {
+  document.getElementById('frameNote').style.display = 'block';
+  document.getElementById('loginForm').setAttribute('target', '_top');
+}
+</script></div></body></html>`;
   return new Response(html, {
     status: 401,
     headers: {
@@ -110,7 +117,7 @@ export default async function handler(req: Request, context: any) {
         status: 303,
         headers: {
           location: "/",
-          "set-cookie": `${COOKIE_NAME}=${expiry}.${sig}; Path=/; Max-Age=${COOKIE_MAX_AGE}; HttpOnly; Secure; SameSite=Lax`,
+          "set-cookie": `${COOKIE_NAME}=${expiry}.${sig}; Path=/; Max-Age=${COOKIE_MAX_AGE}; HttpOnly; Secure; SameSite=None`,
           "x-robots-tag": "noindex, nofollow",
           "cache-control": "no-store",
         },
