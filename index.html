@@ -313,10 +313,12 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
       <button class="nav-item" data-nav="listimport"><span class="ico">📥</span> List Import</button>
       <div class="nav-sec">Tools</div>
       <button class="nav-item" data-nav="buyers"><span class="ico">🤝</span> Buyer Match Ai</button>
+      <button class="nav-item" data-nav="blast"><span class="ico">📣</span> Buyer Blast</button>
       <button class="nav-item" data-nav="skiptrace"><span class="ico">🔍</span> Skip Trace</button>
 <button class="nav-item" data-nav="listsearch"><span class="ico">🎯</span> List Builder</button>
 <button class="nav-item" data-nav="people"><span class="ico">👥</span> People Search</button>
       <button class="nav-item" data-nav="comps"><span class="ico">📊</span> Comps</button>
+      <button class="nav-item" data-nav="aichat"><span class="ico">💬</span> AI Assistant</button>
       <div class="nav-sec">System</div>
       <button class="nav-item" data-nav="settings"><span class="ico">⚙️</span> Settings</button>
     </nav>
@@ -579,6 +581,45 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
           <button class="btn small ghost" style="position:absolute;top:12px;right:12px" onclick="closeBuyerProfile()">✕ Close</button>
           <div id="bmProfileBody"></div>
         </div>
+      </div>
+
+      <!-- BUYER BLAST TAB -->
+      <div class="tab-page" id="page-blast">
+        <div class="sec-title">📣 Buyer Blast <span class="badge orange" style="font-size:10px">REVIEW REQUIRED — NOTHING SENDS ITSELF</span></div>
+        <div class="card" style="margin-bottom:14px">
+          <p style="color:var(--muted);font-size:13px;margin-bottom:12px">Enter the deal — Buyer Blast auto-matches <strong>textable</strong> cash buyers (confirmed mobile, never DNC) from your buyer database, drafts the blast SMS, and stages everything for your review. <strong>The dashboard never sends.</strong> After you approve a blast, you copy the message + phone list into HighLevel and send from your market's buyer-blast number.</p>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">
+            <div><label class="lbl">Market</label><select class="field" id="bbMarket" onchange="bbMarketChanged()">
+              <option value="">Select market…</option>
+              <option value="indianapolis">Indianapolis</option>
+              <option value="cleveland">Cleveland</option>
+              <option value="kansascity">Kansas City</option>
+              <option value="carolina">Carolina</option>
+              <option value="jacksonville">Jacksonville</option>
+            </select></div>
+            <div><label class="lbl">Deal Price ($) — your asking/MAO</label><input class="field" id="bbPrice" type="number" min="0" step="1000" placeholder="e.g. 80000" /></div>
+            <div><label class="lbl">Property Type</label><select class="field" id="bbPropType"><option>Single Family</option><option>Multi-Family</option><option>Condo/Townhome</option><option>Vacant Land</option><option>Commercial</option></select></div>
+          </div>
+          <div style="margin-bottom:12px"><label class="lbl">Property Address</label><input class="field" id="bbAddress" placeholder="Street address" /></div>
+          <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:12px;margin-bottom:12px">
+            <div><label class="lbl">City</label><input class="field" id="bbCity" placeholder="City" /></div>
+            <div><label class="lbl">State</label><input class="field" id="bbState" placeholder="ST" maxlength="2" /></div>
+            <div><label class="lbl">ZIP</label><input class="field" id="bbZip" placeholder="ZIP" maxlength="5" /></div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">
+            <div><label class="lbl">Beds</label><input class="field" id="bbBeds" type="number" min="0" placeholder="—" /></div>
+            <div><label class="lbl">Baths</label><input class="field" id="bbBaths" type="number" min="0" step="0.5" placeholder="—" /></div>
+            <div><label class="lbl">Sqft</label><input class="field" id="bbSqft" type="number" min="0" placeholder="—" /></div>
+          </div>
+          <div style="margin-bottom:12px"><label class="lbl">Deal Notes <span style="color:var(--muted);font-weight:400">— optional, one line for buyers (e.g. "needs roof, vacant")</span></label><input class="field" id="bbNotes" placeholder="Optional one-liner" /></div>
+          <button class="btn primary" onclick="runBuyerBlast()">🤖 Match Buyers &amp; Draft Blast</button>
+          <div id="bbDealSummary" style="margin-top:12px"></div>
+        </div>
+        <div id="bbStatus" style="font-size:13px;margin-bottom:10px"></div>
+        <div id="bbResults"></div>
+        <div id="bbReview"></div>
+        <div class="sec-title" style="font-size:14px;margin-top:18px">📜 Blast History</div>
+        <div id="bbHistory"></div>
       </div>
 
       <!-- SKIP TRACE TAB -->
@@ -856,6 +897,36 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
         </div>
       </div>
 
+      <div class="tab-page" id="page-aichat">
+        <style>
+          .ai-shell{max-width:860px;margin:0 auto;display:flex;flex-direction:column;height:calc(100vh - 170px);min-height:480px}
+          .ai-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+          .ai-title{font-size:18px;font-weight:700}
+          .ai-sub{color:var(--muted);font-size:12px;margin-top:2px}
+          .ai-msgs{flex:1;overflow-y:auto;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;display:flex;flex-direction:column;gap:14px}
+          .ai-row{display:flex;gap:10px;align-items:flex-start}
+          .ai-row.user{justify-content:flex-end}
+          .ai-avatar{width:32px;height:32px;border-radius:50%;background:var(--panel2);display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;border:1px solid var(--line)}
+          .ai-bubble{max-width:78%;padding:11px 14px;border-radius:14px;font-size:14px;line-height:1.55}
+          .ai-bubble p{margin:0 0 8px}.ai-bubble p:last-child{margin:0}
+          .ai-bubble.user{background:var(--accent);color:#fff;border-bottom-right-radius:4px;white-space:pre-wrap}
+          .ai-bubble.ai{background:var(--panel2);border:1px solid var(--line);border-bottom-left-radius:4px}
+          .ai-list{margin:6px 0 6px 18px;padding:0}.ai-list li{margin-bottom:4px}
+          .ai-empty{color:var(--muted);text-align:center;padding:40px 20px;font-size:14px;line-height:1.6}
+          .ai-typing{display:flex;gap:5px;align-items:center;padding:14px 16px}
+          .ai-typing span{width:7px;height:7px;border-radius:50%;background:var(--muted);animation:aiBlink 1.2s infinite}
+          .ai-typing span:nth-child(2){animation-delay:.2s}.ai-typing span:nth-child(3){animation-delay:.4s}
+          @keyframes aiBlink{0%,80%,100%{opacity:.25}40%{opacity:1}}
+          .ai-starters{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+          .ai-chip{background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:99px;padding:7px 14px;font-size:12px;cursor:pointer}
+          .ai-chip:hover{border-color:var(--accent);color:var(--accent)}
+          .ai-inputrow{display:flex;gap:10px}
+          .ai-inputrow .field{flex:1}
+          .ai-foot{color:var(--muted2);font-size:11px;margin-top:10px;text-align:center}
+        </style>
+        <div id="aiChatMount"></div>
+      </div>
+
     </div><!-- /content -->
   </div><!-- /main -->
 </div><!-- /app -->
@@ -895,6 +966,7 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
   <img id="lightboxImg" src="" alt="Enlarged property image">
 </div>
 <div id="toast"></div>
+<script src="ai-assistant.js"></script>
 <script>
 /* ============ STATE ============ */
 let leads = [];
@@ -2616,6 +2688,7 @@ function openLead(id){
       <button class="btn" onclick="analyzeDeal('${l.id}')">🤖 Analyze Deal</button>
       <button class="btn" onclick="openCompsForLead('${l.id}')">📊 Run Comps</button>
       <button class="btn" onclick="matchLeadToBuyers('${l.id}')">🤝 Buyer Match Ai</button>
+      <button class="btn" onclick="blastLeadToBuyers('${l.id}')">📣 Blast</button>
       <button class="btn ghost" onclick="pushToGHL('${l.id}')">📤 Send to GHL</button>
     </div>
     <div id="analysisBox"></div>`;
@@ -3499,6 +3572,252 @@ function matchLeadToBuyers(leadId){
   showPage('buyers');
   runBuyerMatch({ address: `${l.address}, ${l.city}, ${l.state} ${l.zip||''}`, city: l.city, state: l.state, zip: l.zip||'', price: l.estimatedValue || l.value || 0 });
 }
+
+function blastLeadToBuyers(leadId){
+  const l = leads.find(x=>x.id===leadId); if(!l) return;
+  closeModal();
+  showPage('blast');
+  bbPrefillFromLead(l);
+  runBuyerBlast();
+}
+
+/* ============ BUYER BLAST (auto-match + draft + review; the dashboard NEVER sends) ============
+   Flow: deal in -> match buyers (existing buyer-match fn) -> keep ONLY confirmed-mobile,
+   non-DNC buyers -> draft SMS -> Troy reviews list + exact message -> Approve stages the
+   package (message + phone list) for MANUAL send from HighLevel. No live sending is wired. */
+const BB_MARKETS = {
+  indianapolis: { label: 'Indianapolis', city: 'indianapolis', state: 'IN' },
+  cleveland:    { label: 'Cleveland',    city: 'cleveland',    state: 'OH' },
+  kansascity:   { label: 'Kansas City',  city: 'kansas city',  state: 'MO' },
+  carolina:     { label: 'Carolina',     city: 'greenville',   state: 'NC' },
+  jacksonville: { label: 'Jacksonville', city: 'jacksonville', state: 'FL' },
+};
+let bbDeal = null;
+let bbMatches = [];   // textable buyers, ranked (each has .mobile)
+let bbExcluded = [];  // {name, reason} — shown, never silently dropped
+let bbSelected = {};  // idx -> bool
+
+function bbMarketChanged(){
+  const m = BB_MARKETS[document.getElementById('bbMarket').value];
+  if(m){ document.getElementById('bbCity').value = m.city.replace(/\b\w/g, c=>c.toUpperCase()); document.getElementById('bbState').value = m.state; }
+}
+function bbPrefillFromLead(l){
+  const msel = document.getElementById('bbMarket');
+  if(l.market && BB_MARKETS[l.market]) msel.value = l.market;
+  else {
+    const addr = ((l.address || '') + ' ' + (l.city || '')).toLowerCase();
+    const guess = Object.keys(BB_MARKETS).find(k => addr.includes(BB_MARKETS[k].city));
+    if(guess) msel.value = guess;
+  }
+  bbMarketChanged();
+  document.getElementById('bbAddress').value = l.address || '';
+  if(l.city) document.getElementById('bbCity').value = l.city;
+  if(l.state) document.getElementById('bbState').value = l.state;
+  if(l.zip) document.getElementById('bbZip').value = l.zip;
+  document.getElementById('bbPrice').value = l.askingPrice || l.mao || l.value || l.estimatedValue || '';
+  document.getElementById('bbBeds').value = l.bedrooms || '';
+  document.getElementById('bbBaths').value = l.bathrooms || '';
+  document.getElementById('bbSqft').value = l.sqft || '';
+}
+/* Confirmed mobile per Troy's doctrine: type mobile (any case), NOT DNC-flagged. */
+function bbMobilePhone(b){
+  return (b.phones || []).find(p => /mobi/i.test(p.type || '') && !p.dnc) || null;
+}
+function bbMoney(n){ return '$' + Math.round(+n || 0).toLocaleString('en-US'); }
+function bbDraftMessage(){
+  const d = bbDeal || {};
+  const bits = [];
+  bits.push('OFF-MARKET DEAL: ' + (d.address || ''));
+  const loc = [d.city, d.state, d.zip].filter(Boolean).join(' ');
+  if(loc) bits[0] += ', ' + loc;
+  const specs = [];
+  if(d.beds) specs.push(d.beds + 'bd');
+  if(d.baths) specs.push(d.baths + 'ba');
+  if(d.sqft) specs.push(Number(d.sqft).toLocaleString() + ' sqft');
+  if(d.propType && d.propType !== 'Single Family') specs.push(d.propType);
+  let msg = '🏠 ' + bits[0] + (specs.length ? ' — ' + specs.join('/') : '') + '.';
+  if(d.price) msg += ' Asking ' + bbMoney(d.price) + '.';
+  if(d.notes) msg += ' ' + d.notes.trim();
+  msg += ' Reply INTERESTED for details. — Direct Property Buyers';
+  return msg;
+}
+function bbSegCount(t){ return Math.max(1, Math.ceil(t.length / 160)); }
+function bbUpdateMsgCount(){
+  const t = document.getElementById('bbMsg').value;
+  document.getElementById('bbMsgCount').textContent = t.length + ' chars · ' + bbSegCount(t) + ' segment' + (bbSegCount(t) > 1 ? 's' : '');
+}
+function bbSelectedCount(){ return bbMatches.filter((b, i) => bbSelected[i] !== false).length; }
+function bbUpdateCount(){
+  const n = bbSelectedCount();
+  const el = document.getElementById('bbSelCount');
+  if(el) el.innerHTML = '✅ <strong>' + n + '</strong> buyer' + (n === 1 ? '' : 's') + ' selected for this blast';
+  const btn = document.getElementById('bbReviewBtn');
+  if(btn) btn.disabled = n === 0;
+}
+function bbToggle(i, on){ bbSelected[i] = on; bbUpdateCount(); }
+function bbToggleAll(on){ bbMatches.forEach((b, i) => { bbSelected[i] = on; const c = document.getElementById('bbChk' + i); if(c) c.checked = on; }); bbUpdateCount(); }
+
+async function runBuyerBlast(){
+  const marketKey = document.getElementById('bbMarket').value;
+  const address = document.getElementById('bbAddress').value.trim();
+  const city = document.getElementById('bbCity').value.trim();
+  const state = document.getElementById('bbState').value.trim().toUpperCase();
+  const zip = document.getElementById('bbZip').value.trim().slice(0, 5);
+  const price = parseFloat(document.getElementById('bbPrice').value) || 0;
+  const status = document.getElementById('bbStatus');
+  const results = document.getElementById('bbResults');
+  document.getElementById('bbReview').innerHTML = '';
+  if(!marketKey){ toast('Pick a market first'); return; }
+  if(!address){ toast('Enter the property address'); return; }
+  bbDeal = {
+    market: BB_MARKETS[marketKey].label, marketKey,
+    address, city, state, zip, price,
+    beds: document.getElementById('bbBeds').value.trim(),
+    baths: document.getElementById('bbBaths').value.trim(),
+    sqft: document.getElementById('bbSqft').value.trim(),
+    propType: document.getElementById('bbPropType').value,
+    notes: document.getElementById('bbNotes').value.trim(),
+  };
+  document.getElementById('bbDealSummary').innerHTML =
+    '<div style="background:var(--panel2,#16233c);border:1px solid var(--line,#22345a);border-radius:10px;padding:10px 12px;font-size:13px">🏠 <strong>' + esc(address) + '</strong>' +
+    (city || state || zip ? ' · ' + esc([city, state, zip].filter(Boolean).join(' ')) : '') +
+    (price ? ' · Asking <strong>' + bbMoney(price) + '</strong>' : '') +
+    ' · Market <strong>' + esc(BB_MARKETS[marketKey].label) + '</strong></div>';
+  status.innerHTML = '⏳ Matching buyers…';
+  results.innerHTML = '';
+  try {
+    const r = await fetch('/.netlify/functions/buyer-match', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ zip, city, state, price, filters: {} }),
+    });
+    const d = await r.json();
+    const all = d.buyers || [];
+    bbMatches = []; bbExcluded = []; bbSelected = {};
+    all.forEach(b => {
+      const m = bbMobilePhone(b);
+      if(m) bbMatches.push(Object.assign({}, b, { mobile: m.phone }));
+      else {
+        const hasPhone = (b.phones || []).length > 0;
+        const dncOnly = hasPhone && (b.phones || []).every(p => p.dnc || !/mobi/i.test(p.type || ''));
+        bbExcluded.push({ name: b.name, reason: !hasPhone ? 'No phone on file' : (dncOnly ? 'Mobile is DNC-flagged or no confirmed mobile' : 'No confirmed mobile') });
+      }
+    });
+    bbMatches.forEach((b, i) => { bbSelected[i] = true; });
+    if(!bbMatches.length){
+      status.innerHTML = '';
+      results.innerHTML = '<div class="card" style="text-align:center;padding:34px"><div style="font-size:17px;font-weight:700;margin-bottom:6px">No Textable Buyers Found</div><p style="color:var(--muted);font-size:13px">' + all.length + ' buyers matched the area, but none have a confirmed mobile number that is safe to text. Excluded buyers are listed below — nothing was silently dropped.</p></div>' + bbExcludedHtml();
+      return;
+    }
+    status.innerHTML = '✅ <strong>' + bbMatches.length + '</strong> textable buyers matched' + (bbExcluded.length ? ' · <span style="color:var(--muted)">' + bbExcluded.length + ' excluded (see below)</span>' : '');
+    const msg = bbDraftMessage();
+    results.innerHTML =
+      '<div class="card" style="margin-bottom:14px"><div class="sec-title" style="font-size:14px">✉️ Blast Message <span style="color:var(--muted);font-weight:400;font-size:12px">— edit before review</span></div>' +
+      '<textarea class="field" id="bbMsg" rows="4" style="resize:vertical" oninput="bbUpdateMsgCount()">' + esc(msg) + '</textarea>' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;flex-wrap:wrap;gap:8px"><span id="bbMsgCount" style="font-size:12px;color:var(--muted)"></span>' +
+      '<button class="btn small" onclick="document.getElementById(\'bbMsg\').value=bbDraftMessage();bbUpdateMsgCount()">↺ Reset to auto-draft</button></div></div>' +
+      '<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">' +
+      '<div class="sec-title" style="font-size:14px;margin:0">👥 Recipients <span id="bbSelCount"></span></div>' +
+      '<div><button class="btn small ghost" onclick="bbToggleAll(true)">Select all</button> <button class="btn small ghost" onclick="bbToggleAll(false)">Clear all</button></div></div>' +
+      '<div id="bbList">' + bbMatches.map((b, i) =>
+        '<label class="buyer-row" style="cursor:pointer"><input type="checkbox" id="bbChk' + i + '" checked onchange="bbToggle(' + i + ',this.checked)" style="width:18px;height:18px;flex-shrink:0" />' +
+        '<div class="buyer-rank">' + (i + 1) + '</div>' +
+        '<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:14px">' + esc(b.name) + '</div>' +
+        '<div style="color:var(--muted);font-size:12px;text-transform:capitalize">' + esc(b.city || '') + (b.state ? ', ' : '') + esc(b.state || '') + ' · match ' + b.score + '% · avg buy ' + bbMoney(b.avgPurchase) + '</div></div>' +
+        '<div style="font-size:13px;flex-shrink:0">📱 ' + esc(b.mobile) + ' <span class="badge green" style="font-size:10px">✅ mobile</span></div></label>'
+      ).join('') + '</div>' +
+      bbExcludedHtml() +
+      '<div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap"><button class="btn primary" id="bbReviewBtn" onclick="bbReviewBlast()">👁️ Review Blast</button></div></div>';
+    bbUpdateMsgCount();
+    bbUpdateCount();
+  } catch(e){
+    status.innerHTML = '<span style="color:var(--red)">Buyer match failed: ' + esc(e.message) + '</span>';
+  }
+}
+function bbExcludedHtml(){
+  if(!bbExcluded.length) return '';
+  return '<details style="margin-top:12px"><summary style="cursor:pointer;font-size:13px;color:var(--muted)">🚫 ' + bbExcluded.length + ' matched buyers excluded — no confirmed mobile (click to see)</summary>' +
+    '<div style="margin-top:8px;font-size:13px;color:var(--muted)">' +
+    bbExcluded.map(x => '<div style="padding:6px 0;border-bottom:1px solid var(--line)">🔒 ' + esc(x.name) + ' — ' + esc(x.reason) + '</div>').join('') + '</div></details>';
+}
+function bbReviewBlast(){
+  const msg = document.getElementById('bbMsg').value;
+  if(!msg.trim()){ toast('The message is empty'); return; }
+  const sel = bbMatches.map((b, i) => ({ b, i })).filter(x => bbSelected[x.i] !== false);
+  if(!sel.length){ toast('Select at least one buyer'); return; }
+  const d = bbDeal;
+  document.getElementById('bbReview').innerHTML =
+    '<div class="card" style="margin-top:14px;border:2px solid var(--accent)"><div class="sec-title" style="font-size:15px">👁️ Review — read every word before approving</div>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">' +
+    '<div><div class="lbl">Deal</div><div style="font-size:13px"><strong>' + esc(d.address) + '</strong><br>' + esc([d.city, d.state, d.zip].filter(Boolean).join(' ')) + (d.price ? '<br>Asking ' + bbMoney(d.price) : '') + '<br>Market: ' + esc(d.market) + '</div></div>' +
+    '<div><div class="lbl">Recipients</div><div style="font-size:13px"><strong>' + sel.length + ' buyers</strong><br>Send-from: <span style="color:var(--muted)">buyer-blast number — chosen in HighLevel at send time</span><br><span style="color:var(--muted)">Only confirmed-mobile, non-DNC numbers. ' + bbExcluded.length + ' excluded buyers stay out.</span></div></div></div>' +
+    '<div class="lbl">Exact message — this is what each buyer would receive</div>' +
+    '<div style="background:#0d1626;border:1px solid var(--line);border-radius:14px;padding:14px 16px;font-size:14px;line-height:1.55;max-width:420px;margin-bottom:6px">' + esc(msg).replace(/\n/g, '<br>') + '</div>' +
+    '<div style="font-size:12px;color:var(--muted);margin-bottom:12px">' + msg.length + ' chars · ' + bbSegCount(msg) + ' segment' + (bbSegCount(msg) > 1 ? 's' : '') + ' per recipient</div>' +
+    '<div style="max-height:220px;overflow-y:auto;border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin-bottom:12px;font-size:13px">' +
+    sel.map(x => '<div style="padding:4px 0;border-bottom:1px solid var(--line)">' + (x.i + 1) + '. <strong>' + esc(x.b.name) + '</strong> — 📱 ' + esc(x.b.mobile) + '</div>').join('') + '</div>' +
+    '<label style="display:flex;gap:10px;align-items:flex-start;font-size:13px;cursor:pointer;margin-bottom:14px"><input type="checkbox" id="bbReviewChk" style="width:18px;height:18px;margin-top:2px" /> <span>I reviewed the message word-for-word and the recipient list. I understand <strong>nothing sends from this dashboard</strong> — approving stages this blast for manual send from HighLevel.</span></label>' +
+    '<div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn primary" onclick="bbApproveBlast()">✅ Approve Blast</button><button class="btn ghost" onclick="document.getElementById(\'bbReview\').innerHTML=\'\'">← Back to edit</button></div></div>';
+  document.getElementById('bbReview').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+function bbApproveBlast(){
+  const chk = document.getElementById('bbReviewChk');
+  if(!chk || !chk.checked){ toast('Check the review box first'); return; }
+  const msg = document.getElementById('bbMsg').value;
+  const sel = bbMatches.map((b, i) => ({ b, i })).filter(x => bbSelected[x.i] !== false);
+  const blast = {
+    id: 'bb' + Date.now(),
+    at: new Date().toISOString(),
+    deal: bbDeal,
+    message: msg,
+    recipients: sel.map(x => ({ name: x.b.name, mobile: x.b.mobile })),
+    status: 'APPROVED — pending manual send',
+  };
+  const hist = bbLoadHistory();
+  hist.unshift(blast);
+  try { localStorage.setItem('bbBlastHistory', JSON.stringify(hist.slice(0, 50))); } catch(e){}
+  const phones = blast.recipients.map(r => r.mobile).join('\n');
+  document.getElementById('bbReview').innerHTML =
+    '<div class="card" style="margin-top:14px;border:2px solid #2ecc71"><div class="sec-title" style="font-size:15px">✅ Blast Approved — <span style="color:var(--muted);font-size:13px;font-weight:400">staged, NOT sent</span></div>' +
+    '<div style="background:#3a2b00;border:1px solid #8a6d1a;border-radius:10px;padding:12px 14px;font-size:13px;margin-bottom:14px">⚠️ <strong>Nothing was sent.</strong> Sending is not wired into the dashboard. To fire this blast: open HighLevel → your market\'s <strong>buyer-blast number</strong> → paste the message below → send to the phone list. Then mark it sent in your records.</div>' +
+    '<div class="lbl">Message</div><div class="field" style="height:auto;white-space:pre-wrap;font-size:14px;margin-bottom:8px">' + esc(msg) + '</div>' +
+    '<button class="btn small" onclick="bbCopyText(\'bbMsgFinal\')">📋 Copy message</button>' +
+    '<textarea id="bbMsgFinal" style="position:absolute;left:-9999px" aria-hidden="true">' + esc(msg) + '</textarea>' +
+    '<div class="lbl" style="margin-top:14px">Phone list — ' + blast.recipients.length + ' numbers, one per line</div>' +
+    '<textarea class="field" rows="6" readonly>' + esc(phones) + '</textarea>' +
+    '<div style="margin-top:8px"><button class="btn small" onclick="bbCopyText(\'bbPhonesFinal\')">📋 Copy phone list</button>' +
+    '<textarea id="bbPhonesFinal" style="position:absolute;left:-9999px" aria-hidden="true">' + esc(phones) + '</textarea></div></div>';
+  bbRenderHistory();
+  document.getElementById('bbReview').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+function bbCopyText(id){
+  const el = document.getElementById(id);
+  el.select();
+  try { document.execCommand('copy'); toast('Copied to clipboard'); }
+  catch(e){ toast('Copy failed — select the text manually'); }
+}
+function bbLoadHistory(){
+  try { return JSON.parse(localStorage.getItem('bbBlastHistory') || '[]'); } catch(e){ return []; }
+}
+function bbRenderHistory(){
+  const hist = bbLoadHistory();
+  const el = document.getElementById('bbHistory');
+  if(!el) return;
+  if(!hist.length){ el.innerHTML = '<p style="color:var(--muted);font-size:13px">No blasts yet. Approved blasts are logged here for your records.</p>'; return; }
+  el.innerHTML = hist.map(h => {
+    const when = new Date(h.at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    return '<div class="card" style="padding:12px 14px;margin-bottom:10px"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">' +
+      '<div><strong>' + esc(h.deal.address || '') + '</strong> <span style="color:var(--muted);font-size:12px">' + esc(h.deal.market || '') + ' · ' + when + '</span></div>' +
+      '<span class="badge ' + (h.status.indexOf('APPROVED') === 0 ? 'orange' : 'green') + '" style="font-size:10px">' + esc(h.status) + '</span></div>' +
+      '<div style="font-size:13px;color:var(--muted);margin-top:6px">' + h.recipients.length + ' recipients · ' + h.message.length + ' chars · ' + bbSegCount(h.message) + ' segment(s)</div>' +
+      '<details style="margin-top:6px"><summary style="cursor:pointer;font-size:12px;color:var(--accent)">View message</summary><div style="font-size:13px;margin-top:6px;white-space:pre-wrap">' + esc(h.message) + '</div></details></div>';
+  }).join('');
+}
+/* Render blast history whenever the page opens. */
+const _bbShowPage = showPage;
+showPage = function(name){
+  _bbShowPage(name);
+  if(name === 'blast') bbRenderHistory();
+};
 
 /* ============ COMPS CALC ============ */
 function compTier(arv){
