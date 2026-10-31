@@ -161,12 +161,83 @@ function normalizeComp(raw) {
 }
 
 function findCompArray(parsed) {
-  if (Array.isArray(parsed)) return parsed;
-  if (!parsed || typeof parsed !== 'object') return [];
-  for (const k of ['comps', 'comparables', 'comparable_sales', 'results', 'data', 'properties']) {
-    if (Array.isArray(parsed[k])) return parsed[k];
+  if (Array.isArray(parsed)) {
+    return parsed.some((r) => r && typeof r === 'object' && (r.address || r.full_address) && (r.sale_price != null || r.price != null))
+      ? parsed : [];
   }
-  return [];
+  if (!parsed || typeof parsed !== 'object') return [];
+  // Direct keys first, then a recursive hunt for any comp-looking array.
+  for (const k of ['comps', 'comparables', 'comparable_sales', 'results', 'data', 'properties']) {
+    if (Array.isArray(parsed[k]) && parsed[k].length) {
+      const arr = findCompArray(parsed[k]);
+      if (arr.length) return arr;
+    }
+  }
+  const seen = new Set();
+  const hunt = (node) => {
+    if (!node || typeof node !== 'object' || seen.has(node)) return [];
+    seen.add(node);
+    if (Array.isArray(node)) {
+      if (node.length && node.some((r) => r && typeof r === 'object' && (r.address || r.full_address))) return node;
+      for (const el of node) { const hit = hunt(el); if (hit.length) return hit; }
+      return [];
+    }
+    for (const v of Object.values(node)) { const hit = hunt(v); if (hit.length) return hit; }
+    return [];
+  };
+  return hunt(parsed);
+}
+
+// Deep-search a parsed enrich response for the matched property's ID.
+// Handles any nesting: {property:{id}}, {properties:[{id}]}, {data:{...}}, etc.
+function findPropertyId(parsed) {
+  const seen = new Set();
+  const idKeys = ['id', 'property_id', 'dealmachine_id', 'propertyId'];
+  const addrKeys = ['address', 'full_address', 'street_address'];
+  let fallbackId = null;
+  const hunt = (node) => {
+    if (!node || typeof node !== 'object' || seen.has(node)) return null;
+    seen.add(node);
+    if (Array.isArray(node)) {
+      for (const el of node) { const hit = hunt(el); if (hit) return hit; }
+      return null;
+    }
+    const id = pick(node, idKeys);
+    const addr = pick(node, addrKeys);
+    if (id != null && String(id).trim() !== '') {
+      if (addr) return String(id); // id + address = the matched property
+      if (fallbackId == null) fallbackId = String(id);
+    }
+    for (const v of Object.values(node)) { const hit = hunt(v); if (hit) return hit; }
+    return null;
+  };
+  return hunt(parsed) || fallbackId;
+}
+
+// Same deep search, but returns the matched property OBJECT (for subject facts).
+function findPropertyObj(parsed) {
+  const seen = new Set();
+  const idKeys = ['id', 'property_id', 'dealmachine_id', 'propertyId'];
+  const addrKeys = ['address', 'full_address', 'street_address'];
+  const hunt = (node) => {
+    if (!node || typeof node !== 'object' || seen.has(node)) return null;
+    seen.add(node);
+    if (Array.isArray(node)) {
+      for (const el of node) { const hit = hunt(el); if (hit) return hit; }
+      return null;
+    }
+    const id = pick(node, idKeys);
+    const addr = pick(node, addrKeys);
+    if (id != null && String(id).trim() !== '' && addr) return node;
+    for (const v of Object.values(node)) { const hit = hunt(v); if (hit) return hit; }
+    return null;
+  };
+  return hunt(parsed) || {};
+}
+
+function topKeys(parsed, n) {
+  if (!parsed || typeof parsed !== 'object') return String(parsed).slice(0, 80);
+  return Object.keys(parsed).slice(0, n || 8).join(', ');
 }
 
 async function dmCompsLookup({ dmApiKey, address }) {
@@ -198,14 +269,14 @@ async function dmCompsLookup({ dmApiKey, address }) {
     contact_audience: 'none', // property-only: zero people credits
     confirmed: true,
   }, 2);
-  const enrichParsed = tryParseJson(mcpText(enrichResult));
-  const enrichObj = (enrichParsed && typeof enrichParsed === 'object' && !Array.isArray(enrichParsed))
-    ? (enrichParsed.property || enrichParsed.result || enrichParsed.data || enrichParsed)
-    : {};
-  const propertyId = pick(enrichObj, ['id', 'property_id', 'dealmachine_id']);
+  const enrichText = mcpText(enrichResult);
+  const enrichParsed = tryParseJson(enrichText);
+  const propertyId = findPropertyId(enrichParsed);
   if (!propertyId) {
-    return { ok: false, credits: 0, summary: `DealMachine could not match the address "${address}" — no property found, no credits spent.` };
+    console.error('[dashboard-ai] enrich parse miss for "' + address + '" — top keys: ' + topKeys(enrichParsed) + ' — raw: ' + String(enrichText).slice(0, 300));
+    return { ok: false, credits: 0, summary: `DealMachine could not match the address "${address}" — no comps available, so I can't quote ARV, MAO, or LAO. (Diagnostic: address lookup returned an unrecognized shape; keys: ${topKeys(enrichParsed)}. No credits spent.)` };
   }
+  const enrichObj = findPropertyObj(enrichParsed) || {};
   const subjectBits = [
     pick(enrichObj, ['address', 'full_address']),
     [pick(enrichObj, ['bedrooms', 'beds']), 'bd'].filter(Boolean).join(''),
@@ -414,5 +485,6 @@ exports.handler = async (event) => {
 // Offline checks (no network): node -e "const a=require('./dashboard-ai.js'); console.log(a._test.offerMath(290000,40000))"
 exports._test = {
   tierFor, offerMath, money, SYSTEM_PROMPT,
-  sseJson, normalizeComp, findCompArray, COMPS_TOOL_DEF, MAX_TOOL_ITERATIONS,
+  sseJson, normalizeComp, findCompArray, findPropertyId, findPropertyObj, topKeys,
+  COMPS_TOOL_DEF, MAX_TOOL_ITERATIONS,
 };
