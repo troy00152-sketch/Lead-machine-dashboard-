@@ -152,9 +152,9 @@ function normalizeComp(raw) {
     date: pick(raw, ['sale_date', 'sold_date', 'date', 'list_date']),
     status: pick(raw, ['status']),
     distance_mi: pick(raw, ['distance_miles', 'distance', 'distance_mi']),
-    beds: pick(raw, ['bedrooms', 'beds']),
-    baths: pick(raw, ['bathrooms', 'baths']),
-    sqft: pick(raw, ['sqft', 'living_area', 'square_feet', 'building_area']),
+    beds: pick(raw, ['bedrooms', 'beds', 'num_bedrooms']),
+    baths: pick(raw, ['bathrooms', 'baths', 'num_bathrooms']),
+    sqft: pick(raw, ['sqft', 'living_area', 'living_area_sqft', 'square_feet', 'building_area']),
     dom: pick(raw, ['dom', 'days_on_market']),
     match: pick(raw, ['match_score', 'match', 'match_percent']),
     photo: pick(raw, ['photo', 'photo_url', 'image_url', 'primary_photo']),
@@ -193,7 +193,7 @@ function findCompArray(parsed) {
 // Handles any nesting: {property:{id}}, {properties:[{id}]}, {data:{...}}, etc.
 function findPropertyId(parsed) {
   const seen = new Set();
-  const idKeys = ['id', 'property_id', 'dealmachine_id', 'propertyId'];
+  const idKeys = ['id', 'property_id', 'dealmachine_id', 'propertyId', 'dm_property_id'];
   const addrKeys = ['address', 'full_address', 'street_address'];
   let fallbackId = null;
   const hunt = (node) => {
@@ -218,7 +218,7 @@ function findPropertyId(parsed) {
 // Same deep search, but returns the matched property OBJECT (for subject facts).
 function findPropertyObj(parsed) {
   const seen = new Set();
-  const idKeys = ['id', 'property_id', 'dealmachine_id', 'propertyId'];
+  const idKeys = ['id', 'property_id', 'dealmachine_id', 'propertyId', 'dm_property_id'];
   const addrKeys = ['address', 'full_address', 'street_address'];
   const hunt = (node) => {
     if (!node || typeof node !== 'object' || seen.has(node)) return null;
@@ -284,9 +284,9 @@ async function dmCompsLookup({ dmApiKey, address }) {
   const enrichObj = findPropertyObj(enrichParsed) || {};
   const subjectBits = [
     pick(enrichObj, ['address', 'full_address']),
-    [pick(enrichObj, ['bedrooms', 'beds']), 'bd'].filter(Boolean).join(''),
-    [pick(enrichObj, ['bathrooms', 'baths']), 'ba'].filter(Boolean).join(''),
-    pick(enrichObj, ['sqft', 'living_area']) ? `${pick(enrichObj, ['sqft', 'living_area'])} sqft` : null,
+    [pick(enrichObj, ['bedrooms', 'beds', 'num_bedrooms']), 'bd'].filter(Boolean).join(''),
+    [pick(enrichObj, ['bathrooms', 'baths', 'num_bathrooms']), 'ba'].filter(Boolean).join(''),
+    pick(enrichObj, ['sqft', 'living_area', 'living_area_sqft']) ? `${pick(enrichObj, ['sqft', 'living_area', 'living_area_sqft'])} sqft` : null,
     pick(enrichObj, ['year_built']) ? `built ${pick(enrichObj, ['year_built'])}` : null,
   ].filter(Boolean).join(' · ');
 
