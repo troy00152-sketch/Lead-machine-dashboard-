@@ -78,7 +78,8 @@ HARD RULES:
 8. You never cancel bookings, never contact sellers yourself, never spend money. The ONLY credit spend allowed is the get_comps tool: 2 DealMachine credits per address lookup (Troy-approved Oct 30, 2026) — one lookup per address unless he asks for more.
 9. Timezones: Kansas City sellers are Central; Indianapolis, Cleveland, Carolina, Florida are Eastern. Never show a conversion parenthetical.
 10. COMP RULES for get_comps results: you need 3+ SOLD comps passing similarity (sqft ±20%, beds ±1, ≤12 months, ≤2 miles) before quoting MAO/LAO. Fewer than 3 = ARV screen-only, no offer numbers, say plainly the set is thin. Name the comps you used and one line each on why. Active listings are never comps — ignore them for ARV math.
-11. If a get_comps tool result contains a DIAGNOSTIC block, reproduce it EXACTLY in your reply (verbatim, no paraphrasing) so the failure can be fixed — then give Troy the plain-English one-liner too.`;
+11. ARV MATH IS DONE FOR YOU: the tool result includes a CODE-AVERAGE line with the exact average of the top-3 comps. Quote that figure as the ARV when you use those 3 comps — never recompute it yourself. If you swap in a different comp, show your arithmetic exactly like the CODE-AVERAGE line.
+12. If a get_comps tool result contains a DIAGNOSTIC block, reproduce it EXACTLY in your reply (verbatim, no paraphrasing) so the failure can be fixed — then give Troy the plain-English one-liner too.`;
 
 // ---- DealMachine MCP client (get_comps tool backend) ----
 
@@ -158,6 +159,7 @@ function normalizeComp(raw) {
     dom: pick(raw, ['dom', 'days_on_market']),
     match: pick(raw, ['match_score', 'match', 'match_percent']),
     photo: pick(raw, ['photo', 'photo_url', 'image_url', 'primary_photo']),
+    apn: pick(raw, ['apn', 'parcel_number', 'parcel_id', 'parcelnumber', 'parcelNumber', 'apn_number']),
   };
 }
 
@@ -282,12 +284,14 @@ async function dmCompsLookup({ dmApiKey, address }) {
     return { ok: false, credits: 0, summary: `No comps available for "${address}" — I can't quote ARV, MAO, or LAO. DIAGNOSTIC (show Troy verbatim): address lookup returned no recognizable property ID. Top-level keys: ${topKeys(enrichParsed)}. Raw response first 500 chars: ${String(enrichText).slice(0, 500)}` };
   }
   const enrichObj = findPropertyObj(enrichParsed) || {};
+  const subjectApn = pick(enrichObj, ['apn', 'parcel_number', 'parcel_id', 'parcelnumber', 'parcelNumber']);
   const subjectBits = [
     pick(enrichObj, ['address', 'full_address']),
     [pick(enrichObj, ['bedrooms', 'beds', 'num_bedrooms']), 'bd'].filter(Boolean).join(''),
     [pick(enrichObj, ['bathrooms', 'baths', 'num_bathrooms']), 'ba'].filter(Boolean).join(''),
     pick(enrichObj, ['sqft', 'living_area', 'living_area_sqft']) ? `${pick(enrichObj, ['sqft', 'living_area', 'living_area_sqft'])} sqft` : null,
     pick(enrichObj, ['year_built']) ? `built ${pick(enrichObj, ['year_built'])}` : null,
+    subjectApn ? `APN ${subjectApn}` : null,
   ].filter(Boolean).join(' · ');
 
   // Step 3: pull comps for the property ID (1 credit per subject).
@@ -314,15 +318,28 @@ async function dmCompsLookup({ dmApiKey, address }) {
       c.sqft ? `${Number(c.sqft).toLocaleString()} sqft` : null,
       c.dom != null ? `${c.dom} DOM` : null,
       c.match != null ? `match ${c.match}%` : null,
+      c.apn ? `APN ${c.apn}` : null,
     ].filter(Boolean).join(' — ');
     return bits;
   });
+
+  // CODE-COMPUTED average of the top-3 by match: the model quotes this figure,
+  // never recomputes it. (The model botched the arithmetic twice on 2026-10-30.)
+  const priced = rows.filter((c) => Number.isFinite(c.price));
+  const top3 = priced.slice(0, 3);
+  const codeAvg = top3.length === 3
+    ? Math.round((top3[0].price + top3[1].price + top3[2].price) / 3)
+    : null;
 
   const summary = [
     `COMPS for "${address}" (DealMachine live pull, 2 credits used):`,
     subjectBits ? `Subject: ${subjectBits}` : null,
     rows.length ? `${rows.length} sold comps (12mo, sorted by match):` : 'No sold comps returned — the feed, not the property, may be thin.',
     ...lines,
+    '',
+    codeAvg != null
+      ? `CODE-AVERAGE of top-3 by match: (${money(top3[0].price)} + ${money(top3[1].price)} + ${money(top3[2].price)}) / 3 = ${money(codeAvg)}. When quoting ARV from these exact 3 comps, use ${money(codeAvg)} — do NOT recompute. If you swap any comp, show your full arithmetic like this line.`
+      : null,
     '',
     'Apply Troy\u2019s comp rules: need 3+ SOLD comps passing similarity (sqft ±20%, beds ±1, ≤12mo, ≤2mi) before quoting MAO/LAO. Fewer than 3 = ARV screen-only, no offer numbers, say the set is thin.',
   ].filter((l) => l !== null).join('\n');
