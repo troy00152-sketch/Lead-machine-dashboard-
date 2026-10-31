@@ -65,7 +65,7 @@
         }).join('') + '</div>'
       + '<div class="ai-inputrow"><input class="field" id="aiInput" placeholder="Ask about a deal, run numbers, draft a text…" autocomplete="off" maxlength="4000">'
       + '<button class="btn primary" id="aiSend">Send</button></div>'
-      + '<div class="ai-foot">Never invents ARVs · quotes MAO/LAO only from verified numbers · can\'t send, book, or spend — it advises, you act.</div>'
+      + '<div class="ai-foot">Never invents ARVs · comp pulls cost 2 DealMachine credits each · can\'t send, book, or cancel — it advises, you act.</div>'
       + '</div>';
     mount.innerHTML = html;
 
