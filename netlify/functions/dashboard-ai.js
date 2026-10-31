@@ -77,7 +77,8 @@ HARD RULES:
 7. Drafted texts follow Troy's SMS rules: no opt-out sentence in the body (footer handles it), no spam-trigger phrasing, plain and short, at most two sentences.
 8. You never cancel bookings, never contact sellers yourself, never spend money. The ONLY credit spend allowed is the get_comps tool: 2 DealMachine credits per address lookup (Troy-approved Oct 30, 2026) — one lookup per address unless he asks for more.
 9. Timezones: Kansas City sellers are Central; Indianapolis, Cleveland, Carolina, Florida are Eastern. Never show a conversion parenthetical.
-10. COMP RULES for get_comps results: you need 3+ SOLD comps passing similarity (sqft ±20%, beds ±1, ≤12 months, ≤2 miles) before quoting MAO/LAO. Fewer than 3 = ARV screen-only, no offer numbers, say plainly the set is thin. Name the comps you used and one line each on why. Active listings are never comps — ignore them for ARV math.`;
+10. COMP RULES for get_comps results: you need 3+ SOLD comps passing similarity (sqft ±20%, beds ±1, ≤12 months, ≤2 miles) before quoting MAO/LAO. Fewer than 3 = ARV screen-only, no offer numbers, say plainly the set is thin. Name the comps you used and one line each on why. Active listings are never comps — ignore them for ARV math.
+11. If a get_comps tool result contains a DIAGNOSTIC block, reproduce it EXACTLY in your reply (verbatim, no paraphrasing) so the failure can be fixed — then give Troy the plain-English one-liner too.`;
 
 // ---- DealMachine MCP client (get_comps tool backend) ----
 
@@ -278,7 +279,7 @@ async function dmCompsLookup({ dmApiKey, address }) {
   const propertyId = findPropertyId(enrichParsed);
   if (!propertyId) {
     console.error('[dashboard-ai] enrich parse miss for "' + address + '" — top keys: ' + topKeys(enrichParsed) + ' — raw: ' + String(enrichText).slice(0, 300));
-    return { ok: false, credits: 0, summary: `DealMachine could not match the address "${address}" — no comps available, so I can't quote ARV, MAO, or LAO. (Diagnostic: address lookup returned an unrecognized shape; keys: ${topKeys(enrichParsed)}. No credits spent.)` };
+    return { ok: false, credits: 0, summary: `No comps available for "${address}" — I can't quote ARV, MAO, or LAO. DIAGNOSTIC (show Troy verbatim): address lookup returned no recognizable property ID. Top-level keys: ${topKeys(enrichParsed)}. Raw response first 500 chars: ${String(enrichText).slice(0, 500)}` };
   }
   const enrichObj = findPropertyObj(enrichParsed) || {};
   const subjectBits = [
@@ -416,7 +417,7 @@ async function runChat({ baseUrl, apiKey, model, dmApiKey, messages }) {
           toolResult = r.summary;
         } catch (err) {
           console.error('[dashboard-ai] get_comps failed:', err.message);
-          toolResult = `Comp pull failed: ${String(err.message || err).slice(0, 200)}. Tell Troy plainly the pull failed and quote no numbers from it.`;
+          toolResult = `No comps available for "${address}" — I can't quote ARV, MAO, or LAO. DIAGNOSTIC (show Troy verbatim): comp pull failed: ${String(err.message || err).slice(0, 400)}`;
         }
       }
       convo.push({ role: 'tool', tool_call_id: tc.id, content: toolResult });
