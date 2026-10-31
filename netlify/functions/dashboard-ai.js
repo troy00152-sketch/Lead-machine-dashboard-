@@ -260,6 +260,10 @@ async function dmCompsLookup({ dmApiKey, address }) {
       apiKey: dmApiKey, sessionId,
       body: { jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: args } },
     });
+    if (r.result && r.result.isError) {
+      const errText = mcpText(r.result).slice(0, 300);
+      throw new Error(`DealMachine ${name} error: ${errText}`);
+    }
     return r.result;
   };
 
