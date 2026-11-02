@@ -30,6 +30,96 @@
 [data-theme="light"] .img-zoom-hint{background:rgba(24,34,52,.75)}
 [data-theme="light"] .lightbox-close{background:rgba(24,34,52,.55)}
 [data-theme="light"] .qs-card:hover,[data-theme="light"] .card:hover{box-shadow:0 4px 14px rgba(24,34,52,.10)}
+/* ============ HOLOGRAPHIC THEME ============ */
+[data-theme="holographic"]{
+  --bg:#050a14; --bg2:rgba(10,18,38,.88); --panel:rgba(13,25,48,.55); --panel2:rgba(20,35,65,.45);
+  --line:rgba(0,212,255,.22); --text:#e8f4ff; --muted:#7a9cc6; --muted2:#4a6a94;
+  --accent:#00d4ff; --accent2:#0090ff; --green:#00ffaa; --red:#ff4466;
+  --blue:#4488ff; --chip:rgba(0,212,255,.12);
+}
+[data-theme="holographic"] body{
+  background-color:#050a14;
+  background-image:
+    radial-gradient(ellipse 80% 50% at 15% 0%, rgba(0,212,255,.09), transparent 60%),
+    radial-gradient(ellipse 70% 55% at 85% 100%, rgba(0,102,255,.11), transparent 60%),
+    radial-gradient(ellipse 55% 40% at 50% 45%, rgba(0,80,200,.05), transparent 70%),
+    linear-gradient(rgba(0,212,255,.028) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,212,255,.028) 1px, transparent 1px);
+  background-size:auto, auto, auto, 44px 44px, 44px 44px;
+}
+[data-theme="holographic"] .content{background:radial-gradient(ellipse at 15% -5%, rgba(0,212,255,.06), transparent 55%)}
+[data-theme="holographic"] .sidebar{background:rgba(5,12,28,.92);border-right:1px solid rgba(0,212,255,.2);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px)}
+[data-theme="holographic"] .brand h1{text-shadow:0 0 22px rgba(0,212,255,.45)}
+[data-theme="holographic"] .brand h1 span{color:#00d4ff;text-shadow:0 0 18px rgba(0,212,255,.8)}
+[data-theme="holographic"] .nav-item.active{background:rgba(0,212,255,.12);color:#00d4ff;box-shadow:0 0 16px rgba(0,212,255,.22), inset 0 0 0 1px rgba(0,212,255,.3)}
+[data-theme="holographic"] .nav-item:hover{background:rgba(0,212,255,.06)}
+[data-theme="holographic"] .nav-item .cnt{background:linear-gradient(135deg,#00d4ff,#0090ff);color:#001220;box-shadow:0 0 12px rgba(0,212,255,.5)}
+[data-theme="holographic"] .topbar{background:linear-gradient(135deg, rgba(5,15,35,.92) 0%, rgba(10,25,55,.88) 60%, rgba(8,18,40,.92) 100%);border-bottom:1px solid rgba(0,212,255,.25)}
+[data-theme="holographic"] .topbar::before{background:radial-gradient(ellipse at 20% 0%, rgba(0,212,255,.16), transparent 60%)}
+[data-theme="holographic"] .topbar h2{color:#fff;text-shadow:0 0 30px rgba(0,212,255,.6)}
+[data-theme="holographic"] .search-box{background:rgba(8,16,34,.75);border:1px solid rgba(0,212,255,.3);box-shadow:0 0 18px rgba(0,212,255,.12), inset 0 0 20px rgba(0,212,255,.04)}
+[data-theme="holographic"] .search-box button{background:linear-gradient(135deg,#00d4ff,#0090ff);color:#001220;font-weight:700;box-shadow:0 0 18px rgba(0,212,255,.45)}
+[data-theme="holographic"] .search-box button:hover{background:linear-gradient(135deg,#33e0ff,#00a5ff);box-shadow:0 0 26px rgba(0,212,255,.65)}
+[data-theme="holographic"] .sec-title{color:#fff;text-shadow:0 0 22px rgba(0,212,255,.5)}
+[data-theme="holographic"] .sec-title::before{background:linear-gradient(180deg,#00d4ff,#0090ff);box-shadow:0 0 12px rgba(0,212,255,.9)}
+[data-theme="holographic"] .card{background:linear-gradient(160deg, rgba(13,25,48,.78), rgba(8,16,34,.68));border:1px solid rgba(0,212,255,.25);box-shadow:0 0 22px rgba(0,212,255,.09), 0 8px 32px rgba(0,0,0,.42), inset 0 1px 0 rgba(0,212,255,.12);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
+[data-theme="holographic"] .card:hover{border-color:rgba(0,212,255,.5);box-shadow:0 0 34px rgba(0,212,255,.18), 0 12px 40px rgba(0,0,0,.5), inset 0 1px 0 rgba(0,212,255,.18);transform:translateY(-1px)}
+[data-theme="holographic"] .card .num{color:#00d4ff;text-shadow:0 0 16px rgba(0,212,255,.55)}
+[data-theme="holographic"] .stat{background:linear-gradient(160deg, rgba(13,25,48,.75), rgba(8,16,34,.65));border:1px solid rgba(0,212,255,.22);box-shadow:0 0 16px rgba(0,212,255,.08)}
+[data-theme="holographic"] .stat .n{color:#00d4ff;text-shadow:0 0 16px rgba(0,212,255,.45)}
+[data-theme="holographic"] .lead-card{background:linear-gradient(160deg, rgba(13,25,48,.72), rgba(8,16,34,.62));border:1px solid rgba(0,212,255,.2);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+[data-theme="holographic"] .lead-card:hover{border-color:rgba(0,212,255,.5);box-shadow:0 0 26px rgba(0,212,255,.16);transform:translateY(-2px)}
+[data-theme="holographic"] .lead-card.selected{border-color:#00d4ff;box-shadow:0 0 0 1px #00d4ff, 0 0 24px rgba(0,212,255,.35)}
+[data-theme="holographic"] .lead-addr{color:#66e3ff;text-shadow:0 0 12px rgba(0,212,255,.35)}
+[data-theme="holographic"] .tbl-wrap{background:rgba(10,20,40,.62);border:1px solid rgba(0,212,255,.2);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+[data-theme="holographic"] th{background:rgba(0,212,255,.08);color:#7a9cc6}
+[data-theme="holographic"] tr:hover td{background:rgba(0,212,255,.05)}
+[data-theme="holographic"] .field{background:rgba(8,16,34,.72);border:1px solid rgba(0,212,255,.25);color:#e8f4ff}
+[data-theme="holographic"] .field:focus{border-color:#00d4ff;box-shadow:0 0 0 3px rgba(0,212,255,.2), 0 0 16px rgba(0,212,255,.3)}
+[data-theme="holographic"] .btn{background:rgba(20,35,65,.6);border:1px solid rgba(0,212,255,.3);color:#e8f4ff}
+[data-theme="holographic"] .btn:hover{border-color:#00d4ff;box-shadow:0 0 16px rgba(0,212,255,.3)}
+[data-theme="holographic"] .btn.primary{background:linear-gradient(135deg,#00d4ff,#0090ff);border-color:transparent;color:#001220;box-shadow:0 0 22px rgba(0,212,255,.45)}
+[data-theme="holographic"] .btn.primary:hover{background:linear-gradient(135deg,#33e0ff,#00a5ff);box-shadow:0 0 32px rgba(0,212,255,.65);transform:translateY(-1px)}
+[data-theme="holographic"] .badge.blue{background:rgba(0,212,255,.15);color:#00d4ff;box-shadow:0 0 10px rgba(0,212,255,.2)}
+[data-theme="holographic"] .badge.green{background:rgba(0,255,170,.12);color:#00ffaa;box-shadow:0 0 10px rgba(0,255,170,.15)}
+[data-theme="holographic"] .badge.red{background:rgba(255,68,102,.12);color:#ff8098}
+[data-theme="holographic"] .badge.orange{background:rgba(0,212,255,.12);color:#00d4ff}
+[data-theme="holographic"] .chip-btn.active,[data-theme="holographic"] .chip-btn:hover{border-color:#00d4ff;box-shadow:0 0 12px rgba(0,212,255,.3)}
+[data-theme="holographic"] .chip-btn.active{box-shadow:0 0 0 1px #00d4ff, 0 0 14px rgba(0,212,255,.35)}
+[data-theme="holographic"] .modal{background:rgba(8,16,36,.94);border:1px solid rgba(0,212,255,.3);box-shadow:0 0 55px rgba(0,212,255,.16), 0 20px 60px rgba(0,0,0,.6);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px)}
+[data-theme="holographic"] .modal-head h3{color:#fff;text-shadow:0 0 16px rgba(0,212,255,.45)}
+[data-theme="holographic"] .img-tab.active{background:linear-gradient(135deg,#00d4ff,#0090ff);border-color:transparent;color:#001220;box-shadow:0 0 16px rgba(0,212,255,.5)}
+[data-theme="holographic"] .img-thumbs img.active{border-color:#00d4ff;box-shadow:0 0 12px rgba(0,212,255,.5)}
+[data-theme="holographic"] .img-seg .img-tab.active{background:linear-gradient(135deg,#00d4ff,#0090ff);color:#001220;box-shadow:0 0 14px rgba(0,212,255,.45)}
+[data-theme="holographic"] .score-fill{background:linear-gradient(90deg,#0090ff,#00d4ff);box-shadow:0 0 10px rgba(0,212,255,.6)}
+[data-theme="holographic"] .buyer-rank{background:linear-gradient(135deg,#00d4ff,#0090ff);color:#001220;box-shadow:0 0 14px rgba(0,212,255,.55)}
+[data-theme="holographic"] .match-hero{border:1px solid rgba(0,212,255,.4);box-shadow:0 0 30px rgba(0,212,255,.15), inset 0 0 30px rgba(0,212,255,.05)}
+[data-theme="holographic"] .match-hero .buyer-name{text-shadow:0 0 18px rgba(0,212,255,.5)}
+[data-theme="holographic"] #toast{background:rgba(8,16,36,.96);border:1px solid rgba(0,212,255,.45);box-shadow:0 0 32px rgba(0,212,255,.28);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+[data-theme="holographic"] .theme-toggle:hover{border-color:#00d4ff;box-shadow:0 0 16px rgba(0,212,255,.35)}
+[data-theme="holographic"] .crm-btn:hover{border-color:#00d4ff;color:#00d4ff;box-shadow:0 4px 12px rgba(0,212,255,.25)}
+[data-theme="holographic"] .phone-item{background:rgba(13,25,48,.6);border:1px solid rgba(0,212,255,.2)}
+[data-theme="holographic"] .rs-item:hover{background:rgba(0,212,255,.06)}
+[data-theme="holographic"] .prop-chip{background:rgba(13,25,48,.6);border:1px solid rgba(0,212,255,.2)}
+[data-theme="holographic"] .notes-area{background:rgba(8,16,34,.7);border:1px solid rgba(0,212,255,.25)}
+[data-theme="holographic"] .filter-drawer{background:rgba(5,12,28,.96);border-left:1px solid rgba(0,212,255,.25)}
+[data-theme="holographic"] .bulk-bar{background:rgba(0,212,255,.08);border:1px solid rgba(0,212,255,.4);box-shadow:0 0 18px rgba(0,212,255,.15)}
+[data-theme="holographic"] .lb-chip.active{background:rgba(0,212,255,.16)!important;border-color:#00d4ff!important;color:#00d4ff!important}
+[data-theme="holographic"] .qs-card:hover{border-color:rgba(0,212,255,.5);box-shadow:0 0 22px rgba(0,212,255,.15)}
+/* ============ HOLOGRAPHIC MAP STYLING (Leaflet) ============ */
+[data-theme="holographic"] .leaflet-container{background:#040912;outline:1px solid rgba(0,212,255,.25);outline-offset:-1px}
+[data-theme="holographic"] .leaflet-tile-pane{filter:hue-rotate(190deg) saturate(1.6) brightness(.72) contrast(1.08)}
+[data-theme="holographic"] .leaflet-control-zoom a{background:rgba(8,16,36,.9)!important;color:#00d4ff!important;border:1px solid rgba(0,212,255,.35)!important;box-shadow:0 0 12px rgba(0,212,255,.25)}
+[data-theme="holographic"] .leaflet-control-attribution{background:rgba(5,10,22,.75)!important;color:#4a6a94!important;font-size:9px}
+[data-theme="holographic"] .leaflet-control-attribution a{color:#3a7ca8!important}
+[data-theme="holographic"] .leaflet-popup-content-wrapper{background:rgba(8,16,36,.96);color:#e8f4ff;border:1px solid rgba(0,212,255,.4);border-radius:10px;box-shadow:0 0 28px rgba(0,212,255,.3)}
+[data-theme="holographic"] .leaflet-popup-tip{background:rgba(8,16,36,.96);border:1px solid rgba(0,212,255,.4);box-shadow:0 0 18px rgba(0,212,255,.3)}
+[data-theme="holographic"] .leaflet-popup-content{color:#e8f4ff}
+[data-theme="holographic"] .leaflet-popup-close-button{color:#7a9cc6!important}
+[data-theme="holographic"] .img-frame{border:1px solid rgba(0,212,255,.25);box-shadow:0 0 24px rgba(0,212,255,.1)}
+[data-theme="holographic"] .holo-marker{filter:drop-shadow(0 0 8px rgba(0,212,255,.9))}
+[data-theme="holographic"] .map-glow-frame{position:relative}
+[data-theme="holographic"] .map-glow-frame::after{content:'';position:absolute;inset:0;pointer-events:none;border-radius:inherit;box-shadow:inset 0 0 60px rgba(0,212,255,.08), inset 0 0 8px rgba(0,212,255,.15)}
 /* Theme toggle button */
 .theme-toggle{margin-left:auto;display:flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:50%;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:18px;cursor:pointer;flex-shrink:0}
 .theme-toggle:hover{border-color:var(--accent)}
@@ -895,9 +985,10 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
         </div>
         <div class="card" style="margin-bottom:14px">
           <div class="sec-title" style="font-size:14px">🎨 Theme</div>
-          <p style="color:var(--muted);font-size:13px;margin-bottom:10px">Switch between dark and light mode. Your choice is saved on this device.</p>
+          <p style="color:var(--muted);font-size:13px;margin-bottom:10px">Switch between dark, holographic and light mode. Your choice is saved on this device.</p>
           <div class="img-seg" id="themeSeg">
             <button class="img-tab theme-btn" data-mode="dark" onclick="setTheme('dark')">🌙 Dark</button>
+            <button class="img-tab theme-btn" data-mode="holographic" onclick="setTheme('holographic')">✨ Holographic</button>
             <button class="img-tab theme-btn" data-mode="light" onclick="setTheme('light')">☀️ Light</button>
             <button class="img-tab theme-btn" data-mode="system" onclick="setTheme('system')">💻 System</button>
           </div>
@@ -5111,15 +5202,16 @@ function getEffectiveTheme(){
 }
 function applyTheme(){
   const t = getEffectiveTheme();
-  document.documentElement.setAttribute('data-theme', t === 'light' ? 'light' : 'dark');
-  const icon = t === 'light' ? '☀️' : '🌙';
-  const label = t === 'light' ? 'Light mode' : 'Dark mode';
+  const attr = t === 'light' ? 'light' : (t === 'holographic' ? 'holographic' : 'dark');
+  document.documentElement.setAttribute('data-theme', attr);
+  const icon = t === 'light' ? '☀️' : (t === 'holographic' ? '✨' : '🌙');
+  const label = t === 'light' ? 'Light mode' : (t === 'holographic' ? 'Holographic' : 'Dark mode');
   ['themeToggleTop','themeToggleSide'].forEach(id=>{ const b=document.getElementById(id); if(b) b.textContent = icon; });
   const sl = document.getElementById('themeLabelSide'); if(sl) sl.textContent = label;
   document.querySelectorAll('.theme-btn').forEach(b=>b.classList.toggle('active', b.dataset.mode===getThemePref()));
 }
 function setTheme(mode){ localStorage.setItem('acc_theme', mode); applyTheme(); }
-function cycleTheme(){ setTheme(getEffectiveTheme() === 'light' ? 'dark' : 'light'); }
+function cycleTheme(){ const t = getEffectiveTheme(); setTheme(t === 'light' ? 'dark' : (t === 'dark' ? 'holographic' : 'light')); }
 if(window.matchMedia){ try{ window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', ()=>{ if(getThemePref()==='system') applyTheme(); }); }catch(e){} }
 
 /* ============ INIT ============ */
