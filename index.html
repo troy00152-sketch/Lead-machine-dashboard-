@@ -3909,6 +3909,7 @@ let compMapTileLayer = null;
 let compMapMarkers = [];
 let compSubjectLat = null;
 let compSubjectLng = null;
+let compDataSource = '';
 function compStatus(){
   const st = document.getElementById('compListStatus');
   return st ? st.value : '';
@@ -4780,9 +4781,27 @@ async function loadCompsForAddress(retryAttempt){
   if(!addr){ if(msg) msg.textContent = 'Enter the property address first.'; return; }
   if(!retryAttempt && msg) msg.textContent = 'Loading verified comps…';
   try{
-    const resp = await fetch('/.netlify/functions/attom-lookup?address=' + encodeURIComponent(addr));
-    if(!resp.ok) throw new Error('HTTP ' + resp.status);
-    const d = await resp.json();
+    /* Comp source priority: PropertyReach first (MLS + public-record comps,
+       recorded mortgage, lat/lng), ATTOM as fallback. Both return the same
+       shape, so everything downstream is source-agnostic. */
+    let d = null;
+    let compSource = '';
+    try{
+      const prResp = await fetch('/.netlify/functions/propertyreach?address=' + encodeURIComponent(addr));
+      if(prResp.ok){
+        const pj = await prResp.json();
+        if(pj && pj.matched && pj.comps && (pj.comps.best || []).length){
+          d = pj; compSource = 'PropertyReach';
+        }
+      }
+    }catch(e){ /* fall through to ATTOM */ }
+    if(!d){
+      const resp = await fetch('/.netlify/functions/attom-lookup?address=' + encodeURIComponent(addr));
+      if(!resp.ok) throw new Error('HTTP ' + resp.status);
+      d = await resp.json();
+      compSource = 'ATTOM';
+    }
+    compDataSource = compSource;
     if(!d.matched){ compRows = []; compPicks = []; compLoadedAddr = ''; compSubjectLat = null; compSubjectLng = null; compConfidence = ''; compConfidenceText = ''; compSubjectSqft = null; compSubjectBeds = null; compStabilityWarns = []; resetCompFilters(); resetCompMortgage(); renderCompSubjectCard(null, addr, ''); if(msg) msg.textContent = 'No ownership records found for this address — type an ARV below to run the math manually.'; renderCompList(); renderCompMortgage(); calcComp(); return; }
     renderCompSubjectCard(d.property || null, addr, d.address || '');
     applyCompMortgageFromAttom(d.property || null, addr);
@@ -4836,7 +4855,7 @@ async function loadCompsForAddress(retryAttempt){
     const next = {};
     rows.forEach(r => { if(compPicks.indexOf(r.address) >= 0 && r.amount != null) next[r.address] = r.amount; });
     compPrevLoads[addr] = next;
-    if(msg) msg.textContent = 'Loaded ' + rows.length + ' verified sale(s) — best ' + compPicks.length + ' pre-picked.';
+    if(msg) msg.textContent = 'Loaded ' + rows.length + ' verified sale(s) via ' + (compDataSource || 'ATTOM') + ' — best ' + compPicks.length + ' pre-picked.';
     const avg = compPickAvg();
     const arvEl = document.getElementById('compARV');
     if(avg && arvEl) arvEl.value = avg;
