@@ -4812,16 +4812,21 @@ async function loadCompsForAddress(retryAttempt){
   if(!retryAttempt && msg) msg.textContent = 'Loading verified comps…';
   try{
     /* Comp source priority: PropertyReach first (MLS + public-record comps,
-       recorded mortgage, lat/lng), ATTOM as fallback. Both return the same
-       shape, so everything downstream is source-agnostic. */
+       recorded mortgage, lat/lng, distress/equity/title), ATTOM as fallback.
+       If PR matches the subject but has no comps, keep the PR subject
+       (distress badges etc.) and fill comps from ATTOM. */
     let d = null;
     let compSource = '';
+    let prSubject = null;
     try{
       const prResp = await fetch('/.netlify/functions/propertyreach?address=' + encodeURIComponent(addr));
       if(prResp.ok){
         const pj = await prResp.json();
-        if(pj && pj.matched && pj.comps && (pj.comps.best || []).length){
-          d = pj; compSource = 'PropertyReach';
+        if(pj && pj.matched){
+          prSubject = pj.property || null;
+          if(pj.comps && (pj.comps.best || []).length){
+            d = pj; compSource = 'PropertyReach';
+          }
         }
       }
     }catch(e){ /* fall through to ATTOM */ }
@@ -4830,6 +4835,10 @@ async function loadCompsForAddress(retryAttempt){
       if(!resp.ok) throw new Error('HTTP ' + resp.status);
       d = await resp.json();
       compSource = 'ATTOM';
+      if(prSubject){
+        d.property = Object.assign({}, d.property || {}, prSubject);
+        compSource = 'ATTOM+PR';
+      }
     }
     compDataSource = compSource;
     if(!d.matched){ compRows = []; compPicks = []; compLoadedAddr = ''; compSubjectLat = null; compSubjectLng = null; compConfidence = ''; compConfidenceText = ''; compSubjectSqft = null; compSubjectBeds = null; compStabilityWarns = []; resetCompFilters(); resetCompMortgage(); renderCompSubjectCard(null, addr, ''); if(msg) msg.textContent = 'No ownership records found for this address — type an ARV below to run the math manually.'; renderCompList(); renderCompMortgage(); calcComp(); return; }
