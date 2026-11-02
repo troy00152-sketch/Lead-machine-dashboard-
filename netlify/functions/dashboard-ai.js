@@ -9,15 +9,19 @@
 //   { messages: [{ role: "user"|"assistant", content: "..." }] }
 // Responds: { reply: "..." }  or  { error: "..." }
 //
-// DealMachine comps wiring (Troy approved Oct 30, 2026):
+// PropertyReach comps wiring (Troy approved Nov 2, 2026 — replaces DealMachine):
 //   The model gets a get_comps tool. When Troy asks for ARV/comps/offer
-//   numbers on a specific address, the function calls DealMachine's MCP
-//   server (https://mcp.dealmachine.com/mcp) with the dashboard's existing
-//   DEALMACHINE_API_KEY: enrich_address (1 credit) to resolve the property
-//   ID, then dealmachine_comps (1 credit) for comparable sales.
-//   Real cost: 2 property data credits per address lookup, $0 marginal
-//   inside Troy's 20,000-credit pool. Guarded by MAX_TOOL_ITERATIONS per
-//   request so one chat message can never burn more than 4 credits.
+//   numbers on a specific address, the function calls PropertyReach's API
+//   (https://api.propertyreach.com/v1) with PROPERTYREACH_API_KEY:
+//   GET /v1/property (1 credit) to resolve the property, then
+//   POST /v1/comparables (1 credit) for comparable sales.
+//   Real cost: ~2 API credits per address lookup ($0.02 nominal at $30/100
+//   credits, inside the 100/mo included). Guarded by MAX_TOOL_ITERATIONS
+//   per request so one chat message can never burn more than 4 credits.
+//   The API returns HTTP 200 with the real status in meta.status — always
+//   read the body. Comp targets tried in order: propertyId, apn, address.
+//   (Target/filter are SIBLINGS in the POST body — nesting target inside
+//   filter was our Nov 2 bug.)
 //
 // Troy's approval gate (Oct 29, 2026): this function ships ONLY after his
 // explicit review. No deploy until he says go.
@@ -25,14 +29,14 @@
 
 const DEFAULT_MODEL = 'gpt-4.1';
 const TIMEOUT_MS = 25000;
-const MCP_TIMEOUT_MS = 20000;
+const PR_TIMEOUT_MS = 20000;
 const MAX_TOKENS = 900;          // keeps replies tight and cheap
 const MAX_MESSAGES = 40;         // history cap per request
 const MAX_INPUT_CHARS = 4000;    // per-message cap
 const MAX_TOOL_ITERATIONS = 2;   // max get_comps calls per chat request (≤4 credits)
 const COMPS_LIMIT = 10;
 
-const DM_MCP_URL = 'https://mcp.dealmachine.com/mcp';
+const PR_API_BASE = 'https://api.propertyreach.com/v1';
 
 function money(n) {
   if (n == null || isNaN(Number(n))) return '?';
@@ -75,57 +79,66 @@ HARD RULES:
 5. Present MAO/LAO as light / medium / heavy repair scenarios when repairs are unknown: Light $20K, Medium $40K, Heavy $70K.
 6. Keep replies short. Lead with the number or the answer, then one line of reasoning at most.
 7. Drafted texts follow Troy's SMS rules: no opt-out sentence in the body (footer handles it), no spam-trigger phrasing, plain and short, at most two sentences.
-8. You never cancel bookings, never contact sellers yourself, never spend money. The ONLY credit spend allowed is the get_comps tool: 2 DealMachine credits per address lookup (Troy-approved Oct 30, 2026) — one lookup per address unless he asks for more.
+8. You never cancel bookings, never contact sellers yourself, never spend money. The ONLY credit spend allowed is the get_comps tool: ~2 PropertyReach API credits per address lookup (Troy-approved Nov 2, 2026) — one lookup per address unless he asks for more.
 9. Timezones: Kansas City sellers are Central; Indianapolis, Cleveland, Carolina, Florida are Eastern. Never show a conversion parenthetical.
 10. COMP RULES for get_comps results: you need 3+ SOLD comps passing similarity (sqft ±20%, beds ±1, ≤12 months, ≤2 miles) before quoting MAO/LAO. Fewer than 3 = ARV screen-only, no offer numbers, say plainly the set is thin. Name the comps you used and one line each on why. Active listings are never comps — ignore them for ARV math.
 11. ARV MATH IS DONE FOR YOU: the tool result includes a CODE-AVERAGE line with the exact average of the top-3 comps. Quote that figure as the ARV when you use those 3 comps — never recompute it yourself. If you swap in a different comp, show your arithmetic exactly like the CODE-AVERAGE line.
 12. If a get_comps tool result contains a DIAGNOSTIC block, reproduce it EXACTLY in your reply (verbatim, no paraphrasing) so the failure can be fixed — then give Troy the plain-English one-liner too.`;
 
-// ---- DealMachine MCP client (get_comps tool backend) ----
+// ---- PropertyReach client (get_comps tool backend) ----
 
-function sseJson(text) {
-  // MCP over HTTP returns Server-Sent Events; pull the last data: payload.
-  let last = null;
-  for (const line of String(text || '').split('\n')) {
-    if (line.startsWith('data: ')) last = line.slice(6).trim();
+function parseAddress(full) {
+  const out = { street: '', city: '', state: '', zip: '' };
+  if (!full) return out;
+  let head = String(full).trim();
+  const sz = head.match(/,?\s*([A-Za-z]{2})\s+(\d{5})(?:-\d{4})?\s*$/);
+  if (sz) {
+    out.state = sz[1].toUpperCase();
+    out.zip = sz[2];
+    head = head.slice(0, sz.index).replace(/,\s*$/, '').trim();
   }
-  if (!last) throw new Error('MCP: empty SSE response');
-  return JSON.parse(last);
+  const parts = head.split(',').map((s) => s.trim()).filter(Boolean);
+  if (parts.length >= 2) {
+    out.city = parts[parts.length - 1];
+    out.street = parts.slice(0, -1).join(', ');
+    return out;
+  }
+  out.street = head;
+  return out;
 }
 
-async function mcpPost({ apiKey, sessionId, body, id }) {
+function isoDaysAgo(n) {
+  const t = new Date();
+  t.setDate(t.getDate() - n);
+  return t.toISOString().slice(0, 10);
+}
+
+async function prFetchJson(url, { apiKey, method, body } = {}) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), MCP_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), PR_TIMEOUT_MS);
   try {
-    const headers = {
-      'Content-Type': 'application/json',
-      Accept: 'application/json, text/event-stream',
-      Authorization: `Bearer ${apiKey}`,
-    };
-    if (sessionId) headers['Mcp-Session-Id'] = sessionId;
-    const res = await fetch(DM_MCP_URL, {
-      method: 'POST',
-      signal: controller.signal,
-      headers,
-      body: JSON.stringify(body),
-    });
+    const headers = { 'x-api-key': apiKey, Accept: 'application/json' };
+    const opts = { method: method || 'GET', signal: controller.signal, headers };
+    if (body !== undefined) {
+      headers['Content-Type'] = 'application/json';
+      opts.body = JSON.stringify(body);
+    }
+    const res = await fetch(url, opts);
     const text = await res.text();
-    const sid = res.headers.get('mcp-session-id') || sessionId || null;
-    if (!res.ok) throw new Error(`MCP ${res.status}: ${text.slice(0, 200)}`);
-    // notifications/initialized has no id and returns 202 with empty body.
-    if (body.method === 'notifications/initialized') return { sessionId: sid, result: null };
-    const data = sseJson(text);
-    if (data.error) throw new Error(`MCP ${data.error.code}: ${String(data.error.message || '').slice(0, 200)}`);
-    return { sessionId: sid, result: data.result };
+    let json = null;
+    try { json = JSON.parse(text); } catch (e) { /* leave null */ }
+    return { http: res.status, json, text };
   } finally {
     clearTimeout(timer);
   }
 }
 
-function mcpText(result) {
-  // tools/call returns { content: [{ type: 'text', text: '...' }] }
-  const parts = (result && result.content) || [];
-  return parts.filter((p) => p && p.type === 'text').map((p) => p.text).join('\n');
+// The API returns HTTP 200 with the real status inside meta.status —
+// a dead/quota-exceeded key shows up as meta.status 403 in the body.
+function prBodyOk(r) {
+  if (!r || !r.json || !r.json.meta) return false;
+  const s = Number(r.json.meta.status);
+  return s >= 200 && s < 300;
 }
 
 function tryParseJson(s) {
@@ -139,191 +152,125 @@ function pick(obj, keys) {
   return null;
 }
 
-function normalizeComp(raw) {
-  if (!raw || typeof raw !== 'object') return null;
-  const address = pick(raw, ['address', 'full_address', 'street_address', 'property_address']);
-  const price = pick(raw, ['sale_price', 'price', 'sold_price', 'list_price']);
-  if (!address || price == null) return null;
+// Normalize a PropertyReach comp row to the shape the summary builder expects.
+function normalizePrComp(r) {
+  if (!r || typeof r !== 'object') return null;
+  const street = pick(r, ['streetAddress', 'address', 'street']);
+  const amount = pick(r, ['lastSaleAmount', 'sale_price', 'price', 'sold_price', 'amount']);
+  if (!street || amount == null) return null;
+  const city = pick(r, ['city']);
+  const state = pick(r, ['state']);
+  const zip = pick(r, ['zip']);
+  const address = [street, city, state, zip].filter((x) => x).join(', ');
   return {
-    address: String(address),
-    city: pick(raw, ['city', 'property_city']),
-    state: pick(raw, ['state', 'property_state']),
-    zip: pick(raw, ['zip', 'zip_code', 'postal_code']),
-    price: Number(price),
-    date: pick(raw, ['sale_date', 'sold_date', 'date', 'list_date']),
-    status: pick(raw, ['status']),
-    distance_mi: pick(raw, ['distance_miles', 'distance', 'distance_mi']),
-    beds: pick(raw, ['bedrooms', 'beds', 'num_bedrooms']),
-    baths: pick(raw, ['bathrooms', 'baths', 'num_bathrooms']),
-    sqft: pick(raw, ['sqft', 'living_area', 'living_area_sqft', 'square_feet', 'building_area']),
-    dom: pick(raw, ['dom', 'days_on_market']),
-    match: pick(raw, ['match_score', 'match', 'match_percent']),
-    photo: pick(raw, ['photo', 'photo_url', 'image_url', 'primary_photo']),
-    apn: pick(raw, ['apn', 'parcel_number', 'parcel_id', 'parcelnumber', 'parcelNumber', 'apn_number']),
+    address,
+    city: city || null,
+    state: state || null,
+    zip: zip || null,
+    price: Number(amount),
+    date: pick(r, ['lastSaleDate', 'sale_date', 'sold_date', 'date'])
+      ? String(pick(r, ['lastSaleDate', 'sale_date', 'sold_date', 'date'])).slice(0, 10)
+      : null,
+    status: pick(r, ['listingStatus', 'status']),
+    distance_mi: null, // PR rows carry no per-row distance; all passed the radius filter
+    beds: pick(r, ['bedrooms', 'beds']),
+    baths: pick(r, ['bathrooms', 'baths']),
+    sqft: pick(r, ['squareFeet', 'sqft', 'livingSquareFeet']),
+    dom: pick(r, ['daysOnMarket', 'dom']),
+    match: null,
+    photo: pick(r, ['photoUrl', 'photo_url', 'image_url']),
+    apn: pick(r, ['apn', 'parcelNumber']),
   };
 }
 
-function findCompArray(parsed) {
-  if (Array.isArray(parsed)) {
-    return parsed.some((r) => r && typeof r === 'object' && (r.address || r.full_address) && (r.sale_price != null || r.price != null))
-      ? parsed : [];
+async function prCompsLookup({ prApiKey, address, apn }) {
+  const parts = parseAddress(address);
+  if (!parts.street) {
+    return { ok: false, credits: 0, summary: `No comps available for "${address}" — I can't quote ARV, MAO, or LAO. DIAGNOSTIC (show Troy verbatim): could not parse a street address from "${address}".` };
   }
-  if (!parsed || typeof parsed !== 'object') return [];
-  // Direct keys first, then a recursive hunt for any comp-looking array.
-  for (const k of ['comps', 'comparables', 'comparable_sales', 'results', 'data', 'properties']) {
-    if (Array.isArray(parsed[k]) && parsed[k].length) {
-      const arr = findCompArray(parsed[k]);
-      if (arr.length) return arr;
-    }
+
+  // Step 1: resolve the property record (1 credit).
+  const propQs = new URLSearchParams({
+    streetAddress: parts.street,
+    city: parts.city,
+    state: parts.state,
+    zip: parts.zip,
+  }).toString();
+  const propRes = await prFetchJson(`${PR_API_BASE}/property?${propQs}`, { apiKey: prApiKey });
+  if (!prBodyOk(propRes)) {
+    const meta = propRes.json && propRes.json.meta;
+    console.error('[dashboard-ai] PR property lookup failed for "' + address + '" — ' + JSON.stringify(meta || { http: propRes.http }));
+    return { ok: false, credits: 0, summary: `No comps available for "${address}" — I can't quote ARV, MAO, or LAO. DIAGNOSTIC (show Troy verbatim): property lookup failed. meta.status: ${meta ? meta.status : 'n/a'}, message: ${meta ? (meta.message || '') : 'fetch failed'}.` };
   }
-  const seen = new Set();
-  const hunt = (node) => {
-    if (!node || typeof node !== 'object' || seen.has(node)) return [];
-    seen.add(node);
-    if (Array.isArray(node)) {
-      if (node.length && node.some((r) => r && typeof r === 'object' && (r.address || r.full_address))) return node;
-      for (const el of node) { const hit = hunt(el); if (hit.length) return hit; }
-      return [];
-    }
-    for (const v of Object.values(node)) { const hit = hunt(v); if (hit.length) return hit; }
-    return [];
-  };
-  return hunt(parsed);
-}
-
-// Deep-search a parsed enrich response for the matched property's ID.
-// Handles any nesting: {property:{id}}, {properties:[{id}]}, {data:{...}}, etc.
-function findPropertyId(parsed) {
-  const seen = new Set();
-  const idKeys = ['id', 'property_id', 'dealmachine_id', 'propertyId', 'dm_property_id'];
-  const addrKeys = ['address', 'full_address', 'street_address'];
-  let fallbackId = null;
-  const hunt = (node) => {
-    if (!node || typeof node !== 'object' || seen.has(node)) return null;
-    seen.add(node);
-    if (Array.isArray(node)) {
-      for (const el of node) { const hit = hunt(el); if (hit) return hit; }
-      return null;
-    }
-    const id = pick(node, idKeys);
-    const addr = pick(node, addrKeys);
-    if (id != null && String(id).trim() !== '') {
-      if (addr) return String(id); // id + address = the matched property
-      if (fallbackId == null) fallbackId = String(id);
-    }
-    for (const v of Object.values(node)) { const hit = hunt(v); if (hit) return hit; }
-    return null;
-  };
-  return hunt(parsed) || fallbackId;
-}
-
-// Same deep search, but returns the matched property OBJECT (for subject facts).
-function findPropertyObj(parsed) {
-  const seen = new Set();
-  const idKeys = ['id', 'property_id', 'dealmachine_id', 'propertyId', 'dm_property_id'];
-  const addrKeys = ['address', 'full_address', 'street_address'];
-  const hunt = (node) => {
-    if (!node || typeof node !== 'object' || seen.has(node)) return null;
-    seen.add(node);
-    if (Array.isArray(node)) {
-      for (const el of node) { const hit = hunt(el); if (hit) return hit; }
-      return null;
-    }
-    const id = pick(node, idKeys);
-    const addr = pick(node, addrKeys);
-    if (id != null && String(id).trim() !== '' && addr) return node;
-    for (const v of Object.values(node)) { const hit = hunt(v); if (hit) return hit; }
-    return null;
-  };
-  return hunt(parsed) || {};
-}
-
-function topKeys(parsed, n) {
-  if (!parsed || typeof parsed !== 'object') return String(parsed).slice(0, 80);
-  return Object.keys(parsed).slice(0, n || 8).join(', ');
-}
-
-async function dmCompsLookup({ dmApiKey, address }) {
-  // Step 1: MCP handshake.
-  let sessionId = null;
-  {
-    const r = await mcpPost({
-      apiKey: dmApiKey,
-      body: {
-        jsonrpc: '2.0', id: 1, method: 'initialize',
-        params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'command-center-ai', version: '1.0.0' } },
-      },
-    });
-    sessionId = r.sessionId;
-  }
-  await mcpPost({ apiKey: dmApiKey, sessionId, body: { jsonrpc: '2.0', method: 'notifications/initialized' } });
-
-  const callTool = async (name, args, id) => {
-    const r = await mcpPost({
-      apiKey: dmApiKey, sessionId,
-      body: { jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: args } },
-    });
-    if (r.result && r.result.isError) {
-      const errText = mcpText(r.result).slice(0, 300);
-      throw new Error(`DealMachine ${name} error: ${errText}`);
-    }
-    return r.result;
-  };
-
-  // Step 2: resolve the address to a DealMachine property ID (1 credit).
-  const enrichResult = await callTool('dealmachine_enrich_address', {
-    full_address: address,
-    contact_audience: 'none', // property-only: zero people credits
-    confirmed: true,
-  }, 2);
-  const enrichText = mcpText(enrichResult);
-  const enrichParsed = tryParseJson(enrichText);
-  const propertyId = findPropertyId(enrichParsed);
-  if (!propertyId) {
-    console.error('[dashboard-ai] enrich parse miss for "' + address + '" — top keys: ' + topKeys(enrichParsed) + ' — raw: ' + String(enrichText).slice(0, 300));
-    return { ok: false, credits: 0, summary: `No comps available for "${address}" — I can't quote ARV, MAO, or LAO. DIAGNOSTIC (show Troy verbatim): address lookup returned no recognizable property ID. Top-level keys: ${topKeys(enrichParsed)}. Raw response first 500 chars: ${String(enrichText).slice(0, 500)}` };
-  }
-  const enrichObj = findPropertyObj(enrichParsed) || {};
-  const subjectApn = pick(enrichObj, ['apn', 'parcel_number', 'parcel_id', 'parcelnumber', 'parcelNumber']);
+  const rawProp = (propRes.json && propRes.json.property) || {};
+  const subjectApn = apn || rawProp.apn || '';
   const subjectBits = [
-    pick(enrichObj, ['address', 'full_address']),
-    [pick(enrichObj, ['bedrooms', 'beds', 'num_bedrooms']), 'bd'].filter(Boolean).join(''),
-    [pick(enrichObj, ['bathrooms', 'baths', 'num_bathrooms']), 'ba'].filter(Boolean).join(''),
-    pick(enrichObj, ['sqft', 'living_area', 'living_area_sqft']) ? `${pick(enrichObj, ['sqft', 'living_area', 'living_area_sqft'])} sqft` : null,
-    pick(enrichObj, ['year_built']) ? `built ${pick(enrichObj, ['year_built'])}` : null,
+    [rawProp.streetAddress, rawProp.city, rawProp.state, rawProp.zip].filter(Boolean).join(', ') || address,
+    rawProp.bedrooms ? `${rawProp.bedrooms}bd` : null,
+    rawProp.bathrooms ? `${rawProp.bathrooms}ba` : null,
+    rawProp.squareFeet ? `${Number(rawProp.squareFeet).toLocaleString()} sqft` : null,
+    rawProp.yearBuilt ? `built ${rawProp.yearBuilt}` : null,
     subjectApn ? `APN ${subjectApn}` : null,
   ].filter(Boolean).join(' · ');
 
-  // Step 3: pull comps for the property ID (1 credit per subject).
-  const compsResult = await callTool('dealmachine_comps', {
-    property_ids: [String(propertyId)],
-    criteria: {
-      timeframe: '12months',
-      sort_by: 'match',
-      sort_direction: 'desc',
-      limit: COMPS_LIMIT,
-      include_active_listings: false, // sold only: active listings are never ARV comps
-    },
-    confirmed: true,
-  }, 3);
-  const compsParsed = tryParseJson(mcpText(compsResult));
-  const rows = findCompArray(compsParsed).map(normalizeComp).filter(Boolean);
+  // Step 2: pull comparables (1 credit). Try propertyId, then APN, then address.
+  // target and filter are SIBLINGS — never nest target inside filter.
+  const compTargets = [];
+  if (rawProp.id) compTargets.push({ propertyId: rawProp.id });
+  if (subjectApn) compTargets.push({ apn: subjectApn });
+  const addrTarget = {
+    streetAddress: parts.street,
+    city: parts.city,
+    state: parts.state,
+    zip: parts.zip,
+  };
+  if (rawProp.county) addrTarget.county = rawProp.county;
+  if (rawProp.fips) addrTarget.fips = rawProp.fips;
+  compTargets.push(addrTarget);
+
+  let compRes = null;
+  let lastMeta = null;
+  for (const target of compTargets) {
+    compRes = await prFetchJson(`${PR_API_BASE}/comparables`, {
+      apiKey: prApiKey,
+      method: 'POST',
+      body: {
+        target,
+        filter: {
+          distanceFromSubject: 2,
+          lastSaleDateMin: isoDaysAgo(365),
+          propertyClassCode: ['R'],
+        },
+      },
+    });
+    if (prBodyOk(compRes)) break;
+    lastMeta = compRes.json && compRes.json.meta;
+    compRes = null;
+  }
+  if (!compRes) {
+    console.error('[dashboard-ai] PR comparables failed for "' + address + '" — ' + JSON.stringify(lastMeta || {}));
+    return { ok: false, credits: 1, summary: `No comps available for "${address}" — I can't quote ARV, MAO, or LAO. DIAGNOSTIC (show Troy verbatim): comparables lookup failed on all target forms. meta: ${JSON.stringify(lastMeta || {}).slice(0, 300)}` };
+  }
+
+  const rows = ((compRes.json && compRes.json.properties) || [])
+    .map(normalizePrComp)
+    .filter(Boolean)
+    .filter((c) => c.price >= 5000); // drop nominal transfers
 
   const lines = rows.map((c, i) => {
     const bits = [
-      `${i + 1}. ${c.address}${c.city ? `, ${c.city}` : ''}${c.state ? ` ${c.state}` : ''}`,
+      `${i + 1}. ${c.address}`,
       `Sold ${money(c.price)}${c.date ? ` on ${c.date}` : ''}`,
-      c.distance_mi != null ? `${c.distance_mi} mi` : null,
+      'within 2 mi',
       [c.beds != null ? `${c.beds}bd` : null, c.baths != null ? `${c.baths}ba` : null].filter(Boolean).join('/'),
       c.sqft ? `${Number(c.sqft).toLocaleString()} sqft` : null,
       c.dom != null ? `${c.dom} DOM` : null,
-      c.match != null ? `match ${c.match}%` : null,
       c.apn ? `APN ${c.apn}` : null,
     ].filter(Boolean).join(' — ');
     return bits;
   });
 
-  // CODE-COMPUTED average of the top-3 by match: the model quotes this figure,
+  // CODE-COMPUTED average of the top-3: the model quotes this figure,
   // never recomputes it. (The model botched the arithmetic twice on 2026-10-30.)
   const priced = rows.filter((c) => Number.isFinite(c.price));
   const top3 = priced.slice(0, 3);
@@ -332,16 +279,16 @@ async function dmCompsLookup({ dmApiKey, address }) {
     : null;
 
   const summary = [
-    `COMPS for "${address}" (DealMachine live pull, 2 credits used):`,
+    `COMPS for "${address}" (PropertyReach live pull, 2 credits used):`,
     subjectBits ? `Subject: ${subjectBits}` : null,
-    rows.length ? `${rows.length} sold comps (12mo, sorted by match):` : 'No sold comps returned — the feed, not the property, may be thin.',
+    rows.length ? `${rows.length} sold comps (12mo, ≤2mi):` : 'No sold comps returned — the feed, not the property, may be thin.',
     ...lines,
     '',
     codeAvg != null
-      ? `CODE-AVERAGE of top-3 by match: (${money(top3[0].price)} + ${money(top3[1].price)} + ${money(top3[2].price)}) / 3 = ${money(codeAvg)}. When quoting ARV from these exact 3 comps, use ${money(codeAvg)} — do NOT recompute. If you swap any comp, show your full arithmetic like this line.`
+      ? `CODE-AVERAGE of top-3: (${money(top3[0].price)} + ${money(top3[1].price)} + ${money(top3[2].price)}) / 3 = ${money(codeAvg)}. When quoting ARV from these exact 3 comps, use ${money(codeAvg)} — do NOT recompute. If you swap any comp, show your full arithmetic like this line.`
       : null,
     '',
-    'Apply Troy\u2019s comp rules: need 3+ SOLD comps passing similarity (sqft ±20%, beds ±1, ≤12mo, ≤2mi) before quoting MAO/LAO. Fewer than 3 = ARV screen-only, no offer numbers, say the set is thin.',
+    'Apply Troy\u2019s comp rules: need 3+ SOLD comps passing similarity (sqft ±20%, beds ±1, ≤12mo, ≤2mi) before quoting MAO/LAO. Fewer than 3 = ARV screen-only, no offer numbers, say the set is thin. Note: PropertyReach rows carry no per-row distance — all passed the 2-mile filter.',
   ].filter((l) => l !== null).join('\n');
 
   return { ok: true, credits: 2, count: rows.length, summary };
@@ -353,13 +300,17 @@ const COMPS_TOOL_DEF = {
   type: 'function',
   function: {
     name: 'get_comps',
-    description: 'Pull live comparable sales for a property address from DealMachine. Costs 2 DealMachine credits per lookup (1 to match the address, 1 for comps). Call it when Troy asks for ARV, comps, or offer numbers on a specific property address and you do not already have verified comps for it in this conversation. Do NOT call it for general questions, math on numbers he gave you, or text drafts.',
+    description: 'Pull live comparable sales for a property address from PropertyReach. Costs ~2 API credits per lookup (1 for the property record, 1 for comps). Call it when Troy asks for ARV, comps, or offer numbers on a specific property address and you do not already have verified comps for it in this conversation. Do NOT call it for general questions, math on numbers he gave you, or text drafts. If Troy provides an APN, pass it for a more precise lookup.',
     parameters: {
       type: 'object',
       properties: {
         address: {
           type: 'string',
           description: 'Full property address, e.g. "303 Elizabeth St, Greenville, NC 27834"',
+        },
+        apn: {
+          type: 'string',
+          description: 'Assessor parcel number, e.g. "49-06-29-103-094.000-901". Optional — improves comp matching when known.',
         },
       },
       required: ['address'],
@@ -400,14 +351,14 @@ async function callLlm({ baseUrl, apiKey, model, messages, tools }) {
   }
 }
 
-async function runChat({ baseUrl, apiKey, model, dmApiKey, messages }) {
+async function runChat({ baseUrl, apiKey, model, prApiKey, messages }) {
   const convo = messages.slice();
   let totalCredits = 0;
   for (let iter = 0; iter <= MAX_TOOL_ITERATIONS; iter++) {
     const msg = await callLlm({
       baseUrl, apiKey, model,
       messages: convo,
-      tools: dmApiKey ? [COMPS_TOOL_DEF] : undefined,
+      tools: prApiKey ? [COMPS_TOOL_DEF] : undefined,
     });
     const toolCalls = (msg.tool_calls || []).filter(
       (tc) => tc && tc.type === 'function' && tc.function && tc.function.name === 'get_comps'
@@ -417,19 +368,20 @@ async function runChat({ baseUrl, apiKey, model, dmApiKey, messages }) {
       if (!content) throw new Error('LLM returned empty content');
       return { reply: content, compsCredits: totalCredits };
     }
-    if (!dmApiKey) throw new Error('DealMachine API key not configured');
+    if (!prApiKey) throw new Error('PropertyReach API key not configured');
     // Execute the tool call(s), feed results back, and let the model continue.
     convo.push({ role: 'assistant', content: msg.content || null, tool_calls: msg.tool_calls });
     for (const tc of toolCalls.slice(0, MAX_TOOL_ITERATIONS)) {
       let args = {};
       try { args = JSON.parse(tc.function.arguments || '{}'); } catch (e) {}
       const address = String(args.address || '').trim();
+      const apn = String(args.apn || '').trim() || null;
       let toolResult;
       if (!address) {
         toolResult = 'No address provided — ask Troy for the full property address.';
       } else {
         try {
-          const r = await dmCompsLookup({ dmApiKey, address });
+          const r = await prCompsLookup({ prApiKey, address, apn });
           totalCredits += r.credits || 0;
           toolResult = r.summary;
         } catch (err) {
@@ -470,7 +422,7 @@ exports.handler = async (event) => {
   }
   const baseUrl = process.env.DASHBOARD_AI_BASE_URL || process.env.LLM_BASE_URL || 'https://api.openai.com/v1';
   const model = process.env.DASHBOARD_AI_MODEL || process.env.LLM_MODEL || DEFAULT_MODEL;
-  const dmApiKey = process.env.DEALMACHINE_API_KEY || null;
+  const prApiKey = process.env.PROPERTYREACH_API_KEY || null;
 
   let body;
   try {
@@ -488,7 +440,7 @@ exports.handler = async (event) => {
   }
 
   try {
-    const { reply, compsCredits } = await runChat({ baseUrl, apiKey, model, dmApiKey, messages });
+    const { reply, compsCredits } = await runChat({ baseUrl, apiKey, model, prApiKey, messages });
     return {
       statusCode: 200,
       headers: corsHeaders,
@@ -507,6 +459,6 @@ exports.handler = async (event) => {
 // Offline checks (no network): node -e "const a=require('./dashboard-ai.js'); console.log(a._test.offerMath(290000,40000))"
 exports._test = {
   tierFor, offerMath, money, SYSTEM_PROMPT,
-  sseJson, normalizeComp, findCompArray, findPropertyId, findPropertyObj, topKeys,
+  parseAddress, normalizePrComp, prBodyOk, isoDaysAgo,
   COMPS_TOOL_DEF, MAX_TOOL_ITERATIONS,
 };
