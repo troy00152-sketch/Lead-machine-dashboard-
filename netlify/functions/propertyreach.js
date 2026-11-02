@@ -462,11 +462,15 @@ exports.handler = async (event) => {
     }
     const subject = parseSubject(rawProp, today);
 
-    // --- 2. comparables: try propertyId target first, then address target ---
-    // (propertyId targets 404 "Subject property not found" on some records)
+    // --- 2. comparables: try propertyId, then APN, then full address ---
+    // (all 404 "Subject property not found" so far — trying every target form)
     const compTargets = [];
     if (rawProp.id) compTargets.push({ propertyId: rawProp.id });
-    compTargets.push({ streetAddress: parts.street, city: parts.city, state: parts.state, zip: parts.zip });
+    if (rawProp.apn) compTargets.push({ apn: rawProp.apn });
+    const addrTarget = { streetAddress: parts.street, city: parts.city, state: parts.state, zip: parts.zip };
+    if (rawProp.county) addrTarget.county = rawProp.county;
+    if (rawProp.fips) addrTarget.fips = rawProp.fips;
+    compTargets.push(addrTarget);
     let compRes = null;
     for (const target of compTargets) {
       compRes = await prPost('/comparables', {
