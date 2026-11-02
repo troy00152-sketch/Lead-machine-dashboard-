@@ -4738,6 +4738,35 @@ function compMoney(v){
 function compField(v){
   return (v != null && v !== '') ? v : '—';
 }
+/* PropertyReach distress/equity/title row — renders only when the source
+   supplied the fields (ATTOM-sourced cards are unchanged). */
+function compDistressRow(prop){
+  if(!prop) return '';
+  const b = (txt, color)=>'<span style="display:inline-block;background:'+color+';color:#fff;border-radius:6px;padding:2px 8px;font-size:11px;font-weight:700;margin:0 4px 4px 0">'+esc(txt)+'</span>';
+  const badges = [];
+  if(prop.preForeclosure) badges.push(b('PRE-FORECLOSURE', '#c0392b'));
+  if(prop.preProbate) badges.push(b('PRE-PROBATE', '#8e44ad'));
+  if(prop.bankruptcy) badges.push(b('BANKRUPTCY', '#7f8c8d'));
+  if(prop.taxDelinquency) badges.push(b('TAX DELINQUENT' + (prop.taxDelinquencyYear ? ' ' + prop.taxDelinquencyYear : ''), '#d35400'));
+  if(prop.vacant) badges.push(b('VACANT', '#2c3e50'));
+  if(prop.distressed) badges.push(b('DISTRESSED', '#c0392b'));
+  if(prop.onMarket) badges.push(b('LISTED' + (prop.listingStatus ? ' · ' + prop.listingStatus : ''), '#2980b9'));
+  if(prop.lienCount) badges.push(b(prop.lienCount + ' LIEN' + (prop.lienCount > 1 ? 'S' : ''), '#e67e22'));
+  const bits = [];
+  if(prop.estimatedEquity != null) {
+    const r = Number(prop.estimatedEquityRatio);
+    const pct = (prop.estimatedEquityRatio != null && !isNaN(r)) ? ' (' + (r <= 1 ? Math.round(r * 100) : Math.round(r)) + '%)' : '';
+    bits.push('<div><span style="color:var(--muted)">Est. equity:</span> <strong>' + compMoney(prop.estimatedEquity) + pct + '</strong></div>');
+  }
+  if(prop.lienAmount != null && Number(prop.lienAmount) > 0) bits.push('<div><span style="color:var(--muted)">Lien amount:</span> <strong>' + compMoney(prop.lienAmount) + '</strong></div>');
+  if(prop.rentalValue != null) bits.push('<div><span style="color:var(--muted)">Est. rent:</span> <strong>' + compMoney(prop.rentalValue) + '/mo</strong></div>');
+  if(prop.ownershipMonths != null) bits.push('<div><span style="color:var(--muted)">Owned:</span> <strong>' + (Math.round(prop.ownershipMonths / 12 * 10) / 10) + ' yrs</strong></div>');
+  if(!badges.length && !bits.length) return '';
+  return '<div style="grid-column:1/-1;margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">'
+    + (badges.length ? '<div style="margin-bottom:6px">' + badges.join('') + '</div>' : '')
+    + (bits.length ? '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;font-size:13px">' + bits.join('') + '</div>' : '')
+    + '</div>';
+}
 function renderCompSubjectCard(prop, typedAddr, matchedAddr, unavailable){
   const el = document.getElementById('compSubjectCard'); if(!el) return;
   el.style.display = 'block';
@@ -4771,6 +4800,7 @@ function renderCompSubjectCard(prop, typedAddr, matchedAddr, unavailable){
     + '<div><span style="color:var(--muted)">Lot size:</span> <strong>' + esc(lot) + '</strong></div>'
     + '<div style="grid-column:1/-1"><span style="color:var(--muted)">Owner:</span> <strong>' + esc(owners || '—') + '</strong></div>'
     + '<div style="grid-column:1/-1"><span style="color:var(--muted)">Last sale:</span> <strong>' + esc(sale) + '</strong></div>'
+    + compDistressRow(prop)
     + '</div>';
 }
 async function loadCompsForAddress(retryAttempt){
