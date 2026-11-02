@@ -474,11 +474,10 @@ exports.handler = async (event) => {
     let compRes = null;
     for (const target of compTargets) {
       compRes = await prPost('/comparables', {
-        filter: {
-          target,
+              target,
+                filter: {
           distanceFromSubject: 2,
-          comparableSource: 'Both',
-          lastSaleDateMin: isoDaysAgo(365),
+                    lastSaleDateMin: isoDaysAgo(365),
           propertyClassCode: ['R'],
         },
       }, apiKey).catch(() => null);
