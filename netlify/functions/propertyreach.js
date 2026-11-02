@@ -462,22 +462,30 @@ exports.handler = async (event) => {
     }
     const subject = parseSubject(rawProp, today);
 
-    // --- 2. comparables (target by PropertyReach id when available) ---
-    const target = rawProp.id
-      ? { propertyId: rawProp.id }
-      : { streetAddress: parts.street, city: parts.city, state: parts.state, zip: parts.zip };
-    const compRes = await prPost('/comparables', {
-      filter: {
-        target,
-        distanceFromSubject: 2,
-        comparableSource: 'Both',
-        lastSaleDateMin: isoDaysAgo(365),
-        propertyClassCode: ['R'],
-      },
-    }, apiKey).catch(() => null);
+    // --- 2. comparables: try propertyId target first, then address target ---
+    // (propertyId targets 404 "Subject property not found" on some records)
+    const compTargets = [];
+    if (rawProp.id) compTargets.push({ propertyId: rawProp.id });
+    compTargets.push({ streetAddress: parts.street, city: parts.city, state: parts.state, zip: parts.zip });
+    let compRes = null;
+    for (const target of compTargets) {
+      compRes = await prPost('/comparables', {
+        filter: {
+          target,
+          distanceFromSubject: 2,
+          comparableSource: 'Both',
+          lastSaleDateMin: isoDaysAgo(365),
+          propertyClassCode: ['R'],
+        },
+      }, apiKey).catch(() => null);
+      if (bodyOk(compRes)) break;
+      const meta = compRes && compRes.json && compRes.json.meta;
+      console.log('[propertyreach] comparables failed: ' + JSON.stringify(meta || { http: compRes ? compRes.http : 'fetch-failed' }));
+      compRes = null;
+    }
 
     let comps = null;
-    if (bodyOk(compRes)) {
+    if (compRes) {
       const rows = (compRes.json.properties || []).map(parseCompRow);
       const res = analyzeComps(subject, rows, today);
       console.log('[propertyreach] comps raw=' + rows.length + ' candidates=' + res.candidates.length + ' best=' + res.best.length);
@@ -500,10 +508,8 @@ exports.handler = async (event) => {
         asIsAnchor: null,
         unverified: (res.unverified || []).map(compOut),
       };
-    } else {
-      const meta = compRes && compRes.json && compRes.json.meta;
-      console.log('[propertyreach] comparables failed: ' + JSON.stringify(meta || { http: compRes ? compRes.http : 'fetch-failed' }));
     }
+    // else: comps stays null -> page falls back to ATTOM
 
     return {
       statusCode: 200,
