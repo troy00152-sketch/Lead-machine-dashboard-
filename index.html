@@ -799,6 +799,7 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
           <div id="compMapNote" style="color:var(--muted);font-size:12px;margin-bottom:6px"></div>
           <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Map key: <span style="display:inline-block;background:#ff6b1a;color:#fff;font-weight:800;font-size:11px;padding:3px 8px;border-radius:8px">SUBJECT</span> &nbsp; <span style="display:inline-block;background:#2ecc71;color:#fff;font-weight:800;font-size:11px;padding:3px 8px;border-radius:8px">✓ picked comp — in ARV</span> &nbsp; <span style="display:inline-block;background:#1e8449;color:#fff;font-weight:800;font-size:11px;padding:3px 8px;border-radius:8px">comp</span> &nbsp; <span style="display:inline-block;background:#e6a200;color:#fff;font-weight:800;font-size:11px;padding:3px 8px;border-radius:8px">pending</span></div>
           <div id="compFilterChips" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin:0 0 10px">
+            <div><label class="lbl">Property Type</label><select class="field" id="compPropType" onchange="setCompPropType(this.value)"><option value="house">🏠 House</option><option value="land">🌱 Land</option></select></div>
             <div><label class="lbl">Radius</label><select class="field" id="compFRadius" onchange="setCompFilter('radius', this.value)"><option value="0">Any distance</option><option value="0.5">≤ 0.5 mi</option><option value="1">≤ 1 mi</option><option value="2">≤ 2 mi</option></select></div>
             <div><label class="lbl">Sold within</label><select class="field" id="compFRecency" onchange="setCompFilter('recency', this.value)"><option value="0">Any date</option><option value="3">3 months</option><option value="6">6 months</option><option value="12">12 months</option></select></div>
             <div><label class="lbl">Beds</label><select class="field" id="compFBeds" onchange="setCompFilter('beds', this.value)"><option value="any">Any beds</option><option value="same">Same as subject</option><option value="pm1">Subject ± 1</option></select></div>
@@ -3869,6 +3870,41 @@ function setCompFilter(k, v){
   else compFilters[k] = v;
   renderCompList();
 }
+/* Property Type toggle: House vs Land. Land mode uses vacant-lot comps and
+   buyer-price-minus-fee math (no MAO/LAO tiers, no repairs). */
+let compPropType = 'house';
+function setCompPropType(v){
+  compPropType = v;
+  const isLand = v === 'land';
+  /* Toggle house-specific filters */
+  const bedsWrap = document.getElementById('compFBeds');
+  const sqftWrap = document.getElementById('compFSqft');
+  if(bedsWrap && bedsWrap.parentElement) bedsWrap.parentElement.style.display = isLand ? 'none' : '';
+  if(sqftWrap && sqftWrap.parentElement) sqftWrap.parentElement.style.display = isLand ? 'none' : '';
+  /* Toggle ARV/Repairs inputs (house) vs Land inputs */
+  const arvWrap = document.getElementById('compARV');
+  const repWrap = document.getElementById('compRepairs');
+  if(arvWrap && arvWrap.parentElement) arvWrap.parentElement.style.display = isLand ? 'none' : '';
+  if(repWrap && repWrap.parentElement) repWrap.parentElement.style.display = isLand ? 'none' : '';
+  let landBox = document.getElementById('compLandBox');
+  if(isLand && !landBox){
+    const ref = document.getElementById('compResult');
+    landBox = document.createElement('div');
+    landBox.id = 'compLandBox';
+    landBox.style.marginTop = '14px';
+    landBox.innerHTML = `
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">
+        <div><label class="lbl">Land Value ($) — auto from comps</label><input class="field" id="compLandValue" type="number" placeholder="Auto from comps" oninput="calcComp()" /></div>
+        <div><label class="lbl">Buyer Price ($) — your buyer's buy-box</label><input class="field" id="compBuyerPrice" type="number" placeholder="Enter buyer price" oninput="calcComp()" /></div>
+        <div><label class="lbl">Fee ($) — your assignment fee</label><input class="field" id="compLandFee" type="number" value="7500" oninput="calcComp()" /></div>
+      </div>
+      <div id="compLandResult" style="margin-top:14px"></div>
+      <p style="color:var(--muted2);font-size:11px;margin-top:12px">Land math: Offer = Buyer Price − Fee. No MAO tiers, no repairs. No buyer price = quote Land Value only.</p>`;
+    if(ref && ref.parentElement) ref.parentElement.insertBefore(landBox, ref);
+  }
+  if(landBox) landBox.style.display = isLand ? '' : 'none';
+  calcComp();
+}
 function compRowPassesFilters(r){
   const f = compFilters;
   if(f.radius > 0 && (r.distance == null || Number(r.distance) > f.radius)) return false;
@@ -4434,6 +4470,38 @@ function calcComp(){
   if(gate) gate.innerHTML = (st && st.value === 'not-listed') ? '<div style="font-size:12px;color:var(--green)">✓ Not listed — clear to comp.</div>' : '<div style="font-size:12px;color:var(--muted)">⚠️ Listing status not checked — check before offering.</div>';
   renderCompInsights();
   renderCompList(); /* re-render on every gate change: clears the listed-only "reference only" banners and restores pick checkboxes when switching back to not-listed */
+  /* LAND MODE: buyer-price-minus-fee math, no MAO/LAO tiers. */
+  if(compPropType === 'land'){
+    const landValEl = document.getElementById('compLandValue');
+    const buyerEl = document.getElementById('compBuyerPrice');
+    const feeEl = document.getElementById('compLandFee');
+    const landRes = document.getElementById('compLandResult');
+    /* Auto-fill land value from comp picks average if empty */
+    const picked = compPickedRows();
+    const avg = picked.length ? Math.round(picked.reduce((s,r)=>s+(r.amount||0),0)/picked.length) : 0;
+    if(landValEl && !landValEl.value && avg) landValEl.value = avg;
+    const landVal = parseFloat((landValEl||{}).value)||0;
+    const buyerPrice = parseFloat((buyerEl||{}).value)||0;
+    const fee = parseFloat((feeEl||{}).value)||7500;
+    if(el) el.innerHTML = '';
+    const tt = document.getElementById('compTierTable'); if(tt) tt.innerHTML = '';
+    if(landRes){
+      if(!landVal && !buyerPrice){
+        landRes.innerHTML = '';
+      } else if(!buyerPrice){
+        landRes.innerHTML = `<div class="cards"><div class="card"><div class="num">$${landVal.toLocaleString()}</div><div class="lbl">Land Value</div><div class="sub">avg of ${picked.length} comps — quote value only, no buyer price yet</div></div></div>`;
+      } else {
+        const offer = Math.round(buyerPrice - fee);
+        landRes.innerHTML = `<div class="cards">
+          <div class="card"><div class="num">$${landVal.toLocaleString()}</div><div class="lbl">Land Value</div><div class="sub">avg of ${picked.length} comps</div></div>
+          <div class="card"><div class="num" style="color:var(--green)">$${offer.toLocaleString()}</div><div class="lbl">Offer to Seller</div><div class="sub">buyer $${buyerPrice.toLocaleString()} − fee $${fee.toLocaleString()}</div></div>
+          <div class="card"><div class="num" style="color:var(--blue)">$${fee.toLocaleString()}</div><div class="lbl">Your Fee</div></div>
+        </div>`;
+      }
+    }
+    renderCompWarnBar();
+    return;
+  }
   const arv = parseFloat(arvEl.value)||0;
   const rep = parseFloat(repEl.value)||0;
   /* MINIMUM-COUNT GATE: a loaded comp set with fewer than 3 picks renders
