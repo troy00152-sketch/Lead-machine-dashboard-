@@ -37,9 +37,19 @@
 .sidebar-foot .lbl{font-size:12px;color:var(--muted)}
 .theme-toggle-sm{width:36px;height:36px;font-size:16px}
 /* Back to CRM button */
-.crm-btn{display:flex;align-items:center;gap:8px;padding:9px 16px;border-radius:24px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:13px;font-weight:600;cursor:pointer;flex-shrink:0;white-space:nowrap}
-.crm-btn:hover{border-color:var(--accent);color:var(--accent)}
+.crm-btn{display:flex;align-items:center;gap:8px;padding:9px 16px;border-radius:24px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:13px;font-weight:600;cursor:pointer;flex-shrink:0;white-space:nowrap;transition:all .2s ease}
+.crm-btn:hover{border-color:var(--accent);color:var(--accent);transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,.15)}
 .crm-btn-sm{padding:7px 13px;font-size:12px}
+/* Polish: smooth interactions, card depth, input focus */
+.btn{transition:all .2s ease}
+.btn:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,.18)}
+.btn:active{transform:translateY(0)}
+.card{transition:box-shadow .2s ease}
+.card:hover{box-shadow:0 6px 20px rgba(0,0,0,.12)}
+.field{transition:border-color .2s ease, box-shadow .2s ease}
+.field:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(255,107,26,.15)}
+.nav-item{transition:all .2s ease}
+input::placeholder{color:var(--muted2);opacity:.7}
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%}
 body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,-apple-system,sans-serif;font-size:14px;line-height:1.5;overflow-x:hidden}
@@ -313,6 +323,7 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
       <button class="nav-item" data-nav="listimport"><span class="ico">📥</span> List Import</button>
       <div class="nav-sec">Tools</div>
       <button class="nav-item" data-nav="buyers"><span class="ico">🤝</span> Buyer Match Ai</button>
+      <button class="nav-item" data-nav="masterbuyers"><span class="ico">📋</span> Master Buyers</button>
       <button class="nav-item" data-nav="blast"><span class="ico">📣</span> Buyer Blast</button>
       <button class="nav-item" data-nav="skiptrace"><span class="ico">🔍</span> Skip Trace</button>
 <button class="nav-item" data-nav="listsearch"><span class="ico">🎯</span> List Builder</button>
@@ -583,6 +594,20 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
         </div>
       </div>
 
+      <!-- MASTER BUYERS TAB -->
+      <div class="tab-page" id="page-masterbuyers">
+        <div class="sec-title">📋 Master Buyers <span class="badge blue" style="font-size:10px" id="mbCount">28,301 BUYERS</span></div>
+        <div class="card" style="margin-bottom:14px">
+          <p style="color:var(--muted);font-size:13px;margin-bottom:12px">Search all buyers by name, city, state, or ZIP. The full database — not just the 3+ property filter.</p>
+          <div style="display:flex;gap:10px;margin-bottom:12px">
+            <input class="field" id="mbSearch" placeholder="Search name, city, state, or ZIP..." style="flex:1" onkeydown="if(event.key==='Enter'){event.preventDefault();searchMasterBuyers();}" />
+            <button class="btn primary" onclick="searchMasterBuyers()">🔍 Search</button>
+          </div>
+          <div id="mbResults" style="max-height:600px;overflow-y:auto"></div>
+          <div id="mbPagination" style="margin-top:12px;text-align:center"></div>
+        </div>
+      </div>
+
       <!-- BUYER BLAST TAB -->
       <div class="tab-page" id="page-blast">
         <div class="sec-title">📣 Buyer Blast <span class="badge orange" style="font-size:10px">REVIEW REQUIRED — NOTHING SENDS ITSELF</span></div>
@@ -771,7 +796,7 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
             <div style="font-weight:800;font-size:13px;margin-bottom:4px">🚦 Listing Check — FIRST, before any comp math</div>
             <p style="color:var(--muted);font-size:12px;margin:0 0 10px">If it's listed with a realtor, PASS immediately — no MAO, no LAO, no offer. Check the listing, then set the status here. Listing fields are set by hand from the check — no feed supplies them.</p>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px">
-              <div><label class="lbl">Property address (for listing links)</label><input class="field" id="compListAddr" placeholder="Enter property address" oninput="updateCompLinks()" onkeydown="if(event.key==='Enter'){event.preventDefault();loadCompsForAddress();}" /><button class="btn primary" style="margin-top:8px" onclick="loadCompsForAddress()" title="Load everything for this address — comps, map, mortgage, and offer math">🔍 Search</button></div>
+              <div><label class="lbl">Property address (for listing links)</label><input class="field" id="compListAddr" placeholder="e.g. 123 Main St, Indianapolis, IN 46205" oninput="updateCompLinks()" onkeydown="if(event.key==='Enter'){event.preventDefault();loadCompsForAddress();}" /><button class="btn primary" style="margin-top:8px" onclick="loadCompsForAddress()" title="Load everything for this address — comps, map, mortgage, and offer math">🔍 Search</button></div>
               <div><label class="lbl">Listing status *</label><select class="field" id="compListStatus" onchange="calcComp()"><option value="">Not checked yet</option><option value="not-listed">Not listed — clear to comp</option><option value="listed">Listed with a realtor — PASS</option></select></div>
               <div><label class="lbl">Listing agent</label><input class="field" id="compListAgent" placeholder="Agent name / brokerage" oninput="calcComp()" /></div>
               <div><label class="lbl">List price ($)</label><input class="field" id="compListPrice" type="number" placeholder="Enter list price" oninput="calcComp()" /></div>
@@ -3572,6 +3597,64 @@ function matchLeadToBuyers(leadId){
   closeModal();
   showPage('buyers');
   runBuyerMatch({ address: `${l.address}, ${l.city}, ${l.state} ${l.zip||''}`, city: l.city, state: l.state, zip: l.zip||'', price: l.estimatedValue || l.value || 0 });
+}
+/* Master Buyers: searchable full database (28K, not just 3+ filter) */
+let mbData = null, mbPage = 0;
+const MB_PER_PAGE = 50;
+function loadMasterBuyers(){
+  return new Promise((resolve) => {
+    if(mbData){ resolve(mbData); return; }
+    if(window.MASTER_BUYERS){ mbData = window.MASTER_BUYERS; resolve(mbData); return; }
+    const s = document.createElement('script');
+    s.src = '/assets/master-buyers.js';
+    s.onload = () => {
+      mbData = window.MASTER_BUYERS || [];
+      const badge = document.getElementById('mbCount');
+      if(badge) badge.textContent = mbData.length.toLocaleString() + ' BUYERS';
+      resolve(mbData);
+    };
+    s.onerror = () => resolve([]);
+    document.head.appendChild(s);
+  });
+}
+async function searchMasterBuyers(){
+  const q = (document.getElementById('mbSearch').value || '').toLowerCase().trim();
+  const data = await loadMasterBuyers();
+  let results = data;
+  if(q){
+    results = data.filter(b =>
+      (b.n||'').toLowerCase().includes(q) ||
+      (b.c||'').toLowerCase().includes(q) ||
+      (b.s||'').toLowerCase().includes(q) ||
+      (b.z||'').includes(q)
+    );
+  }
+  mbPage = 0;
+  renderMasterBuyers(results);
+}
+function renderMasterBuyers(results){
+  const box = document.getElementById('mbResults');
+  const pag = document.getElementById('mbPagination');
+  if(!results.length){
+    box.innerHTML = '<p style="color:var(--muted);text-align:center;padding:20px">No buyers found.</p>';
+    pag.innerHTML = '';
+    return;
+  }
+  const totalPages = Math.ceil(results.length / MB_PER_PAGE);
+  const start = mbPage * MB_PER_PAGE;
+  const page = results.slice(start, start + MB_PER_PAGE);
+  let html = '<table style="width:100%;font-size:13px;border-collapse:collapse"><thead><tr style="border-bottom:1px solid var(--line);text-align:left"><th style="padding:8px">Name</th><th style="padding:8px">Phone</th><th style="padding:8px">City</th><th style="padding:8px">ST</th><th style="padding:8px">Props</th></tr></thead><tbody>';
+  for(const b of page){
+    html += `<tr style="border-bottom:1px solid var(--line)"><td style="padding:8px">${esc(b.n||'—')}</td><td style="padding:8px">${esc(b.p||'—')}</td><td style="padding:8px">${esc(b.c||'—')}</td><td style="padding:8px">${esc(b.s||'—')}</td><td style="padding:8px">${b.pc||0}</td></tr>`;
+  }
+  html += '</tbody></table>';
+  box.innerHTML = html;
+  /* Pagination */
+  window._mbResults = results;
+  let ph = `<span style="font-size:12px;color:var(--muted)">${results.length.toLocaleString()} results · page ${mbPage+1} of ${totalPages}</span><br>`;
+  if(mbPage > 0) ph += `<button class="btn" style="margin:4px" onclick="mbPage--;renderMasterBuyers(window._mbResults)">← Prev</button>`;
+  if(mbPage < totalPages - 1) ph += `<button class="btn" style="margin:4px" onclick="mbPage++;renderMasterBuyers(window._mbResults)">Next →</button>`;
+  pag.innerHTML = ph;
 }
 
 function blastLeadToBuyers(leadId){
