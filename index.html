@@ -4989,6 +4989,9 @@ async function loadCompsForAddress(retryAttempt){
       if(prSubject){
         d.property = Object.assign({}, d.property || {}, prSubject);
         compSource = 'ATTOM+PR';
+        // If PR matched the property, we have a subject even if ATTOM didn't match
+        // (Fix 2026-11-02: PR comps=null was causing "not found" despite PR having the property)
+        if(!d.matched) d.matched = true;
       }
     }
     compDataSource = compSource;
