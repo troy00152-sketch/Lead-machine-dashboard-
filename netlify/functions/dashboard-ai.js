@@ -83,7 +83,8 @@ HARD RULES:
 9. Timezones: Kansas City sellers are Central; Indianapolis, Cleveland, Carolina, Florida are Eastern. Never show a conversion parenthetical.
 10. COMP RULES for get_comps results: you need 3+ SOLD comps passing similarity (sqft ±20%, beds ±1, ≤12 months, ≤2 miles) before quoting MAO/LAO. Fewer than 3 = ARV screen-only, no offer numbers, say plainly the set is thin. Name the comps you used and one line each on why. Active listings are never comps — ignore them for ARV math.
 11. ARV MATH IS DONE FOR YOU: the tool result includes a CODE-AVERAGE line with the exact average of the top-3 comps. Quote that figure as the ARV when you use those 3 comps — never recompute it yourself. If you swap in a different comp, show your arithmetic exactly like the CODE-AVERAGE line.
-12. If a get_comps tool result contains a DIAGNOSTIC block, reproduce it EXACTLY in your reply (verbatim, no paraphrasing) so the failure can be fixed — then give Troy the plain-English one-liner too.`;
+12. If a get_comps tool result contains a DIAGNOSTIC block, reproduce it EXACTLY in your reply (verbatim, no paraphrasing) so the failure can be fixed — then give Troy the plain-English one-liner too.
+13. BUYER MATCHING: you have a match_buyers tool (23,837 buyers with phones, costs nothing). Call it when Troy asks "who are my buyers for this deal", "match buyers", "find buyers for [address]", or wants a buyer list for a blast. Pass the property address (or city/state/zip) and the deal price (MAO) when you have it. Present the top matches with name, score, strategy, avg buy, and phone. Never invent buyers — only report what the tool returns. If the tool finds none, say so plainly.`;
 
 // ---- PropertyReach client (get_comps tool backend) ----
 
@@ -319,6 +320,141 @@ const COMPS_TOOL_DEF = {
   },
 };
 
+const MATCH_BUYERS_TOOL_DEF = {
+  type: 'function',
+  function: {
+    name: 'match_buyers',
+    description: 'Find the best cash buyers for a deal from Troy\'s national buyer database (23,837 buyers with phones). Call it when Troy asks "who are my buyers for this deal", "match buyers", "find buyers for [address]", or wants to know who to send a deal to. Scores buyers by location match (zip/city/state), price fit vs their avg purchase, portfolio activity, and flipper/landlord strategy. Returns the top 10. Costs nothing — no API credits, local data only.',
+    parameters: {
+      type: 'object',
+      properties: {
+        address: {
+          type: 'string',
+          description: 'Full property address, e.g. "303 Elizabeth St, Greenville, NC 27834". Best when you have it — city/state/zip are parsed from it.',
+        },
+        city: {
+          type: 'string',
+          description: 'Property city, e.g. "Greenville". Use when no full address.',
+        },
+        state: {
+          type: 'string',
+          description: 'Property state code, e.g. "NC".',
+        },
+        zip: {
+          type: 'string',
+          description: 'Property ZIP code, e.g. "27834".',
+        },
+        price: {
+          type: 'number',
+          description: 'Deal price (MAO) — matched against each buyer\'s average purchase price.',
+        },
+        property_type: {
+          type: 'string',
+          description: '"house" or "land". Land deals prefer buyers with land-investor strategy.',
+        },
+      },
+      required: [],
+      additionalProperties: false,
+    },
+  },
+};
+
+// ---- Buyer matching (match_buyers tool backend) ----
+// Index: buyer-index.json.gz — array of [name, phone, city, state, zip,
+// portfolio_count, strategy, avg_price]. Built from master-buyers.js
+// (phone-having buyers only). Lazy-loaded and cached; ~529KB gzipped.
+const zlib = require('zlib');
+const fs = require('fs');
+const path = require('path');
+let _buyerIndex = null;
+function loadBuyerIndex() {
+  if (_buyerIndex) return _buyerIndex;
+  const gzPath = path.join(__dirname, 'buyer-index.json.gz');
+  const raw = zlib.gunzipSync(fs.readFileSync(gzPath));
+  _buyerIndex = JSON.parse(raw.toString('utf8'));
+  return _buyerIndex;
+}
+
+// Scoring mirrors netlify/functions/buyer-match.js:
+// geo (zip 40 / city 34 / state+zip3 24 / state 14) + price (≤30)
+// + activity (≤20) + strategy (≤10). Cutoff ≥ 35.
+function buyerGeoScore(b, subj) {
+  const zip = subj.zip || '';
+  const city = (subj.city || '').toLowerCase().trim();
+  const state = (subj.state || '').toUpperCase().trim();
+  const bz = b[4] || '', bc = (b[2] || '').toLowerCase().trim(), bs = (b[3] || '').toUpperCase().trim();
+  if (zip && bz && zip === bz) return 40;
+  if (city && bc && (bc === city || bc.includes(city) || city.includes(bc))) return 34;
+  if (state && bs && bs === state) {
+    if (zip && bz && zip.slice(0, 3) === bz.slice(0, 3)) return 24;
+    return 14;
+  }
+  return 0;
+}
+function buyerPriceScore(b, price) {
+  const ap = b[7] || 0;
+  if (!price || !ap) return 12;
+  const ratio = price / ap;
+  const dist = Math.abs(Math.log2(ratio));
+  return Math.max(0, Math.round(30 * (1 - dist / 2)));
+}
+function buyerActivityScore(b) {
+  return Math.min(20, Math.round(6 + (b[5] || 0) * 0.28));
+}
+function buyerStrategyScore(b) {
+  const st = b[6] || '';
+  const f = st.includes('Flipper'), l = st.includes('Landlord');
+  if (f && l) return 10;
+  if (f || l) return 8;
+  return 5;
+}
+
+function matchBuyersLookup({ address, city, state, zip, price, property_type }) {
+  let subj = { city: city || '', state: state || '', zip: (zip || '').toString().slice(0, 5) };
+  if (address) {
+    const p = parseAddress(address);
+    subj = {
+      city: p.city || subj.city,
+      state: p.state || subj.state,
+      zip: (p.zip || subj.zip).toString().slice(0, 5),
+    };
+  }
+  if (!subj.zip && !subj.city && !subj.state) {
+    return { ok: false, summary: 'No location to match against — give me a city/state/ZIP or a full property address.' };
+  }
+  const index = loadBuyerIndex();
+  const isLand = (property_type || '').toLowerCase() === 'land';
+  const scored = [];
+  for (const b of index) {
+    const g = buyerGeoScore(b, subj);
+    if (g === 0) continue;
+    let score = Math.min(99, g + buyerPriceScore(b, price) + buyerActivityScore(b) + buyerStrategyScore(b));
+    if (isLand && (b[6] || '').toLowerCase().includes('land')) score = Math.min(99, score + 5);
+    if (score < 35) continue;
+    scored.push({ b, score });
+  }
+  scored.sort((x, y) => y.score - x.score || (y.b[5] || 0) - (x.b[5] || 0));
+  const top = scored.slice(0, 10);
+  if (!top.length) {
+    return { ok: true, count: 0, summary: `No buyers scored 35+ for ${[subj.city, subj.state, subj.zip].filter(Boolean).join(', ')} — the database may be thin there. ${index.length.toLocaleString()} buyers searched.` };
+  }
+  const lines = top.map(({ b, score }, i) => {
+    const strat = b[6] || 'no strategy on file';
+    const ap = b[7] ? money(b[7]) : 'n/a';
+    const pc = b[5] || 0;
+    return `${i + 1}. ${b[0]} — ${b[2]}, ${b[3]} ${b[4]} — score ${score}/99 — ${strat} — avg buy ${ap} — ${pc} props — ${b[1]}`;
+  });
+  const loc = [subj.city, subj.state, subj.zip].filter(Boolean).join(', ');
+  const summary = [
+    `BUYER MATCH for ${loc}${price ? ` at ${money(price)}` : ''}${isLand ? ' (land deal)' : ''}:`,
+    `${scored.length} buyers scored 35+, top 10:`,
+    ...lines,
+    '',
+    'All have phones on file. Score = location (40/34/24/14) + price fit (≤30) + activity (≤20) + strategy (≤10).',
+  ].join('\n');
+  return { ok: true, count: scored.length, summary };
+}
+
 async function callLlm({ baseUrl, apiKey, model, messages, tools }) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
@@ -353,40 +489,59 @@ async function callLlm({ baseUrl, apiKey, model, messages, tools }) {
 
 async function runChat({ baseUrl, apiKey, model, prApiKey, messages }) {
   const convo = messages.slice();
+  const tools = [MATCH_BUYERS_TOOL_DEF, ...(prApiKey ? [COMPS_TOOL_DEF] : [])];
   let totalCredits = 0;
   for (let iter = 0; iter <= MAX_TOOL_ITERATIONS; iter++) {
     const msg = await callLlm({
       baseUrl, apiKey, model,
       messages: convo,
-      tools: prApiKey ? [COMPS_TOOL_DEF] : undefined,
+      tools,
     });
     const toolCalls = (msg.tool_calls || []).filter(
-      (tc) => tc && tc.type === 'function' && tc.function && tc.function.name === 'get_comps'
+      (tc) => tc && tc.type === 'function' && tc.function &&
+        (tc.function.name === 'get_comps' || tc.function.name === 'match_buyers')
     );
     if (!toolCalls.length) {
       const content = String(msg.content || '').trim();
       if (!content) throw new Error('LLM returned empty content');
       return { reply: content, compsCredits: totalCredits };
     }
-    if (!prApiKey) throw new Error('PropertyReach API key not configured');
     // Execute the tool call(s), feed results back, and let the model continue.
     convo.push({ role: 'assistant', content: msg.content || null, tool_calls: msg.tool_calls });
     for (const tc of toolCalls.slice(0, MAX_TOOL_ITERATIONS)) {
       let args = {};
       try { args = JSON.parse(tc.function.arguments || '{}'); } catch (e) {}
-      const address = String(args.address || '').trim();
-      const apn = String(args.apn || '').trim() || null;
       let toolResult;
-      if (!address) {
-        toolResult = 'No address provided — ask Troy for the full property address.';
-      } else {
+      if (tc.function.name === 'match_buyers') {
         try {
-          const r = await prCompsLookup({ prApiKey, address, apn });
-          totalCredits += r.credits || 0;
+          const r = matchBuyersLookup({
+            address: String(args.address || '').trim() || null,
+            city: String(args.city || '').trim() || null,
+            state: String(args.state || '').trim() || null,
+            zip: String(args.zip || '').trim() || null,
+            price: Number(args.price) || 0,
+            property_type: String(args.property_type || '').trim() || null,
+          });
           toolResult = r.summary;
         } catch (err) {
-          console.error('[dashboard-ai] get_comps failed:', err.message);
-          toolResult = `No comps available for "${address}" — I can't quote ARV, MAO, or LAO. DIAGNOSTIC (show Troy verbatim): comp pull failed: ${String(err.message || err).slice(0, 400)}`;
+          console.error('[dashboard-ai] match_buyers failed:', err.message);
+          toolResult = `Buyer match failed: ${String(err.message || err).slice(0, 200)}`;
+        }
+      } else {
+        if (!prApiKey) throw new Error('PropertyReach API key not configured');
+        const address = String(args.address || '').trim();
+        const apn = String(args.apn || '').trim() || null;
+        if (!address) {
+          toolResult = 'No address provided — ask Troy for the full property address.';
+        } else {
+          try {
+            const r = await prCompsLookup({ prApiKey, address, apn });
+            totalCredits += r.credits || 0;
+            toolResult = r.summary;
+          } catch (err) {
+            console.error('[dashboard-ai] get_comps failed:', err.message);
+            toolResult = `No comps available for "${address}" — I can't quote ARV, MAO, or LAO. DIAGNOSTIC (show Troy verbatim): comp pull failed: ${String(err.message || err).slice(0, 400)}`;
+          }
         }
       }
       convo.push({ role: 'tool', tool_call_id: tc.id, content: toolResult });
@@ -460,5 +615,6 @@ exports.handler = async (event) => {
 exports._test = {
   tierFor, offerMath, money, SYSTEM_PROMPT,
   parseAddress, normalizePrComp, prBodyOk, isoDaysAgo,
-  COMPS_TOOL_DEF, MAX_TOOL_ITERATIONS,
+  COMPS_TOOL_DEF, MATCH_BUYERS_TOOL_DEF, MAX_TOOL_ITERATIONS,
+  matchBuyersLookup, buyerGeoScore, buyerPriceScore, buyerActivityScore, buyerStrategyScore,
 };
