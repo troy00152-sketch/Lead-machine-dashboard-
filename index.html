@@ -709,6 +709,13 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
           <p style="color:var(--muted);font-size:13px;margin-bottom:12px">Search all buyers by name, city, state, or ZIP. The full database — not just the 3+ property filter.</p>
           <div style="display:flex;gap:10px;margin-bottom:12px">
             <input class="field" id="mbSearch" placeholder="Search name, city, state, or ZIP..." style="flex:1" onkeydown="if(event.key==='Enter'){event.preventDefault();searchMasterBuyers();}" />
+            <select class="field" id="mbTier" style="width:140px" onchange="searchMasterBuyers()" title="Filter by buyer score tier">
+              <option value="">All tiers</option>
+              <option value="A">🟢 A — Top</option>
+              <option value="B">🔵 B — Solid</option>
+              <option value="C">🟡 C — Possible</option>
+              <option value="D">⚪ D — Thin data</option>
+            </select>
             <button class="btn primary" onclick="searchMasterBuyers()">🔍 Search</button>
           </div>
           <div id="mbResults" style="max-height:600px;overflow-y:auto"></div>
@@ -3790,18 +3797,37 @@ function loadMasterBuyers(){
 }
 async function searchMasterBuyers(){
   const q = (document.getElementById('mbSearch').value || '').toLowerCase().trim();
+  const tier = (document.getElementById('mbTier') || {}).value || '';
   const data = await loadMasterBuyers();
   let results = data;
   if(q){
-    results = data.filter(b =>
+    results = results.filter(b =>
       (b.n||'').toLowerCase().includes(q) ||
       (b.c||'').toLowerCase().includes(q) ||
       (b.s||'').toLowerCase().includes(q) ||
       (b.z||'').includes(q)
     );
   }
+  if(tier){
+    results = results.filter(b => (b.ti||'').charAt(0) === tier);
+  }
   mbPage = 0;
+  window._mbSortDir = 1; /* reset to score-desc on new search */
   renderMasterBuyers(results);
+}
+function mbScoreBadge(b){
+  const sc = (b.sc == null ? 0 : b.sc);
+  const t = (b.ti||'').charAt(0);
+  const colors = { A:'#22c55e', B:'#3b82f6', C:'#f59e0b', D:'#9ca3af' };
+  const c = colors[t] || '#9ca3af';
+  return `<span title="${esc(b.ti||'')}" style="display:inline-block;min-width:52px;text-align:center;font-weight:700;font-size:12px;padding:3px 8px;border-radius:10px;color:#fff;background:${c}">${sc}%</span>`;
+}
+function mbToggleSort(){
+  window._mbSortDir = (window._mbSortDir === 1) ? -1 : 1;
+  const r = (window._mbResults || []).slice();
+  r.sort((a,b) => ((b.sc||0) - (a.sc||0)) * window._mbSortDir);
+  mbPage = 0;
+  renderMasterBuyers(r);
 }
 function renderMasterBuyers(results){
   const box = document.getElementById('mbResults');
@@ -3811,13 +3837,15 @@ function renderMasterBuyers(results){
     pag.innerHTML = '';
     return;
   }
+  const sortDir = (window._mbSortDir === -1) ? -1 : 1;
+  const arrow = sortDir === 1 ? '▼' : '▲';
   const totalPages = Math.ceil(results.length / MB_PER_PAGE);
   const start = mbPage * MB_PER_PAGE;
   const page = results.slice(start, start + MB_PER_PAGE);
-  let html = '<table style="width:100%;font-size:13px;border-collapse:collapse"><thead><tr style="border-bottom:1px solid var(--line);text-align:left"><th style="padding:8px">Name</th><th style="padding:8px">Phone</th><th style="padding:8px">Buy Box</th><th style="padding:8px">City</th><th style="padding:8px">ST</th><th style="padding:8px">Props</th></tr></thead><tbody>';
+  let html = '<table style="width:100%;font-size:13px;border-collapse:collapse"><thead><tr style="border-bottom:1px solid var(--line);text-align:left"><th style="padding:8px;cursor:pointer;white-space:nowrap" onclick="mbToggleSort()" title="Sort by score">Score ' + arrow + '</th><th style="padding:8px">Name</th><th style="padding:8px">Phone</th><th style="padding:8px">Buy Box</th><th style="padding:8px">City</th><th style="padding:8px">ST</th><th style="padding:8px">Props</th></tr></thead><tbody>';
   for(const b of page){
     const buyBox = (b.st||'') + (b.ap ? ' · $' + Math.round(b.ap/1000) + 'K avg' : '');
-    html += `<tr style="border-bottom:1px solid var(--line)"><td style="padding:8px">${esc(b.n||'—')}</td><td style="padding:8px">${b.p?esc(formatPhone(b.p)):'—'}</td><td style="padding:8px">${esc(buyBox||'—')}</td><td style="padding:8px">${esc(b.c||'—')}</td><td style="padding:8px">${esc(b.s||'—')}</td><td style="padding:8px">${b.pc||0}</td></tr>`;
+    html += `<tr style="border-bottom:1px solid var(--line)"><td style="padding:8px">${mbScoreBadge(b)}</td><td style="padding:8px">${esc(b.n||'—')}</td><td style="padding:8px">${b.p?esc(formatPhone(b.p)):'—'}</td><td style="padding:8px">${esc(buyBox||'—')}</td><td style="padding:8px">${esc(b.c||'—')}</td><td style="padding:8px">${esc(b.s||'—')}</td><td style="padding:8px">${b.pc||0}</td></tr>`;
   }
   html += '</tbody></table>';
   box.innerHTML = html;
