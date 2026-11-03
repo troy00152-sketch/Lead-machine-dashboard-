@@ -5256,9 +5256,20 @@ function renderCompSubjectCard(prop, typedAddr, matchedAddr, unavailable){
     : '';
   const showAddr = matchedAddr || typedAddr || '';
   const photoUrl = prop.photoUrl || prop.photo_url || null;
+  // Nov 3: fall back to Google Street View when PropertyReach has no photo —
+  // Troy: "I still cant see the house running comps". Uses lat/lng if available,
+  // otherwise the address.
+  let streetViewFallback = '';
+  if (!photoUrl && typeof GOOGLE_MAPS_KEY !== 'undefined' && GOOGLE_MAPS_KEY) {
+    const svLoc = (prop.latitude != null && prop.longitude != null)
+      ? prop.latitude + ',' + prop.longitude
+      : encodeURIComponent(showAddr);
+    const svUrl = 'https://maps.googleapis.com/maps/api/streetview?size=800x500&location=' + svLoc + '&key=' + GOOGLE_MAPS_KEY;
+    streetViewFallback = '<div style="margin-bottom:10px"><img src="' + esc(svUrl) + '" alt="Street View" style="width:100%;max-width:420px;border-radius:10px;border:1px solid var(--line);display:block" onerror="this.style.display=\'none\'"></div>';
+  }
   const photoHtml = photoUrl
     ? '<div style="margin-bottom:10px"><img src="' + esc(photoUrl) + '" alt="Property photo" style="width:100%;max-width:420px;border-radius:10px;border:1px solid var(--line);display:block" onerror="this.style.display=\'none\'"></div>'
-    : '<div style="margin-bottom:10px;padding:12px;border:1px dashed var(--line);border-radius:10px;color:var(--muted);font-size:13px">📷 No property photo available from the feed</div>';
+    : (streetViewFallback || '<div style="margin-bottom:10px;padding:12px;border:1px dashed var(--line);border-radius:10px;color:var(--muted);font-size:13px">📷 No property photo available from the feed</div>');
   el.innerHTML = '<div style="font-weight:800;font-size:14px;margin-bottom:8px">🏠 This is the property you searched</div>'
     + (showAddr ? '<div style="font-size:14px;font-weight:700;margin-bottom:10px">' + esc(showAddr) + '</div>' : '')
     + zipWarn
