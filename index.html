@@ -11,6 +11,38 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 <title>Acquisition Command Center</title>
+<script>
+/* White-label branding hook — additive, fails safe to Troy's defaults.
+   Fetches public client config (companyName, logo, primaryColor) from
+   /.netlify/functions/client-config based on the request subdomain,
+   then applies branding. Secrets are never exposed by that function. */
+(function () {
+  var DEFAULTS = { companyName: 'Direct Property Buyers', logo: '/assets/dpb-logo.png', primaryColor: '#00d4ff' };
+  function applyBrand(cfg) {
+    try {
+      var name = cfg.companyName || DEFAULTS.companyName;
+      var color = cfg.primaryColor || DEFAULTS.primaryColor;
+      document.title = name + ' Command Center';
+      document.documentElement.style.setProperty('--brand', color);
+      var sub = document.querySelector('.brand small');
+      if (sub) sub.textContent = name;
+      var logoImg = document.querySelector('.brand img.brand-logo');
+      if (logoImg && cfg.logo) logoImg.src = cfg.logo;
+    } catch (e) { /* branding must never break the dashboard */ }
+  }
+  function fallback() { applyBrand(DEFAULTS); }
+  try {
+    fetch('/.netlify/functions/client-config', { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
+      .then(applyBrand)
+      .catch(fallback);
+    // Safety net: if the fetch hangs, apply defaults after 3s.
+    setTimeout(function () {
+      if (document.title === 'Acquisition Command Center') fallback();
+    }, 3000);
+  } catch (e) { fallback(); }
+})();
+</script>
 <style>
 :root{
   --bg:#0d1117; --bg2:#131a24; --panel:#161e2b; --panel2:#1c2536;
