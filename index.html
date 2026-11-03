@@ -4852,11 +4852,13 @@ function renderCompList(){
   }
 }
 /* ---- Live map on the Comps page: same Leaflet approach as the property
-   search map. Pins render ONLY from coordinates already in the data — comp
-   row latitude/longitude (supplied by the feed when present) and subject
-   latitude/longitude (lead, or an already-fetched property lookup). No
-   geocoding, no new request, no invented pins: rows without coordinates
-   simply get no pin, and the note says so plainly. ---- */
+   search map. Pins render from coordinates already in the data — comp
+   row latitude/longitude (supplied by the feed when present, or resolved
+   via Nominatim geocoding for comp rows that lack them — see
+   geocodeMissingCompRows above) and subject latitude/longitude (lead, or
+   an already-fetched property lookup). No invented pins: rows without
+   coordinates after geocoding simply get no pin, and the note says so
+   plainly. ---- */
 function compMapPriceLabel(amount){
   if(amount == null) return '—';
   if(amount >= 1000) return '$' + Math.round(amount/1000) + 'k';
@@ -4874,6 +4876,69 @@ function priceTagIcon(label, bg){
       + '<div style="display:inline-block;background:' + bg + ';color:#fff;font-weight:800;font-size:11px;padding:5px 9px;border-radius:8px;border:2px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.45);white-space:nowrap">' + esc(label) + '</div>'
       + '<div style="width:10px;height:10px;background:' + bg + ';transform:rotate(45deg);margin:-5px auto 0;border-right:2px solid #fff;border-bottom:2px solid #fff"></div>'
       + '</div>' });
+}
+/* ---- Comp pin geocoding: PropertyReach comp rows carry NO per-row
+   coordinates, so pins can't be placed from the feed alone. This falls back
+   to Nominatim (OpenStreetMap, free, no key) to geocode comp addresses
+   browser-side — 1 request/second to respect their usage policy. Only REAL
+   geocode results become pins (NO-MAKEUP: nothing invented); failures leave
+   the row pin-less and the map note says so plainly. The subject is never
+   geocoded here — it already has coordinates from the property lookup. ---- */
+const compGeocodeCache = new Map();   // lowercased address -> {latitude, longitude} | null
+let compGeocodeRunning = false;
+function compGeocodeDelay(ms){ return new Promise(r => setTimeout(r, ms)); }
+async function geocodeCompAddress(query){
+  const key = String(query || '').trim().toLowerCase();
+  if(!key) return null;
+  if(compGeocodeCache.has(key)) return compGeocodeCache.get(key);
+  try{
+    const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&addressdetails=0&q=' + encodeURIComponent(query);
+    // Browsers send their own User-Agent + Referer automatically (both are
+    // forbidden headers for fetch); Nominatim's policy is satisfied by the
+    // browser's real UA/Referer.
+    const resp = await fetch(url, { headers: { 'Accept': 'application/json' } });
+    if(!resp.ok) throw new Error('HTTP ' + resp.status);
+    const arr = await resp.json();
+    const hit = (Array.isArray(arr) && arr[0]) || null;
+    const out = (hit && hit.lat != null && hit.lon != null)
+      ? { latitude: Number(hit.lat), longitude: Number(hit.lon) }
+      : null;
+    compGeocodeCache.set(key, out);
+    return out;
+  }catch(e){
+    compGeocodeCache.set(key, null);  // cache the miss so a failing lookup isn't hammered
+    return null;
+  }
+}
+/* Geocode comp rows missing coordinates, ~1.1s apart (Nominatim policy),
+   re-rendering the map as pins land. Fire-and-forget: safe to call right
+   after any comps load. Never touches the subject. */
+function geocodeMissingCompRows(){
+  if(compGeocodeRunning) return;
+  const missing = compRows.filter(r => (r.latitude == null || r.longitude == null) && r.address);
+  if(!missing.length) return;
+  compGeocodeRunning = true;
+  let done = 0;
+  const tick = ()=>{
+    done++;
+    renderCompMap();   // pins land as they resolve; note shows pin counts
+    const note = document.getElementById('compMapNote');
+    if(note && done < missing.length) note.textContent = 'Locating comps on map… (' + done + ' of ' + missing.length + ') · ' + note.textContent;
+  };
+  (async ()=>{
+    for(const r of missing){
+      // If the user searched a different address mid-geocode, stop quietly.
+      const cur = (document.getElementById('compListAddr')||{}).value.trim();
+      if(cur !== compLoadedAddr) break;
+      const q = String(r.address || '').trim();
+      const hit = await geocodeCompAddress(q);
+      if(hit){ r.latitude = hit.latitude; r.longitude = hit.longitude; }
+      tick();
+      await compGeocodeDelay(1100);   // Nominatim: max 1 request/second
+    }
+    compGeocodeRunning = false;
+    renderCompMap();   // final note text reflects any still-pinless rows
+  })();
 }
 function renderCompMap(){
   const el = document.getElementById('compMap');
@@ -5145,6 +5210,10 @@ async function loadCompsForAddress(retryAttempt){
     if(avg && arvEl) arvEl.value = avg;
     renderCompList();
     calcComp();
+    /* PropertyReach comp rows carry no per-row coordinates — geocode the
+       missing ones browser-side (Nominatim, ~1 req/sec) so pins land on the
+       map. Fire-and-forget; never touches the subject or the offer math. */
+    geocodeMissingCompRows();
   }catch(e){
     renderCompSubjectCard(null, addr, '', true);
     if(msg) msg.textContent = 'Verified comps unavailable right now — type an ARV below to run the math manually.';
