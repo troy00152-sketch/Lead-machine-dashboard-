@@ -5204,9 +5204,14 @@ function renderCompSubjectCard(prop, typedAddr, matchedAddr, unavailable){
     ? '<div style="border:1px solid var(--red);color:var(--red);border-radius:8px;padding:8px 10px;font-size:13px;font-weight:700;margin-bottom:10px">⚠️ You typed ZIP ' + esc(typedZip) + ' but this property is in ' + esc(matchedZip) + ' — check the ZIP.</div>'
     : '';
   const showAddr = matchedAddr || typedAddr || '';
+  const photoUrl = prop.photoUrl || prop.photo_url || null;
+  const photoHtml = photoUrl
+    ? '<div style="margin-bottom:10px"><img src="' + esc(photoUrl) + '" alt="Property photo" style="width:100%;max-width:420px;border-radius:10px;border:1px solid var(--line);display:block" onerror="this.style.display=\'none\'"></div>'
+    : '<div style="margin-bottom:10px;padding:12px;border:1px dashed var(--line);border-radius:10px;color:var(--muted);font-size:13px">📷 No property photo available from the feed</div>';
   el.innerHTML = '<div style="font-weight:800;font-size:14px;margin-bottom:8px">🏠 This is the property you searched</div>'
     + (showAddr ? '<div style="font-size:14px;font-weight:700;margin-bottom:10px">' + esc(showAddr) + '</div>' : '')
     + zipWarn
+    + photoHtml
     + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;font-size:13px">'
     + '<div><span style="color:var(--muted)">Beds:</span> <strong>' + esc(compField(prop.beds)) + '</strong></div>'
     + '<div><span style="color:var(--muted)">Baths:</span> <strong>' + esc(compField(prop.baths)) + '</strong></div>'
