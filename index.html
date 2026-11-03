@@ -7,6 +7,9 @@
 <link rel="icon" href="data:," />
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 <title>Acquisition Command Center</title>
 <style>
 :root{
@@ -116,6 +119,14 @@
 [data-theme="holographic"] .leaflet-popup-tip{background:rgba(8,16,36,.96);border:1px solid rgba(0,212,255,.4);box-shadow:0 0 18px rgba(0,212,255,.3)}
 [data-theme="holographic"] .leaflet-popup-content{color:#e8f4ff}
 [data-theme="holographic"] .leaflet-popup-close-button{color:#7a9cc6!important}
+/* Holographic marker-cluster overrides (cyan glass, matching theme) */
+[data-theme="holographic"] .marker-cluster-small,
+[data-theme="holographic"] .marker-cluster-medium,
+[data-theme="holographic"] .marker-cluster-large{background-color:rgba(0,212,255,.18)}
+[data-theme="holographic"] .marker-cluster-small div,
+[data-theme="holographic"] .marker-cluster-medium div,
+[data-theme="holographic"] .marker-cluster-large div{background-color:rgba(0,212,255,.35);color:#e8f4ff;box-shadow:0 0 16px rgba(0,212,255,.5)}
+[data-theme="holographic"] .marker-cluster span{color:#e8f4ff;font-weight:800}
 [data-theme="holographic"] .img-frame{border:1px solid rgba(0,212,255,.25);box-shadow:0 0 24px rgba(0,212,255,.1)}
 [data-theme="holographic"] .holo-marker{filter:drop-shadow(0 0 8px rgba(0,212,255,.9))}
 [data-theme="holographic"] .map-glow-frame{position:relative}
@@ -510,6 +521,13 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
             <span style="font-size:11px;color:var(--muted)" id="propMapNote"></span>
           </div>
           <div id="propSearchMap" style="display:none;height:420px;border-radius:12px;margin-top:12px;border:1px solid var(--line);z-index:0"></div>
+          <div id="propMapFilters" style="display:none;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap">
+            <span style="font-size:11px;color:var(--muted)">Show:</span>
+            <button class="btn small" id="propMapFilterAll" onclick="setPropMapFilter('all')">All</button>
+            <button class="btn small ghost" id="propMapFilterAbs" onclick="setPropMapFilter('absentee')">✈️ Absentee</button>
+            <button class="btn small ghost" id="propMapFilterOcc" onclick="setPropMapFilter('ownerocc')">🏠 Owner-occ</button>
+            <button class="btn small ghost" id="propMapFilterVal" onclick="setPropMapFilter('valued')">💰 Has value</button>
+          </div>
         </div>
         <div class="lead-cards" id="propSearchResults" style="margin-top:12px"></div>
         <!-- Property Search Filters Drawer -->
@@ -1670,7 +1688,7 @@ function renderPropSearchResults(){
       <div id="propDetail${i}" style="display:none">${propDetailHtml(p,i)}</div>
       <div class="lead-status-row">
         <span class="badge orange">Tap card for details</span>
-        <div class="lead-actions"><button class="btn small" onclick="event.stopPropagation();sendPropToGHL(${i})">📤 Send to GHL</button> <button class="btn small primary" onclick="event.stopPropagation();addPropSearchToLeads(${i})">➕ Add to Leads</button></div>
+        <div class="lead-actions"><button class="btn small" onclick="event.stopPropagation();flyToProp(${i})">📍 Map</button> <button class="btn small" onclick="event.stopPropagation();sendPropToGHL(${i})">📤 Send to GHL</button> <button class="btn small primary" onclick="event.stopPropagation();addPropSearchToLeads(${i})">➕ Add to Leads</button></div>
       </div>
     </div>`;
   }).join('');
@@ -1690,6 +1708,7 @@ function syncPropView(){
   const row = document.getElementById('propViewRow');
   const cards = document.getElementById('propSearchResults');
   const mapEl = document.getElementById('propSearchMap');
+  const filtEl = document.getElementById('propMapFilters');
   const listBtn = document.getElementById('propViewListBtn');
   const mapBtn = document.getElementById('propViewMapBtn');
   if(!row || !cards || !mapEl) return;
@@ -1698,14 +1717,44 @@ function syncPropView(){
     if(listBtn) listBtn.className = 'btn small ghost';
     if(mapBtn) mapBtn.className = 'btn small';
     cards.style.display = 'none'; mapEl.style.display = 'block';
+    if(filtEl) filtEl.style.display = 'flex';
     renderPropMap();
     setTimeout(()=>{ if(propMap) propMap.invalidateSize(); }, 150);
   }else{
     if(listBtn) listBtn.className = 'btn small';
     if(mapBtn) mapBtn.className = 'btn small ghost';
     cards.style.display = ''; mapEl.style.display = 'none';
+    if(filtEl) filtEl.style.display = 'none';
   }
 }
+let propMapFilter = 'all';
+function setPropMapFilter(f){
+  propMapFilter = f;
+  const btns = { all: 'propMapFilterAll', absentee: 'propMapFilterAbs', ownerocc: 'propMapFilterOcc', valued: 'propMapFilterVal' };
+  Object.keys(btns).forEach(k=>{
+    const el = document.getElementById(btns[k]);
+    if(el) el.className = 'btn small' + (k === f ? '' : ' ghost');
+  });
+  renderPropMap();
+}
+function flyToProp(i){
+  const p = propSearchCache[i];
+  if(!p || p.latitude === null || p.latitude === undefined || p.longitude === null || p.longitude === undefined){
+    toast('No coordinates for that property');
+    return;
+  }
+  if(propView !== 'map') setPropView('map');
+  setTimeout(()=>{
+    if(!propMap) return;
+    propMap.flyTo([p.latitude, p.longitude], 16, { duration: 1.2 });
+    setTimeout(()=>{
+      const m = propMapMarkers.find(x => x._propIdx === i);
+      if(m) m.openPopup();
+    }, 1300);
+  }, 200);
+}
+let propMapMarkers = [];
+let propMapCluster = null;
 function renderPropMap(){
   const note = document.getElementById('propMapNote');
   if(typeof L === 'undefined'){
@@ -1714,10 +1763,16 @@ function renderPropMap(){
   }
   const all = propSearchExact ? propSearchCache.slice() : applyPropFiltersToResults(propSearchCache);
   const pinned = all.filter(p => p.latitude !== null && p.latitude !== undefined && p.longitude !== null && p.longitude !== undefined);
+  // Map-level pin filter toggles (on top of the drawer filters in `all`)
+  let visible = pinned;
+  if(propMapFilter === 'absentee') visible = pinned.filter(isAbsenteeProp);
+  else if(propMapFilter === 'ownerocc') visible = pinned.filter(p => p.ownerOccupied === true);
+  else if(propMapFilter === 'valued') visible = pinned.filter(p => p._avm != null && p._avm !== '');
   const noCoords = all.length - pinned.length;
-  if(note) note.textContent = pinned.length
-    ? pinned.length + ' price tags' + (noCoords ? ' (' + noCoords + ' without coordinates)' : '') + ' · 🔵 absentee · 🟠 other · tag shows estimated value, or No value'
-    : 'No coordinates on these results.';
+  const filtName = propMapFilter === 'all' ? '' : (propMapFilter === 'absentee' ? ' · showing absentee only' : propMapFilter === 'ownerocc' ? ' · showing owner-occupied only' : ' · showing valued only');
+  if(note) note.textContent = visible.length
+    ? visible.length + ' price tags' + (noCoords ? ' (' + noCoords + ' without coordinates)' : '') + ' · 🔵 absentee · 🟠 other · tag shows estimated value, or No value' + filtName
+    : (pinned.length ? 'No pins match this filter.' : 'No coordinates on these results.');
   if(!propMap){
     propMap = L.map('propSearchMap', { scrollWheelZoom: false });
     propMap.on('focus', ()=> propMap.scrollWheelZoom.enable());
@@ -1731,25 +1786,49 @@ function renderPropMap(){
       maxZoom: 19
     }).addTo(propMap);
   }
+  // Clear previous pins (cluster group when the CDN loaded, plain markers otherwise)
+  if(propMapCluster){ propMap.removeLayer(propMapCluster); propMapCluster = null; }
   propMap.eachLayer(l=>{ if(l instanceof L.Marker) propMap.removeLayer(l); });
-  if(!pinned.length) return;
+  propMapMarkers = [];
+  if(!visible.length) return;
   const bounds = L.latLngBounds();
-  pinned.forEach(p=>{
+  const useCluster = (typeof L.markerClusterGroup === 'function');
+  if(useCluster){
+    propMapCluster = L.markerClusterGroup({ showCoverageOnHover: false, maxClusterRadius: 55 });
+    propMap.addLayer(propMapCluster);
+  }
+  visible.forEach(p=>{
     const i = propSearchCache.indexOf(p);
     const abs = isAbsenteeProp(p);
     const owner = getOwnerName(p);
     const beds = numOrDash(p.bedrooms), baths = numOrDash(p.bathrooms);
+    const sqft = p.squareFootage ? Number(p.squareFootage).toLocaleString() + ' sqft' : '—';
     const tagLabel = (p._avm != null && p._avm !== '') ? compMapPriceLabel(p._avm) : 'No value';
-    const m = L.marker([p.latitude, p.longitude], { icon: priceTagIcon(tagLabel, abs ? '#3498db' : '#ff6b1a') }).addTo(propMap);
-    m.bindPopup('<div style="font-size:13px;line-height:1.7;min-width:180px;color:#182234">'
-      + '<div style="font-weight:700">' + esc(p.addressLine1 || '') + '</div>'
-      + '<div style="color:#666">' + esc((p.city||'') + ', ' + (p.state||'') + ' ' + (p.zipCode||'')) + '</div>'
-      + (abs ? '<div>✈️ Absentee Owner</div>' : '')
-      + (owner ? '<div>👤 ' + esc(owner) + '</div>' : '')
-      + '<div>' + beds + 'bd / ' + baths + 'ba' + (p.squareFootage ? ' · ' + Number(p.squareFootage).toLocaleString() + ' sqft' : '') + '</div>'
-      + (p._avm ? '<div>💰 ARV ~$' + Number(p._avm).toLocaleString() + '</div>' : '')
-      + '<button onclick="addPropSearchToLeads(' + i + ')" style="margin-top:6px;background:#ff6b1a;color:#fff;border:0;border-radius:8px;padding:6px 10px;cursor:pointer">➕ Add to Leads</button>'
+    const m = L.marker([p.latitude, p.longitude], { icon: priceTagIcon(tagLabel, abs ? '#3498db' : '#ff6b1a') });
+    m._propIdx = i;
+    // Rich detail card from real record fields only (no invented data)
+    let saleLine = '—';
+    if(p.lastSaleDate){
+      try{ saleLine = new Date(p.lastSaleDate).toLocaleDateString() + (p.lastSalePrice ? ' · $' + Number(p.lastSalePrice).toLocaleString() : ''); }
+      catch(e){ saleLine = '—'; }
+    }
+    m.bindPopup('<div style="font-size:13px;line-height:1.75;min-width:200px;max-width:260px">'
+      + '<div style="font-weight:800;font-size:14px">' + esc(p.addressLine1 || p.address || '') + '</div>'
+      + '<div style="opacity:.75">' + esc((p.city||'') + ', ' + (p.state||'') + ' ' + (p.zipCode||p.zip||'')) + '</div>'
+      + '<div style="margin:4px 0">' + (abs ? '<span class="badge blue">✈️ Absentee</span>' : (p.ownerOccupied === true ? '<span class="badge green">🏠 Owner-occ</span>' : '')) + ' ' + scoreBadgeHtml(p, false) + '</div>'
+      + '<div>👤 ' + esc(owner || 'Not listed') + '</div>'
+      + '<div>' + beds + 'bd / ' + baths + 'ba · ' + sqft + ' · ' + numOrDash(p.yearBuilt) + '</div>'
+      + '<div>💰 Value: ' + moneyOrDash(p._avm) + ' · Tax: ' + moneyOrDash(p.taxAssessed) + '</div>'
+      + '<div>🔄 Last sale: ' + esc(saleLine) + '</div>'
+      + (p.assessorID ? '<div>🗂️ APN: ' + esc(p.assessorID) + '</div>' : '')
+      + '<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">'
+      + '<button onclick="addPropSearchToLeads(' + i + ')" style="background:#ff6b1a;color:#fff;border:0;border-radius:8px;padding:6px 10px;cursor:pointer">➕ Add to Leads</button>'
+      + '<button onclick="flyToProp(' + i + ')" style="background:rgba(0,212,255,.15);color:#00d4ff;border:1px solid rgba(0,212,255,.4);border-radius:8px;padding:6px 10px;cursor:pointer">🎯 Zoom</button>'
+      + '</div>'
       + '</div>');
+    if(useCluster){ propMapCluster.addLayer(m); }
+    else{ m.addTo(propMap); }
+    propMapMarkers.push(m);
     bounds.extend([p.latitude, p.longitude]);
   });
   if(bounds.isValid()) propMap.fitBounds(bounds.pad(0.2));
