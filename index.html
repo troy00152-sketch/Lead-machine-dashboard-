@@ -1393,15 +1393,30 @@ async function searchPropertyByDealMachine(address, statusEl, resultsEl){
   statusEl.innerHTML = '<span style="color:var(--muted)">🔍 Looking up property…</span>';
   resultsEl.innerHTML = '';
   try{
-    const resp = await fetch('/.netlify/functions/dealmachine-lookup?address=' + encodeURIComponent(address));
-    if(!resp.ok) throw new Error('HTTP ' + resp.status);
-    const d = await resp.json();
-    if(!d.matched){
-      statusEl.innerHTML = '<span style="color:var(--muted)">No property found for "' + esc(address) + '". Try the full address with city, state, ZIP.</span>';
-      return;
+    // Nov 3: PropertyReach first (DealMachine is being cancelled). Fall back to DealMachine.
+    let d = null;
+    let lead = null;
+    try{
+      const prResp = await fetch('/.netlify/functions/propertyreach?address=' + encodeURIComponent(address));
+      if(prResp.ok){
+        const pj = await prResp.json();
+        if(pj && pj.matched && pj.property){
+          lead = propertyReachToLead(pj, address);
+          d = { matched: true, source: 'propertyreach' };
+        }
+      }
+    }catch(e){ /* fall through to DealMachine */ }
+    if(!lead){
+      const resp = await fetch('/.netlify/functions/dealmachine-lookup?address=' + encodeURIComponent(address));
+      if(!resp.ok) throw new Error('HTTP ' + resp.status);
+      d = await resp.json();
+      if(!d.matched){
+        statusEl.innerHTML = '<span style="color:var(--muted)">No property found for "' + esc(address) + '". Try the full address with city, state, ZIP.</span>';
+        return;
+      }
+      // Convert DealMachine result to internal lead format
+      lead = dealMachineToLead(d);
     }
-    // Convert DealMachine result to internal lead format
-    const lead = dealMachineToLead(d);
     propSearchCache = [lead];
     propSearchExact = true;
     statusEl.innerHTML = '<span style="color:var(--green)">✓ Property found</span> <button class="btn small primary" style="margin-left:10px" onclick="addAllPropSearchToLeads()">➕ Add to My Leads</button>';
@@ -1446,6 +1461,42 @@ function parseDmAddress(addr){
   }
   out.street = head;
   return out;
+}
+/* Convert PropertyReach API result to internal lead format (Nov 3: PR is the primary source) */
+function propertyReachToLead(pj, typedAddress){
+  const p = pj.property || {};
+  const addr = pj.address || typedAddress || '';
+  const _pa = parseDmAddress(addr);
+  const ownerName = [p.owner1, p.owner2].filter(Boolean).join(' & ');
+  return {
+    id: 'pr_' + Date.now() + '_' + Math.random().toString(36).slice(2,7),
+    address: _pa.street || addr,
+    city: _pa.city, state: _pa.state, zip: _pa.zip,
+    bedrooms: p.beds, bathrooms: p.baths, sqft: p.sqft,
+    lotSqft: p.lotSqft, lotAcres: p.lotAcres, yearBuilt: p.yearBuilt, propertyType: p.propertyType,
+    lastSaleDate: p.lastSaleDate, lastSalePrice: p.lastSaleAmount,
+    assessedValue: p.assessedValue, annualTax: p.taxAmount, taxYear: p.taxYear,
+    ownerOccupied: p.absentee === false, apn: p.apn,
+    owner1Name: p.owner1, owner2Name: p.owner2,
+    absenteeOwner: p.absentee === true,
+    legalDescription: p.legalDescription,
+    zoning: p.zoning,
+    latitude: p.latitude, longitude: p.longitude,
+    images: p.photoUrl ? { primary: p.photoUrl } : null,
+    ownerName: ownerName || null,
+    estimatedValue: p.marketValue || null,
+    arv: p.marketValue || null,
+    // Distress flags from PropertyReach
+    preforeclosure: p.preForeclosure === true,
+    taxDelinquentYear: p.taxDelinquentYear ?? null,
+    onMarket: p.onMarket === true,
+    listingStatus: p.listingStatus || null,
+    freeAndClear: p.freeAndClear === true,
+    // Phones (populated via skip trace)
+    phones: [],
+    owner: ownerName ? { names: [ownerName] } : null,
+    status: 'New Lead', addedAt: new Date().toISOString(), source: 'propertyreach-search',
+  };
 }
 function dealMachineToLead(d){
   const _pa = parseDmAddress(d.address || '');
