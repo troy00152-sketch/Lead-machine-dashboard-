@@ -280,6 +280,57 @@ async function hlUpdateOpportunity({ hlToken, opportunityId, stageId, status, mo
   return { ok: true, summary: `Updated opportunity ${oid}: ${changed}.` };
 }
 
+// hl_list_templates: list document/contract templates in the location
+async function hlListTemplates({ hlToken }) {
+  const data = await hlFetch(
+    hlToken, 'GET',
+    `/proposals/templates?locationId=${encodeURIComponent(HL_LOCATION_ID)}`
+  );
+  const templates = (data && (data.templates || data.data || [])) || [];
+  if (!templates.length) {
+    return { ok: true, count: 0, summary: 'No document templates found in this location.' };
+  }
+  const lines = templates.map((t, i) =>
+    `${i + 1}. ${t.name || t.title || '(unnamed)'} — ID ${t.id || t._id}`
+  );
+  return {
+    ok: true, count: templates.length,
+    summary: `CONTRACT TEMPLATES (${templates.length}):\n${lines.join('\n')}`,
+    templates: templates.map((t) => ({ id: t.id || t._id, name: t.name || t.title })),
+  };
+}
+
+// hl_send_contract: create + send a contract from a template (CONFIRMATION GATE)
+async function hlSendContract({ hlToken, templateId, contactId, contractName, confirmed, customValues }) {
+  const tid = String(templateId || '').trim();
+  const cid = String(contactId || '').trim();
+  if (!tid) return { ok: false, summary: 'No template ID — list templates first with hl_list_templates.' };
+  if (!cid) return { ok: false, summary: 'No contact ID — look up the contact first.' };
+  if (confirmed !== true) {
+    return {
+      ok: false, needsConfirmation: true,
+      summary: `CONTRACT NOT SENT — needs your tap to confirm.\nTemplate: ${tid}\nTo: contact ${cid}\nContract name: ${contractName || '(default)'}\n${customValues ? `Custom values: ${JSON.stringify(customValues).slice(0, 200)}` : ''}\nReply "send it" to confirm.`,
+    };
+  }
+  // Look up the contact to get email for the recipient
+  const contact = await hlFetch(hlToken, 'GET', `/contacts/${encodeURIComponent(cid)}`).catch(() => null);
+  const c = contact ? (contact.contact || contact) : {};
+  const recipientEmail = c.email || '';
+  if (!recipientEmail) {
+    return { ok: false, summary: `Cannot send contract — contact ${cid} has no email on file. Add an email first.` };
+  }
+  const body = {
+    templateId: tid,
+    locationId: HL_LOCATION_ID,
+    recipients: [{ contactId: cid, email: recipientEmail, role: 'signer' }],
+    ...(contractName ? { name: String(contractName).trim() } : {}),
+    ...(customValues && typeof customValues === 'object' ? { customValues } : {}),
+  };
+  const result = await hlFetch(hlToken, 'POST', '/proposals/templates/send', body);
+  const docId = (result && (result.id || result.documentId || (result.document && result.document.id))) || 'unknown';
+  return { ok: true, summary: `Contract sent to contact ${cid} (${recipientEmail}). Document ID: ${docId}.` };
+}
+
 // ---- Tool definitions for the LLM ----
 
 const HL_GET_CONTACT_DEF = {
@@ -459,11 +510,39 @@ const HL_UPDATE_OPPORTUNITY_DEF = {
   },
 };
 
+const HL_LIST_TEMPLATES_DEF = {
+  type: 'function',
+  function: {
+    name: 'hl_list_templates',
+    description: 'List contract/document templates in the CRM. Call it when Troy asks "what contracts do I have", "list my templates", or before sending a contract so you can pick the right template ID.',
+    parameters: { type: 'object', properties: {}, additionalProperties: false },
+  },
+};
+
+const HL_SEND_CONTRACT_DEF = {
+  type: 'function',
+  function: {
+    name: 'hl_send_contract',
+    description: 'Create and send a contract from a template to a contact. NEVER call this with confirmed=true on your own — always propose the contract first (template name, recipient, key details) and let Troy confirm. Only set confirmed=true when Troy has explicitly said "send it". The contact must have an email on file.',
+    parameters: {
+      type: 'object',
+      properties: {
+        templateId: { type: 'string', description: 'Template ID from hl_list_templates.' },
+        contactId: { type: 'string', description: 'HighLevel contact ID (the seller).' },
+        contractName: { type: 'string', description: 'Name for the sent document, e.g. "123 Main St Purchase Agreement".' },
+        confirmed: { type: 'boolean', description: 'Set true ONLY after Troy explicitly confirms. Default false.' },
+      },
+      required: ['templateId', 'contactId'],
+      additionalProperties: false,
+    },
+  },
+};
+
 const HL_TOOLS = [
   HL_GET_CONTACT_DEF, HL_ADD_TAG_DEF, HL_CREATE_OPPORTUNITY_DEF,
   HL_GET_CONVERSATIONS_DEF, HL_GET_WORKFLOWS_DEF, HL_SEND_SMS_DEF,
   HL_UPDATE_CONTACT_DEF, HL_REMOVE_TAG_DEF, HL_ADD_NOTE_DEF,
-  HL_UPDATE_OPPORTUNITY_DEF,
+  HL_UPDATE_OPPORTUNITY_DEF, HL_LIST_TEMPLATES_DEF, HL_SEND_CONTRACT_DEF,
 ];
 
 // ---- System prompt ----
@@ -481,6 +560,8 @@ YOUR TOOLS (HighLevel CRM, location "direct property buyers"):
 - hl_get_conversations: read recent SMS threads. Use for "what did they say" / summaries.
 - hl_get_workflows: Published/Draft status + enrollment counts.
 - hl_send_sms: DRAFT ONLY unless Troy confirms. Propose the exact message, then wait. NEVER set confirmed=true on your own. The tool auto-refuses DND'd contacts.
+- hl_list_templates: list contract templates. Use before sending a contract.
+- hl_send_contract: DRAFT ONLY unless Troy confirms. Propose the template, recipient, and key details, then wait. NEVER set confirmed=true on your own. Contact must have an email.
 
 HARD RULES:
 1. SMS bodies carry NO opt-out sentence — the footer appends it. Never write "Reply STOP to opt out."
@@ -548,6 +629,11 @@ const TOOL_HANDLERS = {
   hl_update_opportunity: (hlToken, a) => hlUpdateOpportunity({
     hlToken, opportunityId: a.opportunityId, stageId: a.stageId,
     status: a.status, monetaryValue: a.monetaryValue, name: a.name,
+  }),
+  hl_list_templates: (hlToken) => hlListTemplates({ hlToken }),
+  hl_send_contract: (hlToken, a) => hlSendContract({
+    hlToken, templateId: a.templateId, contactId: a.contactId,
+    contractName: a.contractName, confirmed: a.confirmed === true,
   }),
 };
 
