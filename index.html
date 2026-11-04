@@ -939,6 +939,28 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
 <!-- COMPS TAB -->
       <div class="tab-page" id="page-comps">
         <div class="sec-title">📊 Comps</div>
+        <!-- ⚡ QUICK OFFER: 60-second offer flow -->
+        <div class="card" style="border:2px solid var(--accent);margin-bottom:16px">
+          <div style="font-weight:800;font-size:15px;margin-bottom:8px">⚡ Quick Offer <span style="font-weight:400;font-size:12px;color:var(--muted)">— address → comps → offer in 60 seconds</span></div>
+          <div style="display:flex;gap:8px;margin-bottom:10px">
+            <input class="field" id="qoAddr" placeholder="Paste property address…" style="flex:1;font-size:15px;padding:12px" onkeydown="if(event.key==='Enter'){event.preventDefault();runQuickOffer();}" />
+            <button class="btn primary" style="font-size:15px;padding:12px 24px;font-weight:800" onclick="runQuickOffer()">⚡ Run</button>
+          </div>
+          <div id="qoStatus" style="font-size:12px;color:var(--muted);margin-bottom:8px"></div>
+          <div style="margin-bottom:10px">
+            <div style="font-size:12px;font-weight:700;margin-bottom:6px;color:var(--muted)">Repairs estimate — tap one:</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn" onclick="setQuickRepairs(15000)">Light $15K</button>
+              <button class="btn" onclick="setQuickRepairs(30000)">Medium $30K</button>
+              <button class="btn" onclick="setQuickRepairs(50000)">Heavy $50K</button>
+              <button class="btn" onclick="setQuickRepairs(75000)">Gut $75K</button>
+            </div>
+          </div>
+          <div id="qoResult" style="display:none"></div>
+          <div style="display:flex;gap:8px;margin-top:10px">
+            <button class="btn" id="qoCopyBtn" style="display:none" onclick="copyQuickOffer()">📋 Copy Offer Summary</button>
+          </div>
+        </div>
         <div class="card">
           <div id="compSubjectHead" style="font-size:17px;font-weight:800;margin-bottom:12px">Comps — enter a property address below</div>
           <div id="compSubjectCard" style="display:none;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:12px"></div>
@@ -4817,6 +4839,86 @@ function downloadCompReport(){
   if(!w){ alert('Allow pop-ups to download the comp report.'); return; }
   w.document.write(html); w.document.close(); w.focus();
 }
+/* ⚡ QUICK OFFER: 60-second offer flow — reuses the full Comps engine */
+function setQuickRepairs(amt){
+  const repEl = document.getElementById('compRepairs');
+  if(repEl){ repEl.value = amt; }
+  // Also sync the Quick Offer address to the main comp field
+  syncQuickOfferAddr();
+  calcComp();
+  updateQuickOfferResult();
+}
+function syncQuickOfferAddr(){
+  const qo = document.getElementById('qoAddr');
+  const main = document.getElementById('compListAddr');
+  if(qo && main && qo.value.trim() && qo.value.trim() !== main.value.trim()){
+    main.value = qo.value.trim();
+    if(typeof updateCompLinks === 'function') updateCompLinks();
+  }
+}
+async function runQuickOffer(){
+  const qo = document.getElementById('qoAddr');
+  const status = document.getElementById('qoStatus');
+  const addr = qo ? qo.value.trim() : '';
+  if(!addr){ if(status) status.textContent = 'Enter a property address first.'; return; }
+  // Sync to the main comp field and run the full engine
+  syncQuickOfferAddr();
+  if(status) status.textContent = '⚡ Loading property, comps, and offer math…';
+  // Default listing status to not-listed if not set (user can override)
+  const st = document.getElementById('compListStatus');
+  if(st && !st.value) st.value = 'not-listed';
+  await loadCompsForAddress();
+  if(status) status.textContent = '';
+  updateQuickOfferResult();
+  // Scroll to the result
+  const res = document.getElementById('qoResult');
+  if(res) res.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+function updateQuickOfferResult(){
+  const res = document.getElementById('qoResult');
+  const copyBtn = document.getElementById('qoCopyBtn');
+  if(!res) return;
+  const addr = (document.getElementById('qoAddr')||{}).value.trim() || (document.getElementById('compListAddr')||{}).value.trim();
+  const arv = parseFloat((document.getElementById('compARV')||{}).value) || 0;
+  const repairs = parseFloat((document.getElementById('compRepairs')||{}).value) || 0;
+  // Read MAO/LAO from the comp result area
+  const compRes = document.getElementById('compResult');
+  let mao = 0, lao = 0, tier = '';
+  if(compRes){
+    const html = compRes.innerHTML || '';
+    const maoM = html.match(/MAO[^$]*\$([\d,]+)/i);
+    const laoM = html.match(/LAO[^$]*\$([\d,]+)/i);
+    const tierM = html.match(/(\d+(?:\.\d+)?%)/);
+    if(maoM) mao = parseInt(maoM[1].replace(/,/g, ''), 10) || 0;
+    if(laoM) lao = parseInt(laoM[1].replace(/,/g, ''), 10) || 0;
+    if(tierM) tier = tierM[1];
+  }
+  if(!arv){
+    res.style.display = 'none';
+    if(copyBtn) copyBtn.style.display = 'none';
+    return;
+  }
+  res.style.display = 'block';
+  if(copyBtn) copyBtn.style.display = '';
+  const picks = (typeof compPicks !== 'undefined' ? compPicks.length : 0);
+  res.innerHTML = `<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:8px">
+    <div class="card" style="text-align:center;padding:12px"><div style="font-size:11px;color:var(--muted);font-weight:700">ARV</div><div style="font-size:22px;font-weight:800">$${arv.toLocaleString()}</div><div style="font-size:11px;color:var(--muted)">${picks} comps</div></div>
+    <div class="card" style="text-align:center;padding:12px;border-color:var(--green)"><div style="font-size:11px;color:var(--muted);font-weight:700">MAO (ceiling)</div><div style="font-size:22px;font-weight:800;color:var(--green)">$${mao.toLocaleString()}</div><div style="font-size:11px;color:var(--muted)">${tier ? tier + ' tier' : ''}</div></div>
+    <div class="card" style="text-align:center;padding:12px;border-color:var(--blue)"><div style="font-size:11px;color:var(--muted);font-weight:700">LAO (open)</div><div style="font-size:22px;font-weight:800;color:var(--blue)">$${lao.toLocaleString()}</div><div style="font-size:11px;color:var(--muted)">start here</div></div>
+  </div>
+  <div style="font-size:12px;color:var(--muted);margin-top:8px">${addr} · Repairs $${repairs.toLocaleString()}</div>`;
+  // Store for copy
+  window._qoData = { addr, arv, repairs, mao, lao, tier, picks };
+}
+function copyQuickOffer(){
+  const d = window._qoData;
+  if(!d) return;
+  const text = `QUICK OFFER — ${d.addr}\nARV: $${d.arv.toLocaleString()} (${d.picks} comps)\nRepairs: $${d.repairs.toLocaleString()}\nMAO (ceiling): $${d.mao.toLocaleString()}${d.tier ? ' @ ' + d.tier : ''}\nLAO (open): $${d.lao.toLocaleString()}\nFormula: (ARV − repairs) × tier = MAO; LAO = MAO × 70%`;
+  navigator.clipboard.writeText(text).then(()=>{
+    const btn = document.getElementById('qoCopyBtn');
+    if(btn){ const orig = btn.textContent; btn.textContent = '✓ Copied!'; setTimeout(()=>{ btn.textContent = orig; }, 1500); }
+  }).catch(()=>{ alert('Copy failed — select the text manually.'); });
+}
 function calcComp(){
   /* The listing group belongs to the address in the box right now. Stamp it
      here — every listing-field edit runs calcComp — so an address change can
@@ -4909,6 +5011,8 @@ function calcComp(){
   </div>`;
   renderCompTierTable();
   renderCompWarnBar();
+  // ⚡ Quick Offer: refresh the summary card live
+  if(typeof updateQuickOfferResult === 'function') updateQuickOfferResult();
 }
 /* ---- Verified comps on the Comps page: same attom-lookup endpoint the lead
    modal's Verified Comps panel uses, driven by the typed address. ATTOM rows are
