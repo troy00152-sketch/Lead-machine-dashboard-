@@ -126,6 +126,16 @@ export default async function handler(req: Request, context: any) {
     return loginPage(true);
   }
 
+  // Public buyer deal rooms — no dashboard login needed.
+  // The deals-api function enforces its own per-action auth: admin actions
+  // verify the lm_auth cookie in-function; room / offer / photo actions are
+  // open by design (unguessable 64-char room tokens, mao never exposed).
+  if (url.pathname === "/room.html" || url.pathname === "/.netlify/functions/deals-api") {
+    const res = await context.next();
+    res.headers.set("x-robots-tag", "noindex, nofollow");
+    return res;
+  }
+
   // Not configured yet — fail closed with a clear message, not an open door.
   if (!password) {
     return new Response(
