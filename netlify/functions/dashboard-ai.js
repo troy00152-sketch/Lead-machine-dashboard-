@@ -429,7 +429,12 @@ function matchBuyersLookup({ address, city, state, zip, price, property_type }) 
     const g = buyerGeoScore(b, subj);
     if (g === 0) continue;
     let score = Math.min(99, g + buyerPriceScore(b, price) + buyerActivityScore(b) + buyerStrategyScore(b));
-    if (isLand && (b[6] || '').toLowerCase().includes('land')) score = Math.min(99, score + 5);
+    /* Land deals: boost actual land investors (name contains 'land', not 'landlord').
+       b[0]=name, b[6]=strategy. Old code checked strategy for 'land' which matched 'Landlord'. */
+    if (isLand) {
+      const nm = (b[0] || '').toLowerCase();
+      if (nm.includes('land') && !nm.includes('landlord')) score = Math.min(99, score + 10);
+    }
     if (score < 35) continue;
     scored.push({ b, score });
   }
