@@ -218,6 +218,68 @@ async function hlSendSms({ hlToken, contactId, message, confirmed, fromNumber })
   return { ok: true, summary: `SMS sent to contact ${cid}.` };
 }
 
+// hl_update_contact: update name, phone, email, address on a contact
+async function hlUpdateContact({ hlToken, contactId, firstName, lastName, phone, email, address1, city, state, postalCode }) {
+  const cid = String(contactId || '').trim();
+  if (!cid) return { ok: false, summary: 'No contact ID — look up the contact first.' };
+  const body = {};
+  if (firstName !== undefined && firstName !== null && String(firstName).trim() !== '') body.firstName = String(firstName).trim();
+  if (lastName !== undefined && lastName !== null && String(lastName).trim() !== '') body.lastName = String(lastName).trim();
+  if (phone !== undefined && phone !== null && String(phone).trim() !== '') body.phone = String(phone).trim();
+  if (email !== undefined && email !== null && String(email).trim() !== '') body.email = String(email).trim();
+  if (address1 !== undefined && address1 !== null && String(address1).trim() !== '') body.address1 = String(address1).trim();
+  if (city !== undefined && city !== null && String(city).trim() !== '') body.city = String(city).trim();
+  if (state !== undefined && state !== null && String(state).trim() !== '') body.state = String(state).trim();
+  if (postalCode !== undefined && postalCode !== null && String(postalCode).trim() !== '') body.postalCode = String(postalCode).trim();
+  // Convenience: "name" splits into first/last
+  if (!body.firstName && !body.lastName && arguments[0].name) {
+    const parts = String(arguments[0].name).trim().split(/\s+/);
+    if (parts.length) body.firstName = parts[0];
+    if (parts.length > 1) body.lastName = parts.slice(1).join(' ');
+  }
+  if (!Object.keys(body).length) return { ok: false, summary: 'Nothing to update — give me a name, phone, email, or address.' };
+  await hlFetch(hlToken, 'PUT', `/contacts/${encodeURIComponent(cid)}`, body);
+  const changed = Object.keys(body).map((k) => `${k}=${body[k]}`).join(', ');
+  return { ok: true, summary: `Updated contact ${cid}: ${changed}.` };
+}
+
+// hl_remove_tag: remove one or more tags from a contact
+async function hlRemoveTag({ hlToken, contactId, tags }) {
+  const cid = String(contactId || '').trim();
+  const tagList = Array.isArray(tags) ? tags : [tags];
+  const clean = tagList.map((t) => String(t || '').trim()).filter(Boolean);
+  if (!cid) return { ok: false, summary: 'No contact ID — look up the contact first.' };
+  if (!clean.length) return { ok: false, summary: 'No tags to remove.' };
+  await hlFetch(hlToken, 'DELETE', `/contacts/${encodeURIComponent(cid)}/tags`, { tags: clean });
+  return { ok: true, summary: `Removed tag(s) [${clean.join(', ')}] from contact ${cid}.` };
+}
+
+// hl_add_note: add a note to a contact's timeline
+async function hlAddNote({ hlToken, contactId, body, userId }) {
+  const cid = String(contactId || '').trim();
+  const text = String(body || '').trim();
+  if (!cid) return { ok: false, summary: 'No contact ID — look up the contact first.' };
+  if (!text) return { ok: false, summary: 'No note text.' };
+  const payload = { body: text, ...(userId ? { userId: String(userId).trim() } : {}) };
+  await hlFetch(hlToken, 'POST', `/contacts/${encodeURIComponent(cid)}/notes`, payload);
+  return { ok: true, summary: `Note added to contact ${cid}.` };
+}
+
+// hl_update_opportunity: move a deal to another stage, or update its value/status
+async function hlUpdateOpportunity({ hlToken, opportunityId, stageId, status, monetaryValue, name }) {
+  const oid = String(opportunityId || '').trim();
+  if (!oid) return { ok: false, summary: 'No opportunity ID.' };
+  const body = {};
+  if (stageId) body.pipelineStageId = String(stageId).trim();
+  if (status) body.status = String(status).trim(); // open, won, lost, abandoned
+  if (monetaryValue !== undefined && monetaryValue !== null && monetaryValue !== '') body.monetaryValue = Number(monetaryValue);
+  if (name) body.name = String(name).trim();
+  if (!Object.keys(body).length) return { ok: false, summary: 'Nothing to update — give me a stage, status, value, or name.' };
+  await hlFetch(hlToken, 'PUT', `/opportunities/${encodeURIComponent(oid)}`, body);
+  const changed = Object.keys(body).map((k) => `${k}=${body[k]}`).join(', ');
+  return { ok: true, summary: `Updated opportunity ${oid}: ${changed}.` };
+}
+
 // ---- Tool definitions for the LLM ----
 
 const HL_GET_CONTACT_DEF = {
@@ -318,9 +380,90 @@ const HL_SEND_SMS_DEF = {
   },
 };
 
+const HL_UPDATE_CONTACT_DEF = {
+  type: 'function',
+  function: {
+    name: 'hl_update_contact',
+    description: 'Update a contact\'s name, phone, email, or address. Call it when Troy says "change his name to X", "fix her phone number", "update his email", or similar. You need the contact ID first — use hl_get_contact if you don\'t have it. Just do it — no extra confirmation needed for contact edits.',
+    parameters: {
+      type: 'object',
+      properties: {
+        contactId: { type: 'string', description: 'HighLevel contact ID.' },
+        firstName: { type: 'string', description: 'First name.' },
+        lastName: { type: 'string', description: 'Last name.' },
+        name: { type: 'string', description: 'Full name (splits into first/last). Use this when Troy gives a full name.' },
+        phone: { type: 'string', description: 'Phone number.' },
+        email: { type: 'string', description: 'Email address.' },
+        address1: { type: 'string', description: 'Street address.' },
+        city: { type: 'string', description: 'City.' },
+        state: { type: 'string', description: 'State (2-letter).' },
+        postalCode: { type: 'string', description: 'ZIP code.' },
+      },
+      required: ['contactId'],
+      additionalProperties: false,
+    },
+  },
+};
+
+const HL_REMOVE_TAG_DEF = {
+  type: 'function',
+  function: {
+    name: 'hl_remove_tag',
+    description: 'Remove one or more tags from a contact. Call it when Troy says "remove the [tag] tag", "untag him", or similar. No extra confirmation needed.',
+    parameters: {
+      type: 'object',
+      properties: {
+        contactId: { type: 'string', description: 'HighLevel contact ID.' },
+        tags: { type: 'array', items: { type: 'string' }, description: 'Tags to remove.' },
+      },
+      required: ['contactId', 'tags'],
+      additionalProperties: false,
+    },
+  },
+};
+
+const HL_ADD_NOTE_DEF = {
+  type: 'function',
+  function: {
+    name: 'hl_add_note',
+    description: 'Add a note to a contact\'s timeline. Call it when Troy says "add a note", "note that [thing]", or wants something recorded on the contact. No extra confirmation needed.',
+    parameters: {
+      type: 'object',
+      properties: {
+        contactId: { type: 'string', description: 'HighLevel contact ID.' },
+        body: { type: 'string', description: 'Note text.' },
+      },
+      required: ['contactId', 'body'],
+      additionalProperties: false,
+    },
+  },
+};
+
+const HL_UPDATE_OPPORTUNITY_DEF = {
+  type: 'function',
+  function: {
+    name: 'hl_update_opportunity',
+    description: 'Move a deal to another pipeline stage, or update its value/status. Call it when Troy says "move [deal] to [stage]", "mark it won/lost", or "update the deal value". You need the opportunity ID — ask Troy if you don\'t have it, or look it up via the contact.',
+    parameters: {
+      type: 'object',
+      properties: {
+        opportunityId: { type: 'string', description: 'HighLevel opportunity ID.' },
+        stageId: { type: 'string', description: 'New pipeline stage ID.' },
+        status: { type: 'string', description: 'open, won, lost, or abandoned.' },
+        monetaryValue: { type: 'number', description: 'Deal value in dollars.' },
+        name: { type: 'string', description: 'Opportunity name.' },
+      },
+      required: ['opportunityId'],
+      additionalProperties: false,
+    },
+  },
+};
+
 const HL_TOOLS = [
   HL_GET_CONTACT_DEF, HL_ADD_TAG_DEF, HL_CREATE_OPPORTUNITY_DEF,
   HL_GET_CONVERSATIONS_DEF, HL_GET_WORKFLOWS_DEF, HL_SEND_SMS_DEF,
+  HL_UPDATE_CONTACT_DEF, HL_REMOVE_TAG_DEF, HL_ADD_NOTE_DEF,
+  HL_UPDATE_OPPORTUNITY_DEF,
 ];
 
 // ---- System prompt ----
@@ -330,7 +473,11 @@ const SYSTEM_PROMPT = `You are Bread, the AI inside Troy's HighLevel CRM. Troy i
 YOUR TOOLS (HighLevel CRM, location "direct property buyers"):
 - hl_get_contact: search by name/phone/email. Always start here when Troy names someone.
 - hl_add_tag: add tags. Fire it when Troy says "tag" — no extra confirmation needed for tags.
+- hl_remove_tag: remove tags. Fire it when Troy says "untag" or "remove the tag".
+- hl_update_contact: change name, phone, email, address. Fire it when Troy says "change his name", "fix the number", "update her email". No confirmation needed — just do it.
+- hl_add_note: add a note to a contact's timeline. Fire it when Troy says "note that" or "add a note".
 - hl_create_opportunity: create a deal. Needs pipeline + stage IDs — ask Troy if you don't have them.
+- hl_update_opportunity: move a deal to another stage, mark won/lost, update value.
 - hl_get_conversations: read recent SMS threads. Use for "what did they say" / summaries.
 - hl_get_workflows: Published/Draft status + enrollment counts.
 - hl_send_sms: DRAFT ONLY unless Troy confirms. Propose the exact message, then wait. NEVER set confirmed=true on your own. The tool auto-refuses DND'd contacts.
@@ -390,6 +537,17 @@ const TOOL_HANDLERS = {
   hl_send_sms: (hlToken, a) => hlSendSms({
     hlToken, contactId: a.contactId, message: a.message,
     confirmed: a.confirmed === true, fromNumber: a.fromNumber,
+  }),
+  hl_update_contact: (hlToken, a) => hlUpdateContact({
+    hlToken, contactId: a.contactId, firstName: a.firstName, lastName: a.lastName,
+    name: a.name, phone: a.phone, email: a.email, address1: a.address1,
+    city: a.city, state: a.state, postalCode: a.postalCode,
+  }),
+  hl_remove_tag: (hlToken, a) => hlRemoveTag({ hlToken, contactId: a.contactId, tags: a.tags }),
+  hl_add_note: (hlToken, a) => hlAddNote({ hlToken, contactId: a.contactId, body: a.body }),
+  hl_update_opportunity: (hlToken, a) => hlUpdateOpportunity({
+    hlToken, opportunityId: a.opportunityId, stageId: a.stageId,
+    status: a.status, monetaryValue: a.monetaryValue, name: a.name,
   }),
 };
 
