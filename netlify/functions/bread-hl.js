@@ -38,6 +38,8 @@ const HL_API_BASE = 'https://services.leadconnectorhq.com';
 const HL_API_VERSION = '2021-07-28';
 // Troy's new CRM — "direct property buyers" (Fitness Lead Machine LLC)
 const HL_LOCATION_ID = 'krKoHLudPnn7nT0DPtwa';
+// Paula Thomas — account owner (for contract sends, notes, etc.)
+const HL_USER_ID = 'BsoCeQWYI6BRct8hBKdz';
 
 // ---- HighLevel API client ----
 
@@ -340,12 +342,12 @@ async function hlSendContract({ hlToken, templateId, contactId, contractName, co
   if (!recipientEmail) {
     return { ok: false, summary: `Cannot send contract — contact ${cid} has no email on file. Add an email first.` };
   }
+  // HL API format (from 422 error 2026-11-03): top-level contactId + userId, NO recipients/name properties
   const body = {
     templateId: tid,
     locationId: HL_LOCATION_ID,
-    recipients: [{ contactId: cid, email: recipientEmail, role: 'signer' }],
-    ...(contractName ? { name: String(contractName).trim() } : {}),
-    ...(customValues && typeof customValues === 'object' ? { customValues } : {}),
+    userId: HL_USER_ID,
+    contactId: cid,
   };
   const result = await hlFetch(hlToken, 'POST', '/proposals/templates/send', body);
   const docId = (result && (result.id || result.documentId || (result.document && result.document.id))) || 'unknown';
@@ -687,6 +689,7 @@ const TOOL_HANDLERS = {
 
 async function runChat({ baseUrl, apiKey, model, hlToken, messages }) {
   const convo = messages.slice();
+  const seenFailures = new Set(); // circuit breaker: don't retry the same failed tool+args
   for (let iter = 0; iter <= MAX_TOOL_ITERATIONS; iter++) {
     const msg = await callLlm({ baseUrl, apiKey, model, messages: convo, tools: HL_TOOLS });
     const toolCalls = (msg.tool_calls || []).filter(
@@ -701,15 +704,31 @@ async function runChat({ baseUrl, apiKey, model, hlToken, messages }) {
     for (const tc of toolCalls.slice(0, MAX_TOOL_ITERATIONS)) {
       let args = {};
       try { args = JSON.parse(tc.function.arguments || '{}'); } catch (e) {}
+      const failureKey = `${tc.function.name}:${JSON.stringify(args)}`;
+      // Circuit breaker: if this exact call already failed, don't retry — tell the model to stop
+      if (seenFailures.has(failureKey)) {
+        convo.push({ role: 'tool', tool_call_id: tc.id, content: `[STOP — this call already failed. Do NOT retry it. Explain the problem to Troy in plain language and ask what he wants to do instead.]` });
+        continue;
+      }
       let toolResult;
+      let isHardFailure = false;
       try {
         const r = await TOOL_HANDLERS[tc.function.name](hlToken, args);
         toolResult = r.summary;
         // Surface the confirmation gate to the model
-        if (r.needsConfirmation) toolResult = '[AWAITING TROY CONFIRMATION]\n' + toolResult;
+        if (r.needsConfirmation) {
+          toolResult = '[AWAITING TROY CONFIRMATION]\n' + toolResult;
+        } else if (r.ok === false) {
+          // Hard failure — mark it so we don't retry the same call
+          isHardFailure = true;
+          seenFailures.add(failureKey);
+          toolResult = `[FAILED — do NOT retry this exact call. Explain to Troy what went wrong and what he can do.]\n${toolResult}`;
+        }
       } catch (err) {
         console.error(`[bread-hl] ${tc.function.name} failed:`, err.message);
-        toolResult = `${tc.function.name} failed: ${String(err.message || err).slice(0, 300)}`;
+        isHardFailure = true;
+        seenFailures.add(failureKey);
+        toolResult = `[FAILED — do NOT retry this exact call. Explain to Troy what went wrong.]\n${tc.function.name} failed: ${String(err.message || err).slice(0, 300)}`;
       }
       convo.push({ role: 'tool', tool_call_id: tc.id, content: toolResult });
     }
