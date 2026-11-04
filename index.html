@@ -458,6 +458,7 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
       <button class="nav-item" data-nav="buyers"><span class="ico">🤝</span> Buyer Match Ai</button>
       <button class="nav-item" data-nav="masterbuyers"><span class="ico">📋</span> Master Buyers</button>
       <button class="nav-item" data-nav="blast"><span class="ico">📣</span> Buyer Blast</button>
+      <button class="nav-item" data-nav="dealrooms"><span class="ico">🏘️</span> Deal Rooms</button>
       <button class="nav-item" data-nav="skiptrace"><span class="ico">🔍</span> Skip Trace</button>
 <button class="nav-item" data-nav="listsearch"><span class="ico">🎯</span> List Builder</button>
 <button class="nav-item" data-nav="people"><span class="ico">👥</span> People Search</button>
@@ -795,6 +796,66 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
         <div id="bbReview"></div>
         <div class="sec-title" style="font-size:14px;margin-top:18px">📜 Blast History</div>
         <div id="bbHistory"></div>
+      </div>
+
+      <!-- DEAL ROOMS TAB -->
+      <div class="tab-page" id="page-dealrooms">
+        <div class="sec-title">🏘️ Deal Rooms <span class="badge orange" style="font-size:10px">BUYER LINKS ARE PUBLIC — MAO STAYS PRIVATE</span></div>
+        <div class="card" style="margin-bottom:14px">
+          <p style="color:var(--muted);font-size:13px;margin-bottom:12px">Create a private deal room per property — photo gallery, numbers, comp breakdown. Buyers open the link (no login), see the view counter, and submit offers with the <strong>Make an Offer</strong> button. Every offer lands here with a timestamp. Your <strong>MAO is never shown to buyers.</strong></p>
+          <button class="btn primary" onclick="drShowNewForm()">＋ New Deal Room</button>
+          <span id="drStatus" style="font-size:13px;margin-left:12px;color:var(--muted)"></span>
+        </div>
+
+        <div id="drFormWrap" style="display:none" class="card">
+          <div class="sec-title" style="font-size:14px" id="drFormTitle">New deal room</div>
+          <input type="hidden" id="drId">
+          <div style="margin-bottom:12px"><label class="lbl">Property Address *</label><input class="field" id="drAddress" placeholder="123 Main St, Indianapolis, IN 46201"></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;margin-bottom:12px">
+            <div><label class="lbl">ARV ($)</label><input class="field" id="drArv" type="number" min="0" step="1000" placeholder="e.g. 145000"></div>
+            <div><label class="lbl">Asking Price ($)</label><input class="field" id="drAsking" type="number" min="0" step="1000" placeholder="e.g. 99000"></div>
+            <div><label class="lbl">Est. Repairs ($)</label><input class="field" id="drRepairs" type="number" min="0" step="1000" placeholder="e.g. 30000"></div>
+            <div><label class="lbl">MAO ($) — 🔒 private, buyers never see this</label><input class="field" id="drMao" type="number" min="0" step="1000" placeholder="e.g. 88000"></div>
+          </div>
+          <div style="margin-bottom:12px"><label class="lbl">Comp Breakdown <span style="color:var(--muted);font-weight:400">— shown to buyers (e.g. "3 comps avg $145K, 0.4mi radius, all 3bd/2ba sold in last 6 months")</span></label><textarea class="field" id="drComp" rows="3" placeholder="How you got the ARV"></textarea></div>
+          <div style="display:flex;gap:10px">
+            <button class="btn primary" onclick="drSaveDeal()">💾 Save Deal</button>
+            <button class="btn" onclick="document.getElementById('drFormWrap').style.display='none'">Cancel</button>
+          </div>
+        </div>
+
+        <div id="drDetailWrap" style="display:none">
+          <div class="card">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
+              <button class="btn" onclick="drBackToList()">← All deals</button>
+              <div class="sec-title" style="font-size:15px;margin:0" id="drDetailAddr"></div>
+            </div>
+            <div id="drDetailStats" style="font-size:13px;color:var(--muted);margin-bottom:12px"></div>
+            <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+              <button class="btn primary" onclick="drCopyBuyerLink()">🔗 Copy Buyer Link</button>
+              <button class="btn" onclick="drEditCurrent()">✏️ Edit Numbers</button>
+              <button class="btn" onclick="drDeleteCurrent()" style="color:#f87171">🗑 Delete</button>
+            </div>
+            <div id="drLinkOut" style="font-size:12px;color:var(--muted);word-break:break-all;margin-bottom:6px"></div>
+          </div>
+          <div class="card">
+            <div class="sec-title" style="font-size:14px">📷 Photos</div>
+            <p style="font-size:12px;color:var(--muted);margin-bottom:10px">First photo becomes the cover. Click ⭐ on any photo to make it the cover.</p>
+            <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+              <input type="file" id="drPhotoFile" accept="image/*" class="field" style="max-width:280px;margin:0">
+              <input class="field" id="drPhotoCap" placeholder="Caption (optional)" style="max-width:220px;margin:0">
+              <button class="btn primary" onclick="drUploadPhoto()">⬆ Upload</button>
+              <span id="drPhotoStatus" style="font-size:12px;color:var(--muted)"></span>
+            </div>
+            <div id="drPhotos" style="display:flex;gap:10px;flex-wrap:wrap"></div>
+          </div>
+          <div class="card">
+            <div class="sec-title" style="font-size:14px">💰 Offers <span id="drOfferCount" class="badge" style="font-size:10px"></span></div>
+            <div id="drOffers"></div>
+          </div>
+        </div>
+
+        <div id="drList"></div>
       </div>
 
       <!-- SKIP TRACE TAB -->
@@ -1366,6 +1427,7 @@ function showPage(name){
   document.querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active', b.dataset.nav===name));
   if(name === 'settings') dmLoadCredits();
   if(name === 'listimport') liLoadConn();
+  if(name === 'dealrooms' && typeof drLoadDeals === 'function') drLoadDeals();
   if(name === 'comps'){ renderCompMap(); setTimeout(()=>{ if(compMap){ compMap.invalidateSize(); renderCompMap(); } }, 150); }
   /* Leaving Comps wipes it (never on entering, never on a same-page
      re-click): a return shows a blank page, never the previous property. */
@@ -5677,6 +5739,288 @@ function leadPassesTypeFilter(l){
   if(includedTypes.size && !includedTypes.has(sig)) return false;
   if(excludedTypes.has(sig)) return false;
   return true;
+}
+
+/* ============ DEAL ROOMS (master API — Netlify Blobs, zero new vendors) ============ */
+const DR_API = '/.netlify/functions/deals-api';
+let drDeals = [];
+let drCurrent = null;
+
+function drEsc(s){
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+  });
+}
+function drMoney(n){
+  if(n == null || n === '') return '—';
+  return '$' + Number(n).toLocaleString('en-US');
+}
+function drSetStatus(msg){
+  const el = document.getElementById('drStatus');
+  if(el) el.textContent = msg || '';
+}
+async function drApiGet(action, params){
+  const q = new URLSearchParams(Object.assign({action}, params || {})).toString();
+  const r = await fetch(DR_API + '?' + q);
+  const j = await r.json().catch(()=>({}));
+  if(r.status === 401) throw new Error('Not signed in — reload the dashboard and sign in.');
+  if(!r.ok) throw new Error(j.error || ('Request failed (' + r.status + ')'));
+  return j;
+}
+async function drApiPost(payload){
+  const r = await fetch(DR_API, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+  const j = await r.json().catch(()=>({}));
+  if(r.status === 401) throw new Error('Not signed in — reload the dashboard and sign in.');
+  if(!r.ok) throw new Error(j.error || ('Request failed (' + r.status + ')'));
+  return j;
+}
+function drBuyerLink(deal){
+  return location.origin + '/room.html?token=' + deal.roomToken;
+}
+
+async function drLoadDeals(){
+  drSetStatus('Loading…');
+  try{
+    const j = await drApiGet('list');
+    drDeals = j.deals || [];
+    drRenderList();
+    drSetStatus(drDeals.length ? '' : 'No deal rooms yet — create your first one above.');
+  }catch(e){
+    drSetStatus('');
+    document.getElementById('drList').innerHTML =
+      '<div class="card"><p style="color:#f87171;font-size:13px">⚠ ' + drEsc(e.message) + '</p>' +
+      '<p style="color:var(--muted);font-size:12px;margin-top:8px">Deal rooms need the <b>@netlify/blobs</b> dependency deployed (package.json). If you just added it, wait for the Netlify deploy to finish, then reload.</p></div>';
+  }
+}
+function drRenderList(){
+  const el = document.getElementById('drList');
+  document.getElementById('drFormWrap').style.display = 'none';
+  document.getElementById('drDetailWrap').style.display = 'none';
+  if(!drDeals.length){
+    el.innerHTML = '';
+    return;
+  }
+  el.innerHTML = drDeals.map(function(d){
+    return '<div class="card" style="margin-bottom:10px"><div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">' +
+      '<div style="flex:1;min-width:200px"><div style="font-weight:700;font-size:15px">' + drEsc(d.address) + '</div>' +
+      '<div style="font-size:12px;color:var(--muted);margin-top:4px">ARV ' + drMoney(d.arv) + ' · Asking ' + drMoney(d.askingPrice) +
+      ' · 👁 ' + (d.viewCount||0) + ' views · 💰 ' + (d.offerCount||0) + ' offers · 📷 ' + (d.photoCount||0) + ' photos</div></div>' +
+      '<button class="btn primary" onclick="drOpenDeal(\'' + d.id + '\')">Open</button>' +
+      '<button class="btn" onclick="drQuickCopy(\'' + d.id + '\')">🔗 Copy link</button>' +
+      '</div></div>';
+  }).join('');
+}
+async function drQuickCopy(id){
+  const d = drDeals.find(function(x){ return x.id === id; });
+  if(!d) return;
+  try{
+    const full = await drApiGet('get', {id});
+    drCopyText(drBuyerLink(full.deal));
+  }catch(e){ alert('Could not load deal: ' + e.message); }
+}
+function drCopyText(t){
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(t).then(function(){ drSetStatus('✅ Buyer link copied — paste it into your blast SMS.'); }, function(){ prompt('Copy the buyer link:', t); });
+  } else { prompt('Copy the buyer link:', t); }
+}
+function drShowNewForm(){
+  document.getElementById('drFormTitle').textContent = 'New deal room';
+  document.getElementById('drId').value = '';
+  ['drAddress','drArv','drAsking','drRepairs','drMao','drComp'].forEach(function(i){ document.getElementById(i).value = ''; });
+  document.getElementById('drDetailWrap').style.display = 'none';
+  document.getElementById('drFormWrap').style.display = 'block';
+  document.getElementById('drAddress').focus();
+}
+async function drSaveDeal(){
+  const id = document.getElementById('drId').value;
+  const payload = {
+    action: id ? 'update' : 'create',
+    address: document.getElementById('drAddress').value.trim(),
+    arv: document.getElementById('drArv').value,
+    askingPrice: document.getElementById('drAsking').value,
+    estRepairs: document.getElementById('drRepairs').value,
+    mao: document.getElementById('drMao').value,
+    compSummary: document.getElementById('drComp').value.trim()
+  };
+  if(!payload.address){ alert('Property address is required.'); return; }
+  if(id) payload.id = id;
+  drSetStatus('Saving…');
+  try{
+    const j = await drApiPost(payload);
+    drSetStatus('✅ Saved.');
+    document.getElementById('drFormWrap').style.display = 'none';
+    await drLoadDeals();
+    drOpenDeal(id || j.id);
+  }catch(e){ drSetStatus(''); alert('Save failed: ' + e.message); }
+}
+async function drOpenDeal(id){
+  drSetStatus('Loading deal…');
+  try{
+    const j = await drApiGet('get', {id});
+    drCurrent = j.deal;
+    drRenderDetail();
+    drSetStatus('');
+  }catch(e){ drSetStatus(''); alert('Could not open deal: ' + e.message); }
+}
+function drRenderDetail(){
+  const d = drCurrent;
+  if(!d) return;
+  document.getElementById('drList').innerHTML = '';
+  document.getElementById('drFormWrap').style.display = 'none';
+  document.getElementById('drDetailWrap').style.display = 'block';
+  document.getElementById('drDetailAddr').textContent = d.address;
+  document.getElementById('drDetailStats').innerHTML =
+    'ARV <b style="color:var(--text)">' + drMoney(d.arv) + '</b> · Asking <b style="color:var(--text)">' + drMoney(d.askingPrice) + '</b>' +
+    ' · Est. repairs <b style="color:var(--text)">' + drMoney(d.estRepairs) + '</b> · 🔒 MAO <b style="color:var(--gold)">' + drMoney(d.mao) + '</b> (private)' +
+    ' · 👁 ' + (d.viewCount||0) + ' views';
+  document.getElementById('drLinkOut').textContent = drBuyerLink(d);
+  // photos
+  const ph = document.getElementById('drPhotos');
+  const photos = d.photos || [];
+  ph.innerHTML = photos.length ? photos.map(function(p){
+    return '<div style="position:relative;width:150px">' +
+      '<img src="' + drEsc(p.url) + '" style="width:150px;height:110px;object-fit:cover;border-radius:8px;border:1px solid var(--line);display:block" alt="">' +
+      '<div style="font-size:11px;color:var(--muted);margin-top:4px;min-height:16px">' + drEsc(p.caption || '') + (p.isCover ? ' <span style="color:var(--gold)">⭐ cover</span>' : '') + '</div>' +
+      '<div style="display:flex;gap:6px;margin-top:4px">' +
+      (p.isCover ? '' : '<button class="btn" style="padding:4px 8px;font-size:11px" onclick="drSetCover(\'' + p.id + '\')">⭐</button>') +
+      '<button class="btn" style="padding:4px 8px;font-size:11px;color:#f87171" onclick="drDeletePhoto(\'' + p.id + '\')">✕</button>' +
+      '</div></div>';
+  }).join('') : '<p style="font-size:13px;color:var(--muted)">No photos yet — upload the first one above.</p>';
+  drRenderOffers();
+}
+function drBackToList(){
+  drCurrent = null;
+  document.getElementById('drDetailWrap').style.display = 'none';
+  drRenderList();
+}
+function drCopyBuyerLink(){
+  if(drCurrent) drCopyText(drBuyerLink(drCurrent));
+}
+function drEditCurrent(){
+  const d = drCurrent;
+  if(!d) return;
+  document.getElementById('drFormTitle').textContent = 'Edit deal room';
+  document.getElementById('drId').value = d.id;
+  document.getElementById('drAddress').value = d.address || '';
+  document.getElementById('drArv').value = d.arv == null ? '' : d.arv;
+  document.getElementById('drAsking').value = d.askingPrice == null ? '' : d.askingPrice;
+  document.getElementById('drRepairs').value = d.estRepairs == null ? '' : d.estRepairs;
+  document.getElementById('drMao').value = d.mao == null ? '' : d.mao;
+  document.getElementById('drComp').value = d.compSummary || '';
+  document.getElementById('drDetailWrap').style.display = 'none';
+  document.getElementById('drFormWrap').style.display = 'block';
+  document.getElementById('drAddress').focus();
+}
+async function drDeleteCurrent(){
+  const d = drCurrent;
+  if(!d) return;
+  if(!confirm('Delete the deal room for "' + d.address + '"? Photos and offers go with it. This cannot be undone.')) return;
+  try{
+    await drApiPost({action:'delete', id:d.id});
+    drBackToList();
+    drLoadDeals();
+  }catch(e){ alert('Delete failed: ' + e.message); }
+}
+async function drRenderOffers(){
+  const d = drCurrent;
+  const el = document.getElementById('drOffers');
+  if(!d){ el.innerHTML = ''; return; }
+  try{
+    const j = await drApiGet('offers', {id:d.id});
+    const offers = j.offers || [];
+    document.getElementById('drOfferCount').textContent = offers.length + ' total';
+    el.innerHTML = offers.length ? offers.slice().reverse().map(function(o){
+      const when = o.submittedAt ? new Date(o.submittedAt).toLocaleString() : '';
+      return '<div class="card" style="margin-bottom:8px;padding:12px 14px">' +
+        '<div style="display:flex;gap:12px;align-items:baseline;flex-wrap:wrap">' +
+        '<b style="font-size:16px;color:var(--accent)">$' + Number(o.amount||0).toLocaleString('en-US') + '</b>' +
+        '<b>' + drEsc(o.buyerName) + '</b>' +
+        '<span style="color:var(--muted);font-size:12px">' + drEsc(o.buyerPhone || 'no phone') + '</span>' +
+        '<span style="color:var(--muted);font-size:11px;margin-left:auto">' + drEsc(when) + '</span></div>' +
+        (o.message ? '<div style="font-size:13px;margin-top:6px;color:var(--text)">' + drEsc(o.message) + '</div>' : '') +
+        '</div>';
+    }).join('') : '<p style="font-size:13px;color:var(--muted)">No offers yet — share the buyer link to start getting them.</p>';
+  }catch(e){
+    el.innerHTML = '<p style="font-size:13px;color:#f87171">Could not load offers: ' + drEsc(e.message) + '</p>';
+  }
+}
+// client-side resize before upload (keeps Blobs + credits lean)
+async function drResizeImage(file){
+  try{
+    if(typeof createImageBitmap !== 'function') throw new Error('no bitmap');
+    const bmp = await createImageBitmap(file);
+    const maxDim = 1600;
+    const scale = Math.min(1, maxDim / Math.max(bmp.width, bmp.height));
+    const w = Math.round(bmp.width * scale), h = Math.round(bmp.height * scale);
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    canvas.getContext('2d').drawImage(bmp, 0, 0, w, h);
+    const blob = await new Promise(function(r){ canvas.toBlob(r, 'image/jpeg', 0.82); });
+    if(!blob) throw new Error('encode failed');
+    const buf = new Uint8Array(await blob.arrayBuffer());
+    return { data: drB64(buf), contentType: 'image/jpeg' };
+  }catch(e){
+    // fall back to the original file (HEIC etc.)
+    const buf = new Uint8Array(await file.arrayBuffer());
+    return { data: drB64(buf), contentType: file.type || 'image/jpeg' };
+  }
+}
+function drB64(bytes){
+  let bin = '';
+  const CH = 8192;
+  for(let i = 0; i < bytes.length; i += CH){
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
+  }
+  return btoa(bin);
+}
+async function drUploadPhoto(){
+  const d = drCurrent;
+  const fileInput = document.getElementById('drPhotoFile');
+  const st = document.getElementById('drPhotoStatus');
+  if(!d){ alert('Open a deal first.'); return; }
+  const file = fileInput.files && fileInput.files[0];
+  if(!file){ st.textContent = 'Pick a photo first.'; return; }
+  if(file.size > 8 * 1024 * 1024){ st.textContent = 'That file is over 8MB — pick a smaller one.'; return; }
+  st.textContent = 'Resizing & uploading…';
+  try{
+    const r = await drResizeImage(file);
+    if(r.data.length * 0.75 > 5 * 1024 * 1024){ st.textContent = 'Still over 5MB after resize — try another photo.'; return; }
+    await drApiPost({
+      action: 'uploadPhoto',
+      id: d.id,
+      filename: file.name,
+      contentType: r.contentType,
+      data: r.data,
+      caption: document.getElementById('drPhotoCap').value.trim()
+    });
+    fileInput.value = '';
+    document.getElementById('drPhotoCap').value = '';
+    st.textContent = '✅ Uploaded.';
+    const j = await drApiGet('get', {id:d.id});
+    drCurrent = j.deal;
+    drRenderDetail();
+    drLoadDeals();
+  }catch(e){ st.textContent = 'Upload failed: ' + e.message; }
+}
+async function drDeletePhoto(photoId){
+  const d = drCurrent;
+  if(!d || !confirm('Delete this photo?')) return;
+  try{
+    await drApiPost({action:'deletePhoto', id:d.id, photoId});
+    const j = await drApiGet('get', {id:d.id});
+    drCurrent = j.deal;
+    drRenderDetail();
+  }catch(e){ alert('Delete failed: ' + e.message); }
+}
+async function drSetCover(photoId){
+  const d = drCurrent;
+  if(!d) return;
+  try{
+    await drApiPost({action:'setCover', id:d.id, photoId});
+    const j = await drApiGet('get', {id:d.id});
+    drCurrent = j.deal;
+    drRenderDetail();
+  }catch(e){ alert('Could not set cover: ' + e.message); }
 }
 </script>
 <!-- XLeads-style Filters Drawer -->
