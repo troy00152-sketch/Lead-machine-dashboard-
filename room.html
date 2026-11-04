@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Private Deal Room — Direct Property Buyers</title>
+<style>
+:root{
+  --bg:#050a14; --bg2:#0a1428; --panel:rgba(10,20,40,.72); --line:rgba(0,212,255,.18);
+  --text:#d7e6f5; --muted:#7d93ad; --accent:#00d4ff; --accent2:#0090ff;
+  --gold:#f5b301; --green:#22c55e; --red:#f87171;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;min-height:100vh;padding:20px 14px 60px}
+body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
+  background:radial-gradient(900px 480px at 20% -5%,rgba(0,212,255,.10),transparent 60%),
+             radial-gradient(700px 420px at 90% 10%,rgba(0,144,255,.08),transparent 60%);}
+.wrap{max-width:760px;margin:0 auto;position:relative;z-index:1}
+.brand{text-align:center;margin-bottom:18px}
+.brand .t{font-size:13px;font-weight:700;letter-spacing:2px;color:var(--accent);text-transform:uppercase}
+.brand .s{font-size:11px;color:var(--muted);margin-top:4px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px;margin-bottom:16px;backdrop-filter:blur(12px)}
+.addr{font-size:22px;font-weight:700;margin-bottom:4px}
+.views{display:inline-block;font-size:12px;color:var(--gold);border:1px solid rgba(245,179,1,.35);border-radius:99px;padding:4px 12px;margin-top:8px;background:rgba(245,179,1,.07)}
+.gallery{position:relative;border-radius:12px;overflow:hidden;background:#020610;border:1px solid var(--line);margin-bottom:12px}
+.gallery img.main{width:100%;max-height:440px;object-fit:cover;display:block}
+.thumbs{display:flex;gap:8px;overflow-x:auto;padding:10px}
+.thumbs img{width:76px;height:56px;object-fit:cover;border-radius:8px;cursor:pointer;border:2px solid transparent;opacity:.7;flex:none}
+.thumbs img.on{border-color:var(--accent);opacity:1}
+.nophoto{padding:60px 20px;text-align:center;color:var(--muted);font-size:14px;border:1px dashed var(--line);border-radius:12px;margin-bottom:12px}
+.nums{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:4px}
+.num{background:rgba(0,212,255,.05);border:1px solid var(--line);border-radius:10px;padding:12px;text-align:center}
+.num .l{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px}
+.num .v{font-size:20px;font-weight:700;color:var(--accent)}
+.comp h3{font-size:13px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin-bottom:8px}
+.comp p{font-size:14px;line-height:1.6;white-space:pre-wrap}
+.offer-btn{display:block;width:100%;padding:16px;border:0;border-radius:12px;font-size:17px;font-weight:700;cursor:pointer;
+  background:linear-gradient(135deg,var(--accent),var(--accent2));color:#001220;box-shadow:0 0 24px rgba(0,212,255,.35);margin:6px 0 16px}
+.offer-btn:hover{filter:brightness(1.1)}
+.field{width:100%;background:#020610;border:1px solid var(--line);border-radius:8px;color:var(--text);padding:11px 12px;font-size:15px;margin-bottom:10px}
+.field:focus{outline:none;border-color:var(--accent)}
+textarea.field{resize:vertical;min-height:70px}
+.lbl{display:block;font-size:12px;color:var(--muted);margin-bottom:6px;font-weight:600}
+.form-title{font-size:17px;font-weight:700;margin-bottom:14px}
+.hidden{display:none!important}
+.msg{padding:12px 14px;border-radius:10px;font-size:14px;margin-bottom:12px}
+.msg.ok{background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.4);color:#86efac}
+.msg.err{background:rgba(248,113,113,.1);border:1px solid rgba(248,113,113,.4);color:#fca5a5}
+.foot{text-align:center;font-size:11px;color:var(--muted);margin-top:22px}
+@media(max-width:520px){.nums{grid-template-columns:1fr 1fr}.num .v{font-size:17px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand">
+    <div class="t">Direct Property Buyers</div>
+    <div class="s">Private deal room — for serious cash buyers</div>
+  </div>
+  <div id="roomBody"><div class="card" style="text-align:center;color:var(--muted)">Loading deal room…</div></div>
+  <div class="foot">This is a private link. Please do not share it.</div>
+</div>
+<script>
+(function(){
+  var API = '/.netlify/functions/deals-api';
+  var token = new URLSearchParams(location.search).get('token') || '';
+  var body = document.getElementById('roomBody');
+
+  function esc(s){
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){
+      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+    });
+  }
+  function money(n){
+    if(n == null || n === '') return '—';
+    return '$' + Number(n).toLocaleString('en-US');
+  }
+  function showErr(msg){
+    body.innerHTML = '<div class="card"><div class="msg err">' + esc(msg) + '</div></div>';
+  }
+
+  if(!token){ showErr('This deal room link is missing its access token.'); return; }
+
+  fetch(API + '?action=room&token=' + encodeURIComponent(token))
+    .then(function(r){ return r.json().then(function(j){ return {s:r.status, j:j}; }); })
+    .then(function(res){
+      if(res.s !== 200 || !res.j.deal){ showErr(res.j.error || 'This deal room link is not valid.'); return; }
+      render(res.j.deal);
+    })
+    .catch(function(){ showErr('Could not load this deal room. Check your connection and try again.'); });
+
+  function render(d){
+    var photos = d.photos || [];
+    var cover = photos.find(function(p){ return p.isCover; }) || photos[0];
+    var gal = '';
+    if(photos.length){
+      gal = '<div class="gallery"><img class="main" id="rmMain" src="' + esc(cover.url) + '" alt="Property photo"></div>' +
+        '<div class="thumbs">' + photos.map(function(p,i){
+          return '<img src="' + esc(p.url) + '" data-i="' + i + '" class="' + (p === cover ? 'on' : '') + '" alt="">';
+        }).join('') + '</div>';
+    } else {
+      gal = '<div class="nophoto">Photos coming soon — call or text for details.</div>';
+    }
+    var comp = d.compSummary
+      ? '<div class="card comp"><h3>Comp breakdown</h3><p>' + esc(d.compSummary) + '</p></div>'
+      : '';
+
+    body.innerHTML =
+      '<div class="card"><div class="addr">' + esc(d.address) + '</div>' +
+      '<span class="views">👁 ' + Number(d.viewCount || 0) + ' buyer' + (Number(d.viewCount||0) === 1 ? ' has' : 's have') + ' viewed this deal</span></div>' +
+      gal +
+      '<div class="card"><div class="nums">' +
+        '<div class="num"><div class="l">ARV</div><div class="v">' + money(d.arv) + '</div></div>' +
+        '<div class="num"><div class="l">Asking</div><div class="v">' + money(d.askingPrice) + '</div></div>' +
+        '<div class="num"><div class="l">Est. repairs</div><div class="v">' + money(d.estRepairs) + '</div></div>' +
+      '</div></div>' +
+      comp +
+      '<button class="offer-btn" id="rmOfferBtn">💰 Make an Offer</button>' +
+      '<div class="card hidden" id="rmForm">' +
+        '<div class="form-title">Make an offer</div>' +
+        '<div id="rmFormMsg"></div>' +
+        '<label class="lbl">Your name *</label><input class="field" id="rmName" placeholder="Full name">' +
+        '<label class="lbl">Phone</label><input class="field" id="rmPhone" placeholder="(555) 123-4567" inputmode="tel">' +
+        '<label class="lbl">Offer amount ($) *</label><input class="field" id="rmAmount" placeholder="e.g. 75000" inputmode="decimal">' +
+        '<label class="lbl">Message <span style="font-weight:400">— optional (terms, timeline, proof of funds…)</span></label>' +
+        '<textarea class="field" id="rmMsg" placeholder="Anything Troy should know"></textarea>' +
+        '<button class="offer-btn" id="rmSend" style="margin-bottom:0">Send offer</button>' +
+      '</div>';
+
+    // gallery thumbs
+    body.querySelectorAll('.thumbs img').forEach(function(t){
+      t.addEventListener('click', function(){
+        body.querySelectorAll('.thumbs img').forEach(function(x){ x.classList.remove('on'); });
+        t.classList.add('on');
+        document.getElementById('rmMain').src = photos[Number(t.dataset.i)].url;
+      });
+    });
+
+    document.getElementById('rmOfferBtn').addEventListener('click', function(){
+      var f = document.getElementById('rmForm');
+      f.classList.toggle('hidden');
+      if(!f.classList.contains('hidden')) f.scrollIntoView({behavior:'smooth', block:'start'});
+    });
+
+    document.getElementById('rmSend').addEventListener('click', function(){
+      var m = document.getElementById('rmFormMsg');
+      var payload = {
+        action: 'submitOffer',
+        token: token,
+        buyerName: document.getElementById('rmName').value.trim(),
+        buyerPhone: document.getElementById('rmPhone').value.trim(),
+        amount: document.getElementById('rmAmount').value.trim(),
+        message: document.getElementById('rmMsg').value.trim()
+      };
+      if(!payload.buyerName){ m.innerHTML = '<div class="msg err">Please enter your name.</div>'; return; }
+      if(!payload.amount || isNaN(Number(payload.amount)) || Number(payload.amount) <= 0){
+        m.innerHTML = '<div class="msg err">Enter your offer amount.</div>'; return;
+      }
+      var btn = document.getElementById('rmSend');
+      btn.disabled = true; btn.textContent = 'Sending…';
+      fetch(API, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)})
+        .then(function(r){ return r.json().then(function(j){ return {s:r.status, j:j}; }); })
+        .then(function(res){
+          if(res.s === 200 && res.j.ok){
+            m.innerHTML = '<div class="msg ok">✅ Offer sent — Troy will be in touch shortly.</div>';
+            btn.textContent = 'Offer sent';
+          } else {
+            m.innerHTML = '<div class="msg err">' + esc(res.j.error || 'Could not send your offer. Try again.') + '</div>';
+            btn.disabled = false; btn.textContent = 'Send offer';
+          }
+        })
+        .catch(function(){
+          m.innerHTML = '<div class="msg err">Connection issue — try again.</div>';
+          btn.disabled = false; btn.textContent = 'Send offer';
+        });
+    });
+  }
+})();
+</script>
+</body>
+</html>
