@@ -280,6 +280,27 @@ async function hlUpdateOpportunity({ hlToken, opportunityId, stageId, status, mo
   return { ok: true, summary: `Updated opportunity ${oid}: ${changed}.` };
 }
 
+// hl_create_contact: create a new contact
+async function hlCreateContact({ hlToken, firstName, lastName, name, phone, email }) {
+  const body = { locationId: HL_LOCATION_ID };
+  if (name && !firstName && !lastName) {
+    const parts = String(name).trim().split(/\s+/);
+    if (parts.length) body.firstName = parts[0];
+    if (parts.length > 1) body.lastName = parts.slice(1).join(' ');
+  } else {
+    if (firstName) body.firstName = String(firstName).trim();
+    if (lastName) body.lastName = String(lastName).trim();
+  }
+  if (phone) body.phone = String(phone).trim();
+  if (email) body.email = String(email).trim();
+  if (!body.firstName && !body.phone && !body.email) {
+    return { ok: false, summary: 'Need at least a name, phone, or email to create a contact.' };
+  }
+  const result = await hlFetch(hlToken, 'POST', '/contacts/', body);
+  const c = result.contact || result;
+  return { ok: true, summary: `Created contact ${c.contactName || c.name || ''} — ID ${c.id}.`, contactId: c.id };
+}
+
 // hl_list_templates: list document/contract templates in the location
 async function hlListTemplates({ hlToken }) {
   const data = await hlFetch(
@@ -538,11 +559,31 @@ const HL_SEND_CONTRACT_DEF = {
   },
 };
 
+const HL_CREATE_CONTACT_DEF = {
+  type: 'function',
+  function: {
+    name: 'hl_create_contact',
+    description: 'Create a new contact. Call it when Troy says "create a contact", "add [name]", or when a lookup finds no match and Troy wants a new one. Needs at least a name, phone, or email.',
+    parameters: {
+      type: 'object',
+      properties: {
+        firstName: { type: 'string', description: 'First name.' },
+        lastName: { type: 'string', description: 'Last name.' },
+        name: { type: 'string', description: 'Full name (splits into first/last).' },
+        phone: { type: 'string', description: 'Phone number.' },
+        email: { type: 'string', description: 'Email address.' },
+      },
+      additionalProperties: false,
+    },
+  },
+};
+
 const HL_TOOLS = [
   HL_GET_CONTACT_DEF, HL_ADD_TAG_DEF, HL_CREATE_OPPORTUNITY_DEF,
   HL_GET_CONVERSATIONS_DEF, HL_GET_WORKFLOWS_DEF, HL_SEND_SMS_DEF,
   HL_UPDATE_CONTACT_DEF, HL_REMOVE_TAG_DEF, HL_ADD_NOTE_DEF,
   HL_UPDATE_OPPORTUNITY_DEF, HL_LIST_TEMPLATES_DEF, HL_SEND_CONTRACT_DEF,
+  HL_CREATE_CONTACT_DEF,
 ];
 
 // ---- System prompt ----
@@ -551,6 +592,7 @@ const SYSTEM_PROMPT = `You are Bread, the AI inside Troy's HighLevel CRM. Troy i
 
 YOUR TOOLS (HighLevel CRM, location "direct property buyers"):
 - hl_get_contact: search by name/phone/email. Always start here when Troy names someone.
+- hl_create_contact: create a new contact when lookup finds no match and Troy wants one.
 - hl_add_tag: add tags. Fire it when Troy says "tag" — no extra confirmation needed for tags.
 - hl_remove_tag: remove tags. Fire it when Troy says "untag" or "remove the tag".
 - hl_update_contact: change name, phone, email, address. Fire it when Troy says "change his name", "fix the number", "update her email". No confirmation needed — just do it.
@@ -562,6 +604,8 @@ YOUR TOOLS (HighLevel CRM, location "direct property buyers"):
 - hl_send_sms: DRAFT ONLY unless Troy confirms. Propose the exact message, then wait. NEVER set confirmed=true on your own. The tool auto-refuses DND'd contacts.
 - hl_list_templates: list contract templates. Use before sending a contract.
 - hl_send_contract: DRAFT ONLY unless Troy confirms. Propose the template, recipient, and key details, then wait. NEVER set confirmed=true on your own. Contact must have an email.
+
+CRITICAL — CONTACT ID RETENTION: When hl_get_contact returns a contact ID, you MUST keep that exact ID and pass it to every follow-up tool call (hl_update_contact, hl_add_tag, hl_send_contract, etc.) in the SAME conversation. Never guess an ID, never omit it, never use a name where an ID is required. If you lose the ID, call hl_get_contact again to re-fetch it — do not proceed without it.
 
 HARD RULES:
 1. SMS bodies carry NO opt-out sentence — the footer appends it. Never write "Reply STOP to opt out."
@@ -634,6 +678,10 @@ const TOOL_HANDLERS = {
   hl_send_contract: (hlToken, a) => hlSendContract({
     hlToken, templateId: a.templateId, contactId: a.contactId,
     contractName: a.contractName, confirmed: a.confirmed === true,
+  }),
+  hl_create_contact: (hlToken, a) => hlCreateContact({
+    hlToken, firstName: a.firstName, lastName: a.lastName,
+    name: a.name, phone: a.phone, email: a.email,
   }),
 };
 
