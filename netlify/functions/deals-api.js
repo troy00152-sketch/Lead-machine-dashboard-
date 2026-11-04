@@ -401,6 +401,87 @@ async function adminSetCover(s, body) {
   return ok({ ok: true });
 }
 
+// ================= TROY SMS NOTIFICATIONS =================
+// Texts Troy (+1 203-565-7810) when a buyer views a deal room or submits
+// an offer. Troy explicitly requested these 2026-11-04 ("text me on views
+// and offers"). Uses the HL Private Integration token (HL_API_TOKEN env).
+// View alerts are throttled to 1 per deal per 15 min to avoid buzz-storms
+// when a link goes to many buyers at once; offers always alert immediately.
+// All failures are silent — notifications never break the buyer flow.
+const TROY_PHONE_DIGITS = '12035657810';
+const HL_LOCATION_ID_NOTIFY = 'krKoHLudPnn7nT0DPtwa';
+const HL_API_BASE_NOTIFY = 'https://services.leadconnectorhq.com';
+const HL_API_VERSION_NOTIFY = '2021-07-28';
+const NOTIFY_TIMEOUT_MS = 10000;
+let troyContactIdCache = null;
+
+async function hlNotifyFetch(path, method, body) {
+  const token = process.env.HL_API_TOKEN;
+  if (!token) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), NOTIFY_TIMEOUT_MS);
+  try {
+    const res = await fetch(HL_API_BASE_NOTIFY + path, {
+      method,
+      signal: controller.signal,
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Version': HL_API_VERSION_NOTIFY,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    });
+    if (!res.ok) return null;
+    return await res.json().catch(() => ({}));
+  } catch (e) {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function getTroyContactId() {
+  if (troyContactIdCache) return troyContactIdCache;
+  try {
+    const data = await hlNotifyFetch(
+      `/contacts/?locationId=${HL_LOCATION_ID_NOTIFY}&phone=%2B${TROY_PHONE_DIGITS}`,
+      'GET'
+    );
+    const contacts = (data && data.contacts) || [];
+    for (const c of contacts) {
+      const digits = String(c.phone || '').replace(/\D/g, '');
+      if (digits.endsWith(TROY_PHONE_DIGITS) || digits.endsWith('2035657810')) {
+        troyContactIdCache = c.id;
+        return c.id;
+      }
+    }
+  } catch (e) { /* fall through */ }
+  return null;
+}
+
+async function notifyTroy(message) {
+  try {
+    const msg = String(message || '').trim().slice(0, 300);
+    if (!msg) return;
+    const contactId = await getTroyContactId();
+    if (!contactId) return;
+    await hlNotifyFetch('/conversations/messages', 'POST', {
+      type: 'SMS',
+      contactId,
+      message: msg,
+      locationId: HL_LOCATION_ID_NOTIFY,
+    });
+  } catch (e) { /* silent */ }
+}
+
+function fmtMoney(n) {
+  const v = Number(n);
+  if (!isFinite(v)) return String(n);
+  return '$' + Math.round(v).toLocaleString('en-US');
+}
+
 // ================= PUBLIC =================
 
 async function publicRoom(s, token) {
@@ -413,6 +494,10 @@ async function publicRoom(s, token) {
   d.viewCount = (d.viewCount || 0) + 1;
   // best-effort view count — a lost increment here is harmless
   try { await writeJson(s, dealKey(d.id), d); } catch (e) { /* ignore */ }
+  // Notify Troy (throttled: max 1 view-SMS per deal per 15 min)
+  if (rateOk('notify:view:' + d.id, 1, 15 * 60 * 1000)) {
+    notifyTroy(`\u{1F441} Buyer viewed your deal: ${d.address} (${d.viewCount} total view${d.viewCount === 1 ? '' : 's'})`);
+  }
   return ok({ deal: publicDeal(d) });
 }
 
@@ -438,6 +523,11 @@ async function publicSubmitOffer(s, body) {
   const offers = await readJson(s, key, []);
   (Array.isArray(offers) ? offers : []).push(offer);
   await writeJson(s, key, Array.isArray(offers) ? offers : [offer]);
+  // Notify Troy immediately — every offer alerts (no throttle)
+  const offerBits = [`\u{1F4B0} New offer on ${d.address}: ${fmtMoney(amount)} from ${buyerName}`];
+  if (offer.buyerPhone) offerBits.push(`Ph: ${offer.buyerPhone}`);
+  if (offer.message) offerBits.push(`"${offer.message.slice(0, 120)}"`);
+  notifyTroy(offerBits.join('\n'));
   return ok({ ok: true });
 }
 
