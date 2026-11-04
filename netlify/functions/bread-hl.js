@@ -323,35 +323,43 @@ async function hlListTemplates({ hlToken }) {
   };
 }
 
-// hl_send_contract: create + send a contract from a template (CONFIRMATION GATE)
+// hl_send_contract: PREPARE a contract send (ASSISTED FLOW — Troy sends in HL UI)
+// The HL documents API is unreliable, so Bread prepares everything and Troy hits send.
 async function hlSendContract({ hlToken, templateId, contactId, contractName, confirmed, customValues }) {
   const tid = String(templateId || '').trim();
   const cid = String(contactId || '').trim();
   if (!tid) return { ok: false, summary: 'No template ID — list templates first with hl_list_templates.' };
   if (!cid) return { ok: false, summary: 'No contact ID — look up the contact first.' };
-  if (confirmed !== true) {
-    return {
-      ok: false, needsConfirmation: true,
-      summary: `CONTRACT NOT SENT — needs your tap to confirm.\nTemplate: ${tid}\nTo: contact ${cid}\nContract name: ${contractName || '(default)'}\n${customValues ? `Custom values: ${JSON.stringify(customValues).slice(0, 200)}` : ''}\nReply "send it" to confirm.`,
-    };
-  }
-  // Look up the contact to get email for the recipient
+  // Look up the contact to verify email
   const contact = await hlFetch(hlToken, 'GET', `/contacts/${encodeURIComponent(cid)}`).catch(() => null);
   const c = contact ? (contact.contact || contact) : {};
+  const contactName = c.contactName || c.name || `${c.firstName || ''} ${c.lastName || ''}`.trim() || 'the contact';
   const recipientEmail = c.email || '';
   if (!recipientEmail) {
-    return { ok: false, summary: `Cannot send contract — contact ${cid} has no email on file. Add an email first.` };
+    return { ok: false, summary: `Cannot prepare contract — ${contactName} has no email on file. Add an email first with hl_update_contact.` };
   }
-  // HL API format (from 422 error 2026-11-03): top-level contactId + userId, NO recipients/name properties
-  const body = {
-    templateId: tid,
-    locationId: HL_LOCATION_ID,
-    userId: HL_USER_ID,
-    contactId: cid,
+  // Get template name for the instructions
+  const templates = await hlFetch(hlToken, 'GET', `/proposals/templates?locationId=${HL_LOCATION_ID}`).catch(() => null);
+  let templateName = tid;
+  if (templates) {
+    const list = templates.templates || templates.data || [];
+    const match = list.find(t => String(t.id || t._id) === tid);
+    if (match) templateName = match.name || match.title || tid;
+  }
+  return {
+    ok: true,
+    summary: `READY TO SEND — here's your checklist:\n\n` +
+      `Template: ${templateName}\n` +
+      `To: ${contactName} (${recipientEmail})\n` +
+      (contractName ? `Contract name: ${contractName}\n` : '') +
+      (customValues ? `Details: ${JSON.stringify(customValues).slice(0, 200)}\n` : '') +
+      `\nTo send it:\n` +
+      `1. Go to Documents → Contracts in HighLevel\n` +
+      `2. Open "${templateName}"\n` +
+      `3. Send to ${contactName} — the contact's email (${recipientEmail}) is already on file\n` +
+      `4. Fill in the contract amount and details, then hit Send\n\n` +
+      `Say "done" when you've sent it and I'll log a note on the contact.`,
   };
-  const result = await hlFetch(hlToken, 'POST', '/proposals/templates/send', body);
-  const docId = (result && (result.id || result.documentId || (result.document && result.document.id))) || 'unknown';
-  return { ok: true, summary: `Contract sent to contact ${cid} (${recipientEmail}). Document ID: ${docId}.` };
 }
 
 // ---- Tool definitions for the LLM ----
@@ -546,14 +554,14 @@ const HL_SEND_CONTRACT_DEF = {
   type: 'function',
   function: {
     name: 'hl_send_contract',
-    description: 'Create and send a contract from a template to a contact. NEVER call this with confirmed=true on your own — always propose the contract first (template name, recipient, key details) and let Troy confirm. Only set confirmed=true when Troy has explicitly said "send it". The contact must have an email on file.',
+    description: 'Prepare a contract for Troy to send. Looks up the contact (verifies email on file) and the template, then gives Troy a step-by-step checklist to send it in the HighLevel UI. Call it when Troy says "send a contract to [name]" or "prepare a contract".',
     parameters: {
       type: 'object',
       properties: {
         templateId: { type: 'string', description: 'Template ID from hl_list_templates.' },
-        contactId: { type: 'string', description: 'HighLevel contact ID (the seller).' },
-        contractName: { type: 'string', description: 'Name for the sent document, e.g. "123 Main St Purchase Agreement".' },
-        confirmed: { type: 'boolean', description: 'Set true ONLY after Troy explicitly confirms. Default false.' },
+        contactId: { type: 'string', description: 'HighLevel contact ID (the recipient).' },
+        contractName: { type: 'string', description: 'Name for the contract, e.g. "123 Main St Purchase Agreement".' },
+        customValues: { type: 'object', description: 'Key contract details (amount, address, etc.) to include in the checklist.' },
       },
       required: ['templateId', 'contactId'],
       additionalProperties: false,
@@ -605,7 +613,7 @@ YOUR TOOLS (HighLevel CRM, location "direct property buyers"):
 - hl_get_workflows: Published/Draft status + enrollment counts.
 - hl_send_sms: DRAFT ONLY unless Troy confirms. Propose the exact message, then wait. NEVER set confirmed=true on your own. The tool auto-refuses DND'd contacts.
 - hl_list_templates: list contract templates. Use before sending a contract.
-- hl_send_contract: DRAFT ONLY unless Troy confirms. Propose the template, recipient, and key details, then wait. NEVER set confirmed=true on your own. Contact must have an email.
+- hl_send_contract: PREPARE a contract send (assisted flow). Looks up the contact + template, verifies the email, then gives Troy a step-by-step checklist to send it himself in the HighLevel UI. Troy hits send — Bread does everything around it.
 
 CRITICAL — CONTACT ID RETENTION: When hl_get_contact returns a contact ID, you MUST keep that exact ID and pass it to every follow-up tool call (hl_update_contact, hl_add_tag, hl_send_contract, etc.) in the SAME conversation. Never guess an ID, never omit it, never use a name where an ID is required. If you lose the ID, call hl_get_contact again to re-fetch it — do not proceed without it.
 
@@ -679,7 +687,7 @@ const TOOL_HANDLERS = {
   hl_list_templates: (hlToken) => hlListTemplates({ hlToken }),
   hl_send_contract: (hlToken, a) => hlSendContract({
     hlToken, templateId: a.templateId, contactId: a.contactId,
-    contractName: a.contractName, confirmed: a.confirmed === true,
+    contractName: a.contractName, customValues: a.customValues,
   }),
   hl_create_contact: (hlToken, a) => hlCreateContact({
     hlToken, firstName: a.firstName, lastName: a.lastName,
