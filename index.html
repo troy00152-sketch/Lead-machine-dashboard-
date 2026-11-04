@@ -748,6 +748,9 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
               <option value="C">🟡 C — Possible</option>
               <option value="D">⚪ D — Thin data</option>
             </select>
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);white-space:nowrap;cursor:pointer" title="Show only land investors (name contains 'land', phone on file)">
+              <input type="checkbox" id="mbLandOnly" onchange="searchMasterBuyers()" style="width:16px;height:16px;accent-color:#22c55e" /> 🌱 Land only
+            </label>
             <button class="btn primary" onclick="searchMasterBuyers()">🔍 Search</button>
           </div>
           <div id="mbResults" style="max-height:600px;overflow-y:auto"></div>
@@ -3881,6 +3884,7 @@ function loadMasterBuyers(){
 async function searchMasterBuyers(){
   const q = (document.getElementById('mbSearch').value || '').toLowerCase().trim();
   const tier = (document.getElementById('mbTier') || {}).value || '';
+  const landOnly = (document.getElementById('mbLandOnly') || {}).checked || false;
   const data = await loadMasterBuyers();
   let results = data;
   if(q){
@@ -3893,6 +3897,14 @@ async function searchMasterBuyers(){
   }
   if(tier){
     results = results.filter(b => (b.ti||'').charAt(0) === tier);
+  }
+  if(landOnly){
+    /* Land investors: name contains 'land' (Land Trust, Land Co, etc.) + phone on file.
+       Excludes 'landlord' name matches that aren't land-focused. */
+    results = results.filter(b => {
+      const n = (b.n||'').toLowerCase();
+      return n.includes('land') && !n.includes('landlord') && (b.p||'').length >= 7;
+    });
   }
   mbPage = 0;
   window._mbSortDir = 1; /* reset to score-desc on new search */
