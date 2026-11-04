@@ -5444,6 +5444,67 @@ function compDistressRow(prop){
     + (bits.length ? '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;font-size:13px">' + bits.join('') + '</div>' : '')
     + '</div>';
 }
+/* ── Comp photo gallery lightbox (Nov 4, Troy: "cant click on the picture
+   or zoom and its only one picture") — click any subject photo to open
+   full-screen; arrow keys / on-screen arrows cycle through all angles. ── */
+function openCompLightbox(gid, idx) {
+  const photos = (window._compGalleries && window._compGalleries[gid]) || [];
+  if (!photos.length) return;
+  let cur = idx || 0;
+  let lb = document.getElementById('compLightbox');
+  if (!lb) {
+    lb = document.createElement('div');
+    lb.id = 'compLightbox';
+    lb.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:99999;display:flex;align-items:center;justify-content:center;flex-direction:column;cursor:zoom-out';
+    lb.innerHTML = '<img id="compLbImg" style="max-width:92vw;max-height:82vh;border-radius:12px;box-shadow:0 8px 60px rgba(0,0,0,0.6)">'
+      + '<div id="compLbLabel" style="color:#fff;margin-top:12px;font-size:14px"></div>'
+      + '<div style="margin-top:10px;display:flex;gap:16px;align-items:center">'
+      + '<button id="compLbPrev" style="background:rgba(255,255,255,0.15);color:#fff;border:1px solid rgba(255,255,255,0.3);border-radius:50%;width:48px;height:48px;font-size:22px;cursor:pointer">‹</button>'
+      + '<span id="compLbCount" style="color:#fff;font-size:14px"></span>'
+      + '<button id="compLbNext" style="background:rgba(255,255,255,0.15);color:#fff;border:1px solid rgba(255,255,255,0.3);border-radius:50%;width:48px;height:48px;font-size:22px;cursor:pointer">›</button>'
+      + '</div>'
+      + '<div style="color:rgba(255,255,255,0.5);margin-top:8px;font-size:12px">Click anywhere or press ESC to close</div>';
+    document.body.appendChild(lb);
+    lb.addEventListener('click', (e) => {
+      if (e.target.id === 'compLbPrev') { show((cur - 1 + photos.length) % photos.length); e.stopPropagation(); return; }
+      if (e.target.id === 'compLbNext') { show((cur + 1) % photos.length); e.stopPropagation(); return; }
+      closeCompLightbox();
+    });
+    document.addEventListener('keydown', function escHandler(e) {
+      if (e.key === 'Escape') closeCompLightbox();
+      if (e.key === 'ArrowLeft') show((cur - 1 + photos.length) % photos.length);
+      if (e.key === 'ArrowRight') show((cur + 1) % photos.length);
+    });
+  }
+  function show(i) {
+    cur = i;
+    document.getElementById('compLbImg').src = photos[i].src;
+    document.getElementById('compLbLabel').textContent = photos[i].label;
+    document.getElementById('compLbCount').textContent = (i + 1) + ' / ' + photos.length;
+  }
+  window._compLbShow = show;
+  lb.style.display = 'flex';
+  show(cur);
+  document.body.style.overflow = 'hidden';
+}
+function closeCompLightbox() {
+  const lb = document.getElementById('compLightbox');
+  if (lb) lb.style.display = 'none';
+  document.body.style.overflow = '';
+}
+function compGalleryThumb(gid, idx) {
+  // Clicking a thumbnail swaps the main image AND updates the highlight
+  const photos = (window._compGalleries && window._compGalleries[gid]) || [];
+  if (!photos[idx]) return;
+  const main = document.getElementById(gid + '_main');
+  const label = document.getElementById(gid + '_label');
+  if (main) { main.src = photos[idx].src; main.setAttribute('onclick', "openCompLightbox('" + gid + "'," + idx + ")"); }
+  if (label) label.textContent = photos[idx].label + ' — click to zoom 🔍';
+  photos.forEach((_, i) => {
+    const t = document.getElementById(gid + '_thumb' + i);
+    if (t) t.style.borderColor = (i === idx ? 'var(--cyan)' : 'var(--line)');
+  });
+}
 function renderCompSubjectCard(prop, typedAddr, matchedAddr, unavailable){
   const el = document.getElementById('compSubjectCard'); if(!el) return;
   el.style.display = 'block';
@@ -5469,17 +5530,51 @@ function renderCompSubjectCard(prop, typedAddr, matchedAddr, unavailable){
   // Nov 3: fall back to Google Street View when PropertyReach has no photo —
   // Troy: "I still cant see the house running comps". Uses lat/lng if available,
   // otherwise the address.
-  let streetViewFallback = '';
-  if (!photoUrl && typeof GOOGLE_MAPS_KEY !== 'undefined' && GOOGLE_MAPS_KEY) {
+  // Nov 4: Troy wants (1) click-to-zoom and (2) MORE pictures. Gallery = main
+  // photo (if any) + Street View at 4 headings (0/90/180/270) for multiple
+  // angles. Click any image opens a full-screen lightbox.
+  const galleryPhotos = [];
+  if (photoUrl) galleryPhotos.push({ src: photoUrl, label: 'Property photo' });
+  if (typeof GOOGLE_MAPS_KEY !== 'undefined' && GOOGLE_MAPS_KEY) {
     const svLoc = (prop.latitude != null && prop.longitude != null)
       ? prop.latitude + ',' + prop.longitude
       : encodeURIComponent(showAddr);
-    const svUrl = 'https://maps.googleapis.com/maps/api/streetview?size=800x500&location=' + svLoc + '&key=' + GOOGLE_MAPS_KEY;
-    streetViewFallback = '<div style="margin-bottom:10px"><img src="' + esc(svUrl) + '" alt="Street View" style="width:100%;max-width:420px;border-radius:10px;border:1px solid var(--line);display:block" onerror="this.style.display=\'none\'"></div>';
+    const headings = [0, 90, 180, 270];
+    const labels = ['Street View — front', 'Street View — right', 'Street View — back', 'Street View — left'];
+    headings.forEach((h, i) => {
+      galleryPhotos.push({
+        src: 'https://maps.googleapis.com/maps/api/streetview?size=800x500&location=' + svLoc + '&heading=' + h + '&key=' + GOOGLE_MAPS_KEY,
+        label: labels[i]
+      });
+    });
   }
-  const photoHtml = photoUrl
-    ? '<div style="margin-bottom:10px"><img src="' + esc(photoUrl) + '" alt="Property photo" style="width:100%;max-width:420px;border-radius:10px;border:1px solid var(--line);display:block" onerror="this.style.display=\'none\'"></div>'
-    : (streetViewFallback || '<div style="margin-bottom:10px;padding:12px;border:1px dashed var(--line);border-radius:10px;color:var(--muted);font-size:13px">📷 No property photo available from the feed</div>');
+  let photoHtml = '';
+  if (galleryPhotos.length) {
+    const gid = 'cpg' + Math.random().toString(36).slice(2, 8);
+    // Store gallery data globally for the lightbox
+    if (!window._compGalleries) window._compGalleries = {};
+    window._compGalleries[gid] = galleryPhotos;
+    const main = galleryPhotos[0];
+    let thumbs = '';
+    if (galleryPhotos.length > 1) {
+      thumbs = '<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">';
+      galleryPhotos.forEach((p, i) => {
+        thumbs += '<img src="' + esc(p.src) + '" alt="' + esc(p.label) + '" onclick="compGalleryThumb(\'' + gid + '\',' + i + ')" '
+          + 'style="width:72px;height:54px;object-fit:cover;border-radius:8px;border:2px solid ' + (i === 0 ? 'var(--cyan)' : 'var(--line)') + ';cursor:pointer" '
+          + 'id="' + gid + '_thumb' + i + '" onerror="this.style.display=\'none\'">';
+      });
+      thumbs += '</div>';
+    }
+    photoHtml = '<div style="margin-bottom:10px">'
+      + '<img id="' + gid + '_main" src="' + esc(main.src) + '" alt="' + esc(main.label) + '" '
+      + 'onclick="openCompLightbox(\'' + gid + '\',0)" title="Click to zoom" '
+      + 'style="width:100%;max-width:420px;border-radius:10px;border:1px solid var(--line);display:block;cursor:zoom-in" '
+      + 'onerror="this.style.display=\'none\'">'
+      + '<div id="' + gid + '_label" style="font-size:12px;color:var(--muted);margin-top:4px">' + esc(main.label) + ' — click to zoom 🔍</div>'
+      + thumbs + '</div>';
+  } else {
+    photoHtml = '<div style="margin-bottom:10px;padding:12px;border:1px dashed var(--line);border-radius:10px;color:var(--muted);font-size:13px">📷 No property photo available from the feed</div>';
+  }
   el.innerHTML = '<div style="font-weight:800;font-size:14px;margin-bottom:8px">🏠 This is the property you searched</div>'
     + (showAddr ? '<div style="font-size:14px;font-weight:700;margin-bottom:10px">' + esc(showAddr) + '</div>' : '')
     + zipWarn
