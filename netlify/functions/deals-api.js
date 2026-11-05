@@ -40,6 +40,9 @@
 'use strict';
 
 const crypto = require('crypto');
+const zlib = require('zlib');
+const fs = require('fs');
+const path = require('path');
 
 let blobs = null;
 try {
@@ -51,6 +54,11 @@ try {
 }
 
 const STORE_NAME = 'deal-rooms';
+// Verified buyer tier (see buyer-verify.js): offers whose phone matches a
+// master buyer auto-verify that buyer. Views never verify — room links are
+// shared, so a view can't be attributed to a specific buyer.
+const VERIFIED_STORE = 'buyer-verified';
+const VERIFIED_KEY = 'map';
 const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
 const COOKIE_NAME = 'lm_auth';
 
@@ -155,6 +163,62 @@ async function writeJson(s, key, obj) {
 }
 
 const dealKey = (id) => `deal:${id}`;
+
+// ---- verified buyer tier: match an offer phone to the master buyer index ----
+// buyer-index.json.gz lives beside this function ([name, phone, city, state,
+// zip, pc, strategy, avg_price]). Lazy-loaded and cached per instance.
+let _buyerPhoneMap = null;
+let _buyerPhoneMapTried = false;
+function loadBuyerPhoneMap() {
+  if (_buyerPhoneMap) return _buyerPhoneMap;
+  if (_buyerPhoneMapTried) return null;
+  _buyerPhoneMapTried = true;
+  try {
+    const gzPath = path.join(__dirname, 'buyer-index.json.gz');
+    const raw = zlib.gunzipSync(fs.readFileSync(gzPath));
+    const rows = JSON.parse(raw.toString('utf8'));
+    const m = new Map();
+    for (const r of rows) {
+      const ph = String((r && r[1]) || '').replace(/\D/g, '');
+      if (ph.length === 10 && !m.has(ph)) m.set(ph, String(r[0] || ''));
+    }
+    _buyerPhoneMap = m;
+    return m;
+  } catch (e) {
+    return null; // index unreadable — offer still succeeds, verification skipped
+  }
+}
+function digits10(v) {
+  const d = String(v == null ? '' : v).replace(/\D/g, '');
+  return d.length === 11 && d.startsWith('1') ? d.slice(1) : d;
+}
+// Best-effort: never throws, never blocks the offer. First verification wins
+// (a 'pof' record is never downgraded to 'deal-offer').
+async function markVerifiedFromOffer(event, phone, buyerName, dealId) {
+  try {
+    const digits = digits10(phone);
+    if (digits.length !== 10) return false;
+    const map = loadBuyerPhoneMap();
+    if (!map || !map.has(digits)) return false;
+    if (!blobs) return false;
+    let vs;
+    try {
+      if (typeof blobs.connectLambda === 'function') blobs.connectLambda(event);
+    } catch (e) { /* best-effort */ }
+    vs = blobs.getStore(VERIFIED_STORE);
+    let verified = {};
+    try {
+      const v = await vs.get(VERIFIED_KEY, { type: 'json' });
+      if (v && typeof v === 'object') verified = v;
+    } catch (e) { verified = {}; }
+    if (verified[digits]) return false;
+    verified[digits] = { name: map.get(digits) || buyerName, how: 'deal-offer', at: Date.now(), dealId };
+    await vs.set(VERIFIED_KEY, JSON.stringify(verified), { contentType: 'application/json' });
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
 const offersKey = (id) => `deal:${id}:offers`;
 const photoKey = (id, pid) => `deal:${id}:photo:${pid}`;
 const roomKey = (token) => `room:${token}`;
@@ -501,7 +565,7 @@ async function publicRoom(s, token) {
   return ok({ deal: publicDeal(d) });
 }
 
-async function publicSubmitOffer(s, body) {
+async function publicSubmitOffer(s, body, event) {
   const t = cleanStr(body.token, 128);
   if (!t) return bad('Missing token.');
   const map = await readJson(s, roomKey(t), null);
@@ -523,9 +587,13 @@ async function publicSubmitOffer(s, body) {
   const offers = await readJson(s, key, []);
   (Array.isArray(offers) ? offers : []).push(offer);
   await writeJson(s, key, Array.isArray(offers) ? offers : [offer]);
+  // Verified buyer tier: an offer from a master buyer verifies them.
+  // Best-effort — never blocks the offer or the Troy alert.
+  const verified = await markVerifiedFromOffer(event, offer.buyerPhone, buyerName, d.id);
   // Notify Troy immediately — every offer alerts (no throttle)
   const offerBits = [`\u{1F4B0} New offer on ${d.address}: ${fmtMoney(amount)} from ${buyerName}`];
   if (offer.buyerPhone) offerBits.push(`Ph: ${offer.buyerPhone}`);
+  if (verified) offerBits.push('✅ Buyer verified (in master list)');
   if (offer.message) offerBits.push(`"${offer.message.slice(0, 120)}"`);
   notifyTroy(offerBits.join('\n'));
   return ok({ ok: true });
@@ -602,7 +670,7 @@ exports.handler = async (event) => {
     }
     if (action === 'submitOffer') {
       if (!rateOk(`offer:${ip}`, 8, 10 * 60 * 1000)) return tooMany();
-      return await publicSubmitOffer(s, body);
+      return await publicSubmitOffer(s, body, event);
     }
     if (action === 'photo') {
       if (!rateOk(`photo:${ip}`, 120, 10 * 60 * 1000)) return tooMany();
