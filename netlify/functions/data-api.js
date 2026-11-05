@@ -46,21 +46,43 @@ function isoDaysAgo(n) {
   return t.toISOString().slice(0, 10);
 }
 
+// US state abbreviations. The old state+ZIP regex grabbed the last two
+// letters of the city name as a "state" ("Indianapolis 46237" -> state
+// "IS", street "4405 E edgewood ave Indianapol"), which made the upstream
+// property lookup return no match. Only accept the token as a state when
+// it is a real US state abbreviation; otherwise fall back to ZIP-only.
+const US_STATES = new Set(['AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'DC', 'FL', 'GA', 'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ', 'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY']);
+
 function parseAddress(full) {
   const out = { street: '', city: '', state: '', zip: '' };
   if (!full) return out;
   let head = String(full).trim();
-  const sz = head.match(/,?\s*([A-Za-z]{2})\s+(\d{5})(?:-\d{4})?\s*$/);
-  if (sz) {
+  const sz = head.match(/(?:^|,|\s)([A-Za-z]{2})\s+(\d{5})(?:-\d{4})?\s*$/);
+  if (sz && US_STATES.has(sz[1].toUpperCase())) {
     out.state = sz[1].toUpperCase();
     out.zip = sz[2];
     head = head.slice(0, sz.index).replace(/,\s*$/, '').trim();
+  } else {
+    const z = head.match(/\s+(\d{5})(?:-\d{4})?\s*$/);
+    if (z) {
+      out.zip = z[1];
+      head = head.slice(0, z.index).replace(/,\s*$/, '').trim();
+    }
   }
   const parts = head.split(',').map(s => s.trim()).filter(Boolean);
   if (parts.length >= 2) {
     out.city = parts[parts.length - 1];
     out.street = parts.slice(0, -1).join(', ');
     return out;
+  }
+  const SUF = ['ave', 'avenue', 'st', 'street', 'rd', 'road', 'dr', 'drive', 'ln', 'lane', 'blvd', 'boulevard', 'ct', 'court', 'way', 'pl', 'place', 'ter', 'terrace', 'cir', 'circle', 'hwy', 'highway', 'pkwy', 'parkway', 'aly', 'alley', 'trl', 'trail', 'sq', 'square', 'xing', 'crossing', 'pt', 'point', 'cove', 'cv', 'row', 'run', 'walk', 'path', 'ext'];
+  const words = head.split(/\s+/);
+  for (let i = 1; i < words.length - 1; i++) {
+    if (SUF.includes(words[i].toLowerCase().replace(/\.$/, ''))) {
+      out.street = words.slice(0, i + 1).join(' ');
+      out.city = words.slice(i + 1).join(' ');
+      return out;
+    }
   }
   out.street = head;
   return out;
