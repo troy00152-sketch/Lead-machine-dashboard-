@@ -19,7 +19,16 @@ function parseStreet(addr) {
   const first = String(addr || '').split(',')[0].trim();
   const m = first.match(/^(\d+)\s+(.+)$/);
   if (!m) return null;
-  return { num: m[1], street: m[2].toUpperCase().replace(/[^A-Z0-9 ]/g, '').trim() };
+  return { num: m[1], street: normalizeStreet(m[2]) };
+}
+
+// County stores numbered streets WITHOUT ordinal suffixes: "E 113 ST",
+// not "E 113TH ST". Strip suffixes on both sides before comparing,
+// otherwise every numbered-street comp silently misses.
+function normalizeStreet(s) {
+  return String(s || '').toUpperCase().replace(/[^A-Z0-9 ]/g, '').trim()
+    .replace(/\b(\d+)(ST|ND|RD|TH)\b/g, '$1')
+    .replace(/\s+/g, ' ');
 }
 
 function parseState(addr) {
@@ -64,15 +73,15 @@ function bestCountyMatch(features, street) {
     const m = a.match(/^(\d+)\s+([^,]+)/);
     if (!m) continue;
     const num = m[1];
-    const st = m[2].trim().replace(/[^A-Z0-9 ]/g, '').trim();
+    const st = normalizeStreet(m[2]);
     if (num === street.num && st === street.street) return f.attributes;
   }
   return null;
 }
 
-async function verifyOne(comp) {
+async function verifyOne(comp, fallbackState) {
   const base = { address: comp.address, status: 'unsupported', countyAmount: null, countyDate: null, note: null };
-  const state = parseState(comp.address);
+  const state = parseState(comp.address) || fallbackState;
   if (state !== 'OH') {
     base.note = 'County check covers Ohio only right now.';
     return base;
@@ -125,9 +134,10 @@ exports.handler = async (event) => {
   let body = {};
   try { body = JSON.parse(event.body || '{}'); } catch (e) { body = {}; }
   const comps = Array.isArray(body.comps) ? body.comps.slice(0, 10) : [];
+  const fallbackState = typeof body.state === 'string' ? body.state.toUpperCase() : null;
   const results = [];
   for (const c of comps) {
-    results.push(await verifyOne(c));
+    results.push(await verifyOne(c, fallbackState));
   }
   return { statusCode: 200, headers: corsHeaders, body: JSON.stringify({ results }) };
 };
