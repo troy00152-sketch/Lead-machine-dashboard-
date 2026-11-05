@@ -207,6 +207,7 @@ a{color:var(--accent)}
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="subject-lookup.js"></script>
 <script>
 'use strict';
 /* ============ UTILITIES ============ */
@@ -378,10 +379,21 @@ async function analyzeSubject(){
   btn.disabled=true;btn.textContent='Analyzing…';
   out.innerHTML='<div class="loading">Pulling property data, comps, and owner portfolio…</div>';
   try{
-    const r=await fetch('/.netlify/functions/data-api?address='+encodeURIComponent(addr));
-    const d=await r.json();
+    // Subject lookup with backup-source fallback (mirrors the Comps page
+    // hybrid): data provider first; when it fails or its quota is out, the
+    // backup source supplies the property record, value estimate and comps.
+    // No data-provider API call is made on the fallback path.
+    let d;
+    if(typeof lookupSubjectProperty==='function'){
+      d=await lookupSubjectProperty(addr);
+    }else{
+      // subject-lookup.js failed to load — original direct call, unchanged.
+      const r=await fetch('/.netlify/functions/data-api?address='+encodeURIComponent(addr));
+      d=await r.json();
+    }
     if(!d.matched||!d.property){out.innerHTML='<div class="err">No property record found for this address.</div>';btn.disabled=false;btn.textContent='Analyze';return;}
     const p=d.property;
+    const viaBackup=d.source==='backup';
     const comps=(d.comps&&d.comps.best)||[];
     const arv=(d.comps&&d.comps.indication)||p.marketValue||null;
     const ws=wholesaleScoreSimple(p);
@@ -389,7 +401,8 @@ async function analyzeSubject(){
     const photo=p.photoUrl||('https://maps.googleapis.com/maps/api/streetview?size=800x400&location='+encodeURIComponent(addr));
     let html='<img class="subj-photo" src="'+esc(photo)+'" onerror="this.style.display=\'none\'" alt="Property photo">';
     html+='<div style="margin-bottom:12px"><strong style="font-size:16px">'+esc(p.address||addr)+'</strong> '
-      +' <span class="score-badge '+scoreClass(ws.label)+'">🎯 '+ws.score+' · '+ws.label+'</span></div>';
+      +' <span class="score-badge '+scoreClass(ws.label)+'">🎯 '+ws.score+' · '+ws.label+'</span>'
+      +(viaBackup?' <span style="font-size:11px;color:var(--muted)">· via backup source</span>':'')+'</div>';
     html+='<div class="subj-details">'
       +'<div><div class="k">Beds / Baths</div><strong>'+esc(p.beds??'—')+' / '+esc(p.baths??'—')+'</strong></div>'
       +'<div><div class="k">Sq Ft</div><strong>'+(p.sqft?Number(p.sqft).toLocaleString():'—')+'</strong></div>'
