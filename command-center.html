@@ -169,8 +169,9 @@ a{color:var(--accent)}
     <!-- SUBJECT PROPERTY -->
     <div class="panel">
       <h2>🏠 Subject Property Analysis</h2>
-      <div class="subj-input-row">
-        <input type="text" id="subjAddr" placeholder="Enter property address…" onkeydown="if(event.key==='Enter')analyzeSubject()">
+      <div class="subj-input-row" style="position:relative">
+        <input type="text" id="subjAddr" placeholder="Enter property address…" autocomplete="off" onkeydown="if(event.key==='Enter')analyzeSubject()" oninput="ccSuggest(this.value)">
+        <div id="ccSuggestBox" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:50;background:var(--card);border:1px solid var(--line);border-radius:8px;max-height:220px;overflow-y:auto"></div>
         <button class="btn" id="analyzeBtn" onclick="analyzeSubject()">Analyze</button>
       </div>
       <div id="subjResult"><div class="empty">Enter an address above to pull live property data, comps, and owner portfolio.</div></div>
@@ -339,6 +340,35 @@ function renderReplies(replies){
 }
 
 /* ============ SUBJECT PROPERTY ============ */
+let ccSuggestTimer=null;
+async function ccSuggest(q){
+  const box=document.getElementById('ccSuggestBox');
+  clearTimeout(ccSuggestTimer);
+  if(!q||q.trim().length<3){box.style.display='none';box.innerHTML='';return;}
+  ccSuggestTimer=setTimeout(async()=>{
+    try{
+      const r=await fetch('/.netlify/functions/pr-suggest?query='+encodeURIComponent(q.trim()));
+      const d=await r.json();
+      const s=(d.suggestions||[]).filter(x=>x.type==='address').slice(0,6);
+      if(!s.length){box.style.display='none';box.innerHTML='';return;}
+      box.innerHTML=s.map(x=>{
+        const label=x.title||[x.streetAddress,x.city,x.state,x.zip].filter(Boolean).join(', ');
+        const val=[x.streetAddress,x.city,x.state,x.zip].filter(Boolean).join(', ');
+        return '<div class="cc-sug" data-val="'+val.replace(/"/g,'&quot;')+'" style="padding:10px 12px;cursor:pointer;border-bottom:1px solid var(--line);font-size:13px">'+label.replace(/</g,'&lt;')+'</div>';
+      }).join('');
+      box.style.display='block';
+      box.querySelectorAll('.cc-sug').forEach(el=>{
+        el.onclick=()=>{document.getElementById('subjAddr').value=el.getAttribute('data-val');box.style.display='none';box.innerHTML='';};
+        el.onmouseenter=()=>{el.style.background='rgba(0,212,255,.12)';};
+        el.onmouseleave=()=>{el.style.background='';};
+      });
+    }catch(e){box.style.display='none';}
+  },300);
+}
+document.addEventListener('click',e=>{
+  const box=document.getElementById('ccSuggestBox');
+  if(box&&!e.target.closest('.subj-input-row')){box.style.display='none';}
+});
 async function analyzeSubject(){
   const addr=document.getElementById('subjAddr').value.trim();
   const out=document.getElementById('subjResult');
@@ -438,7 +468,7 @@ function drawArvChart(comps,arv){
 let ccMap=null,ccMarkers=[];
 function initMap(){
   ccMap=L.map('ccMap').setView([39.7684,-86.1581],10); // Indianapolis
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{attribution:'©OpenStreetMap ©CARTO',maxZoom:19}).addTo(ccMap);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'©OpenStreetMap',maxZoom:19}).addTo(ccMap);
 }
 function updateMapPins(leads){
   if(!ccMap)return;
