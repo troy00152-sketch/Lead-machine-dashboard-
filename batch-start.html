@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Batch Skip-Trace Starter (Admin)</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 720px; margin: 40px auto; padding: 0 16px; background: #0b1020; color: #e8ecf4; }
+  h1 { font-size: 20px; }
+  button { padding: 10px 18px; font-size: 15px; margin: 6px 6px 6px 0; cursor: pointer; }
+  pre { background: #141a2e; border: 1px solid #2a3350; padding: 12px; white-space: pre-wrap; word-break: break-word; min-height: 120px; }
+  input[type=file] { margin: 8px 0; }
+  .hint { color: #9aa5bd; font-size: 13px; }
+</style>
+</head>
+<body>
+<h1>Batch Skip-Trace Starter</h1>
+<p class="hint">Admin utility — starts a bulk skip-trace batch job. Pick the job payload JSON, then Start. The job runs server-side; this page only starts it and polls status.</p>
+<input type="file" id="payloadFile" accept=".json,application/json">
+<br>
+<button id="startBtn">Start job</button>
+<button id="statusBtn">Check status</button>
+<button id="resumeBtn">Resume job</button>
+<pre id="out">Idle.</pre>
+<script>
+const out = document.getElementById('out');
+const JOB = 'dayton-2026-11-05';
+function show(obj) { out.textContent = typeof obj === 'string' ? obj : JSON.stringify(obj, null, 2); }
+async function post(body) {
+  const r = await fetch('/.netlify/functions/data-skiptrace-batch', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  return r.json();
+}
+document.getElementById('startBtn').onclick = async () => {
+  const f = document.getElementById('payloadFile').files[0];
+  if (!f) { show('Pick the payload JSON file first.'); return; }
+  show('Reading payload…');
+  const payload = JSON.parse(await f.text());
+  if (!payload.jobId || !Array.isArray(payload.addresses)) { show('Bad payload: need jobId + addresses[].'); return; }
+  show('Starting job ' + payload.jobId + ' (' + payload.addresses.length + ' addresses)…');
+  const res = await post({ action: 'start', ...payload });
+  show(res);
+  if (res.triggered === false) show(JSON.stringify(res, null, 2) + '\n\nWorker did NOT trigger — click Resume job.');
+};
+document.getElementById('statusBtn').onclick = async () => {
+  const r = await fetch('/.netlify/functions/data-skiptrace-batch?jobId=' + JOB);
+  show(await r.json());
+};
+document.getElementById('resumeBtn').onclick = async () => {
+  show(await post({ action: 'resume', jobId: JOB }));
+};
+</script>
+</body>
+</html>
