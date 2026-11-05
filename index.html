@@ -5505,7 +5505,7 @@ function compGalleryThumb(gid, idx) {
     if (t) t.style.borderColor = (i === idx ? 'var(--cyan)' : 'var(--line)');
   });
 }
-function renderCompSubjectCard(prop, typedAddr, matchedAddr, unavailable){
+function renderCompSubjectCard(prop, typedAddr, matchedAddr, unavailable, linkedProperties){
   const el = document.getElementById('compSubjectCard'); if(!el) return;
   el.style.display = 'block';
   if(unavailable){
@@ -5589,7 +5589,27 @@ function renderCompSubjectCard(prop, typedAddr, matchedAddr, unavailable){
     + '<div style="grid-column:1/-1"><span style="color:var(--muted)">Owner:</span> <strong>' + esc(owners || '—') + '</strong></div>'
     + '<div style="grid-column:1/-1"><span style="color:var(--muted)">Last sale:</span> <strong>' + esc(sale) + '</strong></div>'
     + compDistressRow(prop)
-    + '</div>';
+    + '</div>'
+    + renderLinkedProperties(linkedProperties);
+}
+/* ── Linked Properties (Nov 4, Troy: "some sellers mite have more then one
+   house") — shows other properties owned by the same owner, via
+   PropertyReach /v1/linked-properties. ── */
+function renderLinkedProperties(linked) {
+  if (!linked || !linked.length) return '';
+  let rows = '';
+  linked.forEach(p => {
+    const val = p.estimatedValue != null ? '$' + Number(p.estimatedValue).toLocaleString('en-US') : '—';
+    const details = [p.beds != null ? p.beds + 'bd' : null, p.baths != null ? p.baths + 'ba' : null, p.sqft ? Number(p.sqft).toLocaleString('en-US') + ' sqft' : null].filter(Boolean).join(' · ');
+    rows += '<div style="padding:8px 0;border-top:1px solid var(--line);font-size:13px">'
+      + '<div style="font-weight:700">' + esc(p.address || '—') + '</div>'
+      + '<div style="color:var(--muted);font-size:12px">' + esc(details || p.propertyType || '') + (p.lastSaleDate ? ' · sold ' + esc(p.lastSaleDate) : '') + '</div>'
+      + '<div style="font-size:12px">Est. value: <strong>' + val + '</strong></div>'
+      + '</div>';
+  });
+  return '<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line)">'
+    + '<div style="font-weight:800;font-size:14px;margin-bottom:8px">🏘️ Owner also owns ' + linked.length + ' other propert' + (linked.length === 1 ? 'y' : 'ies') + '</div>'
+    + rows + '</div>';
 }
 async function loadCompsForAddress(retryAttempt){
   retryAttempt = retryAttempt || 0;
@@ -5633,7 +5653,7 @@ async function loadCompsForAddress(retryAttempt){
     }
     compDataSource = compSource;
     if(!d.matched){ compRows = []; compPicks = []; compLoadedAddr = ''; compSubjectLat = null; compSubjectLng = null; compConfidence = ''; compConfidenceText = ''; compSubjectSqft = null; compSubjectBeds = null; compStabilityWarns = []; resetCompFilters(); resetCompMortgage(); renderCompSubjectCard(null, addr, ''); if(msg) msg.textContent = 'No ownership records found for this address — type an ARV below to run the math manually.'; renderCompList(); renderCompMortgage(); calcComp(); return; }
-    renderCompSubjectCard(d.property || null, addr, d.address || '');
+    renderCompSubjectCard(d.property || null, addr, d.address || '', null, d.linkedProperties || []);
     applyCompMortgageFromAttom(d.property || null, addr);
     compConfidence = (d.comps && d.comps.confidence) || '';
     compConfidenceText = (d.comps && d.comps.confidenceText) || '';
