@@ -3585,7 +3585,10 @@ async function verifyBuyer(){
     const r = await fetch('/.netlify/functions/buyer-verify', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'set', phone, name: hit ? hit.n : '', how})});
     const j = await r.json();
     if(!r.ok) throw new Error(j.error || 'Failed');
-    _verifiedMap = null; await loadVerifiedMap();
+    // Update the local map directly — do NOT re-fetch: a fresh read can
+    // return the pre-write state and the badge would not render until reload.
+    _verifiedMap = await loadVerifiedMap();
+    _verifiedMap[mbDigits(phone)] = {name: hit ? hit.n : '', how, at: Date.now()};
     msg.textContent = '✅ Verified — ' + (how === 'pof' ? 'proof of funds' : 'buy box confirmed') + '.';
     searchMasterBuyers();
   }catch(e){ msg.textContent = 'Could not verify: ' + e.message; }
@@ -3599,7 +3602,8 @@ async function unverifyBuyer(){
     const r = await fetch('/.netlify/functions/buyer-verify', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'remove', phone})});
     const j = await r.json();
     if(!r.ok) throw new Error(j.error || 'Failed');
-    _verifiedMap = null; await loadVerifiedMap();
+    _verifiedMap = await loadVerifiedMap();
+    delete _verifiedMap[mbDigits(phone)];
     msg.textContent = 'Removed from verified.';
     searchMasterBuyers();
   }catch(e){ msg.textContent = 'Could not remove: ' + e.message; }
