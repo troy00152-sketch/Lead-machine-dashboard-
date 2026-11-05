@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="holographic">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Acquisition Command Center</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+/* ============ HOLOGRAPHIC THEME (from index.html) ============ */
+:root{
+  --bg:#050a14; --bg2:rgba(10,18,38,.88); --panel:rgba(13,25,48,.55); --panel2:rgba(20,35,65,.45);
+  --line:rgba(0,212,255,.22); --text:#e8f4ff; --muted:#7a9cc6; --muted2:#4a6a94;
+  --accent:#00d4ff; --accent2:#0090ff; --green:#00ffaa; --red:#ff4466;
+  --blue:#4488ff; --chip:rgba(0,212,255,.12); --radius:14px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  background-color:#050a14; color:var(--text); min-height:100vh;
+  background-image:
+    radial-gradient(ellipse 80% 50% at 15% 0%, rgba(0,212,255,.09), transparent 60%),
+    radial-gradient(ellipse 70% 55% at 85% 100%, rgba(0,102,255,.11), transparent 60%),
+    linear-gradient(rgba(0,212,255,.028) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,212,255,.028) 1px, transparent 1px);
+  background-size:auto,auto,44px 44px,44px 44px;
+}
+a{color:var(--accent)}
+/* ============ HEADER ============ */
+.cc-header{
+  padding:22px 28px 16px; border-bottom:1px solid var(--line);
+  background:linear-gradient(135deg, rgba(5,15,35,.92), rgba(10,25,55,.88));
+  position:sticky; top:0; z-index:100; backdrop-filter:blur(16px);
+}
+.cc-header h1{
+  font-size:26px; font-weight:800; letter-spacing:2px; color:#fff;
+  text-shadow:0 0 30px rgba(0,212,255,.6); margin-bottom:4px;
+}
+.cc-header h1 span{color:var(--accent)}
+.cc-header .sub{color:var(--muted);font-size:13px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.live-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 10px var(--green);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+/* ============ PIPELINE CARDS ============ */
+.pipe-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;padding:20px 28px}
+.pipe-card{
+  background:linear-gradient(160deg, rgba(13,25,48,.78), rgba(8,16,34,.68));
+  border:1px solid var(--line); border-radius:var(--radius); padding:18px;
+  box-shadow:0 0 22px rgba(0,212,255,.09), 0 8px 32px rgba(0,0,0,.42);
+  backdrop-filter:blur(12px); transition:transform .2s, border-color .2s;
+}
+.pipe-card:hover{transform:translateY(-2px);border-color:rgba(0,212,255,.5)}
+.pipe-card .label{font-size:12px;text-transform:uppercase;letter-spacing:1.5px;color:var(--muted);margin-bottom:8px}
+.pipe-card .num{font-size:38px;font-weight:800;color:var(--accent);text-shadow:0 0 16px rgba(0,212,255,.55)}
+.pipe-card .hint{font-size:12px;color:var(--muted);margin-top:6px}
+/* ============ LAYOUT GRID ============ */
+.cc-grid{display:grid;grid-template-columns:1fr 380px;gap:20px;padding:0 28px 28px}
+@media(max-width:1100px){.cc-grid{grid-template-columns:1fr}}
+.cc-main{display:flex;flex-direction:column;gap:20px;min-width:0}
+.cc-side{display:flex;flex-direction:column;gap:20px;min-width:0}
+.panel{
+  background:linear-gradient(160deg, rgba(13,25,48,.78), rgba(8,16,34,.68));
+  border:1px solid var(--line); border-radius:var(--radius); padding:20px;
+  box-shadow:0 0 22px rgba(0,212,255,.09); backdrop-filter:blur(12px);
+}
+.panel h2{font-size:16px;font-weight:700;margin-bottom:14px;color:#fff;text-shadow:0 0 22px rgba(0,212,255,.5);display:flex;align-items:center;gap:8px}
+.panel h2 .refresh{margin-left:auto;font-size:12px;color:var(--muted);cursor:pointer}
+.panel h2 .refresh:hover{color:var(--accent)}
+/* ============ HOT LEADS ============ */
+.leads-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px}
+.lead-card{
+  background:rgba(8,16,34,.6); border:1px solid var(--line); border-radius:12px;
+  padding:14px; cursor:pointer; transition:all .2s;
+}
+.lead-card:hover{border-color:rgba(0,212,255,.5);box-shadow:0 0 26px rgba(0,212,255,.16);transform:translateY(-2px)}
+.lead-card .addr{font-weight:700;font-size:14px;margin-bottom:8px}
+.lead-card .nums{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin:10px 0;font-size:12px}
+.lead-card .nums div{background:rgba(0,212,255,.06);border-radius:8px;padding:8px;text-align:center}
+.lead-card .nums .k{color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.5px}
+.lead-card .nums .v{font-weight:700;font-size:14px;color:var(--text)}
+.score-badge{display:inline-block;padding:4px 12px;border-radius:20px;font-weight:700;font-size:13px}
+.score-layup{background:rgba(255,68,102,.2);color:var(--red);border:1px solid var(--red)}
+.score-hot{background:rgba(255,107,26,.2);color:#ff8c42;border:1px solid #ff8c42}
+.score-warm{background:rgba(68,136,255,.2);color:var(--blue);border:1px solid var(--blue)}
+.score-cool{background:rgba(122,156,198,.15);color:var(--muted);border:1px solid var(--muted)}
+/* ============ SUBJECT PROPERTY ============ */
+.subj-input-row{display:flex;gap:10px;margin-bottom:16px}
+.subj-input-row input{
+  flex:1;background:rgba(8,16,34,.75);border:1px solid rgba(0,212,255,.3);
+  border-radius:10px;padding:12px 16px;color:var(--text);font-size:14px;
+}
+.subj-input-row input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 18px rgba(0,212,255,.2)}
+.btn{
+  background:linear-gradient(135deg,#00d4ff,#0090ff);color:#001220;font-weight:700;
+  border:none;border-radius:10px;padding:12px 24px;cursor:pointer;font-size:14px;
+  box-shadow:0 0 18px rgba(0,212,255,.45);transition:all .2s;white-space:nowrap;
+}
+.btn:hover{box-shadow:0 0 26px rgba(0,212,255,.65);transform:translateY(-1px)}
+.btn:disabled{opacity:.5;cursor:default;transform:none}
+.subj-photo{width:100%;height:220px;object-fit:cover;border-radius:12px;margin-bottom:14px;border:1px solid var(--line)}
+.subj-details{display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px;margin-bottom:14px}
+.subj-details div{background:rgba(0,212,255,.04);padding:8px 12px;border-radius:8px}
+.subj-details .k{color:var(--muted);font-size:11px}
+/* ============ ALERTS FEED ============ */
+.alerts-feed{max-height:420px;overflow-y:auto;display:flex;flex-direction:column;gap:10px}
+.alert-item{
+  background:rgba(8,16,34,.5);border:1px solid var(--line);border-radius:10px;
+  padding:12px;font-size:13px;border-left:3px solid var(--accent);
+}
+.alert-item.offer{border-left-color:var(--green)}
+.alert-item.view{border-left-color:var(--blue)}
+.alert-item .time{color:var(--muted);font-size:11px;margin-top:4px}
+/* ============ STATS ============ */
+.stats-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px}
+.stat{
+  background:linear-gradient(160deg, rgba(13,25,48,.75), rgba(8,16,34,.65));
+  border:1px solid var(--line);border-radius:12px;padding:16px;text-align:center;
+}
+.stat .n{font-size:26px;font-weight:800;color:var(--accent);text-shadow:0 0 16px rgba(0,212,255,.45)}
+.stat .l{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-top:4px}
+/* ============ MAP ============ */
+#ccMap{height:320px;border-radius:12px;border:1px solid var(--line);z-index:1}
+/* ============ LOADING / EMPTY ============ */
+.loading{color:var(--muted);text-align:center;padding:30px;font-size:14px}
+.empty{color:var(--muted2);text-align:center;padding:20px;font-size:13px}
+.err{color:var(--red);font-size:13px;padding:10px}
+/* ============ CHART ============ */
+#arvChart{width:100%;height:220px;display:block}
+.calc-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:14px}
+.calc-box{background:rgba(0,212,255,.06);border:1px solid var(--line);border-radius:10px;padding:12px;text-align:center}
+.calc-box .k{font-size:11px;color:var(--muted);text-transform:uppercase}
+.calc-box .v{font-size:20px;font-weight:800;color:var(--green)}
+.linked-prop{padding:10px 0;border-top:1px solid var(--line);font-size:13px}
+.linked-prop:first-of-type{border-top:none}
+</style>
+</head>
+<body>
+
+<div class="cc-header">
+  <h1>🎯 ACQUISITION <span>COMMAND CENTER</span></h1>
+  <div class="sub">
+    <span class="live-dot"></span> LIVE
+    <span id="ccClock"></span>
+    <span style="margin-left:auto"><a href="/index.html" style="color:var(--muted);font-size:13px">← Back to Dashboard</a></span>
+  </div>
+</div>
+
+<div class="pipe-row" id="pipeRow">
+  <div class="pipe-card"><div class="label">💬 Seller Replies (24h)</div><div class="num" id="pipeReplies">—</div><div class="hint" id="pipeRepliesHint">Loading…</div></div>
+  <div class="pipe-card"><div class="label">📅 Booked Today</div><div class="num" id="pipeBooked">—</div><div class="hint" id="pipeBookedHint">Loading…</div></div>
+  <div class="pipe-card"><div class="label">🤝 Under Contract</div><div class="num" id="pipeContract">—</div><div class="hint" id="pipeContractHint">Loading…</div></div>
+  <div class="pipe-card"><div class="label">🔥 New Leads</div><div class="num" id="pipeLeads">—</div><div class="hint">In pipeline</div></div>
+</div>
+
+<div class="cc-grid">
+  <div class="cc-main">
+    <!-- STATS -->
+    <div class="stats-row">
+      <div class="stat"><div class="n" id="statProfit">$—</div><div class="l">Net Profit (Closed)</div></div>
+      <div class="stat"><div class="n" id="statCloseRate">—%</div><div class="l">Close Rate</div></div>
+      <div class="stat"><div class="n" id="statClosed">—</div><div class="l">Deals Closed</div></div>
+      <div class="stat"><div class="n">7,642</div><div class="l">Active Buyers</div></div>
+    </div>
+
+    <!-- HOT LEADS -->
+    <div class="panel">
+      <h2>🔥 Hot Leads <span class="refresh" onclick="loadOverview()">↻</span></h2>
+      <div class="leads-grid" id="leadsGrid"><div class="loading">Loading pipeline leads…</div></div>
+    </div>
+
+    <!-- SUBJECT PROPERTY -->
+    <div class="panel">
+      <h2>🏠 Subject Property Analysis</h2>
+      <div class="subj-input-row">
+        <input type="text" id="subjAddr" placeholder="Enter property address…" onkeydown="if(event.key==='Enter')analyzeSubject()">
+        <button class="btn" id="analyzeBtn" onclick="analyzeSubject()">Analyze</button>
+      </div>
+      <div id="subjResult"><div class="empty">Enter an address above to pull live property data, comps, and owner portfolio.</div></div>
+    </div>
+
+    <!-- MAP -->
+    <div class="panel">
+      <h2>🗺️ Lead Map</h2>
+      <div id="ccMap"></div>
+    </div>
+  </div>
+
+  <div class="cc-side">
+    <!-- DEAL ALERTS -->
+    <div class="panel">
+      <h2>🔔 Deal Alerts <span class="refresh" onclick="loadAlerts()">↻</span></h2>
+      <div class="alerts-feed" id="alertsFeed"><div class="loading">Loading alerts…</div></div>
+    </div>
+
+    <!-- TODAY'S APPOINTMENTS -->
+    <div class="panel">
+      <h2>📅 Today's Appointments</h2>
+      <div id="apptList"><div class="loading">Loading…</div></div>
+    </div>
+
+    <!-- RECENT REPLIES -->
+    <div class="panel">
+      <h2>💬 Recent Seller Replies</h2>
+      <div id="replyList"><div class="loading">Loading…</div></div>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+'use strict';
+/* ============ UTILITIES ============ */
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function fmtMoney(n){const v=Number(n);if(!isFinite(v))return'—';return'$'+Math.round(v).toLocaleString('en-US');}
+function timeAgo(iso){try{const d=new Date(iso);const s=(Date.now()-d.getTime())/1000;if(s<60)return'just now';if(s<3600)return Math.floor(s/60)+'m ago';if(s<86400)return Math.floor(s/3600)+'h ago';return Math.floor(s/86400)+'d ago';}catch(e){return'';}}
+
+/* ============ WHOLESALE SCORE (from index.html) ============ */
+function wholesaleScoreSimple(prop){
+  // Simplified: Distress/45 + Equity/35 + Ownership/20
+  let distress=0, equity=0, own=0;
+  if(!prop) return {score:0,label:'NO DATA'};
+  if(prop.taxDelinquency){distress+=16;}
+  if(prop.preForeclosure){distress+=18;}
+  if(prop.vacant){distress+=12;}
+  if(prop.bankruptcy){distress+=14;}
+  if(prop.lienCount>0){distress+=10;}
+  if(prop.codeViolation){distress+=12;}
+  distress=Math.min(45,distress);
+  const eqPct = prop.estimatedEquityRatio!=null ? prop.estimatedEquityRatio*100 : null;
+  if(eqPct!=null){equity = eqPct>=90?35:eqPct>=75?31:eqPct>=60?26:eqPct>=50?21:eqPct>=35?15:eqPct>=20?9:eqPct>0?4:0;}
+  if(prop.absentee){own+=6;}
+  if(prop.freeAndClear){own+=4;}
+  if(prop.ownershipMonths>=60){own+=3;}else if(prop.ownershipMonths>=12){own+=1;}
+  own=Math.min(20,own);
+  const score=Math.max(0,Math.min(100,distress+equity+own));
+  const label=score>=75?'LAYUP':score>=55?'HOT':score>=35?'WARM':score>=15?'COOL':'COLD';
+  return {score,label,distress,equity,own};
+}
+function scoreClass(label){return label==='LAYUP'?'score-layup':label==='HOT'?'score-hot':label==='WARM'?'score-warm':'score-cool';}
+
+/* ============ MAO/LAO ============ */
+function calcMAO(arv, repairs){
+  if(!arv||arv<=0)return{mao:null,lao:null};
+  const r=repairs||0;
+  const t=arv<120000?0.70:arv<220000?0.80:arv<300000?0.815:arv<400000?0.829:0.849;
+  const mao=Math.round((arv-r)*t);
+  return{mao,lao:Math.round(mao*0.70),tier:Math.round(t*1000)/10};
+}
+
+/* ============ OVERVIEW DATA ============ */
+let overviewCache=null;
+async function loadOverview(){
+  try{
+    const r=await fetch('/.netlify/functions/cc-data?action=overview');
+    const d=await r.json();
+    if(!d.ok)throw new Error(d.error||'Failed');
+    overviewCache=d;
+    // Pipeline cards
+    document.getElementById('pipeReplies').textContent=d.sellerReplies;
+    document.getElementById('pipeRepliesHint').textContent=d.sellerReplies===1?'conversation':'conversations';
+    document.getElementById('pipeBooked').textContent=d.bookedToday;
+    document.getElementById('pipeBookedHint').textContent=d.bookedToday===1?'appointment':'appointments';
+    document.getElementById('pipeContract').textContent=d.underContract;
+    document.getElementById('pipeContractHint').textContent='active deals';
+    document.getElementById('pipeLeads').textContent=d.newLeadsCount;
+    // Stats
+    document.getElementById('statProfit').textContent=fmtMoney(d.netProfit);
+    document.getElementById('statCloseRate').textContent=d.closeRate+'%';
+    document.getElementById('statClosed').textContent=d.closedCount;
+    // Hot leads
+    renderHotLeads(d.newLeads||[]);
+    // Appointments
+    renderAppointments(d.todayAppointments||[]);
+    // Recent replies
+    renderReplies(d.recentReplies||[]);
+    // Map pins
+    updateMapPins(d.newLeads||[]);
+  }catch(e){
+    document.getElementById('leadsGrid').innerHTML='<div class="err">Could not load pipeline data: '+esc(e.message)+'</div>';
+  }
+}
+
+async function renderHotLeads(leads){
+  const grid=document.getElementById('leadsGrid');
+  if(!leads.length){grid.innerHTML='<div class="empty">No new leads in the pipeline right now.</div>';return;}
+  grid.innerHTML='<div class="loading">Enriching '+leads.length+' leads with property data…</div>';
+  const cards=[];
+  for(const lead of leads.slice(0,9)){
+    const addr=lead.address||lead.name||'';
+    let prop=null, arv=null;
+    if(addr && addr.length>5){
+      try{
+        const r=await fetch('/.netlify/functions/propertyreach?address='+encodeURIComponent(addr));
+        const d=await r.json();
+        if(d.matched&&d.property){prop=d.property;arv=d.comps&&d.comps.indication?d.comps.indication:(prop.marketValue||null);}
+      }catch(e){}
+    }
+    const ws=wholesaleScoreSimple(prop);
+    const mao=calcMAO(arv,30000);
+    cards.push({lead,addr,prop,arv,ws,mao});
+  }
+  // Sort by score desc
+  cards.sort((a,b)=>b.ws.score-a.ws.score);
+  grid.innerHTML=cards.map((c,i)=>{
+    return '<div class="lead-card" onclick="analyzeLeadAddress('+i+')" data-addr="'+esc(c.addr).replace(/"/g,'&quot;')+'">'
+      +'<div class="addr">'+esc(c.addr||c.lead.name)+'</div>'
+      +'<span class="score-badge '+scoreClass(c.ws.label)+'">🎯 '+c.ws.score+' · '+c.ws.label+'</span>'
+      +'<div class="nums">'
+      +'<div><div class="k">ARV</div><div class="v">'+fmtMoney(c.arv)+'</div></div>'
+      +'<div><div class="k">MAO</div><div class="v">'+fmtMoney(c.mao.mao)+'</div></div>'
+      +'<div><div class="k">LAO</div><div class="v">'+fmtMoney(c.mao.lao)+'</div></div>'
+      +'</div>'
+      +'<div style="font-size:11px;color:var(--muted)">'+esc(c.lead.stage||'')+' · '+timeAgo(c.lead.createdAt)+' · tap to analyze ↓</div>'
+      +'</div>';
+  }).join('');
+  // Store for click handler
+  window._ccLeadCards=cards;
+}
+
+function analyzeLeadAddress(i){
+  const c=(window._ccLeadCards||[])[i];
+  if(!c||!c.addr)return;
+  document.getElementById('subjAddr').value=c.addr;
+  analyzeSubject();
+  document.getElementById('subjAddr').scrollIntoView({behavior:'smooth',block:'center'});
+}
+
+function renderAppointments(appts){
+  const el=document.getElementById('apptList');
+  if(!appts.length){el.innerHTML='<div class="empty">No appointments today.</div>';return;}
+  el.innerHTML=appts.map(a=>{
+    let t='';try{t=new Date(a.startTime).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});}catch(e){}
+    return '<div class="alert-item"><strong>'+esc(t)+'</strong> — '+esc(a.title)+'<div class="time">'+esc(a.contactName||'')+'</div></div>';
+  }).join('');
+}
+
+function renderReplies(replies){
+  const el=document.getElementById('replyList');
+  if(!replies.length){el.innerHTML='<div class="empty">No seller replies in the last 24h.</div>';return;}
+  el.innerHTML=replies.map(r=>'<div class="alert-item"><strong>'+esc(r.contactName)+'</strong><div style="margin-top:4px">'+esc(r.preview)+'</div><div class="time">'+timeAgo(r.date)+'</div></div>').join('');
+}
+
+/* ============ SUBJECT PROPERTY ============ */
+async function analyzeSubject(){
+  const addr=document.getElementById('subjAddr').value.trim();
+  const out=document.getElementById('subjResult');
+  const btn=document.getElementById('analyzeBtn');
+  if(!addr){out.innerHTML='<div class="err">Enter a property address first.</div>';return;}
+  btn.disabled=true;btn.textContent='Analyzing…';
+  out.innerHTML='<div class="loading">Pulling property data, comps, and owner portfolio…</div>';
+  try{
+    const r=await fetch('/.netlify/functions/propertyreach?address='+encodeURIComponent(addr));
+    const d=await r.json();
+    if(!d.matched||!d.property){out.innerHTML='<div class="err">No property record found for this address.</div>';btn.disabled=false;btn.textContent='Analyze';return;}
+    const p=d.property;
+    const comps=(d.comps&&d.comps.best)||[];
+    const arv=(d.comps&&d.comps.indication)||p.marketValue||null;
+    const ws=wholesaleScoreSimple(p);
+    const mao=calcMAO(arv,30000);
+    const photo=p.photoUrl||('https://maps.googleapis.com/maps/api/streetview?size=800x400&location='+encodeURIComponent(addr));
+    let html='<img class="subj-photo" src="'+esc(photo)+'" onerror="this.style.display=\'none\'" alt="Property photo">';
+    html+='<div style="margin-bottom:12px"><strong style="font-size:16px">'+esc(p.address||addr)+'</strong> '
+      +' <span class="score-badge '+scoreClass(ws.label)+'">🎯 '+ws.score+' · '+ws.label+'</span></div>';
+    html+='<div class="subj-details">'
+      +'<div><div class="k">Beds / Baths</div><strong>'+esc(p.beds??'—')+' / '+esc(p.baths??'—')+'</strong></div>'
+      +'<div><div class="k">Sq Ft</div><strong>'+(p.sqft?Number(p.sqft).toLocaleString():'—')+'</strong></div>'
+      +'<div><div class="k">Year Built</div><strong>'+esc(p.yearBuilt??'—')+'</strong></div>'
+      +'<div><div class="k">Owner</div><strong>'+esc(p.owner1||'—')+'</strong></div>'
+      +'<div><div class="k">Last Sale</div><strong>'+(p.lastSaleAmount?fmtMoney(p.lastSaleAmount):'—')+'</strong></div>'
+      +'<div><div class="k">Est. Equity</div><strong>'+(p.estimatedEquity!=null?fmtMoney(p.estimatedEquity):'—')+'</strong></div>'
+      +'</div>';
+    // ARV chart
+    html+='<div style="font-weight:700;margin:14px 0 8px">📊 Live ARV — Comp Sale Prices</div>';
+    html+='<canvas id="arvChart" width="600" height="220"></canvas>';
+    // MAO/LAO
+    html+='<div class="calc-row">'
+      +'<div class="calc-box"><div class="k">ARV</div><div class="v">'+fmtMoney(arv)+'</div></div>'
+      +'<div class="calc-box"><div class="k">MAO ('+mao.tier+'%)</div><div class="v">'+fmtMoney(mao.mao)+'</div></div>'
+      +'<div class="calc-box"><div class="k">LAO (70%)</div><div class="v">'+fmtMoney(mao.lao)+'</div></div>'
+      +'</div>';
+    // Linked properties
+    const linked=d.linkedProperties||[];
+    if(linked.length){
+      html+='<div style="font-weight:700;margin:16px 0 8px">🏘️ Owner also owns '+linked.length+' other propert'+(linked.length===1?'y':'ies')+'</div>';
+      html+=linked.slice(0,5).map(lp=>'<div class="linked-prop"><strong>'+esc(lp.address||'—')+'</strong><div style="color:var(--muted);font-size:12px">'
+        +esc([lp.beds!=null?lp.beds+'bd':null,lp.baths!=null?lp.baths+'ba':null,lp.sqft?Number(lp.sqft).toLocaleString()+' sqft':null].filter(Boolean).join(' · '))
+        +' · Est. '+fmtMoney(lp.estimatedValue)+'</div></div>').join('');
+    }
+    out.innerHTML=html;
+    drawArvChart(comps,arv);
+    // Drop a pin on the map
+    if(p.latitude&&p.longitude)addMapPin(p.latitude,p.longitude,p.address||addr);
+  }catch(e){
+    out.innerHTML='<div class="err">Analysis failed: '+esc(e.message)+'</div>';
+  }
+  btn.disabled=false;btn.textContent='Analyze';
+}
+
+function drawArvChart(comps,arv){
+  const cv=document.getElementById('arvChart');
+  if(!cv)return;
+  const ctx=cv.getContext('2d');
+  const W=cv.width,H=cv.height;
+  ctx.clearRect(0,0,W,H);
+  const prices=comps.map(c=>c.amount).filter(v=>v>0);
+  if(!prices.length){ctx.fillStyle='#7a9cc6';ctx.font='14px sans-serif';ctx.fillText('No comp data for chart',20,40);return;}
+  const max=Math.max(...prices,arv||0)*1.1;
+  const n=prices.length;
+  const bw=Math.min(60,(W-40)/n-10);
+  const gap=(W-40-(bw*n))/(n+1);
+  ctx.font='11px sans-serif';
+  prices.forEach((pr,i)=>{
+    const h=(pr/max)*(H-60);
+    const x=20+gap+(bw+gap)*i;
+    const y=H-30-h;
+    // Bar
+    const grad=ctx.createLinearGradient(0,y,0,y+h);
+    grad.addColorStop(0,'#00d4ff');grad.addColorStop(1,'#0090ff');
+    ctx.fillStyle=grad;
+    ctx.fillRect(x,y,bw,h);
+    // Value label
+    ctx.fillStyle='#e8f4ff';ctx.textAlign='center';
+    ctx.fillText('$'+Math.round(pr/1000)+'K',x+bw/2,y-6);
+    // Comp # label
+    ctx.fillStyle='#7a9cc6';
+    ctx.fillText('C'+(i+1),x+bw/2,H-12);
+  });
+  // ARV line
+  if(arv>0){
+    const ay=H-30-(arv/max)*(H-60);
+    ctx.strokeStyle='#00ffaa';ctx.lineWidth=2;ctx.setLineDash([6,4]);
+    ctx.beginPath();ctx.moveTo(10,ay);ctx.lineTo(W-10,ay);ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle='#00ffaa';ctx.textAlign='left';
+    ctx.fillText('ARV '+fmtMoney(arv),W-110,ay-6);
+  }
+}
+
+/* ============ MAP ============ */
+let ccMap=null,ccMarkers=[];
+function initMap(){
+  ccMap=L.map('ccMap').setView([39.7684,-86.1581],10); // Indianapolis
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{attribution:'©OpenStreetMap ©CARTO',maxZoom:19}).addTo(ccMap);
+}
+function updateMapPins(leads){
+  if(!ccMap)return;
+  ccMarkers.forEach(m=>ccMap.removeLayer(m));ccMarkers=[];
+  // Geocode via Nominatim would be slow for many; use PR data if available
+  // For now, pins are added when subject analysis runs with lat/lng
+}
+function addMapPin(lat,lng,label){
+  if(!ccMap||!lat||!lng)return;
+  const m=L.marker([lat,lng]).addTo(ccMap).bindPopup(esc(label||''));
+  ccMarkers.push(m);
+}
+
+/* ============ DEAL ALERTS ============ */
+let lastAlertCheck=Date.now();
+async function loadAlerts(){
+  const feed=document.getElementById('alertsFeed');
+  try{
+    // Deal room activity from deals-api
+    const items=[];
+    // Note: deals-api list requires admin auth; try public-safe approach
+    // For now, show HL-based alerts from overview cache
+    if(overviewCache){
+      (overviewCache.todayAppointments||[]).forEach(a=>{
+        items.push({type:'',icon:'📅',text:'Appointment: '+a.title,t:timeAgo(a.startTime)});
+      });
+      (overviewCache.recentReplies||[]).forEach(r=>{
+        items.push({type:'',icon:'💬',text:r.contactName+': '+r.preview,t:timeAgo(r.date)});
+      });
+      (overviewCache.underContractDeals||[]).forEach(d=>{
+        items.push({type:'',icon:'🤝',text:'Under Contract: '+(d.address||d.name),t:timeAgo(d.createdAt)});
+      });
+    }
+    if(!items.length){feed.innerHTML='<div class="empty">No recent activity. Alerts appear here as deals move.</div>';return;}
+    feed.innerHTML=items.slice(0,15).map(i=>'<div class="alert-item '+i.type+'"><span>'+i.icon+'</span> '+esc(i.text)+'<div class="time">'+esc(i.t)+'</div></div>').join('');
+  }catch(e){
+    feed.innerHTML='<div class="err">Could not load alerts.</div>';
+  }
+}
+
+/* ============ CLOCK + INIT ============ */
+function tickClock(){
+  const el=document.getElementById('ccClock');
+  if(el)el.textContent=new Date().toLocaleString('en-US',{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+}
+document.addEventListener('DOMContentLoaded',()=>{
+  tickClock();setInterval(tickClock,30000);
+  initMap();
+  loadOverview();
+  loadAlerts();
+  // Refresh every 60s
+  setInterval(()=>{loadOverview();loadAlerts();},60000);
+});
+</script>
+</body>
+</html>
