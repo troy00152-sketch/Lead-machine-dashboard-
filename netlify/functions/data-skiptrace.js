@@ -7,7 +7,7 @@
    field — mobile vs landline is not distinguished in the response. */
 const https = require('https');
 
-const API_BASE = 'https://api.data-api.com';
+const API_BASE = 'https://api.propertyreach.com';
 
 function post(path, body, apiKey) {
   return new Promise((resolve, reject) => {

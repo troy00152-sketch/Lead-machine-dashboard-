@@ -5,7 +5,7 @@
    Cost: 1 API credit per call. Up to 150 results per call. */
 const https = require('https');
 
-const API_BASE = 'https://api.data-api.com';
+const API_BASE = 'https://api.propertyreach.com';
 
 function post(path, body, apiKey) {
   return new Promise((resolve, reject) => {
