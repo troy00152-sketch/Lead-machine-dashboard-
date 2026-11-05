@@ -5192,12 +5192,17 @@ async function runCountyVerify(){
   try{
     const picks = (typeof compRows !== 'undefined' ? compRows : []).filter(r => (typeof compPicks !== 'undefined' ? compPicks : []).indexOf(r.address) >= 0);
     if(!picks.length) return;
-    const ohPicks = picks.filter(r => /,\s*OH\s+\d{5}/.test(r.address || ''));
-    if(!ohPicks.length) return; // county check covers Ohio only right now
+    // Subject state decides coverage — comp rows (esp. ATTOM) often omit
+    // the state from their address string, so checking each comp's address
+    // for ", OH" silently skips everything. Comps are nearby the subject,
+    // so subject-in-OH means comps-in-OH.
+    const subjAddr = (typeof compLoadedAddr !== 'undefined' && compLoadedAddr) ? compLoadedAddr : ((document.getElementById('compListAddr')||{}).value || '');
+    const subjState = (subjAddr.match(/,\s*([A-Z]{2})\s+\d{5}/) || [])[1] || (/,\s*OH\b/i.test(subjAddr) ? 'OH' : null);
+    if(subjState !== 'OH') return; // county check covers Ohio only right now
     box.innerHTML = '<p style="color:var(--muted);font-size:12px">🏛️ Checking picked comps against Cuyahoga County records…</p>';
     const res = await fetch('/.netlify/functions/data-verify', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ comps: ohPicks.map(r => ({ address: r.address, amount: r.amount, date: r.date })) }),
+      body: JSON.stringify({ state: 'OH', comps: picks.map(r => ({ address: r.address, amount: r.amount, date: r.date })) }),
     });
     if(!res.ok){ box.innerHTML = ''; return; }
     const data = await res.json();
