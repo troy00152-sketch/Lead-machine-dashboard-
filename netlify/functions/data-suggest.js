@@ -3,7 +3,7 @@
    Cost: 0.01 API credits per successful call. */
 const https = require('https');
 
-const API_BASE = 'https://api.data-api.com';
+const API_BASE = 'https://api.propertyreach.com';
 
 function get(path, apiKey) {
   return new Promise((resolve, reject) => {

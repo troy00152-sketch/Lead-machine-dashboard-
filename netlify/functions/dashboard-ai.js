@@ -12,7 +12,7 @@
 // data provider comps wiring (Troy approved Nov 2, 2026 — replaces DealMachine):
 //   The model gets a get_comps tool. When Troy asks for ARV/comps/offer
 //   numbers on a specific address, the function calls data provider's API
-//   (https://api.data-api.com/v1) with PROPERTYREACH_API_KEY:
+//   (https://api.propertyreach.com/v1) with PROPERTYREACH_API_KEY:
 //   GET /v1/property (1 credit) to resolve the property, then
 //   POST /v1/comparables (1 credit) for comparable sales.
 //   Real cost: ~2 API credits per address lookup ($0.02 nominal at $30/100
@@ -36,7 +36,10 @@ const MAX_INPUT_CHARS = 4000;    // per-message cap
 const MAX_TOOL_ITERATIONS = 2;   // max get_comps calls per chat request (≤4 credits)
 const COMPS_LIMIT = 10;
 
-const PR_API_BASE = 'https://api.data-api.com/v1';
+// NOTE (Nov 5): real data-provider API hostname. The Nov 4 white-label
+// scrub replaced it with api.data-api.com (nonexistent) and broke every
+// server-side lookup. White-labeling covers USER-VISIBLE text only.
+const PR_API_BASE = 'https://api.propertyreach.com/v1';
 
 function money(n) {
   if (n == null || isNaN(Number(n))) return '?';

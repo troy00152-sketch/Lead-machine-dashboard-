@@ -12,7 +12,13 @@
 // Costs ~2 API credits per address (1 property + 1 comparables). Reads the
 // response BODY status (the API returns HTTP 200 with embedded status codes).
 
-const API_BASE = 'https://api.data-api.com/v1';
+// NOTE (Nov 5): this hostname is the real data-provider API endpoint.
+// The Nov 4 white-label scrub replaced it with api.data-api.com, which
+// does not exist — every server-side lookup failed (fetch-failed) and the
+// Command Center showed "No property record found" for all addresses.
+// White-labeling covers USER-VISIBLE text only; server-side integration
+// identifiers (endpoint host, env var name) must stay real.
+const API_BASE = 'https://api.propertyreach.com/v1';
 
 /* ---------------- helpers (mirrors attom-lookup) ---------------- */
 
