@@ -289,7 +289,7 @@ async function renderHotLeads(leads){
     let prop=null, arv=null;
     if(addr && addr.length>5){
       try{
-        const r=await fetch('/.netlify/functions/propertyreach?address='+encodeURIComponent(addr));
+        const r=await fetch('/.netlify/functions/data-api?address='+encodeURIComponent(addr));
         const d=await r.json();
         if(d.matched&&d.property){prop=d.property;arv=d.comps&&d.comps.indication?d.comps.indication:(prop.marketValue||null);}
       }catch(e){}
@@ -347,7 +347,7 @@ async function ccSuggest(q){
   if(!q||q.trim().length<3){box.style.display='none';box.innerHTML='';return;}
   ccSuggestTimer=setTimeout(async()=>{
     try{
-      const r=await fetch('/.netlify/functions/pr-suggest?query='+encodeURIComponent(q.trim()));
+      const r=await fetch('/.netlify/functions/data-suggest?query='+encodeURIComponent(q.trim()));
       const d=await r.json();
       const s=(d.suggestions||[]).filter(x=>(x.type||'').toLowerCase()==='address').slice(0,6);
       if(!s.length){box.style.display='none';box.innerHTML='';return;}
@@ -377,7 +377,7 @@ async function analyzeSubject(){
   btn.disabled=true;btn.textContent='Analyzing…';
   out.innerHTML='<div class="loading">Pulling property data, comps, and owner portfolio…</div>';
   try{
-    const r=await fetch('/.netlify/functions/propertyreach?address='+encodeURIComponent(addr));
+    const r=await fetch('/.netlify/functions/data-api?address='+encodeURIComponent(addr));
     const d=await r.json();
     if(!d.matched||!d.property){out.innerHTML='<div class="err">No property record found for this address.</div>';btn.disabled=false;btn.textContent='Analyze';return;}
     const p=d.property;

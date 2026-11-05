@@ -1437,7 +1437,7 @@ async function searchPropertiesByZip(){
   const statusEl = document.getElementById('propSearchStatus');
   const resultsEl = document.getElementById('propSearchResults');
   if(!raw){ statusEl.innerHTML = '<span style="color:var(--red)">Enter a full property address.</span>'; return; }
-  // PropertyReach is address-based
+  // data provider is address-based
   if(/^\d{5}$/.test(raw)){
     statusEl.innerHTML = '<span style="color:var(--muted)">Search looks up by full address. Try "123 Main St, City, ST ' + esc(raw) + '" format.</span>';
     return;
@@ -1448,9 +1448,9 @@ async function searchPropertyPR(address, statusEl, resultsEl){
   statusEl.innerHTML = '<span style="color:var(--muted)">🔍 Looking up property…</span>';
   resultsEl.innerHTML = '';
   try{
-    // PropertyReach is the data source (DealMachine removed Nov 4).
+    // data provider is the data source (DealMachine removed Nov 4).
     let lead = null;
-    const prResp = await fetch('/.netlify/functions/propertyreach?address=' + encodeURIComponent(address));
+    const prResp = await fetch('/.netlify/functions/data-api?address=' + encodeURIComponent(address));
     if(prResp.ok){
       const pj = await prResp.json();
       if(pj && pj.matched && pj.property){
@@ -1466,7 +1466,7 @@ async function searchPropertyPR(address, statusEl, resultsEl){
     statusEl.innerHTML = '<span style="color:var(--green)">✓ Property found</span> <button class="btn small primary" style="margin-left:10px" onclick="addAllPropSearchToLeads()">➕ Add to My Leads</button>';
     renderPropSearchResults();
     // Exact search: bring the FULL property view straight up — reuse the converted lead
-    // (already lead-shaped from PropertyReach), dedupe by address or coordinates, and open it.
+    // (already lead-shaped from data provider), dedupe by address or coordinates, and open it.
     try{
       let _t = null;
       if(lead.address) _t = leads.find(x => (x.address||'').toLowerCase() === lead.address.toLowerCase() && (x.zip||'') === (lead.zip||''));
@@ -1504,7 +1504,7 @@ function parseDmAddress(addr){
   out.street = head;
   return out;
 }
-/* Convert PropertyReach API result to internal lead format (Nov 3: PR is the primary source) */
+/* Convert data provider API result to internal lead format (Nov 3: PR is the primary source) */
 function propertyReachToLead(pj, typedAddress){
   const p = pj.property || {};
   const addr = pj.address || typedAddress || '';
@@ -1528,7 +1528,7 @@ function propertyReachToLead(pj, typedAddress){
     ownerName: ownerName || null,
     estimatedValue: p.marketValue || null,
     arv: p.marketValue || null,
-    // Distress flags from PropertyReach
+    // Distress flags from data provider
     preforeclosure: p.preForeclosure === true,
     taxDelinquentYear: p.taxDelinquentYear ?? null,
     onMarket: p.onMarket === true,
@@ -1537,10 +1537,10 @@ function propertyReachToLead(pj, typedAddress){
     // Phones (populated via skip trace)
     phones: [],
     owner: ownerName ? { names: [ownerName] } : null,
-    status: 'New Lead', addedAt: new Date().toISOString(), source: 'propertyreach-search',
+    status: 'New Lead', addedAt: new Date().toISOString(), source: 'data-api-search',
   };
 }
-/* dealMachineToLead removed Nov 4 — DealMachine canceled, PropertyReach is the data source */
+/* dealMachineToLead removed Nov 4 — DealMachine canceled, data provider is the data source */
 async function searchPropertiesByZipCode(zip, key, statusEl, resultsEl){
   if(!key){ statusEl.innerHTML = '<span style="color:var(--red)">Add your RentCast API key in Settings first.</span>'; return; }
   statusEl.innerHTML = '<span style="color:var(--muted)">🔍 Searching RentCast for ' + esc(zip) + '…</span>';
@@ -1928,7 +1928,7 @@ function addAllPropSearchToLeads(){
   toast('Added ' + added + ' properties to My Leads');
 }
 
-/* ============ LIST BUILDER via PropertyReach /v1/search (Nov 4 — DealMachine removed) ============ */
+/* ============ LIST BUILDER via data provider /v1/search (Nov 4 — DealMachine removed) ============ */
 let lbSearchCache = [];
 
 function lbGetFilters(){
@@ -1938,8 +1938,8 @@ function lbGetFilters(){
   out.maxValue = document.getElementById('lbMaxVal').value || '';
   return out;
 }
-/* dmPreviewList removed Nov 4 — PropertyReach /v1/search has no free preview; each search is 1 credit. */
-/* List Builder via PropertyReach /v1/search (Nov 4 — DealMachine removed).
+/* dmPreviewList removed Nov 4 — data provider /v1/search has no free preview; each search is 1 credit. */
+/* List Builder via data provider /v1/search (Nov 4 — DealMachine removed).
    Maps the UI filter chips to PR search filters. 1 credit per search. */
 function prSearchFilters(){
   const lf = lbGetFilters();
@@ -1964,7 +1964,7 @@ async function prRunListSearch(){
   statusEl.innerHTML = '<span style="color:var(--muted)">🔍 Searching…</span>';
   resultsEl.innerHTML = '';
   try{
-    const resp = await fetch('/.netlify/functions/pr-search', {
+    const resp = await fetch('/.netlify/functions/data-search', {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({
         target: { zip },
@@ -2068,11 +2068,11 @@ function addAllListResultsToLeads(){
 /* dmCheckDnc removed Nov 4 — DealMachine canceled. DNC screening runs in HighLevel. */
 
 /* ============ PEOPLE SEARCH / REVERSE LOOKUP / DM CREDITS — REMOVED Nov 4 ============
-   DealMachine canceled. PropertyReach has no people-search, reverse-lookup, or
+   DealMachine canceled. data provider has no people-search, reverse-lookup, or
    DNC endpoints, so these features were removed rather than left broken.
    - People Search: use the Skip Trace page (address → owner phones via PR)
    - Reverse lookup: not available
-   - Credits meter: see PropertyReach dashboard at app.propertyreach.com
+   - Credits meter: see data provider dashboard at app.data-api.com
    =========================================================================== */
 
 /* Single-address lookup via RentCast AVM + property records */
@@ -2363,7 +2363,7 @@ function setImgMode(mode){
   renderImgFrame(l);
 }
 function prImgUrl(l, mode){
-  // PropertyReach photo when available, else Google imagery fallbacks.
+  // data provider photo when available, else Google imagery fallbacks.
   // (DealMachine img.dealmachine.com URLs removed Nov 4 — DM canceled.)
   if(l.images && l.images.primary && mode !== 'satellite' && mode !== 'map') return l.images.primary;
   return null; // renderImgFrame falls back to streetViewUrl/satelliteUrl/mapUrl
@@ -2485,7 +2485,7 @@ function propIntelHtml(l){
   return html;
 }
 
-/* ============ 🤖 AI DEAL ANALYSIS (rule-based, uses PropertyReach data on the lead) ============ */
+/* ============ 🤖 AI DEAL ANALYSIS (rule-based, uses data provider data on the lead) ============ */
 function maoTier(estVal){
   if(estVal == null) return { tier: null, label: '—' };
   if(estVal < 120000) return { tier: 0.70, label: '70%' };
@@ -2633,7 +2633,7 @@ function openLead(id){
 }
 /* ============ LISTING GATE — listed-first hard lock (Troy, Oct 28, 2026) ============ */
 /* The photo above the gate is the house (street view). Listing status is NOT in the
-   PropertyReach API or ATTOM — it comes from the Zillow listing page, checked
+   data provider API or ATTOM — it comes from the Zillow listing page, checked
    by hand (free view) and set here. A realtor listing = PASS, enforced everywhere comp
    math runs (this gate, the Comp Calculator, Analyze Deal, and the Verified Comps panel). */
 function listingPassBanner(l){
@@ -2681,7 +2681,7 @@ function setListingField(id, field, val){
   l[field] = val; saveState();
   if(currentLeadId === id) openLead(id);
 }
-/* ============ MORTGAGE LOOKUP via PropertyReach (Nov 4 — DealMachine removed) ============ */
+/* ============ MORTGAGE LOOKUP via data provider (Nov 4 — DealMachine removed) ============ */
 async function loadMortgageInfo(l){
   const box = document.getElementById('mortgageInfoBox');
   if(!box) return;
@@ -2699,7 +2699,7 @@ async function loadMortgageInfo(l){
   const fullAddr = [l.address, l.city, l.state, l.zip].filter(Boolean).join(', ');
   if(!fullAddr){ box.innerHTML = '<p style="color:var(--muted);font-size:13px">No address to look up.</p>'; return; }
   try{
-    const resp = await fetch('/.netlify/functions/propertyreach?address=' + encodeURIComponent(fullAddr));
+    const resp = await fetch('/.netlify/functions/data-api?address=' + encodeURIComponent(fullAddr));
     if(!resp.ok) throw new Error('HTTP ' + resp.status);
     const pj = await resp.json();
     if(!pj.matched || !pj.property){
@@ -2997,7 +2997,7 @@ async function traceAllLeads(){
     const l = untraced[i];
     toast('Tracing '+(i+1)+' of '+untraced.length+': '+l.address);
     try{
-      const resp = await fetch('/.netlify/functions/pr-skiptrace', {
+      const resp = await fetch('/.netlify/functions/data-skiptrace', {
         method: 'POST', headers: {'Content-Type':'application/json'},
         body: JSON.stringify({ streetAddress: l.address, city: l.city, state: l.state, zip: l.zip })
       });
@@ -3188,7 +3188,7 @@ async function getARV(id){
   toast('Getting ARV for '+l.address+'...');
   try{
     const fullAddr = [l.address, l.city, l.state, l.zip].filter(Boolean).join(', ');
-    const resp = await fetch('/.netlify/functions/propertyreach?address=' + encodeURIComponent(fullAddr));
+    const resp = await fetch('/.netlify/functions/data-api?address=' + encodeURIComponent(fullAddr));
     if(!resp.ok) throw new Error('HTTP '+resp.status);
     const pj = await resp.json();
     if(!pj.matched || !pj.property) throw new Error('No value found');
@@ -3197,7 +3197,7 @@ async function getARV(id){
     if(!val) throw new Error('No value found');
     l.arv = val;
     l.estimatedValue = val;
-    // Store additional property details from PropertyReach
+    // Store additional property details from data provider
     if(p.beds) l.bedrooms = p.beds;
     if(p.baths) l.bathrooms = p.baths;
     if(p.sqft) l.sqft = p.sqft;
@@ -3208,7 +3208,7 @@ async function getARV(id){
     toast('ARV lookup failed: '+e.message);
   }
 }
-function getTraceProvider(){ return 'propertyreach'; }
+function getTraceProvider(){ return 'data-api'; }
 function updateProviderStatus(){
   const el = document.getElementById('stKeyStatus');
   if(el) el.innerHTML = '<span class="badge green">Data feed active</span>';
@@ -3333,7 +3333,7 @@ async function traceLead(id){
   const l = leads.find(x=>x.id===id); if(!l) return;
   toast('Tracing '+l.address+'...');
   try{
-    const resp = await fetch('/.netlify/functions/pr-skiptrace', {
+    const resp = await fetch('/.netlify/functions/data-skiptrace', {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ streetAddress: l.address, city: l.city, state: l.state, zip: l.zip })
     });
@@ -3370,7 +3370,7 @@ async function runSkipTrace(){
   const box = document.getElementById('stResults');
   box.innerHTML = '<p style="color:var(--muted)">Tracing...</p>';
   try{
-    const resp = await fetch('/.netlify/functions/pr-skiptrace', {
+    const resp = await fetch('/.netlify/functions/data-skiptrace', {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ streetAddress: address, city, state, zip })
     });
@@ -3430,9 +3430,9 @@ async function runBuyerMatch(prefill){
   results.innerHTML = '';
   let subj = (prefill && prefill.city) ? { city: prefill.city, state: prefill.state, zip: prefill.zip||'' } : bmParseAddress(address);
   let price = parseFloat(document.getElementById('bmPrice').value) || (prefill && prefill.price) || 0;
-  // Enrich from PropertyReach property lookup (value, beds, type)
+  // Enrich from data provider property lookup (value, beds, type)
   try {
-    const r = await fetch('/.netlify/functions/propertyreach?address=' + encodeURIComponent(address));
+    const r = await fetch('/.netlify/functions/data-api?address=' + encodeURIComponent(address));
     const pj = await r.json();
     const d = pj && pj.matched ? pj.property : null;
     if(d){
@@ -4292,7 +4292,7 @@ async function loadCompMortgage(){
     renderCompMortgage();
   };
   try{
-    const resp = await fetch('/.netlify/functions/propertyreach?address=' + encodeURIComponent(addr));
+    const resp = await fetch('/.netlify/functions/data-api?address=' + encodeURIComponent(addr));
     if(!resp.ok) throw new Error('HTTP ' + resp.status);
     const pj = await resp.json();
     if(!pj.matched || !pj.property){
@@ -4816,7 +4816,7 @@ function priceTagIcon(label, bg){
       + '<div style="width:10px;height:10px;background:' + bg + ';transform:rotate(45deg);margin:-5px auto 0;border-right:2px solid #fff;border-bottom:2px solid #fff"></div>'
       + '</div>' });
 }
-/* ---- Comp pin geocoding: PropertyReach comp rows carry NO per-row
+/* ---- Comp pin geocoding: data provider comp rows carry NO per-row
    coordinates, so pins can't be placed from the feed alone. This falls back
    to Nominatim (OpenStreetMap, free, no key) to geocode comp addresses
    browser-side — 1 request/second to respect their usage policy. Only REAL
@@ -4984,7 +4984,7 @@ function compMoney(v){
 function compField(v){
   return (v != null && v !== '') ? v : '—';
 }
-/* PropertyReach distress/equity/title row — renders only when the source
+/* data provider distress/equity/title row — renders only when the source
    supplied the fields (ATTOM-sourced cards are unchanged). */
 function compDistressRow(prop){
   if(!prop) return '';
@@ -5096,7 +5096,7 @@ function renderCompSubjectCard(prop, typedAddr, matchedAddr, unavailable, linked
     : '';
   const showAddr = matchedAddr || typedAddr || '';
   const photoUrl = prop.photoUrl || prop.photo_url || null;
-  // Nov 3: fall back to Google Street View when PropertyReach has no photo —
+  // Nov 3: fall back to Google Street View when data provider has no photo —
   // Troy: "I still cant see the house running comps". Uses lat/lng if available,
   // otherwise the address.
   // Nov 4: Troy wants (1) click-to-zoom and (2) MORE pictures. Gallery = main
@@ -5163,7 +5163,7 @@ function renderCompSubjectCard(prop, typedAddr, matchedAddr, unavailable, linked
 }
 /* ── Linked Properties (Nov 4, Troy: "some sellers mite have more then one
    house") — shows other properties owned by the same owner, via
-   PropertyReach /v1/linked-properties. ── */
+   data provider /v1/linked-properties. ── */
 function renderLinkedProperties(linked) {
   if (!linked || !linked.length) return '';
   let rows = '';
@@ -5188,7 +5188,7 @@ async function loadCompsForAddress(retryAttempt){
   if(!addr){ if(msg) msg.textContent = 'Enter the property address first.'; return; }
   if(!retryAttempt && msg) msg.textContent = 'Loading verified comps…';
   try{
-    /* Comp source priority: PropertyReach first (MLS + public-record comps,
+    /* Comp source priority: data provider first (MLS + public-record comps,
        recorded mortgage, lat/lng, distress/equity/title), ATTOM as fallback.
        If PR matches the subject but has no comps, keep the PR subject
        (distress badges etc.) and fill comps from ATTOM. */
@@ -5196,13 +5196,13 @@ async function loadCompsForAddress(retryAttempt){
     let compSource = '';
     let prSubject = null;
     try{
-      const prResp = await fetch('/.netlify/functions/propertyreach?address=' + encodeURIComponent(addr));
+      const prResp = await fetch('/.netlify/functions/data-api?address=' + encodeURIComponent(addr));
       if(prResp.ok){
         const pj = await prResp.json();
         if(pj && pj.matched){
           prSubject = pj.property || null;
           if(pj.comps && (pj.comps.best || []).length){
-            d = pj; compSource = 'PropertyReach';
+            d = pj; compSource = 'data provider';
           }
         }
       }
@@ -5280,7 +5280,7 @@ async function loadCompsForAddress(retryAttempt){
     if(avg && arvEl) arvEl.value = avg;
     renderCompList();
     calcComp();
-    /* PropertyReach comp rows carry no per-row coordinates — geocode the
+    /* data provider comp rows carry no per-row coordinates — geocode the
        missing ones browser-side (Nominatim, ~1 req/sec) so pins land on the
        map. Fire-and-forget; never touches the subject or the offer math. */
     geocodeMissingCompRows();
