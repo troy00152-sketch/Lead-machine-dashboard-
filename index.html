@@ -929,7 +929,7 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
             <button class="btn primary" id="lbSearchBtn" onclick="prRunListSearch()">🔍 Search Properties</button>
-            <span style="font-size:11px;color:var(--muted)">1 credit per search via PropertyReach</span>
+            <span style="font-size:11px;color:var(--muted)">1 credit per search</span>
           </div>
           <div id="lbStatus" style="margin-top:12px;font-size:13px"></div>
         </div>
@@ -1052,7 +1052,7 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
         </div>
         <div class="card" style="margin-bottom:14px">
           <div class="sec-title" style="font-size:14px">💳 Data Credits</div>
-          <p style="color:var(--muted);font-size:13px;margin-bottom:8px">Property data runs on PropertyReach (1 credit per lookup/search/linked-properties, 2 per skip trace). Check your balance at <a href="https://app.propertyreach.com" target="_blank" rel="noopener" style="color:var(--accent)">app.propertyreach.com ↗</a>.</p>
+          <p style="color:var(--muted);font-size:13px;margin-bottom:8px">Property data, skip tracing, and mortgage info all run through the built-in data feed. No separate accounts or API keys needed.</p>
         </div>
         <div class="card" style="margin-bottom:14px">
           <div class="sec-title" style="font-size:14px">🛰️ Default Property View</div>
@@ -1961,7 +1961,7 @@ async function prRunListSearch(){
   const resultsEl = document.getElementById('lbResults');
   const zip = (document.getElementById('lbZip').value || '').trim();
   if(!/^\d{5}$/.test(zip)){ statusEl.innerHTML = '<span style="color:var(--red)">Enter a valid 5-digit ZIP.</span>'; return; }
-  statusEl.innerHTML = '<span style="color:var(--muted)">🔍 Searching via PropertyReach…</span>';
+  statusEl.innerHTML = '<span style="color:var(--muted)">🔍 Searching…</span>';
   resultsEl.innerHTML = '';
   try{
     const resp = await fetch('/.netlify/functions/pr-search', {
@@ -2652,7 +2652,7 @@ function listingGateFields(l){
     + '</div>';
 }
 function listingGateHtml(l){
-  const links = '<div style="font-size:12px;color:var(--muted)">Photo above is the house. <a href="' + zillowUrl(l) + '" target="_blank" rel="noopener">Check listing on Zillow ↗</a> · <a href="https://app.propertyreach.com/" target="_blank" rel="noopener">Open in PropertyReach ↗</a></div>';
+  const links = '<div style="font-size:12px;color:var(--muted)">Photo above is the house. <a href="' + zillowUrl(l) + '" target="_blank" rel="noopener">Check listing on Zillow ↗</a></div>';
   if(l.listingStatus === 'listed') return listingPassBanner(l) + links
     + '<div style="margin-top:8px"><button class="btn ghost" style="padding:4px 8px" onclick="setListingStatus(\'' + l.id + '\',\'\')">Clear status</button></div>'
     + listingGateFields(l);
@@ -2662,7 +2662,6 @@ function listingGateHtml(l){
     + '<div style="color:var(--muted);margin-bottom:8px">⚠️ Listing status not checked. If it\'s listed with a realtor, PASS immediately.</div>'
     + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'
     + '<a class="btn" href="' + zillowUrl(l) + '" target="_blank" rel="noopener" style="text-decoration:none">🏠 Check on Zillow ↗</a>'
-    + '<a class="btn" href="https://app.propertyreach.com/" target="_blank" rel="noopener" style="text-decoration:none">Open in PropertyReach ↗</a>'
     + '<button class="btn" onclick="setListingStatus(\'' + l.id + '\',\'not-listed\')">✓ Not listed</button>'
     + '<button class="btn" onclick="setListingStatus(\'' + l.id + '\',\'listed\')">⛔ Listed with realtor</button>'
     + '</div>'
@@ -2694,7 +2693,7 @@ async function loadMortgageInfo(l){
       + '<div class="prop-chip"><span class="k">Original Loan</span><span class="v">' + fmtMoney(m.originalAmount) + '</span></div>'
       + '<div class="prop-chip"><span class="k">Est. Balance</span><span class="v">' + fmtMoney(m.balance) + '</span></div>'
       + '<div class="prop-chip"><span class="k">Foreclosure</span><span class="v">' + (l.preforeclosure ? '<span class="badge red">⚠️ Pre-Foreclosure</span>' : '<span class="badge gray">No foreclosure</span>') + '</span></div>'
-      + '</div><p style="color:var(--muted);font-size:11px;margin-top:8px">Via PropertyReach. Balances are estimates — verified payoff only at title.</p>';
+      + '</div><p style="color:var(--muted);font-size:11px;margin-top:8px">Balances are estimates — verified payoff only at title.</p>';
     return;
   }
   const fullAddr = [l.address, l.city, l.state, l.zip].filter(Boolean).join(', ');
@@ -2721,7 +2720,7 @@ async function loadMortgageInfo(l){
         + '<div class="prop-chip"><span class="k">Original Loan</span><span class="v">' + fmtMoney(m.originalAmount) + '</span></div>'
         + '<div class="prop-chip"><span class="k">Est. Balance</span><span class="v">' + fmtMoney(m.balance) + '</span></div>'
         + '<div class="prop-chip"><span class="k">Foreclosure</span><span class="v">' + (p.preForeclosure ? '<span class="badge red">⚠️ Pre-Foreclosure</span>' : '<span class="badge gray">No foreclosure</span>') + '</span></div>'
-        + '</div><p style="color:var(--muted);font-size:11px;margin-top:8px">Via PropertyReach. Balances are estimates — verified payoff only at title.</p>'
+        + '</div><p style="color:var(--muted);font-size:11px;margin-top:8px">Balances are estimates — verified payoff only at title.</p>'
       : '<div style="padding:10px;background:var(--panel2);border-radius:8px"><span class="badge green">✓ Free & Clear</span> <span style="color:var(--muted);font-size:13px">No active liens found.</span></div>';
   }catch(e){
     box.innerHTML = '<p style="color:var(--muted);font-size:13px">Mortgage lookup unavailable.</p>';
@@ -3186,7 +3185,7 @@ async function getARV(id){
     toast('ARV: $'+Number(val).toLocaleString()+' (data estimate)');
     return;
   }
-  toast('Getting ARV for '+l.address+'... (PropertyReach)');
+  toast('Getting ARV for '+l.address+'...');
   try{
     const fullAddr = [l.address, l.city, l.state, l.zip].filter(Boolean).join(', ');
     const resp = await fetch('/.netlify/functions/propertyreach?address=' + encodeURIComponent(fullAddr));
@@ -3204,7 +3203,7 @@ async function getARV(id){
     if(p.sqft) l.sqft = p.sqft;
     saveState(); renderLeads();
     if(currentLeadId===id) openLead(id);
-    toast('ARV: $'+val.toLocaleString()+' (PropertyReach est.)');
+    toast('ARV: $'+val.toLocaleString());
   }catch(e){
     toast('ARV lookup failed: '+e.message);
   }
@@ -3332,7 +3331,7 @@ function applyEnrichmentToLead(l, d){
 }
 async function traceLead(id){
   const l = leads.find(x=>x.id===id); if(!l) return;
-  toast('Tracing '+l.address+'... (PropertyReach, 2 credits)');
+  toast('Tracing '+l.address+'...');
   try{
     const resp = await fetch('/.netlify/functions/pr-skiptrace', {
       method: 'POST', headers: {'Content-Type':'application/json'},
@@ -4310,7 +4309,7 @@ async function loadCompMortgage(){
       compMortFreeClear = true; compMortDetail = null; compMortSource = 'lookup';
       const a = document.getElementById('compMortAmt'); if(a) a.value = 0;
       const l = document.getElementById('compMortLender'); if(l) l.value = '';
-      if(msg) msg.textContent = 'No mortgages on record for this address (PropertyReach).';
+      if(msg) msg.textContent = 'No mortgages on record for this address.';
       renderCompMortgage(); return;
     }
     compMortFreeClear = false;
@@ -4322,7 +4321,7 @@ async function loadCompMortgage(){
     } else {
       compMortDetail = { lender: m.lender || null, amount: bal != null ? Math.round(bal) : null, loanType: null, termMonths: null, dueDate: null, recordedDate: m.recordingDate || null };
       compMortSource = 'lookup';
-      if(msg) msg.textContent = 'Loaded mortgage on record (PropertyReach). Balances are estimates.';
+      if(msg) msg.textContent = 'Loaded mortgage on record. Balances are estimates.';
       renderCompMortgage();
     }
   }catch(e){
