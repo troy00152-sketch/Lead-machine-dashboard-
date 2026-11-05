@@ -349,7 +349,7 @@ async function ccSuggest(q){
     try{
       const r=await fetch('/.netlify/functions/pr-suggest?query='+encodeURIComponent(q.trim()));
       const d=await r.json();
-      const s=(d.suggestions||[]).filter(x=>x.type==='address').slice(0,6);
+      const s=(d.suggestions||[]).filter(x=>(x.type||'').toLowerCase()==='address').slice(0,6);
       if(!s.length){box.style.display='none';box.innerHTML='';return;}
       box.innerHTML=s.map(x=>{
         const label=x.title||[x.streetAddress,x.city,x.state,x.zip].filter(Boolean).join(', ');
