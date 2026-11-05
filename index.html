@@ -1005,6 +1005,7 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
             <span style="font-size:11px;color:var(--muted)">Filters change the view, not your picks.</span>
           </div>
           <div id="compListBox"></div>
+          <div id="countyVerifyBox" style="margin:12px 0"></div>
           <div id="compBest3" style="margin:12px 0"></div>
           <div id="compPickBar" style="margin:12px 0"></div>
           <div id="compWarnBar" style="margin:0 0 12px"></div>
@@ -5181,6 +5182,40 @@ function renderLinkedProperties(linked) {
     + '<div style="font-weight:800;font-size:14px;margin-bottom:8px">🏘️ Owner also owns ' + linked.length + ' other propert' + (linked.length === 1 ? 'y' : 'ies') + '</div>'
     + rows + '</div>';
 }
+/* ── County sale cross-check (Nov 4, Troy: "comps like them") ──
+   Verifies picked comps against the county recorder's own public data.
+   Currently Ohio only (Cuyahoga County ArcGIS — free, keyless).
+   Runs fire-and-forget after comps load; never touches offer math. ── */
+async function runCountyVerify(){
+  const box = document.getElementById('countyVerifyBox'); if(!box) return;
+  box.innerHTML = '';
+  try{
+    const picks = (typeof compRows !== 'undefined' ? compRows : []).filter(r => (typeof compPicks !== 'undefined' ? compPicks : []).indexOf(r.address) >= 0);
+    if(!picks.length) return;
+    const ohPicks = picks.filter(r => /,\s*OH\s+\d{5}/.test(r.address || ''));
+    if(!ohPicks.length) return; // county check covers Ohio only right now
+    box.innerHTML = '<p style="color:var(--muted);font-size:12px">🏛️ Checking picked comps against Cuyahoga County records…</p>';
+    const res = await fetch('/.netlify/functions/data-verify', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ comps: ohPicks.map(r => ({ address: r.address, amount: r.amount, date: r.date })) }),
+    });
+    if(!res.ok){ box.innerHTML = ''; return; }
+    const data = await res.json();
+    const results = data.results || [];
+    if(!results.length){ box.innerHTML = ''; return; }
+    const badge = (s) => ({ verified: '✅ County verified', resold: '🔄 Resold since', mismatch: '⚠️ County mismatch', 'no-record': '❓ No county record', error: '—', unsupported: '—' }[s] || '—');
+    const rows = results.map(r => {
+      const county = r.countyAmount != null ? '$' + Number(r.countyAmount).toLocaleString() + (r.countyDate ? ' · ' + r.countyDate : '') : '—';
+      return '<div style="padding:6px 0;border-top:1px solid var(--line);font-size:13px">'
+        + '<div><strong>' + esc(r.address) + '</strong> — ' + badge(r.status) + '</div>'
+        + '<div style="color:var(--muted);font-size:12px">County: ' + county + (r.note ? ' · ' + esc(r.note) : '') + '</div></div>';
+    }).join('');
+    box.innerHTML = '<div style="background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px">'
+      + '<div style="font-weight:800;font-size:13px;margin-bottom:6px">🏛️ County verification — Cuyahoga County, OH</div>'
+      + rows
+      + '<div style="color:var(--muted);font-size:11px;margin-top:6px">County records confirm the sale actually happened at that price. A mismatch means the comp needs review before it carries the ARV.</div></div>';
+  }catch(e){ box.innerHTML = ''; }
+}
 async function loadCompsForAddress(retryAttempt){
   retryAttempt = retryAttempt || 0;
   const addrEl = document.getElementById('compListAddr');
@@ -5281,6 +5316,9 @@ async function loadCompsForAddress(retryAttempt){
     if(avg && arvEl) arvEl.value = avg;
     renderCompList();
     calcComp();
+    /* County sale cross-check (Nov 4): verifies picked OH comps against
+       Cuyahoga County records. Fire-and-forget; never touches offer math. */
+    runCountyVerify();
     /* data provider comp rows carry no per-row coordinates — geocode the
        missing ones browser-side (Nominatim, ~1 req/sec) so pins land on the
        map. Fire-and-forget; never touches the subject or the offer math. */
