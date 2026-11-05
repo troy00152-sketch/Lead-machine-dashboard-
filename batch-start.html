@@ -20,6 +20,7 @@
 <button id="startBtn">Start job</button>
 <button id="statusBtn">Check status</button>
 <button id="resumeBtn">Resume job</button>
+<button id="resultsBtn">Download results (JSON)</button>
 <pre id="out">Idle.</pre>
 <script>
 const out = document.getElementById('out');
@@ -49,6 +50,24 @@ document.getElementById('statusBtn').onclick = async () => {
 };
 document.getElementById('resumeBtn').onclick = async () => {
   show(await post({ action: 'resume', jobId: JOB }));
+};
+document.getElementById('resultsBtn').onclick = async () => {
+  show('Fetching all results for ' + JOB + '…');
+  const all = [];
+  let offset = 0;
+  for (;;) {
+    const r = await fetch('/.netlify/functions/data-skiptrace-batch?action=results&jobId=' + JOB + '&offset=' + offset + '&limit=500');
+    const j = await r.json();
+    (j.results || []).forEach((x) => all.push(x));
+    if (!j.results || j.results.length === 0 || all.length >= (j.available || 0)) break;
+    offset = all.length;
+  }
+  const blob = new Blob([JSON.stringify({ jobId: JOB, fetchedAt: new Date().toISOString(), count: all.length, results: all }, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = JOB + '-results.json';
+  a.click();
+  show('Downloaded ' + all.length + ' results for ' + JOB + '.');
 };
 </script>
 </body>
