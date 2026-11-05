@@ -474,10 +474,10 @@ exports.handler = async (event) => {
     let compRes = null;
     for (const target of compTargets) {
       compRes = await prPost('/comparables', {
-              target,
-                filter: {
+        target,
+        filter: {
           distanceFromSubject: 2,
-                    lastSaleDateMin: isoDaysAgo(365),
+          lastSaleDateMin: isoDaysAgo(365),
           propertyClassCode: ['R'],
         },
       }, apiKey).catch(() => null);
@@ -513,6 +513,38 @@ exports.handler = async (event) => {
       };
     }
     // else: comps stays null -> page falls back to ATTOM
+
+    // --- 3. linked properties: other properties owned by the same owner ---
+    // (Nov 4, Troy: "some sellers mite have more then one house")
+    // POST /v1/linked-properties, 1 credit. Target forms tried in order.
+    let linkedProperties = [];
+    const linkedTargets = [];
+    if (rawProp.id) linkedTargets.push({ propertyId: rawProp.id });
+    if (rawProp.apn) linkedTargets.push({ apn: rawProp.apn });
+    linkedTargets.push(addrTarget);
+    for (const target of linkedTargets) {
+      const linkedRes = await prPost('/linked-properties', { target }, apiKey).catch(() => null);
+      if (bodyOk(linkedRes) && linkedRes.json.properties) {
+        linkedProperties = (linkedRes.json.properties || []).map(p => ({
+          address: p.address || [p.streetAddress, p.city, p.state, p.zip].filter(Boolean).join(', '),
+          city: p.city || null,
+          state: p.state || null,
+          zip: p.zip || null,
+          propertyType: p.propertyType || null,
+          beds: p.bedrooms != null ? p.bedrooms : null,
+          baths: p.bathrooms != null ? p.bathrooms : null,
+          sqft: p.squareFeet || p.livingSquareFeet || null,
+          yearBuilt: p.yearBuilt || null,
+          lastSaleAmount: p.lastSaleAmount != null ? p.lastSaleAmount : null,
+          lastSaleDate: p.lastSaleDate ? String(p.lastSaleDate).slice(0, 10) : null,
+          estimatedValue: p.estimatedValue != null ? p.estimatedValue : (p.marketValue != null ? p.marketValue : null),
+        }));
+        // Exclude the subject property itself from the list
+        const subjAddr = (subject.address || '').toLowerCase().trim();
+        linkedProperties = linkedProperties.filter(lp => (lp.address || '').toLowerCase().trim() !== subjAddr);
+        break;
+      }
+    }
 
     return {
       statusCode: 200,
@@ -578,6 +610,7 @@ exports.handler = async (event) => {
           value: subject.marketValue, low: null, high: null, score: null, note: 'PropertyReach market value — screen only, never ARV',
         } : null,
         comps,
+        linkedProperties,
       }),
     };
   } catch (err) {
