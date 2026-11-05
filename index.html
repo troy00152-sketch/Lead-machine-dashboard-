@@ -753,7 +753,20 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
             <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);white-space:nowrap;cursor:pointer" title="Show only land investors (name contains 'land', phone on file)">
               <input type="checkbox" id="mbLandOnly" onchange="searchMasterBuyers()" style="width:16px;height:16px;accent-color:#22c55e" /> 🌱 Land only
             </label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);white-space:nowrap;cursor:pointer" title="Show only ✅ Verified buyers">
+              <input type="checkbox" id="mbVerifiedOnly" onchange="searchMasterBuyers()" style="width:16px;height:16px;accent-color:#22c55e" /> ✅ Verified only
+            </label>
             <button class="btn primary" onclick="searchMasterBuyers()">🔍 Search</button>
+          </div>
+          <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center;flex-wrap:wrap">
+            <input class="field" id="mbVerifyPhone" placeholder="Verify a buyer — phone number" style="width:210px" />
+            <select class="field" id="mbVerifyHow" style="width:200px" title="How was this buyer verified?">
+              <option value="confirmed">Confirmed buy box</option>
+              <option value="pof">Proof of funds on file</option>
+            </select>
+            <button class="btn" onclick="verifyBuyer()">✅ Mark verified</button>
+            <button class="btn" onclick="unverifyBuyer()">Remove</button>
+            <span id="mbVerifyMsg" style="font-size:12px;color:var(--muted)"></span>
           </div>
           <div id="mbResults" style="max-height:600px;overflow-y:auto"></div>
           <div id="mbPagination" style="margin-top:12px;text-align:center"></div>
@@ -3536,11 +3549,68 @@ function loadMasterBuyers(){
     document.head.appendChild(s);
   });
 }
+/* Verified buyer tier — live overlay from /.netlify/functions/buyer-verify.
+   A buyer is ✅ Verified when they made an offer in a deal room, confirmed
+   their buy box, or have proof of funds on file. Views never verify. */
+let _verifiedMap = null;
+function mbDigits(p){
+  const d = String(p||'').replace(/\D/g,'');
+  return (d.length === 11 && d.startsWith('1')) ? d.slice(1) : d;
+}
+async function loadVerifiedMap(){
+  if(_verifiedMap) return _verifiedMap;
+  try{
+    const r = await fetch('/.netlify/functions/buyer-verify?action=list', {cache:'no-store'});
+    const j = await r.json();
+    _verifiedMap = (j && j.verified) || {};
+  }catch(e){ _verifiedMap = {}; }
+  return _verifiedMap;
+}
+function mbVerifiedBadge(b){
+  const v = (_verifiedMap||{})[mbDigits(b.p)];
+  if(!v) return '';
+  const howLabel = {confirmed:'Confirmed buy box', pof:'Proof of funds', 'deal-offer':'Made an offer on a deal'}[v.how] || 'Verified';
+  const when = v.at ? new Date(v.at).toLocaleDateString() : '';
+  return ` <span title="✅ Verified — ${esc(howLabel)}${when ? ' · ' + esc(when) : ''}" style="cursor:help">✅</span>`;
+}
+async function verifyBuyer(){
+  const msg = document.getElementById('mbVerifyMsg');
+  const phone = (document.getElementById('mbVerifyPhone').value || '').trim();
+  const how = (document.getElementById('mbVerifyHow').value || 'confirmed');
+  if(!phone){ msg.textContent = 'Enter a phone number first.'; return; }
+  msg.textContent = 'Saving…';
+  try{
+    const data = await loadMasterBuyers();
+    const hit = data.find(b => mbDigits(b.p) === mbDigits(phone));
+    const r = await fetch('/.netlify/functions/buyer-verify', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'set', phone, name: hit ? hit.n : '', how})});
+    const j = await r.json();
+    if(!r.ok) throw new Error(j.error || 'Failed');
+    _verifiedMap = null; await loadVerifiedMap();
+    msg.textContent = '✅ Verified — ' + (how === 'pof' ? 'proof of funds' : 'buy box confirmed') + '.';
+    searchMasterBuyers();
+  }catch(e){ msg.textContent = 'Could not verify: ' + e.message; }
+}
+async function unverifyBuyer(){
+  const msg = document.getElementById('mbVerifyMsg');
+  const phone = (document.getElementById('mbVerifyPhone').value || '').trim();
+  if(!phone){ msg.textContent = 'Enter a phone number first.'; return; }
+  msg.textContent = 'Removing…';
+  try{
+    const r = await fetch('/.netlify/functions/buyer-verify', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'remove', phone})});
+    const j = await r.json();
+    if(!r.ok) throw new Error(j.error || 'Failed');
+    _verifiedMap = null; await loadVerifiedMap();
+    msg.textContent = 'Removed from verified.';
+    searchMasterBuyers();
+  }catch(e){ msg.textContent = 'Could not remove: ' + e.message; }
+}
 async function searchMasterBuyers(){
   const q = (document.getElementById('mbSearch').value || '').toLowerCase().trim();
   const tier = (document.getElementById('mbTier') || {}).value || '';
   const landOnly = (document.getElementById('mbLandOnly') || {}).checked || false;
+  const verifiedOnly = (document.getElementById('mbVerifiedOnly') || {}).checked || false;
   const data = await loadMasterBuyers();
+  const vmap = await loadVerifiedMap();
   let results = data;
   if(q){
     results = results.filter(b =>
@@ -3552,6 +3622,9 @@ async function searchMasterBuyers(){
   }
   if(tier){
     results = results.filter(b => (b.ti||'').charAt(0) === tier);
+  }
+  if(verifiedOnly){
+    results = results.filter(b => vmap[mbDigits(b.p)]);
   }
   if(landOnly){
     /* Land investors: name contains 'land' (Land Trust, Land Co, etc.) + phone on file.
@@ -3595,7 +3668,7 @@ function renderMasterBuyers(results){
   let html = '<table style="width:100%;font-size:13px;border-collapse:collapse"><thead><tr style="border-bottom:1px solid var(--line);text-align:left"><th style="padding:8px;cursor:pointer;white-space:nowrap" onclick="mbToggleSort()" title="Sort by score">Score ' + arrow + '</th><th style="padding:8px">Name</th><th style="padding:8px">Phone</th><th style="padding:8px">Buy Box</th><th style="padding:8px">City</th><th style="padding:8px">ST</th><th style="padding:8px">Props</th></tr></thead><tbody>';
   for(const b of page){
     const buyBox = (b.st||'') + (b.ap ? ' · $' + Math.round(b.ap/1000) + 'K avg' : '');
-    html += `<tr style="border-bottom:1px solid var(--line)"><td style="padding:8px">${mbScoreBadge(b)}</td><td style="padding:8px">${esc(b.n||'—')}</td><td style="padding:8px">${b.p?esc(formatPhone(b.p)):'—'}</td><td style="padding:8px">${esc(buyBox||'—')}</td><td style="padding:8px">${esc(b.c||'—')}</td><td style="padding:8px">${esc(b.s||'—')}</td><td style="padding:8px">${b.pc||0}</td></tr>`;
+    html += `<tr style="border-bottom:1px solid var(--line)"><td style="padding:8px">${mbScoreBadge(b)}</td><td style="padding:8px">${esc(b.n||'—')}${mbVerifiedBadge(b)}</td><td style="padding:8px">${b.p?esc(formatPhone(b.p)):'—'}</td><td style="padding:8px">${esc(buyBox||'—')}</td><td style="padding:8px">${esc(b.c||'—')}</td><td style="padding:8px">${esc(b.s||'—')}</td><td style="padding:8px">${b.pc||0}</td></tr>`;
   }
   html += '</tbody></table>';
   box.innerHTML = html;
