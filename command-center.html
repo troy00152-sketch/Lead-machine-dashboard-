@@ -480,6 +480,7 @@ function addMapPin(lat,lng,label){
   if(!ccMap||!lat||!lng)return;
   const m=L.marker([lat,lng]).addTo(ccMap).bindPopup(esc(label||''));
   ccMarkers.push(m);
+  ccMap.setView([lat,lng],15);
 }
 
 /* ============ DEAL ALERTS ============ */
