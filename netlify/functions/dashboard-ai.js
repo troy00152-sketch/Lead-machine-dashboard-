@@ -9,10 +9,10 @@
 //   { messages: [{ role: "user"|"assistant", content: "..." }] }
 // Responds: { reply: "..." }  or  { error: "..." }
 //
-// PropertyReach comps wiring (Troy approved Nov 2, 2026 — replaces DealMachine):
+// data provider comps wiring (Troy approved Nov 2, 2026 — replaces DealMachine):
 //   The model gets a get_comps tool. When Troy asks for ARV/comps/offer
-//   numbers on a specific address, the function calls PropertyReach's API
-//   (https://api.propertyreach.com/v1) with PROPERTYREACH_API_KEY:
+//   numbers on a specific address, the function calls data provider's API
+//   (https://api.data-api.com/v1) with PROPERTYREACH_API_KEY:
 //   GET /v1/property (1 credit) to resolve the property, then
 //   POST /v1/comparables (1 credit) for comparable sales.
 //   Real cost: ~2 API credits per address lookup ($0.02 nominal at $30/100
@@ -36,7 +36,7 @@ const MAX_INPUT_CHARS = 4000;    // per-message cap
 const MAX_TOOL_ITERATIONS = 2;   // max get_comps calls per chat request (≤4 credits)
 const COMPS_LIMIT = 10;
 
-const PR_API_BASE = 'https://api.propertyreach.com/v1';
+const PR_API_BASE = 'https://api.data-api.com/v1';
 
 function money(n) {
   if (n == null || isNaN(Number(n))) return '?';
@@ -79,30 +79,52 @@ HARD RULES:
 5. Present MAO/LAO as light / medium / heavy repair scenarios when repairs are unknown: Light $20K, Medium $40K, Heavy $70K.
 6. Keep replies short. Lead with the number or the answer, then one line of reasoning at most.
 7. Drafted texts follow Troy's SMS rules: no opt-out sentence in the body (footer handles it), no spam-trigger phrasing, plain and short, at most two sentences.
-8. You never cancel bookings, never contact sellers yourself, never spend money. The ONLY credit spend allowed is the get_comps tool: ~2 PropertyReach API credits per address lookup (Troy-approved Nov 2, 2026) — one lookup per address unless he asks for more.
+8. You never cancel bookings, never contact sellers yourself, never spend money. The ONLY credit spend allowed is the get_comps tool: ~2 data provider API credits per address lookup (Troy-approved Nov 2, 2026) — one lookup per address unless he asks for more.
 9. Timezones: Kansas City sellers are Central; Indianapolis, Cleveland, Carolina, Florida are Eastern. Never show a conversion parenthetical.
 10. COMP RULES for get_comps results: you need 3+ SOLD comps passing similarity (sqft ±20%, beds ±1, ≤12 months, ≤2 miles) before quoting MAO/LAO. Fewer than 3 = ARV screen-only, no offer numbers, say plainly the set is thin. Name the comps you used and one line each on why. Active listings are never comps — ignore them for ARV math.
 11. ARV MATH IS DONE FOR YOU: the tool result includes a CODE-AVERAGE line with the exact average of the top-3 comps. Quote that figure as the ARV when you use those 3 comps — never recompute it yourself. If you swap in a different comp, show your arithmetic exactly like the CODE-AVERAGE line.
 12. If a get_comps tool result contains a DIAGNOSTIC block, reproduce it EXACTLY in your reply (verbatim, no paraphrasing) so the failure can be fixed — then give Troy the plain-English one-liner too.
 13. BUYER MATCHING: you have a match_buyers tool (23,837 buyers with phones, costs nothing). Call it when Troy asks "who are my buyers for this deal", "match buyers", "find buyers for [address]", or wants a buyer list for a blast. Pass the property address (or city/state/zip) and the deal price (MAO) when you have it. Present the top matches with name, score, strategy, avg buy, and phone. Never invent buyers — only report what the tool returns. If the tool finds none, say so plainly.`;
 
-// ---- PropertyReach client (get_comps tool backend) ----
+// ---- data provider client (get_comps tool backend) ----
+
+// US state abbreviations. The old state+ZIP regex grabbed the last two
+// letters of the city name as a "state" ("Indianapolis 46237" -> state
+// "IS", street "4405 E edgewood ave Indianapol"), which made the upstream
+// property lookup return no match. Only accept the token as a state when
+// it is a real US state abbreviation; otherwise fall back to ZIP-only.
+const US_STATES = new Set(['AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'DC', 'FL', 'GA', 'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ', 'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY']);
 
 function parseAddress(full) {
   const out = { street: '', city: '', state: '', zip: '' };
   if (!full) return out;
   let head = String(full).trim();
-  const sz = head.match(/,?\s*([A-Za-z]{2})\s+(\d{5})(?:-\d{4})?\s*$/);
-  if (sz) {
+  const sz = head.match(/(?:^|,|\s)([A-Za-z]{2})\s+(\d{5})(?:-\d{4})?\s*$/);
+  if (sz && US_STATES.has(sz[1].toUpperCase())) {
     out.state = sz[1].toUpperCase();
     out.zip = sz[2];
     head = head.slice(0, sz.index).replace(/,\s*$/, '').trim();
+  } else {
+    const z = head.match(/\s+(\d{5})(?:-\d{4})?\s*$/);
+    if (z) {
+      out.zip = z[1];
+      head = head.slice(0, z.index).replace(/,\s*$/, '').trim();
+    }
   }
   const parts = head.split(',').map((s) => s.trim()).filter(Boolean);
   if (parts.length >= 2) {
     out.city = parts[parts.length - 1];
     out.street = parts.slice(0, -1).join(', ');
     return out;
+  }
+  const SUF = ['ave', 'avenue', 'st', 'street', 'rd', 'road', 'dr', 'drive', 'ln', 'lane', 'blvd', 'boulevard', 'ct', 'court', 'way', 'pl', 'place', 'ter', 'terrace', 'cir', 'circle', 'hwy', 'highway', 'pkwy', 'parkway', 'aly', 'alley', 'trl', 'trail', 'sq', 'square', 'xing', 'crossing', 'pt', 'point', 'cove', 'cv', 'row', 'run', 'walk', 'path', 'ext'];
+  const words = head.split(/\s+/);
+  for (let i = 1; i < words.length - 1; i++) {
+    if (SUF.includes(words[i].toLowerCase().replace(/\.$/, ''))) {
+      out.street = words.slice(0, i + 1).join(' ');
+      out.city = words.slice(i + 1).join(' ');
+      return out;
+    }
   }
   out.street = head;
   return out;
@@ -153,7 +175,7 @@ function pick(obj, keys) {
   return null;
 }
 
-// Normalize a PropertyReach comp row to the shape the summary builder expects.
+// Normalize a data provider comp row to the shape the summary builder expects.
 function normalizePrComp(r) {
   if (!r || typeof r !== 'object') return null;
   const street = pick(r, ['streetAddress', 'address', 'street']);
@@ -280,7 +302,7 @@ async function prCompsLookup({ prApiKey, address, apn }) {
     : null;
 
   const summary = [
-    `COMPS for "${address}" (PropertyReach live pull, 2 credits used):`,
+    `COMPS for "${address}" (data provider live pull, 2 credits used):`,
     subjectBits ? `Subject: ${subjectBits}` : null,
     rows.length ? `${rows.length} sold comps (12mo, ≤2mi):` : 'No sold comps returned — the feed, not the property, may be thin.',
     ...lines,
@@ -289,7 +311,7 @@ async function prCompsLookup({ prApiKey, address, apn }) {
       ? `CODE-AVERAGE of top-3: (${money(top3[0].price)} + ${money(top3[1].price)} + ${money(top3[2].price)}) / 3 = ${money(codeAvg)}. When quoting ARV from these exact 3 comps, use ${money(codeAvg)} — do NOT recompute. If you swap any comp, show your full arithmetic like this line.`
       : null,
     '',
-    'Apply Troy\u2019s comp rules: need 3+ SOLD comps passing similarity (sqft ±20%, beds ±1, ≤12mo, ≤2mi) before quoting MAO/LAO. Fewer than 3 = ARV screen-only, no offer numbers, say the set is thin. Note: PropertyReach rows carry no per-row distance — all passed the 2-mile filter.',
+    'Apply Troy\u2019s comp rules: need 3+ SOLD comps passing similarity (sqft ±20%, beds ±1, ≤12mo, ≤2mi) before quoting MAO/LAO. Fewer than 3 = ARV screen-only, no offer numbers, say the set is thin. Note: data provider rows carry no per-row distance — all passed the 2-mile filter.',
   ].filter((l) => l !== null).join('\n');
 
   return { ok: true, credits: 2, count: rows.length, summary };
@@ -301,7 +323,7 @@ const COMPS_TOOL_DEF = {
   type: 'function',
   function: {
     name: 'get_comps',
-    description: 'Pull live comparable sales for a property address from PropertyReach. Costs ~2 API credits per lookup (1 for the property record, 1 for comps). Call it when Troy asks for ARV, comps, or offer numbers on a specific property address and you do not already have verified comps for it in this conversation. Do NOT call it for general questions, math on numbers he gave you, or text drafts. If Troy provides an APN, pass it for a more precise lookup.',
+    description: 'Pull live comparable sales for a property address from data provider. Costs ~2 API credits per lookup (1 for the property record, 1 for comps). Call it when Troy asks for ARV, comps, or offer numbers on a specific property address and you do not already have verified comps for it in this conversation. Do NOT call it for general questions, math on numbers he gave you, or text drafts. If Troy provides an APN, pass it for a more precise lookup.',
     parameters: {
       type: 'object',
       properties: {
@@ -533,7 +555,7 @@ async function runChat({ baseUrl, apiKey, model, prApiKey, messages }) {
           toolResult = `Buyer match failed: ${String(err.message || err).slice(0, 200)}`;
         }
       } else {
-        if (!prApiKey) throw new Error('PropertyReach API key not configured');
+        if (!prApiKey) throw new Error('data provider API key not configured');
         const address = String(args.address || '').trim();
         const apn = String(args.apn || '').trim() || null;
         if (!address) {
