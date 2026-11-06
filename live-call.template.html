@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="holographic">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live Call Console — Prep + Debrief · Direct Property Buyers</title>
+<style>
+/* Holographic theme — same variables as command-center.html / index.html */
+:root{
+  --bg:#050a14; --bg2:rgba(10,18,38,.88); --panel:rgba(13,25,48,.55); --panel2:rgba(20,35,65,.45);
+  --line:rgba(0,212,255,.22); --text:#e8f4ff; --muted:#7a9cc6; --muted2:#4a6a94;
+  --accent:#00d4ff; --accent2:#0090ff; --green:#00ffaa; --red:#ff4466;
+  --blue:#4488ff; --chip:rgba(0,212,255,.12); --radius:14px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  background-color:#050a14; color:var(--text); min-height:100vh;
+  background-image:
+    radial-gradient(ellipse 80% 50% at 15% 0%, rgba(0,212,255,.09), transparent 60%),
+    radial-gradient(ellipse 70% 55% at 85% 100%, rgba(0,102,255,.11), transparent 60%);
+}
+a{color:var(--accent)}
+.wrap{max-width:1060px;margin:0 auto;padding:18px 16px 60px}
+header{display:flex;flex-wrap:wrap;gap:10px;align-items:baseline;justify-content:space-between;margin-bottom:14px}
+h1{font-size:24px;font-weight:800}
+h1 span{color:var(--accent);text-shadow:0 0 18px rgba(0,212,255,.8)}
+.sub{color:var(--muted);font-size:13px;margin-top:4px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px;margin-bottom:14px;backdrop-filter:blur(8px)}
+.panel h2{font-size:16px;margin-bottom:4px}
+.panel h2 .n{color:var(--accent)}
+.panel .hint{color:var(--muted);font-size:13px;margin-bottom:12px}
+.lbl{font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.grid .wide{grid-column:1 / -1}
+.f{display:flex;flex-direction:column;gap:4px}
+.f label{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+input,select,textarea{
+  background:rgba(10,18,38,.7);color:var(--text);border:1px solid var(--line);
+  border-radius:8px;padding:9px 10px;font-size:14px;font-family:inherit;width:100%;
+}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 18px rgba(0,212,255,.2)}
+input[type=checkbox]{width:auto;padding:0;accent-color:var(--accent)}
+input[type=range]{padding:0}
+textarea{min-height:64px;resize:vertical}
+.btn{
+  display:inline-block;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#001220;
+  border:none;border-radius:8px;padding:10px 18px;font-size:14px;font-weight:800;cursor:pointer;
+  box-shadow:0 0 18px rgba(0,212,255,.35);
+}
+.btn:hover{box-shadow:0 0 26px rgba(0,212,255,.65);transform:translateY(-1px)}
+.btn:disabled{opacity:.5;cursor:default;transform:none}
+.btn.ghost{background:transparent;color:var(--accent);border:1px solid var(--line);box-shadow:none}
+.row{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;align-items:center}
+.muted{color:var(--muted);font-size:13px}
+.nums{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:8px;overflow:hidden;margin-top:10px}
+.num{background:var(--panel2);padding:10px 12px}
+.num.key{background:rgba(0,212,255,.10)}
+.num .v{font-size:22px;font-weight:800;letter-spacing:-.02em}
+.num.key .v{color:var(--accent);text-shadow:0 0 16px rgba(0,212,255,.45)}
+.num .sub{font-size:11px;color:var(--muted);margin-top:1px}
+.say{margin-top:8px;padding:13px 14px;background:rgba(0,212,255,.08);border-left:4px solid var(--accent);border-radius:6px;font-size:15px;line-height:1.5}
+.obj{margin-top:10px;padding:10px 12px;background:var(--panel2);border:1px solid var(--line);border-radius:8px}
+.obj-t{font-weight:700;font-size:14px}
+.obj-r{color:var(--text);font-size:14px;margin-top:4px;line-height:1.5}
+.tag{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;padding:3px 7px;border-radius:4px;background:var(--chip);color:var(--accent);border:1px solid var(--line)}
+.chip{background:transparent;color:var(--text);border:1px solid var(--line);border-radius:20px;padding:6px 12px;font-size:12.5px;font-weight:700;cursor:pointer}
+.chip.on{background:var(--chip);color:var(--accent);border-color:var(--accent)}
+.obj-chip{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:7px 10px;font-size:13px;cursor:pointer;text-align:left}
+.obj-chip:hover{border-color:var(--accent)}
+.obj-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px}
+.prep-addr{font-size:19px;font-weight:800}
+.pass-banner{margin-top:10px;padding:12px 14px;background:rgba(255,68,102,.14);border:1px solid var(--red);border-radius:8px;color:#ffb3c0;font-weight:700}
+.score-big{font-size:26px;font-weight:800;color:var(--accent);text-shadow:0 0 16px rgba(0,212,255,.45)}
+.sc-item{display:flex;gap:10px;align-items:flex-start;padding:9px 4px;border-bottom:1px solid var(--line);cursor:pointer}
+.sc-item:last-child{border-bottom:none}
+.sc-item input{margin-top:3px;transform:scale(1.25)}
+.sc-item .t{font-weight:700;font-size:14px}
+.sc-item .d{color:var(--muted);font-size:12.5px}
+.note{padding:6px 2px;border-bottom:1px solid var(--line);font-size:14px}
+footer{color:var(--muted);font-size:12.5px;line-height:1.6;margin-top:8px}
+footer b{color:var(--text)}
+@media(max-width:640px){h1{font-size:20px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div>
+    <h1>📞 Live Call <span>Console</span></h1>
+    <div class="sub">Prep card + debrief scorecard — for Troy and Irish. Second screen for live seller calls.</div>
+  </div>
+  <div class="f" style="min-width:160px">
+    <label for="caller">Who is calling</label>
+    <select id="caller" data-draft>
+      <option value="Troy" selected>Troy</option>
+      <option value="Irish">Irish</option>
+    </select>
+  </div>
+</header>
+
+<div style="margin-bottom:14px"><a href="index.html">← Back to dashboard</a></div>
+
+<!-- ============ 1 · PREP CARD ============ -->
+<section class="panel">
+  <h2><span class="n">1 ·</span> Prep card</h2>
+  <div class="hint">Type the deal, hit “Build prep card.” Numbers come from the dashboard's canonical MAO/LAO math — same tiers as the Deal Analysis page.</div>
+  <div class="grid">
+    <div class="f wide"><label for="address">Property address</label><input id="address" data-draft placeholder="123 Main St, Indianapolis, IN 46201" autocomplete="off"></div>
+    <div class="f"><label for="city">City</label><input id="city" data-draft placeholder="Indianapolis"></div>
+    <div class="f"><label for="state">State</label><input id="state" data-draft placeholder="IN" maxlength="2"></div>
+    <div class="f"><label for="zip">ZIP</label><input id="zip" data-draft placeholder="46201" inputmode="numeric"></div>
+    <div class="f"><label for="listSource">List source</label>
+      <select id="listSource" data-draft>
+        <option value="probate">Probate</option>
+        <option value="code violation" selected>Code violation</option>
+        <option value="pre-foreclosure">Pre-foreclosure</option>
+        <option value="tax delinquent">Tax delinquent</option>
+        <option value="D4D">Driving for dollars</option>
+        <option value="FSBO">FSBO</option>
+        <option value="other">Other</option>
+      </select>
+    </div>
+    <div class="f"><label for="arv">ARV ($)</label><input id="arv" data-draft placeholder="150000" inputmode="numeric"></div>
+    <div class="f"><label for="repairs">Repairs ($)</label><input id="repairs" data-draft placeholder="50000" inputmode="numeric"></div>
+    <div class="f"><label for="bedsBaths">Beds / baths</label><input id="bedsBaths" data-draft placeholder="3 / 2"></div>
+    <div class="f"><label for="sqft">Sqft</label><input id="sqft" data-draft placeholder="1450" inputmode="numeric"></div>
+    <div class="f"><label for="yearBuilt">Year built</label><input id="yearBuilt" data-draft placeholder="1987" inputmode="numeric"></div>
+    <div class="f"><label for="ownerName">Owner on record</label><input id="ownerName" data-draft placeholder="Owner name"></div>
+    <div class="f"><label for="sellerPhone">Seller phone</label><input id="sellerPhone" data-draft placeholder="(317) 555-0100" inputmode="tel"></div>
+    <div class="f"><label for="buyerName">Likely cash buyer (optional — or match below)</label><input id="buyerName" data-draft placeholder="Type a buyer, or use Match buyers"></div>
+    <div class="f wide">
+      <label style="display:flex;gap:8px;align-items:center;text-transform:none;letter-spacing:0;font-size:14px;color:var(--text)">
+        <input type="checkbox" id="listed" data-draft> Listed with a realtor — PASS, no offer, no chase
+      </label>
+    </div>
+  </div>
+  <div class="row">
+    <button type="button" class="btn" id="buildPrep">Build prep card</button>
+    <button type="button" class="btn ghost" id="matchBuyers">Match buyers</button>
+    <span class="muted">Match buyers loads the master buyer list (city / ZIP, top score) — real buyers only.</span>
+  </div>
+  <div id="prepOut" style="margin-top:14px"><p class="muted">No prep card yet.</p></div>
+</section>
+
+<!-- ============ 2 · LIVE COACH ============ -->
+<section class="panel">
+  <h2><span class="n">2 ·</span> Live Coach — listens and suggests</h2>
+  <div class="hint">Start the coach when the call starts. It listens on this device's mic (put the call on speaker), shows what the seller just said, and flashes 1–3 replies in about 2 seconds. Tap a reply to use it. When a vetted objection line matches, it comes first — the AI suggestions are the backup.</div>
+  <div class="row" style="margin-top:0">
+    <button type="button" class="btn" id="coachToggle">🎙 Start listening</button>
+    <span class="muted" id="coachStatus">Coach off. The mic is never on unless you start it.</span>
+    <span class="muted" id="coachLatency"></span>
+  </div>
+  <label style="display:flex;gap:8px;align-items:center;font-size:14px;margin-top:10px">
+    <input type="checkbox" id="coachConsent"> Seller knows I'm taking notes on this call
+  </label>
+  <div class="muted" style="margin-top:4px">Florida and 10+ other states are all-party consent — tell the seller first: “I take notes on my calls — is that alright with you?”</div>
+  <div class="lbl" style="margin-top:14px">What was just said</div>
+  <div id="coachTranscript" class="obj" style="min-height:64px;max-height:180px;overflow-y:auto"><p class="muted">Nothing heard yet.</p></div>
+  <div class="lbl" style="margin-top:14px">Say this</div>
+  <div id="coachSuggestions"><p class="muted">Suggestions appear here while the seller is talking.</p></div>
+  <div class="row">
+    <input id="coachSimInput" placeholder="Test: type what the seller just said, e.g. That's too low." style="flex:1;min-width:220px">
+    <button type="button" class="btn ghost" id="coachSimBtn">Test suggestion</button>
+  </div>
+  <div class="muted" style="margin-top:8px">v1 listens with your browser's free speech recognition (Chrome on desktop or Android). If it misses words, the pro upgrade is live transcription at about $0.017/min — roughly $1 an hour of calls.</div>
+</section>
+
+<!-- ============ 3 · OBJECTION LINES (instant chips) ============ -->
+<section class="panel">
+  <h2><span class="n">3 ·</span> Objection lines — tap, read, say it</h2>
+  <div class="hint">77 vetted lines from the bot's objection library (same lines Amber uses — with your name swapped in). Zero latency: tap a line, the response appears. Use it when the call is moving.</div>
+  <div id="chipBox"></div>
+</section>
+
+<!-- ============ 4 · DURING THE CALL ============ -->
+<section class="panel">
+  <h2><span class="n">4 ·</span> During the call — MCTP + talk ratio + notes</h2>
+  <div class="hint">Type the hard moments — or let the coach above catch them live. Fill the MCTP blanks — blanks are the finding.</div>
+  <div class="grid">
+    <div class="f wide"><label for="motivation">Motivation — why are they selling? (the real reason)</label><input id="motivation" data-draft placeholder="e.g. behind on taxes, inherited, tired landlord"></div>
+    <div class="f"><label for="motivationStrength">Motivation strength</label>
+      <select id="motivationStrength" data-draft>
+        <option value="">—</option><option value="need-to-sell">Need to sell</option><option value="want-to-sell">Want to sell</option><option value="tire-kicker">Tire-kicker</option>
+      </select>
+    </div>
+    <div class="f"><label for="repairLevel">Repair level</label>
+      <select id="repairLevel" data-draft>
+        <option value="">—</option><option value="light">Light</option><option value="medium">Medium</option><option value="heavy">Heavy</option>
+      </select>
+    </div>
+    <div class="f wide"><label for="condition">Condition — roof, HVAC, kitchen, floors, known issues</label><input id="condition" data-draft placeholder="e.g. roof 15 yrs, kitchen dated, bath needs work"></div>
+    <div class="f"><label for="timeframe">Timeframe — when do they need it done?</label><input id="timeframe" data-draft placeholder="e.g. within 30 days, auction Mar 12"></div>
+    <div class="f"><label for="sellerPrice">Their price (recorded, not respected)</label><input id="sellerPrice" data-draft placeholder="e.g. $180,000"></div>
+    <div class="f wide"><label for="decisionMakers">Decision makers — who else has to agree? (names)</label><input id="decisionMakers" data-draft placeholder="e.g. spouse, 2 siblings, executor"></div>
+    <div class="f"><label for="direction">Direction</label>
+      <select id="direction" data-draft>
+        <option value="outbound">Outbound — cold call</option><option value="inbound">Inbound — they called in</option><option value="callback">Callback</option><option value="buyer">Buyer call</option>
+      </select>
+    </div>
+    <div class="f"><label for="durationMin">Duration (minutes)</label><input id="durationMin" data-draft placeholder="12" inputmode="numeric"></div>
+    <div class="f wide">
+      <label for="talkPct">Talk ratio — seller talked <span id="talkVal">—</span></label>
+      <input type="range" id="talkPct" data-draft min="0" max="100" step="5" value="50">
+      <div class="muted">Target: seller talks ≥ 80%. If you are talking more than ~20%, shut up and let them finish.</div>
+    </div>
+    <div class="f wide"><label for="noteText">Note log — the hard moments (objection you didn't expect, their counter, “they went quiet”)</label>
+      <div style="display:flex;gap:8px"><input id="noteText" placeholder="Type a note, hit Add"><button type="button" class="btn ghost" id="addNote">Add</button></div>
+      <div id="noteLog" style="margin-top:8px"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 5 · DEBRIEF SCORECARD ============ -->
+<section class="panel">
+  <h2><span class="n">5 ·</span> Debrief scorecard — out of 10</h2>
+  <div class="hint">Grade it honest — this is the only way anyone improves. Check what actually happened on the call.</div>
+  <div id="scorecard">
+    <label class="sc-item"><input type="checkbox" id="sc-opener" data-draft><span><span class="t">1. Opened with the two-question script</span><br><span class="d">Owner of the address → interested in selling</span></span></label>
+    <label class="sc-item"><input type="checkbox" id="sc-talk" data-draft><span><span class="t">2. Seller talked ≥ 80% of the time</span><br><span class="d">Auto-filled from the talk-ratio slider when set — or check by hand</span></span></label>
+    <label class="sc-item"><input type="checkbox" id="sc-mctp" data-draft><span><span class="t">3. All four MCTP fields captured</span><br><span class="d">Motivation, condition, timeframe, price — no blanks</span></span></label>
+    <label class="sc-item"><input type="checkbox" id="sc-conditioned" data-draft><span><span class="t">4. Conditioned for a yes/no decision BEFORE any number</span><br><span class="d">Condition first, number second</span></span></label>
+    <label class="sc-item"><input type="checkbox" id="sc-anchored" data-draft><span><span class="t">5. Anchored low — at or near LAO, not MAO</span><br><span class="d">Opened at LAO; never drifted up toward MAO</span></span></label>
+    <label class="sc-item"><input type="checkbox" id="sc-reverseAnchor" data-draft><span><span class="t">6. Used the reverse price anchor</span><br><span class="d">Blamed the partner for the number</span></span></label>
+    <label class="sc-item"><input type="checkbox" id="sc-nextAction" data-draft><span><span class="t">7. Ended with a committed next action + date</span><br><span class="d">A date, not “I'll think about it”</span></span></label>
+    <label class="sc-item"><input type="checkbox" id="sc-noLeadDistress" data-draft><span><span class="t">8. Did NOT lead with their distress</span><br><span class="d">Never opened with probate, foreclosure, or fines</span></span></label>
+    <label class="sc-item"><input type="checkbox" id="sc-heldAnchor" data-draft><span><span class="t">9. Held the anchor — ignored the SSRP</span><br><span class="d">Their number has no bearing; did not drift toward it</span></span></label>
+    <label class="sc-item"><input type="checkbox" id="sc-decisionMakers" data-draft><span><span class="t">10. All decision makers identified</span><br><span class="d">Present, or the missing one named</span></span></label>
+  </div>
+  <div class="grid" style="margin-top:14px">
+    <div class="f"><label for="offerMade">Offer made ($)</label><input id="offerMade" data-draft placeholder="e.g. $56,000 (LAO) or —"></div>
+    <div class="f"><label for="sellerCounter">Seller counter ($)</label><input id="sellerCounter" data-draft placeholder="e.g. $120,000 or —"></div>
+    <div class="f"><label for="outcome">Outcome</label>
+      <select id="outcome" data-draft>
+        <option value="">—</option><option value="contract">Contract</option><option value="appointment-set">Appointment set</option><option value="follow-up">Follow-up</option><option value="dead">Dead</option>
+      </select>
+    </div>
+    <div class="f"><label for="nextAction">Next action</label><input id="nextAction" data-draft placeholder="e.g. Call back, re-condition, re-anchor at LAO"></div>
+    <div class="f"><label for="nextActionDate">Next action date</label><input id="nextActionDate" data-draft type="date"></div>
+  </div>
+  <div class="row">
+    <button type="button" class="btn" id="scoreBtn">Score this call</button>
+    <button type="button" class="btn ghost" id="downloadBtn">Download debrief (.md)</button>
+    <button type="button" class="btn ghost" id="draftBtn">Save draft</button>
+    <span class="muted" id="saveStatus"></span>
+  </div>
+  <div id="scoreOut" style="margin-top:14px"></div>
+</section>
+
+<footer>
+  <b>Listening:</b> the coach listens only while you have it on, on this device only — nothing is
+  recorded or stored, and only the words it needs to suggest a reply leave the device.
+  If you record a call yourself, get consent first: Florida and 10+ other states are all-party consent.
+  When in doubt, say: “Just so you know, I record my calls for quality — is that alright with you?”
+  Debriefs save as dated notes (<span style="font-family:monospace">YYYY-MM-DD-&lt;address&gt;.md</span>) — move the download into
+  <span style="font-family:monospace">~/workspace/playbook-system/live-call-debriefs/</span>. Over time those notes become
+  training data for a Troy-specific model, built from your last 10 deals per market.
+</footer>
+</div>
+
+<script>window.LIVE_CALL_OBJECTIONS = {{OBJECTIONS_JSON}};</script>
+<script src="assets/offer-math.js"></script>
+<script src="live-call.js"></script>
+</body>
+</html>

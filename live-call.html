@@ -104,12 +104,12 @@ footer b{color:var(--text)}
 <!-- ============ 1 · PREP CARD ============ -->
 <section class="panel">
   <h2><span class="n">1 ·</span> Prep card</h2>
-  <div class="hint">Type the deal, hit “Build prep card” — or open it from a lead or the Comps page and it fills itself. Numbers come from the dashboard's canonical MAO/LAO math — same tiers as the Deal Analysis page.</div>
+  <div class="hint">Type the deal, hit “Build prep card.” Numbers come from the dashboard's canonical MAO/LAO math — same tiers as the Deal Analysis page.</div>
   <div class="grid">
     <div class="f wide"><label for="address">Property address</label><input id="address" data-draft placeholder="123 Main St, Indianapolis, IN 46201" autocomplete="off"></div>
     <div class="f"><label for="city">City</label><input id="city" data-draft placeholder="Indianapolis"></div>
     <div class="f"><label for="state">State</label><input id="state" data-draft placeholder="IN" maxlength="2"></div>
-    <div class="f"><label for="zip">ZIP</label><input id="zip" data-draft placeholder="e.g. 46205" inputmode="numeric"></div>
+    <div class="f"><label for="zip">ZIP</label><input id="zip" data-draft placeholder="46201" inputmode="numeric"></div>
     <div class="f"><label for="listSource">List source</label>
       <select id="listSource" data-draft>
         <option value="probate">Probate</option>
@@ -123,9 +123,9 @@ footer b{color:var(--text)}
     </div>
     <div class="f"><label for="arv">ARV ($)</label><input id="arv" data-draft placeholder="150000" inputmode="numeric"></div>
     <div class="f"><label for="repairs">Repairs ($)</label><input id="repairs" data-draft placeholder="50000" inputmode="numeric"></div>
-    <div class="f"><label for="bedsBaths">Beds / baths</label><input id="bedsBaths" data-draft placeholder="e.g. 3 / 2"></div>
-    <div class="f"><label for="sqft">Sqft</label><input id="sqft" data-draft placeholder="e.g. 1450" inputmode="numeric"></div>
-    <div class="f"><label for="yearBuilt">Year built</label><input id="yearBuilt" data-draft placeholder="e.g. 1987" inputmode="numeric"></div>
+    <div class="f"><label for="bedsBaths">Beds / baths</label><input id="bedsBaths" data-draft placeholder="3 / 2"></div>
+    <div class="f"><label for="sqft">Sqft</label><input id="sqft" data-draft placeholder="1450" inputmode="numeric"></div>
+    <div class="f"><label for="yearBuilt">Year built</label><input id="yearBuilt" data-draft placeholder="1987" inputmode="numeric"></div>
     <div class="f"><label for="ownerName">Owner on record</label><input id="ownerName" data-draft placeholder="Owner name"></div>
     <div class="f"><label for="sellerPhone">Seller phone</label><input id="sellerPhone" data-draft placeholder="(317) 555-0100" inputmode="tel"></div>
     <div class="f"><label for="buyerName">Likely cash buyer (optional — or match below)</label><input id="buyerName" data-draft placeholder="Type a buyer, or use Match buyers"></div>
@@ -143,17 +143,41 @@ footer b{color:var(--text)}
   <div id="prepOut" style="margin-top:14px"><p class="muted">No prep card yet.</p></div>
 </section>
 
-<!-- ============ 2 · OBJECTION LINES (instant chips) ============ -->
+<!-- ============ 2 · LIVE COACH ============ -->
 <section class="panel">
-  <h2><span class="n">2 ·</span> Objection lines — tap, read, say it</h2>
+  <h2><span class="n">2 ·</span> Live Coach — listens and suggests</h2>
+  <div class="hint">Start the coach when the call starts. It listens on this device's mic (put the call on speaker), shows what the seller just said, and flashes 1–3 replies in about 2 seconds. Tap a reply to use it. When a vetted objection line matches, it comes first — the AI suggestions are the backup.</div>
+  <div class="row" style="margin-top:0">
+    <button type="button" class="btn" id="coachToggle">🎙 Start listening</button>
+    <span class="muted" id="coachStatus">Coach off. The mic is never on unless you start it.</span>
+    <span class="muted" id="coachLatency"></span>
+  </div>
+  <label style="display:flex;gap:8px;align-items:center;font-size:14px;margin-top:10px">
+    <input type="checkbox" id="coachConsent"> Seller knows I'm taking notes on this call
+  </label>
+  <div class="muted" style="margin-top:4px">Florida and 10+ other states are all-party consent — tell the seller first: “I take notes on my calls — is that alright with you?”</div>
+  <div class="lbl" style="margin-top:14px">What was just said</div>
+  <div id="coachTranscript" class="obj" style="min-height:64px;max-height:180px;overflow-y:auto"><p class="muted">Nothing heard yet.</p></div>
+  <div class="lbl" style="margin-top:14px">Say this</div>
+  <div id="coachSuggestions"><p class="muted">Suggestions appear here while the seller is talking.</p></div>
+  <div class="row">
+    <input id="coachSimInput" placeholder="Test: type what the seller just said, e.g. That's too low." style="flex:1;min-width:220px">
+    <button type="button" class="btn ghost" id="coachSimBtn">Test suggestion</button>
+  </div>
+  <div class="muted" style="margin-top:8px">v1 listens with your browser's free speech recognition (Chrome on desktop or Android). If it misses words, the pro upgrade is live transcription at about $0.017/min — roughly $1 an hour of calls.</div>
+</section>
+
+<!-- ============ 3 · OBJECTION LINES (instant chips) ============ -->
+<section class="panel">
+  <h2><span class="n">3 ·</span> Objection lines — tap, read, say it</h2>
   <div class="hint">77 vetted lines from the bot's objection library (same lines Amber uses — with your name swapped in). Zero latency: tap a line, the response appears. Use it when the call is moving.</div>
   <div id="chipBox"></div>
 </section>
 
-<!-- ============ 3 · DURING THE CALL ============ -->
+<!-- ============ 4 · DURING THE CALL ============ -->
 <section class="panel">
-  <h2><span class="n">3 ·</span> During the call — MCTP + talk ratio + notes</h2>
-  <div class="hint">You type the hard moments; the page never listens. Fill the MCTP blanks — blanks are the finding.</div>
+  <h2><span class="n">4 ·</span> During the call — MCTP + talk ratio + notes</h2>
+  <div class="hint">Type the hard moments — or let the coach above catch them live. Fill the MCTP blanks — blanks are the finding.</div>
   <div class="grid">
     <div class="f wide"><label for="motivation">Motivation — why are they selling? (the real reason)</label><input id="motivation" data-draft placeholder="e.g. behind on taxes, inherited, tired landlord"></div>
     <div class="f"><label for="motivationStrength">Motivation strength</label>
@@ -175,7 +199,7 @@ footer b{color:var(--text)}
         <option value="outbound">Outbound — cold call</option><option value="inbound">Inbound — they called in</option><option value="callback">Callback</option><option value="buyer">Buyer call</option>
       </select>
     </div>
-    <div class="f"><label for="durationMin">Duration (minutes)</label><input id="durationMin" data-draft placeholder="e.g. 30" inputmode="numeric"></div>
+    <div class="f"><label for="durationMin">Duration (minutes)</label><input id="durationMin" data-draft placeholder="12" inputmode="numeric"></div>
     <div class="f wide">
       <label for="talkPct">Talk ratio — seller talked <span id="talkVal">—</span></label>
       <input type="range" id="talkPct" data-draft min="0" max="100" step="5" value="50">
@@ -188,9 +212,9 @@ footer b{color:var(--text)}
   </div>
 </section>
 
-<!-- ============ 4 · DEBRIEF SCORECARD ============ -->
+<!-- ============ 5 · DEBRIEF SCORECARD ============ -->
 <section class="panel">
-  <h2><span class="n">4 ·</span> Debrief scorecard — out of 10</h2>
+  <h2><span class="n">5 ·</span> Debrief scorecard — out of 10</h2>
   <div class="hint">Grade it honest — this is the only way anyone improves. Check what actually happened on the call.</div>
   <div id="scorecard">
     <label class="sc-item"><input type="checkbox" id="sc-opener" data-draft><span><span class="t">1. Opened with the two-question script</span><br><span class="d">Owner of the address → interested in selling</span></span></label>
@@ -225,7 +249,8 @@ footer b{color:var(--text)}
 </section>
 
 <footer>
-  <b>Recording caution:</b> this page does not record, listen to, or dial any call — it cannot hear you.
+  <b>Listening:</b> the coach listens only while you have it on, on this device only — nothing is
+  recorded or stored, and only the words it needs to suggest a reply leave the device.
   If you record a call yourself, get consent first: Florida and 10+ other states are all-party consent.
   When in doubt, say: “Just so you know, I record my calls for quality — is that alright with you?”
   Debriefs save as dated notes (<span style="font-family:monospace">YYYY-MM-DD-&lt;address&gt;.md</span>) — move the download into

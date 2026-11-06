@@ -1,11 +1,15 @@
 // live-call.js — Live Call Console (Ginn improvement #4) for Troy + Irish.
-// PREP + DEBRIEF ONLY. No live-interrupt, no listening, no recording, no mic,
-// no auto-dialing. This page never hears a call — Troy/Irish type what happened.
-// Objection lines come from window.LIVE_CALL_OBJECTIONS, inlined at build time
-// from the SMS bot's vetted kb.json `objections` array (77 lines, Troy-voiced).
-// See build-live-call.py. Never paste Ginn's unvetted lines here.
-// MAO/LAO math lives in assets/offer-math.js (canonical, shared) — this file
-// calls OfferMath.offerMath and never re-implements the tiers.
+// PREP + LIVE COACH + DEBRIEF. The coach listens on the device mic while it
+// is on (browser speech recognition, speakerphone) and flashes suggested
+// replies; the prep card and debrief are unchanged. No auto-dialing, nothing
+// is recorded or stored — the transcript lives on the page only, and only the
+// words needed for a suggestion leave the device (to the coach-suggest
+// function). Objection lines come from window.LIVE_CALL_OBJECTIONS, inlined
+// at build time from the SMS bot's vetted kb.json `objections` array (77
+// lines, Troy-voiced). See build-live-call.py. Never paste Ginn's unvetted
+// lines here. MAO/LAO math lives in assets/offer-math.js (canonical,
+// shared) — this file calls OfferMath.offerMath and never re-implements
+// the tiers.
 (function (root) {
   'use strict';
 
@@ -185,6 +189,14 @@
     (d.notes || []).forEach(function (n) { L.push('- ' + n); });
     if (!(d.notes || []).length) L.push('- (none)');
     L.push('');
+    // Live-coach transcript (coach mode only): what was actually said on
+    // the call. Kept on the page only until the debrief downloads — this
+    // is the record, and the training data the footer promises.
+    if ((d.transcript || []).length) {
+      L.push('## Live transcript');
+      d.transcript.forEach(function (t) { L.push('- ' + t); });
+      L.push('');
+    }
     return L.join('\n');
   }
 
@@ -390,6 +402,123 @@
     return out;
   }
 
+  // ---------- live coach: match + prompt + guard (pure, Node-testable) ----------
+  // The coach hears the seller through the device mic (speakerphone) and
+  // flashes 1-3 replies in ~2s. Grounding rules, same as the SMS bot:
+  // open at LAO, never quote above MAO, ballpark probe only inside LAO-MAO,
+  // walk away gracefully when their ask is >2x MAO, total silence on
+  // opt-out / rejection / have-an-offer / under-contract. The vetted
+  // objection line ALWAYS comes first when one matches — the AI suggestions
+  // are the backup, never the replacement.
+
+  // Keyword match on the seller's words. Longest matching keyword wins;
+  // ties break by earliest line in the vetted list. No match -> null.
+  function matchObjection(text, objections) {
+    var t = String(text || '').toLowerCase();
+    if (!t || !Array.isArray(objections)) return null;
+    var best = null, bestLen = 0;
+    (objections || []).forEach(function (o) {
+      (o.keywords || []).forEach(function (kw) {
+        var k = String(kw || '').toLowerCase();
+        if (k && t.indexOf(k) !== -1 && k.length > bestLen) { best = o; bestLen = k.length; }
+      });
+    });
+    return best;
+  }
+
+  // Every $ amount in a line of text, as numbers (commas stripped).
+  function extractDollarAmounts(text) {
+    var out = [];
+    String(text || '').replace(/\$([\d,]+(?:\.\d+)?)/g, function (_, n) {
+      var v = Number(n.replace(/,/g, ''));
+      if (!isNaN(v)) out.push(v);
+      return _;
+    });
+    return out;
+  }
+
+  // Client-side number guard (defense in depth — the server prompt carries
+  // the same rule): a suggestion is safe only if every $ figure in it is
+  // at or below MAO. With no MAO known, any $ figure fails closed.
+  function coachSuggestionGuard(suggestion, mao) {
+    var amounts = extractDollarAmounts(suggestion);
+    if (!amounts.length) return true;
+    if (mao == null) return false;
+    return amounts.every(function (a) { return a <= mao; });
+  }
+
+  // Normalize the deal the form holds into the coach's context. MAO/LAO are
+  // passed in (computed by OfferMath) — never recomputed here.
+  function coachDealContext(deal) {
+    var d = deal || {};
+    return {
+      address: d.address || '', city: d.city || '', state: d.state || '',
+      arv: d.arv != null ? d.arv : null, repairs: d.repairs != null ? d.repairs : null,
+      mao: d.mao != null ? d.mao : null, lao: d.lao != null ? d.lao : null,
+      multiplierLabel: d.multiplierLabel || '',
+      sellerPrice: d.sellerPrice || '', motivation: d.motivation || '',
+      condition: d.condition || '', listSource: d.listSource || '',
+      callerName: d.callerName || 'Troy', listed: !!d.listed
+    };
+  }
+
+  // The prompt the coach-suggest function gets. System carries the
+  // grounding rules; user carries the deal facts + the last few transcript
+  // lines + the matched vetted line (if any — it becomes suggestion #1).
+  function buildCoachPrompt(ctx, transcriptLines, matched) {
+    var c = coachDealContext(ctx);
+    var system = [
+      'You are coaching ' + c.callerName + ' on a LIVE seller call for a house purchase. ' +
+      'Reply with a JSON object {"suggestions": ["...", "..."]} — 1 to 3 short spoken replies, each 1-2 sentences, in ' + c.callerName + "'s voice.",
+      'NUMBERS: open at LAO ($' + (c.lao != null ? Math.round(c.lao).toLocaleString() : '?') + '), never quote above MAO ($' + (c.mao != null ? Math.round(c.mao).toLocaleString() : '?') + '). ' +
+      'A ballpark probe may only span LAO to MAO. Never state MAO as the offer. If their ask is more than 2x MAO, suggest a graceful walkaway — no arguing, no counter.',
+      'If they opt out, reject, say not for sale, wrong number, have an offer, or are under contract: suggest ending politely and stopping. Never push, never argue.',
+      'Talk like ' + c.callerName + ': say "my partner" for the numbers, never name ' + c.callerName + ' unless asked. Never mention MAO, LAO, tiers, or the dashboard.',
+      'Keep each reply short enough to say in one breath.'
+    ].join('\n');
+    var user = ['Deal: ' + (c.address || 'unknown address') + (c.city ? ', ' + c.city : '') + (c.state ? ' ' + c.state : '') +
+      ' · ARV $' + (c.arv != null ? Math.round(c.arv).toLocaleString() : '?') + ' · Repairs $' + (c.repairs != null ? Math.round(c.repairs).toLocaleString() : '?') +
+      ' · MAO $' + (c.mao != null ? Math.round(c.mao).toLocaleString() : '?') + ' · LAO $' + (c.lao != null ? Math.round(c.lao).toLocaleString() : '?') +
+      (c.multiplierLabel ? ' (' + c.multiplierLabel + ')' : '') +
+      (c.sellerPrice ? ' · Their price: ' + c.sellerPrice : '') +
+      (c.motivation ? ' · Motivation: ' + c.motivation : '') +
+      (c.condition ? ' · Condition: ' + c.condition : '') +
+      (c.listed ? ' · LISTED WITH A REALTOR — suggest passing, no offer.' : '')];
+    var lines = (transcriptLines || []).slice(-6);
+    user.push('What was just said (latest last):');
+    lines.forEach(function (l) { user.push('- ' + l); });
+    if (matched) user.push('A vetted reply matches what they said — use it as suggestion #1, verbatim: "' + matched.reply + '"');
+    return { system: system, user: user.join('\n') };
+  }
+
+  // Validate the coach-suggest response. Suggestions must be strings;
+  // empties dropped, capped at 3, and the number guard applied (a $ figure
+  // above MAO drops that suggestion — never a silent rewrite). Returns the
+  // safe list, possibly empty.
+  function parseCoachResponse(body, mao) {
+    if (!body || !Array.isArray(body.suggestions)) return [];
+    var out = [];
+    body.suggestions.forEach(function (s) {
+      var t = String(s || '').trim();
+      if (!t) return;
+      if (!coachSuggestionGuard(t, mao)) return;
+      out.push(t);
+    });
+    return out.slice(0, 3);
+  }
+
+  // Throttle: suggest at most once per 4s, only on a real utterance
+  // (>= 3 words). The mic fires many finals per sentence; without this
+  // the coach would re-suggest on every fragment.
+  var COACH_SUGGEST_COOLDOWN_MS = 4000;
+  function shouldSuggestCoach(opts) {
+    var o = opts || {};
+    var text = String(o.text || '').trim();
+    if (text.split(/\s+/).filter(Boolean).length < 3) return false;
+    if (o.lastSuggestedAt != null && o.now != null && (o.now - o.lastSuggestedAt) < COACH_SUGGEST_COOLDOWN_MS) return false;
+    return true;
+  }
+
   var api = {
     slugify: slugify, todayISO: todayISO, renderReply: renderReply,
     CAT_LABELS: CAT_LABELS, SOURCE_CATS: SOURCE_CATS,
@@ -403,7 +532,11 @@
     DEAL_FIELD_IDS: DEAL_FIELD_IDS, isDealDraftKey: isDealDraftKey,
     isNonDealDraftKey: isNonDealDraftKey, normalizeAddress: normalizeAddress,
     isSameAddress: isSameAddress, shouldClearDraftForDeal: shouldClearDraftForDeal,
-    cleanDraftForNewDeal: cleanDraftForNewDeal, blankDealFields: blankDealFields
+    cleanDraftForNewDeal: cleanDraftForNewDeal, blankDealFields: blankDealFields,
+    matchObjection: matchObjection, extractDollarAmounts: extractDollarAmounts,
+    coachSuggestionGuard: coachSuggestionGuard, coachDealContext: coachDealContext,
+    buildCoachPrompt: buildCoachPrompt, parseCoachResponse: parseCoachResponse,
+    shouldSuggestCoach: shouldSuggestCoach, COACH_SUGGEST_COOLDOWN_MS: COACH_SUGGEST_COOLDOWN_MS
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.LiveCall = api;
@@ -674,7 +807,8 @@
       sellerCounter: $('sellerCounter') ? $('sellerCounter').value.trim() : '', outcome: $('outcome') ? $('outcome').value : '',
       score: r.score, total: r.total, verdict: r.verdict, biggestLeak: r.biggestLeak, biggestLeakDetail: r.biggestLeakDetail,
       lineNeeded: r.lineNeeded, worked: worked, nextAction: $('nextAction') ? $('nextAction').value.trim() : '',
-      nextActionDate: $('nextActionDate') ? $('nextActionDate').value : '', notes: notes.slice()
+      nextActionDate: $('nextActionDate') ? $('nextActionDate').value : '', notes: notes.slice(),
+      transcript: coach.transcript.slice()
     });
     var fname = todayISO() + '-' + slugify(address) + '.md';
     var blob = new Blob([md], { type: 'text/markdown' });
@@ -717,6 +851,179 @@
     box.innerHTML = notes.length ? notes.map(function (n) { return '<div class="note">• ' + esc(n) + '</div>'; }).join('') : '<p class="muted">No notes yet — type the hard moments as they happen.</p>';
   }
 
+  // ---------- live coach (DOM only) ----------
+  // Browser speech recognition (Chrome desktop/Android, free). Continuous
+  // mode + auto-restart: the API ends the session on pauses, so onend
+  // restarts while the coach is on. Interim results show live; finals are
+  // what trigger suggestions (debounced 1.2s after the last final, plus
+  // the 4s cooldown in shouldSuggestCoach).
+  var coach = {
+    listening: false, recog: null, transcript: [], lastSuggestedAt: null,
+    suggestTimer: null, interimText: ''
+  };
+
+  function coachDealFromForm() {
+    var arv = num('arv'), repairs = num('repairs');
+    var math = (root.OfferMath && arv != null) ? root.OfferMath.offerMath(arv, repairs || 0, undefined, marketOf()) : null;
+    return coachDealContext({
+      address: $('address') ? $('address').value.trim() : '',
+      city: cityOf(), state: stateOf(), arv: arv, repairs: repairs,
+      mao: math ? math.mao : null, lao: math ? math.lao : null,
+      multiplierLabel: math ? math.label : '',
+      sellerPrice: $('sellerPrice') ? $('sellerPrice').value.trim() : '',
+      motivation: $('motivation') ? $('motivation').value.trim() : '',
+      condition: $('condition') ? $('condition').value.trim() : '',
+      listSource: $('listSource') ? $('listSource').value : '',
+      callerName: callerName(),
+      listed: $('listed') ? $('listed').checked : false
+    });
+  }
+
+  function coachSetStatus(text) { var el = $('coachStatus'); if (el) el.textContent = text; }
+  function coachSetLatency(ms) { var el = $('coachLatency'); if (el) el.textContent = ms != null ? ('suggested in ' + (ms / 1000).toFixed(1) + 's') : ''; }
+
+  function renderCoachTranscript() {
+    var box = $('coachTranscript');
+    if (!box) return;
+    var lines = coach.transcript.slice(-8);
+    var html = lines.map(function (t) { return '<div class="note">• ' + esc(t) + '</div>'; }).join('');
+    if (coach.interimText) html += '<div class="note" style="color:var(--muted)">• ' + esc(coach.interimText) + ' …</div>';
+    box.innerHTML = html || '<p class="muted">Nothing heard yet.</p>';
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function renderCoachSuggestions(suggestions, matched, latencyMs, source) {
+    var box = $('coachSuggestions');
+    if (!box) return;
+    var cards = [];
+    if (matched) cards.push({ text: renderReply(matched.reply, callerName(), cityOf()), vetted: true });
+    (suggestions || []).forEach(function (s) { cards.push({ text: s, vetted: false }); });
+    if (!cards.length) {
+      box.innerHTML = '<p class="muted">No line matched — tap a chip in section 3.</p>';
+      return;
+    }
+    box.innerHTML = cards.slice(0, 3).map(function (c, i) {
+      return '<div class="obj coach-sug" data-i="' + i + '"><div class="obj-t">' +
+        (c.vetted ? 'Vetted line' : 'Coach suggestion') + '</div><div class="obj-r">' + esc(c.text) + '</div></div>';
+    }).join('') + '<div class="muted">Tap a reply to mark it used.' + (source ? ' · ' + esc(source) : '') + '</div>';
+    coachSetLatency(latencyMs);
+    box.querySelectorAll('.coach-sug').forEach(function (el) {
+      el.addEventListener('click', function () {
+        el.style.borderColor = 'var(--green)';
+        if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+          var r = el.querySelector('.obj-r');
+          if (r) navigator.clipboard.writeText(r.textContent).catch(function () {});
+        }
+      });
+    });
+  }
+
+  // One suggestion round: match the vetted lines first (instant, local),
+  // then ask the AI for backups. On any failure the vetted line alone is
+  // the answer — the coach never goes blank mid-call.
+  async function requestCoachSuggestions(latestText) {
+    var deal = coachDealFromForm();
+    var matched = matchObjection(latestText, objections);
+    var recent = coach.transcript.slice(-6);
+    var prompt = buildCoachPrompt(deal, recent, matched);
+    var t0 = Date.now();
+    var used = matched ? renderReply(matched.reply, callerName(), cityOf()) : null;
+    try {
+      var controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+      var timer = controller ? setTimeout(function () { controller.abort(); }, 10000) : null;
+      var res = await fetch('/.netlify/functions/coach-suggest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ system: prompt.system, user: prompt.user }),
+        signal: controller ? controller.signal : undefined
+      });
+      if (timer) clearTimeout(timer);
+      if (!res.ok) throw new Error('coach-suggest HTTP ' + res.status);
+      var body = await res.json();
+      var suggestions = parseCoachResponse(body, deal.mao);
+      // The matched vetted line is rendered first by renderCoachSuggestions;
+      // drop any AI suggestion that duplicates it.
+      if (used) suggestions = suggestions.filter(function (s) { return s !== used; });
+      renderCoachSuggestions(suggestions, matched, Date.now() - t0, 'AI');
+      coach.lastSuggestedAt = Date.now();
+    } catch (e) {
+      renderCoachSuggestions([], matched, null, 'vetted line only — AI unreachable');
+      coach.lastSuggestedAt = Date.now();
+    }
+  }
+
+  function coachOnFinal(text) {
+    var t = String(text || '').trim();
+    if (!t) return;
+    var stamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    coach.transcript.push(stamp + ' — ' + t);
+    coach.interimText = '';
+    renderCoachTranscript();
+    clearTimeout(coach.suggestTimer);
+    coach.suggestTimer = setTimeout(function () {
+      if (!coach.listening) return;
+      if (!shouldSuggestCoach({ text: t, lastSuggestedAt: coach.lastSuggestedAt, now: Date.now() })) return;
+      requestCoachSuggestions(t);
+    }, 1200);
+  }
+
+  function coachStart() {
+    var consent = $('coachConsent');
+    if (consent && !consent.checked) {
+      coachSetStatus('Tell the seller first — check the box above, then start.');
+      return;
+    }
+    var SR = (typeof window !== 'undefined') ? (window.SpeechRecognition || window.webkitSpeechRecognition) : null;
+    if (!SR) {
+      coachSetStatus('Live listening is not supported in this browser — use Chrome on desktop or Android. The test box below still works.');
+      return;
+    }
+    var recog;
+    try { recog = new SR(); } catch (e) { coachSetStatus('Could not start the mic: ' + (e && e.message ? e.message : e)); return; }
+    recog.continuous = true;
+    recog.interimResults = true;
+    recog.lang = 'en-US';
+    coach.recog = recog;
+    coach.listening = true;
+    var toggle = $('coachToggle');
+    if (toggle) toggle.textContent = '⏹ Stop listening';
+    coachSetStatus('Listening… put the call on speaker. Suggestions appear below.');
+    recog.onresult = function (ev) {
+      var interim = '', finals = [];
+      for (var i = ev.resultIndex; i < ev.results.length; i++) {
+        var r = ev.results[i];
+        if (r.isFinal) finals.push(r[0].transcript);
+        else interim += r[0].transcript;
+      }
+      coach.interimText = interim.trim();
+      renderCoachTranscript();
+      finals.forEach(function (f) { coachOnFinal(f); });
+    };
+    recog.onerror = function (ev) {
+      var err = ev && ev.error;
+      if (err === 'not-allowed' || err === 'service-not-allowed') {
+        coachStop();
+        coachSetStatus('Mic blocked — allow microphone access for this site, then start again.');
+      }
+      // 'no-speech' / 'aborted' / 'network': onend restarts while listening.
+    };
+    recog.onend = function () {
+      if (!coach.listening) return;
+      try { coach.recog.start(); } catch (e) { /* next onend retries */ }
+    };
+    try { recog.start(); } catch (e) { coachSetStatus('Could not start the mic: ' + (e && e.message ? e.message : e)); coach.listening = false; }
+  }
+
+  function coachStop() {
+    coach.listening = false;
+    clearTimeout(coach.suggestTimer);
+    if (coach.recog) { try { coach.recog.stop(); } catch (e) {} coach.recog = null; }
+    var toggle = $('coachToggle');
+    if (toggle) toggle.textContent = '🎙 Start listening';
+    coachSetStatus('Coach off. Transcript stays on this page for the debrief.');
+    coachSetLatency(null);
+  }
+
   document.addEventListener('DOMContentLoaded', function () {
     restoreDraft();
     autoFillFromUrl(); // ?lead= / URL params win over the restored draft
@@ -724,6 +1031,17 @@
     renderNotes();
     var buildBtn = $('buildPrep');
     if (buildBtn) buildBtn.addEventListener('click', buildPrep);
+    var coachBtn = $('coachToggle');
+    if (coachBtn) coachBtn.addEventListener('click', function () { coach.listening ? coachStop() : coachStart(); });
+    var simBtn = $('coachSimBtn');
+    if (simBtn) simBtn.addEventListener('click', function () {
+      var v = $('coachSimInput') ? $('coachSimInput').value.trim() : '';
+      if (!v) return;
+      coach.transcript.push(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' — ' + v + ' (test)');
+      renderCoachTranscript();
+      if ($('coachSimInput')) $('coachSimInput').value = '';
+      if (shouldSuggestCoach({ text: v, lastSuggestedAt: coach.lastSuggestedAt, now: Date.now() })) requestCoachSuggestions(v);
+    });
     var matchBtn = $('matchBuyers');
     if (matchBtn) matchBtn.addEventListener('click', matchBuyers);
     var scoreBtn = $('scoreBtn');
