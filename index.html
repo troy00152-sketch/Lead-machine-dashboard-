@@ -4705,18 +4705,21 @@ function updateQuickOfferResult(){
   // those gates still yield 0/0 exactly as before.)
   const compRes = document.getElementById('compResult');
   let mao = 0, lao = 0, tier = '';
+  let hasOfferMath = false;
   if(compRes){
     const html = compRes.innerHTML || '';
     const maoM = html.match(/\$([\d,]+)<\/div><div class="lbl">MAO/i);
     const laoM = html.match(/\$([\d,]+)<\/div><div class="lbl">LAO/i);
     const tierM = html.match(/(\d+(?:\.\d+)?%)/);
-    if(maoM) mao = parseInt(maoM[1].replace(/,/g, ''), 10) || 0;
+    if(maoM){ mao = parseInt(maoM[1].replace(/,/g, ''), 10) || 0; hasOfferMath = true; }
     if(laoM) lao = parseInt(laoM[1].replace(/,/g, ''), 10) || 0;
     if(tierM) tier = tierM[1];
   }
-  if(!arv){
-    res.style.display = 'none';
-    if(copyBtn) copyBtn.style.display = 'none';
+  // No offer math rendered (THIN/listed/land/no-ARV gate) — never show a
+  // card with $0 MAO/LAO. The gate's own warning already explains why.
+  if(!arv || !hasOfferMath){
+    if(typeof clearQuickOfferResult === 'function') clearQuickOfferResult();
+    else { res.style.display = 'none'; if(copyBtn) copyBtn.style.display = 'none'; }
     return;
   }
   res.style.display = 'block';
