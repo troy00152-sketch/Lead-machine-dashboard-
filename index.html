@@ -10,6 +10,7 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script src="assets/offer-math.js"></script>
 <title>Acquisition Command Center</title>
 <script>
 /* White-label branding hook — additive, fails safe to Troy's defaults.
@@ -2531,10 +2532,25 @@ function maoPriceBand(arv){
   if(arv < 400000) return '$300k-$400k';
   return '$400k+';
 }
-function effectiveMaoMultiplier(arv){
+// Market gate for MAO calibration: resolve the lead's market via the shared
+// OfferMath.marketFor (assets/offer-math.js, loaded above). Unknown market
+// (or the module failing to load) -> null -> tier only, never calibrated.
+function leadMarket(l){
+  try {
+    if (typeof OfferMath !== 'undefined' && OfferMath.marketFor) return OfferMath.marketFor(l && l.city, l && l.state);
+  } catch (e) { /* fail-soft: tier only */ }
+  return null;
+}
+function effectiveMaoMultiplier(arv, market){
   const t = maoTier(arv);
   if(!t || t.tier == null) return { multiplier: null, label: '—', source: 'none' };
   if(!MAO_CAL) return { multiplier: t.tier, label: t.label + ' tier · not calibrated', source: 'tier', tierMultiplier: t.tier, calibratedMultiplier: null };
+  // Calibration is PER-MARKET: it applies ONLY when the deal's market is known
+  // AND equals the calibration file's market (MAO_CAL.market, default
+  // 'Indianapolis'). Any other market, or an unknown market, gets the tier.
+  const calMarket = String(MAO_CAL.market || 'Indianapolis').toLowerCase().trim();
+  const dealMarket = market == null ? null : String(market).toLowerCase().trim();
+  if(!dealMarket || dealMarket !== calMarket) return { multiplier: t.tier, label: t.label + ' tier · not calibrated for this market', source: 'tier', tierMultiplier: t.tier, calibratedMultiplier: null };
   const band = maoPriceBand(arv);
   const entry = (MAO_CAL.byPriceBand || {})[band];
   let cal = MAO_CAL.multiplierMedian, calSrc = 'calibrated overall median';
@@ -2551,7 +2567,7 @@ function setLeadRepairs(id, val){
   l.repairs = Math.max(0, Number(val) || 0);
   saveState();
   const arv = l.estimatedValue || l.arv || null;
-  const { tier, label } = (function(){ const _em = effectiveMaoMultiplier(arv); return { tier: _em.multiplier, label: _em.label }; })();
+  const { tier, label } = (function(){ const _em = effectiveMaoMultiplier(arv, leadMarket(l)); return { tier: _em.multiplier, label: _em.label }; })();
   const el = document.getElementById('anMaoLao');
   if(el && arv != null && tier){
     const mao = Math.max(0, Math.round((arv - l.repairs) * tier));
@@ -2572,7 +2588,7 @@ function analyzeDeal(id){
 
   const arv = l.estimatedValue || l.arv || null;
   const repairs = Math.max(0, Number(l.repairs) || 0);
-  const _em = effectiveMaoMultiplier(arv);
+  const _em = effectiveMaoMultiplier(arv, leadMarket(l));
   const tier = _em.multiplier, label = _em.label;
   const mao = (arv != null && tier) ? Math.max(0, Math.round((arv - repairs) * tier)) : null;
   const lao = mao != null ? Math.round(mao * 0.70) : null;
@@ -2955,7 +2971,7 @@ function leadPhoneBadge(l){
 function leadMaoLao(l){
   const arv = Number(l.value) || null;
   if(!arv) return { mao: null, lao: null };
-  const _em = effectiveMaoMultiplier(arv);
+  const _em = effectiveMaoMultiplier(arv, leadMarket(l));
   if(!_em || _em.multiplier == null) return { mao: null, lao: null };
   const repairs = Number(l.repairs) || 0;
   const mao = Math.max(0, Math.round((arv - repairs) * _em.multiplier));

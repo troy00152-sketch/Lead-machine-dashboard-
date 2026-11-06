@@ -216,6 +216,11 @@
   }
   function callerName() { return ($('caller') ? $('caller').value : 'Troy') || 'Troy'; }
   function cityOf() { return $('city') ? $('city').value.trim() : ''; }
+  function stateOf() { return $('state') ? $('state').value.trim() : ''; }
+  // Deal market for the MAO calibration gate (assets/offer-math.js marketFor).
+  // Unknown market -> null -> tier only; the Indianapolis calibration must
+  // never leak onto another market's deals.
+  function marketOf() { return (root.OfferMath && root.OfferMath.marketFor) ? root.OfferMath.marketFor(cityOf(), stateOf()) : null; }
 
   function buildPrep() {
     var address = $('address') ? $('address').value.trim() : '';
@@ -225,7 +230,7 @@
     var out = $('prepOut');
     if (!out) return;
     if (!address) { out.innerHTML = '<p class="muted">Type an address above, then build the prep card.</p>'; return; }
-    var math = (root.OfferMath && arv != null) ? root.OfferMath.offerMath(arv, repairs || 0) : null;
+    var math = (root.OfferMath && arv != null) ? root.OfferMath.offerMath(arv, repairs || 0, undefined, marketOf()) : null;
     var expected = pickExpectedObjections(objections, listSource);
     var buyer = $('buyerName') ? $('buyerName').value.trim() : '';
     var html = '';
@@ -326,7 +331,7 @@
     var talkPct = num('talkPct');
     if (talkPct != null) answers.talk = talkPct >= 80;
     var arv = num('arv'), repairs = num('repairs');
-    var math = (root.OfferMath && arv != null) ? root.OfferMath.offerMath(arv, repairs || 0) : null;
+    var math = (root.OfferMath && arv != null) ? root.OfferMath.offerMath(arv, repairs || 0, undefined, marketOf()) : null;
     var result = scoreDebrief(answers, { address: $('address') ? $('address').value.trim() : '', callerName: callerName(), lao: math ? math.lao : null, listSource: $('listSource') ? $('listSource').value : '' });
     return { answers: answers, talkPct: talkPct, math: math, result: result };
   }
