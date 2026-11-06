@@ -77,17 +77,51 @@
 
   // Browser only: loads assets/mao-calibration.json when present (written by the
   // calibration run, ~/workspace/buyer-hunt-2026/calibrate-mao.js).
-  // Fail-soft: no file = tier only. Skipped entirely under Node (tests pass
-  // calibration in explicitly via setCalibration).
-  function loadMaoCalibration() {
+  // Fail-soft: no file = tier only. Skipped entirely under Node unless a fetch
+  // implementation is injected (tests pass calibration in explicitly via
+  // setCalibration, or inject a fetch to simulate load timing).
+  // RACE: the fetch is asynchronous — code that builds a card on page load
+  // (live-call.js auto-fill) must wait for it, or it computes tier-only
+  // numbers from a still-null MAO_CAL. whenCalibrationReady(timeoutMs)
+  // resolves true when the load has settled (loaded, absent, or failed) and
+  // false on timeout, so the page falls back to tier instead of blocking.
+  var MAO_CAL = null;
+  var _calPromise = null;
+  var _calSettled = false;
+
+  function loadMaoCalibration(fetchFn) {
+    // A fresh load supersedes any previous calibration — while it is in
+    // flight the page is uncalibrated (tier only), never stale-calibrated.
+    MAO_CAL = null;
+    _calSettled = false;
     try {
-      if (typeof window === 'undefined' || typeof fetch === 'undefined') return;
-      fetch('assets/mao-calibration.json').then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
+      var f = fetchFn || (typeof window !== 'undefined' && typeof fetch !== 'undefined' ? fetch : null);
+      if (!f) { _calSettled = true; _calPromise = Promise.resolve(null); return _calPromise; }
+      _calPromise = f('assets/mao-calibration.json').then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
         if (j && j.calibrated && j.multiplierMedian) MAO_CAL = j;
-      }).catch(function () {});
-    } catch (e) { /* fail-soft: tier only */ }
+        return MAO_CAL;
+      }).catch(function () { return null; }).then(function (v) { _calSettled = true; return v; });
+      return _calPromise;
+    } catch (e) { _calSettled = true; _calPromise = Promise.resolve(null); return _calPromise; }
   }
   loadMaoCalibration();
+
+  // True once the calibration load has settled (loaded, absent, or failed).
+  function isCalibrationSettled() { return _calSettled; }
+
+  // Promise: resolves true when the calibration load has settled, false if it
+  // has not settled within timeoutMs (default 2000). Never rejects.
+  // False means "gave up waiting" — the caller falls back to tier; a
+  // later-arriving calibration does not retroactively change numbers unless
+  // the caller rebuilds (live-call.js does, via isCalibrationSettled).
+  function whenCalibrationReady(timeoutMs) {
+    var timeout = (typeof timeoutMs === 'number' && timeoutMs >= 0) ? timeoutMs : 2000;
+    var settled = _calPromise || Promise.resolve(null);
+    return Promise.race([
+      settled.then(function () { return true; }),
+      new Promise(function (resolve) { setTimeout(function () { resolve(false); }, timeout); })
+    ]);
+  }
 
   // market: the deal's market label (from marketFor) or null when unknown.
   // Calibration applies ONLY when the deal's market is known AND equals the
@@ -128,7 +162,7 @@
     return { tier: em.tierMultiplier != null ? em.tierMultiplier : em.multiplier, multiplier: em.multiplier, source: em.source, label: em.label, mao: mao, lao: lao };
   }
 
-  var api = { maoTier: maoTier, maoPriceBand: maoPriceBand, marketFor: marketFor, effectiveMaoMultiplier: effectiveMaoMultiplier, fmtMoney: fmtMoney, offerMath: offerMath, setCalibration: setCalibration, getCalibration: function () { return MAO_CAL; } };
+  var api = { maoTier: maoTier, maoPriceBand: maoPriceBand, marketFor: marketFor, effectiveMaoMultiplier: effectiveMaoMultiplier, fmtMoney: fmtMoney, offerMath: offerMath, setCalibration: setCalibration, loadMaoCalibration: loadMaoCalibration, whenCalibrationReady: whenCalibrationReady, isCalibrationSettled: isCalibrationSettled, getCalibration: function () { return MAO_CAL; } };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.OfferMath = api;
 })(typeof window !== 'undefined' ? window : globalThis);
