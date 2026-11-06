@@ -63,7 +63,7 @@ function parseAddress(full) {
   const out = { street: '', city: '', state: '', zip: '' };
   if (!full) return out;
   let head = String(full).trim();
-  const sz = head.match(/(?:^|,|\s)([A-Za-z]{2})\s+(\d{5})(?:-\d{4})?\s*$/);
+  const sz = head.match(/(?:^|,|\s)([A-Za-z]{2})\s*,?\s*(\d{5})(?:-\d{4})?\s*$/);
   if (sz && US_STATES.has(sz[1].toUpperCase())) {
     out.state = sz[1].toUpperCase();
     out.zip = sz[2];
