@@ -2510,6 +2510,37 @@ function maoTier(estVal){
   if(estVal < 400000) return { tier: 0.829, label: '82.9%' };
   return { tier: 0.849, label: '84.9%' };
 }
+/* ============ 📐 MAO CALIBRATION (cash-sales calibrated multiplier) ============ */
+// Loads assets/mao-calibration.json when present (written by the calibration run,
+// ~/workspace/buyer-hunt-2026/calibrate-mao.js). Effective multiplier =
+// min(calibrated, tier) — calibration can only LOWER MAO, never raise it.
+// No file yet = tier only, and the UI says so plainly.
+let MAO_CAL = null;
+(function loadMaoCalibration(){
+  try {
+    fetch('assets/mao-calibration.json').then(function(r){ return r.ok ? r.json() : null; }).then(function(j){
+      if (j && j.calibrated && j.multiplierMedian) MAO_CAL = j;
+    }).catch(function(){});
+  } catch (e) { /* fail-soft: tier only */ }
+})();
+function maoPriceBand(arv){
+  if(arv < 120000) return 'under $120k';
+  if(arv < 220000) return '$120k-$220k';
+  if(arv < 300000) return '$220k-$300k';
+  if(arv < 400000) return '$300k-$400k';
+  return '$400k+';
+}
+function effectiveMaoMultiplier(arv){
+  const t = maoTier(arv);
+  if(!t || t.tier == null) return { multiplier: null, label: '—', source: 'none' };
+  if(!MAO_CAL) return { multiplier: t.tier, label: t.label + ' tier · not calibrated', source: 'tier', tierMultiplier: t.tier, calibratedMultiplier: null };
+  const band = maoPriceBand(arv);
+  const entry = (MAO_CAL.byPriceBand || {})[band];
+  let cal = MAO_CAL.multiplierMedian, calSrc = 'calibrated overall median';
+  if(entry && entry.n >= 8){ cal = entry.median; calSrc = 'calibrated ' + band + ' band (n=' + entry.n + ')'; }
+  if(cal < t.tier) return { multiplier: cal, label: (cal * 100).toFixed(1) + '% calibrated', source: calSrc, tierMultiplier: t.tier, calibratedMultiplier: cal };
+  return { multiplier: t.tier, label: t.label + ' tier', source: 'tier — calibrated ' + (cal * 100).toFixed(1) + '% is higher', tierMultiplier: t.tier, calibratedMultiplier: cal };
+}
 function fmtMoney(n){
   if(n == null || isNaN(n)) return '—';
   return '$' + Math.round(n).toLocaleString();
@@ -2519,12 +2550,12 @@ function setLeadRepairs(id, val){
   l.repairs = Math.max(0, Number(val) || 0);
   saveState();
   const arv = l.estimatedValue || l.arv || null;
-  const { tier, label } = maoTier(arv);
+  const { tier, label } = (function(){ const _em = effectiveMaoMultiplier(arv); return { tier: _em.multiplier, label: _em.label }; })();
   const el = document.getElementById('anMaoLao');
   if(el && arv != null && tier){
     const mao = Math.max(0, Math.round((arv - l.repairs) * tier));
     const lao = Math.round(mao * 0.70);
-    el.innerHTML = fmtMoney(mao) + ' / ' + fmtMoney(lao) + ' <span style="color:var(--muted)">(' + label + ' tier, ' + fmtMoney(l.repairs) + ' repairs)</span>';
+    el.innerHTML = fmtMoney(mao) + ' / ' + fmtMoney(lao) + ' <span style="color:var(--muted)">(' + label + ', ' + fmtMoney(l.repairs) + ' repairs)</span>';
   }
 }
 function analyzeDeal(id){
@@ -2540,7 +2571,8 @@ function analyzeDeal(id){
 
   const arv = l.estimatedValue || l.arv || null;
   const repairs = Math.max(0, Number(l.repairs) || 0);
-  const { tier, label } = maoTier(arv);
+  const _em = effectiveMaoMultiplier(arv);
+  const tier = _em.multiplier, label = _em.label;
   const mao = (arv != null && tier) ? Math.max(0, Math.round((arv - repairs) * tier)) : null;
   const lao = mao != null ? Math.round(mao * 0.70) : null;
   const _ws = wholesaleScore(l);
@@ -2590,7 +2622,7 @@ function analyzeDeal(id){
       <div style="margin-bottom:6px"><strong>🎯 Motivation Score:</strong> <span class="badge ${_ws.color}">${_ws.score} · ${_ws.label}</span> <span style="color:var(--muted)">Distress ${_ws.distressPts}/45 · Equity ${_ws.equityPts}/35 · Ownership ${_ws.ownPts}/20</span></div>
       <div style="margin-bottom:6px"><strong>Equity:</strong> ${numMort === 0 ? '<span style="color:var(--green);font-weight:700">Free & clear — no payoff friction</span>' : fmtMoney(eq) + (eqPct != null ? ' (' + Math.round(eqPct) + '%)' : '') + ' across ' + numMort + ' mortgage(s), balance ' + fmtMoney(bal)}</div>
       <div style="margin-bottom:6px"><strong>Repairs ($):</strong> <input id="anRepairs" type="number" min="0" step="500" value="${repairs}" style="width:110px;padding:4px 8px;border-radius:6px" oninput="setLeadRepairs('${l.id}', this.value)"> <span style="color:var(--muted)">type your repair estimate — MAO/LAO update instantly and stay saved on this lead</span></div>
-      <div style="margin-bottom:6px"><strong>MAO / LAO:</strong> ${mao != null ? '<span id="anMaoLao">' + fmtMoney(mao) + ' / ' + fmtMoney(lao) + ' <span style="color:var(--muted)">(' + label + ' tier, ' + fmtMoney(repairs) + ' repairs)</span></span><br><span style="color:var(--muted)">LAO = your opening offer · MAO = your ceiling — never offer above it</span>' : '<span style="color:var(--muted)">Need ARV to calculate</span>'}</div>
+      <div style="margin-bottom:6px"><strong>MAO / LAO:</strong> ${mao != null ? '<span id="anMaoLao">' + fmtMoney(mao) + ' / ' + fmtMoney(lao) + ' <span style="color:var(--muted)">(' + label + ', ' + fmtMoney(repairs) + ' repairs)</span></span><br><span style="color:var(--muted)">LAO = your opening offer · MAO = your ceiling — never offer above it</span>' : '<span style="color:var(--muted)">Need ARV to calculate</span>'}</div>
       ${distress.length ? '<div style="margin-bottom:6px"><strong>🚨 Distress:</strong> ' + distress.map(esc).join(' · ') + '</div>' : '<div style="margin-bottom:6px"><strong>Distress:</strong> <span style="color:var(--muted)">None flagged</span></div>'}
       ${flags.length ? '<div style="margin-bottom:6px"><strong>Flags:</strong> ' + flags.map(esc).join(' · ') + '</div>' : ''}
       <div style="margin-bottom:8px"><strong>Phones:</strong> ${mobiles.length ? '<span style="color:var(--green)">' + mobiles.length + ' mobile number(s) ready for outreach</span>' : '<span style="color:var(--muted)">No mobile numbers — run Skip Trace</span>'}</div>
@@ -2922,10 +2954,10 @@ function leadPhoneBadge(l){
 function leadMaoLao(l){
   const arv = Number(l.value) || null;
   if(!arv) return { mao: null, lao: null };
-  const t = maoTier(arv);
-  if(!t || t.tier == null) return { mao: null, lao: null };
+  const _em = effectiveMaoMultiplier(arv);
+  if(!_em || _em.multiplier == null) return { mao: null, lao: null };
   const repairs = Number(l.repairs) || 0;
-  const mao = Math.max(0, Math.round((arv - repairs) * t.tier));
+  const mao = Math.max(0, Math.round((arv - repairs) * _em.multiplier));
   return { mao: mao, lao: Math.round(mao * 0.70) };
 }
 function leadToPayload(l){
