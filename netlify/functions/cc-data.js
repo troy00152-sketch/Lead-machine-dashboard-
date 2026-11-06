@@ -234,6 +234,56 @@ const DISTRESS_TAG_POINTS = [
   [/bankrupt/i, 14],
 ];
 
+// KB-10 warning signs (Ginn #3, Nov 5): friction markers that correlate
+// with distressed, complicated deals — solar loan, heirs fighting, a
+// hard-money/private loan, an attorney involved, a custom/unusual house,
+// multiple liens+taxes+fines stacked. Each adds a SMALL +3 to distress
+// (same 45 cap) and is surfaced in `warnings` so the card shows it.
+// Judgment call: in KB-10 these are "watch out" flags, not heat, so the
+// weight is deliberately small — if Troy wants them flags-only (no points)
+// or negative, it is a one-line change here.
+const WARNING_SIGNS = [
+  [/solar/i, 'solar loan'],
+  [/heir/i, 'heirs / disagreement'],
+  [/hard.?money/i, 'hard-money loan'],
+  [/private.?loan/i, 'private loan'],
+  [/attorney/i, 'attorney involved'],
+  [/lawyer/i, 'attorney involved'],
+  [/lawsuit/i, 'attorney involved'],
+  [/custom.?house/i, 'custom / unusual house'],
+  [/unusual/i, 'custom / unusual house'],
+];
+
+// KB-10 instant-HOT triggers (Ginn #3, Nov 5): a deadline or a seller who
+// wants out NOW. Any match floors the score at 55 (the HOT threshold) and
+// records which trigger fired. The 30-day condition in KB-10 cannot be
+// verified from tags alone, so the floor applies to any lead carrying the
+// trigger tag; "pre-foreclosure" is EXCLUDED from the foreclosure trigger
+// (status, not a deadline — it already scores 18 distress points).
+// 'hot lead' is Troy's own tag (Irish hot-lead chain) — it is instant-HOT
+// by definition.
+const HOT_TRIGGER_PATTERNS = [
+  [/auction/i, 'auction'],
+  [/sheriff/i, 'sheriff sale'],
+  [/sale.?date/i, 'sale date'],
+  [/court.?date/i, 'court date'],
+  [/evict/i, 'eviction'],
+  [/move.?out/i, 'move-out'],
+  [/hot.?lead/i, 'hot lead'],
+  [/wants.?to.?sell.?now/i, 'wants to sell now'],
+  [/just.?want.?it.?gone/i, 'wants it gone'],
+];
+
+function isHotTrigger(tagText) {
+  if (/foreclosure/i.test(tagText) && !/pre.?foreclosure/i.test(tagText)) {
+    return 'foreclosure';
+  }
+  for (const [re, label] of HOT_TRIGGER_PATTERNS) {
+    if (re.test(tagText)) return label;
+  }
+  return null;
+}
+
 function scoreLabel(score) {
   return score >= 75 ? 'LAYUP' : score >= 55 ? 'HOT' : score >= 35 ? 'WARM' : score >= 15 ? 'COOL' : 'COLD';
 }
@@ -287,19 +337,34 @@ function crmScoreFor(lead, contact) {
   const createdMs = lead.createdAt ? new Date(lead.createdAt).getTime() : 0;
   if (createdMs && Date.now() - createdMs <= 48 * 3600 * 1000) distress += 5;
   distress = Math.min(45, distress);
+  // KB-10 warning signs: small distress nudge + surfaced for the card.
+  const warnings = [];
+  for (const [re, label] of WARNING_SIGNS) {
+    if (re.test(tagText) && !warnings.includes(label)) warnings.push(label);
+  }
+  if (warnings.length) distress = Math.min(45, distress + 3 * warnings.length);
   // Equity: unmeasured from CRM alone — 0, and the card says so.
   const equity = 0;
   // Ownership: absentee tag only.
   let own = 0;
   if (/absentee/i.test(tagText)) own += 8;
   own = Math.min(20, own);
-  const score = Math.max(0, Math.min(100, distress + equity + own));
+  let score = Math.max(0, Math.min(100, distress + equity + own));
+  // KB-10 instant-HOT: a deadline or a seller who wants out now floors
+  // the score at HOT (55) — the lead's real signals can still lift it
+  // higher, but it never reads below HOT.
+  const hotTrigger = isHotTrigger(tagText);
+  const instantHot = hotTrigger !== null;
+  if (instantHot) score = Math.max(score, 55);
   return {
     score, label: scoreLabel(score),
     parts: { distress, equity, own },
     source: 'crm',
     stackCount: Number.isFinite(stackN) ? stackN : (distressTagCount || 0),
     listSignals: tags.filter((t) => DISTRESS_TAG_POINTS.some(([re]) => re.test(t))).slice(0, 4),
+    warnings,
+    instantHot,
+    hotTrigger,
   };
 }
 
@@ -315,6 +380,9 @@ async function enrichHotLeads(newLeads) {
     lead.scoreSource = s.source;
     lead.stackCount = s.stackCount;
     lead.listSignals = s.listSignals;
+    lead.warnings = s.warnings;
+    lead.instantHot = s.instantHot;
+    lead.hotTrigger = s.hotTrigger;
   }));
   return newLeads;
 }
@@ -333,6 +401,10 @@ function extractAddress(opp) {
   }
   return opp.name || '';
 }
+
+// Test-only export: lets node verify crmScoreFor directly without a live
+// HL call. Harmless in production — the Netlify handler is unchanged.
+exports._test = { crmScoreFor, scoreLabel, isHotTrigger };
 
 exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers: corsHeaders, body: '' };

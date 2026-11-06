@@ -1,0 +1,114 @@
+{
+  "market": "Indianapolis",
+  "generatedAt": "2026-11-06T05:26:05.585Z",
+  "totalRows": 92,
+  "investorCount": 54,
+  "retailCount": 37,
+  "unknownCount": 1,
+  "calibrated": true,
+  "multiplierMedian": 0.713939393939394,
+  "multiplierMean": 0.6452714069225718,
+  "multiplierP25": 0.49262285456187893,
+  "multiplierP75": 0.8086808608058608,
+  "byPriceBand": {
+    "$120k-$220k": {
+      "median": 0.5695588898820925,
+      "n": 18
+    },
+    "$220k-$300k": {
+      "median": 0.5630630630630631,
+      "n": 9
+    },
+    "$300k-$400k": {
+      "median": 0.8121865161220281,
+      "n": 10
+    },
+    "$400k+": {
+      "median": 0.44028103044496486,
+      "n": 3
+    },
+    "under $120k": {
+      "median": 0.789,
+      "n": 3
+    }
+  },
+  "byBuildType": {},
+  "buyBox": {
+    "yearBuilt": "1910 – 2004",
+    "priceBand": "$18,250 – $261,298",
+    "bedsMostCommon": "3bd (27), 2bd (14), 4bd (10)",
+    "bathsMostCommon": "1.5ba (20), 1ba (16), 2ba (7)"
+  },
+  "concentrationZips": [
+    {
+      "zip": "46201",
+      "count": 4,
+      "share": 0.07407407407407407
+    },
+    {
+      "zip": "46205",
+      "count": 4,
+      "share": 0.07407407407407407
+    },
+    {
+      "zip": "46218",
+      "count": 4,
+      "share": 0.07407407407407407
+    },
+    {
+      "zip": "46208",
+      "count": 3,
+      "share": 0.05555555555555555
+    },
+    {
+      "zip": "46219",
+      "count": 3,
+      "share": 0.05555555555555555
+    }
+  ],
+  "topBuyers": [
+    {
+      "name": "ADAM",
+      "count": 2
+    },
+    {
+      "name": "TONY",
+      "count": 1
+    },
+    {
+      "name": "RASHIM",
+      "count": 1
+    },
+    {
+      "name": "GREG",
+      "count": 1
+    },
+    {
+      "name": "MICHAEL",
+      "count": 1
+    },
+    {
+      "name": "EDGAR",
+      "count": 1
+    },
+    {
+      "name": "JOSE",
+      "count": 1
+    },
+    {
+      "name": "DONNA",
+      "count": 1
+    },
+    {
+      "name": "TIFFANY",
+      "count": 1
+    },
+    {
+      "name": "MOHAMMED",
+      "count": 1
+    }
+  ],
+  "notes": [
+    "Only 92 cash sales. The blueprint calls for the top ~100+ — a smaller sample makes the multiplier noisy."
+  ]
+}

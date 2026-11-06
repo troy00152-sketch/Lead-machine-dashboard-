@@ -54,11 +54,21 @@ function tierFor(arv) {
   if (arv < 400000) return 0.829;
   return 0.849;
 }
-function offerMath(arv, repairs) {
+// MAO calibration: when a calibration object is supplied (see loadCalibration),
+// the effective multiplier is min(calibrated, tier) — calibration can only LOWER
+// MAO, never raise it. No calibration = tier only, exactly as before.
+function offerMath(arv, repairs, calibration) {
   const tier = tierFor(arv);
-  const mao = (arv - repairs) * tier;
+  let multiplier = tier, source = 'tier default';
+  if (calibration && calibration.calibrated && calibration.multiplierMedian) {
+    const band = arv < 120000 ? 'under $120k' : arv < 220000 ? '$120k-$220k' : arv < 300000 ? '$220k-$300k' : arv < 400000 ? '$300k-$400k' : '$400k+';
+    const entry = (calibration.byPriceBand || {})[band];
+    const cal = entry && entry.n >= 8 ? entry.median : calibration.multiplierMedian;
+    if (cal < tier) { multiplier = cal; source = 'calibrated'; }
+  }
+  const mao = (arv - repairs) * multiplier;
   const lao = mao * 0.70;
-  return { tier, mao: Math.round(mao), lao: Math.round(lao) };
+  return { tier, multiplier, source, mao: Math.round(mao), lao: Math.round(lao) };
 }
 
 const SYSTEM_PROMPT = `You are the AI assistant inside Troy's Acquisition Command Center dashboard. Troy is a real estate wholesaler running the FreeWholesaling playbook. You help him with three jobs: answer deal questions, run offer math, and draft texts. You are direct, plain-spoken, and you never pad.
@@ -88,6 +98,34 @@ HARD RULES:
 11. ARV MATH IS DONE FOR YOU: the tool result includes a CODE-AVERAGE line with the exact average of the top-3 comps. Quote that figure as the ARV when you use those 3 comps — never recompute it yourself. If you swap in a different comp, show your arithmetic exactly like the CODE-AVERAGE line.
 12. If a get_comps tool result contains a DIAGNOSTIC block, reproduce it EXACTLY in your reply (verbatim, no paraphrasing) so the failure can be fixed — then give Troy the plain-English one-liner too.
 13. BUYER MATCHING: you have a match_buyers tool (23,837 buyers with phones, costs nothing). Call it when Troy asks "who are my buyers for this deal", "match buyers", "find buyers for [address]", or wants a buyer list for a blast. Pass the property address (or city/state/zip) and the deal price (MAO) when you have it. Present the top matches with name, score, strategy, avg buy, and phone. Never invent buyers — only report what the tool returns. If the tool finds none, say so plainly.`;
+
+// ---- MAO calibration (cash-sales calibrated multiplier) ----
+// The calibration run writes assets/mao-calibration.json; at deploy time the same
+// file is copied into netlify/functions/mao-calibration.json so this function can
+// read it. No file = tier only, and the prompt says so plainly.
+let _calibrationCache = undefined;
+function loadCalibration() {
+  if (_calibrationCache !== undefined) return _calibrationCache;
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    _calibrationCache = JSON.parse(fs.readFileSync(path.join(__dirname, 'mao-calibration.json'), 'utf8'));
+    if (!_calibrationCache.calibrated) _calibrationCache = null;
+  } catch (e) { _calibrationCache = null; }
+  return _calibrationCache;
+}
+function systemPromptWithCalibration() {
+  const cal = loadCalibration();
+  if (!cal) return SYSTEM_PROMPT;
+  const bands = Object.entries(cal.byPriceBand || {})
+    .map(([b, v]) => `${b}: ${(v.median * 100).toFixed(1)}% (n=${v.n})`).join(', ');
+  return SYSTEM_PROMPT + `
+
+CALIBRATED MULTIPLIER — ${cal.market || 'market'} (cash-sales calibration, ${cal.generatedAt ? cal.generatedAt.slice(0, 10) : 'undated'}):
+${cal.investorCount} genuine investor purchases out of ${cal.totalRows} cash sales; overall median ${(cal.multiplierMedian * 100).toFixed(1)}% of AVM.
+By price band: ${bands || 'n/a'}.
+RULE: the effective multiplier is min(calibrated, tier) — calibration can only LOWER MAO, never raise it. When the calibrated number is lower than the tier, use it and say so (e.g. "72.9% calibrated, tier was 81.5%"). When it is higher, use the tier. If a deal is outside the calibrated market, say the market is not calibrated and use the tier.`;
+}
 
 // ---- data provider client (get_comps tool backend) ----
 
@@ -524,7 +562,7 @@ async function callLlm({ baseUrl, apiKey, model, messages, tools }) {
         model,
         temperature: 0.4,
         max_tokens: MAX_TOKENS,
-        messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...messages],
+        messages: [{ role: 'system', content: systemPromptWithCalibration() }, ...messages],
         ...(tools ? { tools } : {}),
       }),
     });
@@ -669,7 +707,7 @@ exports.handler = async (event) => {
 
 // Offline checks (no network): node -e "const a=require('./dashboard-ai.js'); console.log(a._test.offerMath(290000,40000))"
 exports._test = {
-  tierFor, offerMath, money, SYSTEM_PROMPT,
+  tierFor, offerMath, money, SYSTEM_PROMPT, loadCalibration, systemPromptWithCalibration,
   parseAddress, normalizePrComp, prBodyOk, isoDaysAgo,
   COMPS_TOOL_DEF, MATCH_BUYERS_TOOL_DEF, MAX_TOOL_ITERATIONS,
   matchBuyersLookup, buyerGeoScore, buyerPriceScore, buyerActivityScore, buyerStrategyScore,
