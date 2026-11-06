@@ -391,6 +391,27 @@ const MATCH_BUYERS_TOOL_DEF = {
 const zlib = require('zlib');
 const fs = require('fs');
 const path = require('path');
+
+// ---- Verified buyer tier (see buyer-verify.js) ----
+// Verified buyers get +20 match score so they rank first. Loaded fresh per
+// request from the Blobs store — best-effort, never blocks matching.
+let _blobs = null;
+try { _blobs = require('@netlify/blobs'); } catch (e) { _blobs = null; }
+function digits10(v) {
+  const d = String(v == null ? '' : v).replace(/\D/g, '');
+  return d.length === 11 && d.startsWith('1') ? d.slice(1) : d;
+}
+async function loadVerifiedMap(event) {
+  try {
+    if (!_blobs) return {};
+    if (typeof _blobs.connectLambda === 'function') _blobs.connectLambda(event);
+    const s = _blobs.getStore('buyer-verified');
+    const v = await s.get('map', { type: 'json' });
+    return (v && typeof v === 'object') ? v : {};
+  } catch (e) {
+    return {};
+  }
+}
 let _buyerIndex = null;
 function loadBuyerIndex() {
   if (_buyerIndex) return _buyerIndex;
@@ -434,7 +455,7 @@ function buyerStrategyScore(b) {
   return 5;
 }
 
-function matchBuyersLookup({ address, city, state, zip, price, property_type }) {
+function matchBuyersLookup({ address, city, state, zip, price, property_type, verifiedMap = {} }) {
   let subj = { city: city || '', state: state || '', zip: (zip || '').toString().slice(0, 5) };
   if (address) {
     const p = parseAddress(address);
@@ -454,6 +475,9 @@ function matchBuyersLookup({ address, city, state, zip, price, property_type }) 
     const g = buyerGeoScore(b, subj);
     if (g === 0) continue;
     let score = Math.min(99, g + buyerPriceScore(b, price) + buyerActivityScore(b) + buyerStrategyScore(b));
+    // Verified buyers rank first (+20) — they close.
+    const verified = !!verifiedMap[digits10(b[1])];
+    if (verified) score = Math.min(99, score + 20);
     /* Land deals: boost actual land investors (name contains 'land', not 'landlord').
        b[0]=name, b[6]=strategy. Old code checked strategy for 'land' which matched 'Landlord'. */
     if (isLand) {
@@ -461,18 +485,18 @@ function matchBuyersLookup({ address, city, state, zip, price, property_type }) 
       if (nm.includes('land') && !nm.includes('landlord')) score = Math.min(99, score + 10);
     }
     if (score < 35) continue;
-    scored.push({ b, score });
+    scored.push({ b, score, verified });
   }
   scored.sort((x, y) => y.score - x.score || (y.b[5] || 0) - (x.b[5] || 0));
   const top = scored.slice(0, 10);
   if (!top.length) {
     return { ok: true, count: 0, summary: `No buyers scored 35+ for ${[subj.city, subj.state, subj.zip].filter(Boolean).join(', ')} — the database may be thin there. ${index.length.toLocaleString()} buyers searched.` };
   }
-  const lines = top.map(({ b, score }, i) => {
+  const lines = top.map(({ b, score, verified }, i) => {
     const strat = b[6] || 'no strategy on file';
     const ap = b[7] ? money(b[7]) : 'n/a';
     const pc = b[5] || 0;
-    return `${i + 1}. ${b[0]} — ${b[2]}, ${b[3]} ${b[4]} — score ${score}/99 — ${strat} — avg buy ${ap} — ${pc} props — ${b[1]}`;
+    return `${i + 1}. ${verified ? '✅ ' : ''}${b[0]} — ${b[2]}, ${b[3]} ${b[4]} — score ${score}/99 — ${strat} — avg buy ${ap} — ${pc} props — ${b[1]}`;
   });
   const loc = [subj.city, subj.state, subj.zip].filter(Boolean).join(', ');
   const summary = [
@@ -517,7 +541,7 @@ async function callLlm({ baseUrl, apiKey, model, messages, tools }) {
   }
 }
 
-async function runChat({ baseUrl, apiKey, model, prApiKey, messages }) {
+async function runChat({ baseUrl, apiKey, model, prApiKey, messages, verifiedMap = {} }) {
   const convo = messages.slice();
   const tools = [MATCH_BUYERS_TOOL_DEF, ...(prApiKey ? [COMPS_TOOL_DEF] : [])];
   let totalCredits = 0;
@@ -551,6 +575,7 @@ async function runChat({ baseUrl, apiKey, model, prApiKey, messages }) {
             zip: String(args.zip || '').trim() || null,
             price: Number(args.price) || 0,
             property_type: String(args.property_type || '').trim() || null,
+            verifiedMap,
           });
           toolResult = r.summary;
         } catch (err) {
@@ -625,7 +650,8 @@ exports.handler = async (event) => {
   }
 
   try {
-    const { reply, compsCredits } = await runChat({ baseUrl, apiKey, model, prApiKey, messages });
+    const verifiedMap = await loadVerifiedMap(event);
+    const { reply, compsCredits } = await runChat({ baseUrl, apiKey, model, prApiKey, messages, verifiedMap });
     return {
       statusCode: 200,
       headers: corsHeaders,

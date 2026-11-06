@@ -206,6 +206,119 @@ async function getOpportunities() {
   }
 }
 
+// ---- Hot Leads CRM motivation score ----
+// The grid used to score leads ONLY from a live property lookup
+// (data-api, 1 PR credit per lead). With the PR API balance at 0 every
+// lookup failed and every card showed 0 / NO DATA / ARV $0 — even though
+// the CRM knows plenty about these sellers. So the feed now scores each
+// lead from CRM signals alone (no credits spent), and the page upgrades
+// to the full property-based score only when a lookup actually succeeds.
+//
+// Canonical scale (same 0-100, same labels as wholesaleScoreSimple):
+//   Distress /45 — distress tags on the contact (list sources) + stack
+//     depth + appointment engagement + recency. Equity /35 is UNMEASURED
+//     from CRM alone (needs a property lookup) so it scores 0 here and
+//     the card says so; Ownership /20 — absentee tag only.
+//   Honest ceiling: with equity unmeasured the CRM score tops out around
+//   WARM (45 distress + up to 8 absentee). Ranking still holds — the
+//   hottest seller sorts first — and HOT/LAYUP need a property lookup
+//   (which upgrades the score when credits exist).
+
+const DISTRESS_TAG_POINTS = [
+  [/pre.?foreclosure/i, 18],
+  [/tax.?delinquen/i, 16],
+  [/probate/i, 14],
+  [/code.?violation/i, 12],
+  [/vacant/i, 12],
+  [/lien/i, 10],
+  [/bankrupt/i, 14],
+];
+
+function scoreLabel(score) {
+  return score >= 75 ? 'LAYUP' : score >= 55 ? 'HOT' : score >= 35 ? 'WARM' : score >= 15 ? 'COOL' : 'COLD';
+}
+
+// Best-effort contact read for one lead. Never throws — returns null on
+// any failure so the lead still scores from stage + recency alone.
+async function getContactTags(contactId) {
+  if (!contactId) return null;
+  try {
+    const data = await hlFetch(`/contacts/${contactId}`, 'GET', null, HL_VERSION_OPPORTUNITIES).catch(() => null);
+    const c = (data && (data.contact || data)) || null;
+    if (!c) return null;
+    const tags = Array.isArray(c.tags) ? c.tags.map((t) => String(t)) : [];
+    // Custom fields carry the weekly-pull stack data when present
+    // (List Sources / Stack Count / Stack Tier, set by name on import).
+    const cfs = Array.isArray(c.customFields) ? c.customFields : [];
+    const cfByName = {};
+    for (const f of cfs) {
+      const n = String(f.name || f.key || '').toLowerCase();
+      if (n) cfByName[n] = String(f.fieldValue != null ? f.fieldValue : (f.value || ''));
+    }
+    return { tags, cfByName };
+  } catch (e) {
+    return null;
+  }
+}
+
+function crmScoreFor(lead, contact) {
+  let distress = 0;
+  const tags = (contact && contact.tags) || [];
+  const tagText = tags.join(' ').toLowerCase();
+  let distressTagCount = 0;
+  for (const [re, pts] of DISTRESS_TAG_POINTS) {
+    if (re.test(tagText)) { distress += pts; distressTagCount++; }
+  }
+  // Stacking: 2+ distress signals = real motivation.
+  if (distressTagCount >= 2) distress += 10;
+  else if (distressTagCount === 1) distress += 4;
+  // Stack Count custom field, when the weekly pull set it.
+  const stackN = contact && contact.cfByName ? parseInt(String(contact.cfByName['stack count'] || '').replace(/\D/g, ''), 10) : NaN;
+  if (Number.isFinite(stackN)) {
+    if (stackN >= 3) distress += 12;
+    else if (stackN === 2) distress += 8;
+    else if (stackN === 1) distress += 3;
+  }
+  // Engagement: a booked appointment means the seller is talking.
+  const stage = String(lead.stage || '').toLowerCase();
+  if (stage.includes('appointment')) distress += 10;
+  else if (stage.includes('contacted') || stage.includes('qualified')) distress += 5;
+  // Recency: fresh leads are hotter.
+  const createdMs = lead.createdAt ? new Date(lead.createdAt).getTime() : 0;
+  if (createdMs && Date.now() - createdMs <= 48 * 3600 * 1000) distress += 5;
+  distress = Math.min(45, distress);
+  // Equity: unmeasured from CRM alone — 0, and the card says so.
+  const equity = 0;
+  // Ownership: absentee tag only.
+  let own = 0;
+  if (/absentee/i.test(tagText)) own += 8;
+  own = Math.min(20, own);
+  const score = Math.max(0, Math.min(100, distress + equity + own));
+  return {
+    score, label: scoreLabel(score),
+    parts: { distress, equity, own },
+    source: 'crm',
+    stackCount: Number.isFinite(stackN) ? stackN : (distressTagCount || 0),
+    listSignals: tags.filter((t) => DISTRESS_TAG_POINTS.some(([re]) => re.test(t))).slice(0, 4),
+  };
+}
+
+async function enrichHotLeads(newLeads) {
+  // Score the first 9 (what the grid shows) from CRM data, in parallel.
+  const targets = newLeads.slice(0, 9);
+  await Promise.all(targets.map(async (lead) => {
+    const contact = await getContactTags(lead.contactId);
+    const s = crmScoreFor(lead, contact);
+    lead.score = s.score;
+    lead.scoreLabel = s.label;
+    lead.scoreParts = s.parts;
+    lead.scoreSource = s.source;
+    lead.stackCount = s.stackCount;
+    lead.listSignals = s.listSignals;
+  }));
+  return newLeads;
+}
+
 function extractAddress(opp) {
   // Try custom fields, then name
   const cf = opp.customFields || opp.customField || [];
@@ -232,6 +345,10 @@ exports.handler = async (event) => {
         getBookedToday(),
         getOpportunities(),
       ]);
+      // Hot Leads scores come from CRM signals (no credits spent) — see
+      // enrichHotLeads above. Best-effort: a failure here never breaks
+      // the overview; leads just render without a score.
+      try { await enrichHotLeads(opps.newLeads); } catch (e) { /* keep unscored */ }
       // Net profit = sum of closed deal values
       const netProfit = opps.closed.reduce((s, o) => s + (Number(o.monetaryValue) || 0), 0);
       // Close rate = closed / total

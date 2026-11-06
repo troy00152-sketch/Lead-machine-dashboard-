@@ -17,6 +17,27 @@
 
 const BUYERS = require('./buyers-data.js');
 
+// ---- Verified buyer tier (see buyer-verify.js) ----
+// Verified buyers get +20 match score so they rank first. Loaded fresh per
+// request from the Blobs store — best-effort, never blocks matching.
+let _blobs = null;
+try { _blobs = require('@netlify/blobs'); } catch (e) { _blobs = null; }
+function digits10(v) {
+  const d = String(v == null ? '' : v).replace(/\D/g, '');
+  return d.length === 11 && d.startsWith('1') ? d.slice(1) : d;
+}
+async function loadVerifiedMap(event) {
+  try {
+    if (!_blobs) return {};
+    if (typeof _blobs.connectLambda === 'function') _blobs.connectLambda(event);
+    const s = _blobs.getStore('buyer-verified');
+    const v = await s.get('map', { type: 'json' });
+    return (v && typeof v === 'object') ? v : {};
+  } catch (e) {
+    return {};
+  }
+}
+
 function geoScore(b, subj) {
   const zip = subj.zip || '';
   const city = (subj.city || '').toLowerCase().trim();
@@ -73,22 +94,31 @@ exports.handler = async (event) => {
   const subj = { zip: (req.zip || '').toString().slice(0, 5), city: req.city || '', state: req.state || '' };
   const price = +req.price || 0;
   const filters = req.filters || {};
+  const vmap = await loadVerifiedMap(event);
 
   const scored = [];
   for (const b of BUYERS) {
     if (!passesFilters(b, filters)) continue;
     const g = geoScore(b, subj);
     if (g === 0) continue;
-    const score = Math.min(99, g + priceScore(b, price) + activityScore(b) + strategyScore(b));
+    let score = Math.min(99, g + priceScore(b, price) + activityScore(b) + strategyScore(b));
+    // Verified buyers rank first (+20) — they close.
+    let verified = null;
+    for (const p of (b.ph || [])) {
+      const rec = vmap[digits10(p[0])];
+      if (rec) { verified = rec; break; }
+    }
+    if (verified) score = Math.min(99, score + 20);
     if (score < 35) continue;
-    scored.push({ b, score });
+    scored.push({ b, score, verified });
   }
   scored.sort((x, y) => y.score - x.score || y.b.pc - x.b.pc);
-  const top = scored.slice(0, 100).map(({ b, score }) => ({
+  const top = scored.slice(0, 100).map(({ b, score, verified }) => ({
     name: b.n,
     city: b.ct[0] || '', state: b.st[0] || '', zip: b.z || '',
     areas: b.ct, states: b.st,
     score,
+    verified: !!verified, verifiedHow: verified ? verified.how : '',
     portfolioCount: b.pc, portfolioValue: b.pv, avgPurchase: b.ap, flips: b.fl,
     isFlipper: !!b.f, isLandlord: !!b.l, isEntity: !!b.e, highVolume: !!b.hv,
     phones: b.ph.map(p => ({ phone: p[0], type: p[1], dnc: !!p[2] })),
