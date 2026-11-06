@@ -1511,7 +1511,7 @@ function parseDmAddress(addr){
   const out = { street:'', city:'', state:'', zip:'' };
   if(!addr) return out;
   let head = String(addr).trim();
-  const sz = head.match(/,?\s*([A-Za-z]{2})\s+(\d{5})(?:-\d{4})?\s*$/);
+  const sz = head.match(/,?\s*([A-Za-z]{2})\s*,?\s*(\d{5})(?:-\d{4})?\s*$/);
   if(sz){ out.state = sz[1].toUpperCase(); out.zip = sz[2]; head = head.slice(0, sz.index).replace(/,\s*$/,'').trim(); }
   const parts = head.split(',').map(s=>s.trim()).filter(Boolean);
   if(parts.length >= 2){ out.city = parts[parts.length-1]; out.street = parts.slice(0,-1).join(', '); return out; }
@@ -2971,7 +2971,7 @@ function leadPhoneBadge(l){
   return '<span class="badge orange">&#9888;&#65039; trace</span>';
 }
 function leadMaoLao(l){
-  const arv = Number(l.value) || null;
+  const arv = l.estimatedValue || l.arv || null;
   if(!arv) return { mao: null, lao: null };
   const _em = effectiveMaoMultiplier(arv, leadMarket(l));
   if(!_em || _em.multiplier == null) return { mao: null, lao: null };
@@ -2998,7 +2998,7 @@ function leadToPayload(l){
     phones: phones,
     owner_name: owner,
     email: (l.emails && l.emails[0]) || l.email || '',
-    arv: Number(l.value) || null,
+    arv: Number(l.estimatedValue || l.arv) || null,
     mao: ml.mao,
     lao: ml.lao,
     mortgage_balance: totalBal || null,
@@ -4191,6 +4191,7 @@ function resetCompsPage(){
   const arvEl = document.getElementById('compARV'); if(arvEl) arvEl.value = '';
   const repEl = document.getElementById('compRepairs'); if(repEl) repEl.value = '';
   const res = document.getElementById('compResult'); if(res) res.innerHTML = '';
+  if(typeof clearQuickOfferResult === 'function') clearQuickOfferResult();
   const tt = document.getElementById('compTierTable'); if(tt) tt.innerHTML = '';
   const lm = document.getElementById('compLoadMsg'); if(lm) lm.textContent = '';
   const mm = document.getElementById('compMortMsg'); if(mm) mm.textContent = '';
@@ -4223,6 +4224,7 @@ function updateCompLinks(){
        cannot re-render stale cards from the old ARV. */
     const arvEl = document.getElementById('compARV'); if(arvEl) arvEl.value = '';
     const res = document.getElementById('compResult'); if(res) res.innerHTML = '';
+    if(typeof clearQuickOfferResult === 'function') clearQuickOfferResult();
     const tt = document.getElementById('compTierTable'); if(tt) tt.innerHTML = '';
     const lm = document.getElementById('compLoadMsg'); if(lm) lm.textContent = '';
     /* The subject card clears with everything else — never a stale
@@ -4677,6 +4679,17 @@ async function runQuickOffer(){
   const res = document.getElementById('qoResult');
   if(res) res.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
+/* Clear the Quick Offer card + its stored copy data. Called from calcComp's
+   early-return branches (listed / land / THIN / no-ARV), which never reach
+   updateQuickOfferResult — without this the card keeps showing the previous
+   load's numbers after a gated load. */
+function clearQuickOfferResult(){
+  const res = document.getElementById('qoResult');
+  if(res){ res.innerHTML = ''; res.style.display = 'none'; }
+  const copyBtn = document.getElementById('qoCopyBtn');
+  if(copyBtn) copyBtn.style.display = 'none';
+  window._qoData = null;
+}
 function updateQuickOfferResult(){
   const res = document.getElementById('qoResult');
   const copyBtn = document.getElementById('qoCopyBtn');
@@ -4768,6 +4781,7 @@ function calcComp(){
     const tt = document.getElementById('compTierTable'); if(tt) tt.innerHTML = '';
     const wb = document.getElementById('compWarnBar'); if(wb) wb.innerHTML = '';
     renderCompList();
+    clearQuickOfferResult();
     return;
   }
   if(gate) gate.innerHTML = (st && st.value === 'not-listed') ? '<div style="font-size:12px;color:var(--green)">✓ Not listed — clear to comp.</div>' : '<div style="font-size:12px;color:var(--muted)">⚠️ Listing status not checked — check before offering.</div>';
@@ -4803,6 +4817,7 @@ function calcComp(){
       }
     }
     renderCompWarnBar();
+    clearQuickOfferResult();
     return;
   }
   const arv = parseFloat(arvEl.value)||0;
@@ -4821,9 +4836,10 @@ function calcComp(){
     }
     const tt = document.getElementById('compTierTable'); if(tt) tt.innerHTML = '';
     renderCompWarnBar();
+    clearQuickOfferResult();
     return;
   }
-  if(!arv){ el.innerHTML=''; const tt = document.getElementById('compTierTable'); if(tt) tt.innerHTML=''; renderCompWarnBar(); return; }
+  if(!arv){ el.innerHTML=''; const tt = document.getElementById('compTierTable'); if(tt) tt.innerHTML=''; renderCompWarnBar(); clearQuickOfferResult(); return; }
   const tier = compTier(arv);
   const mao = Math.round((arv-rep)*tier);
   const lao = Math.round(mao*.70);
