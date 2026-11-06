@@ -786,6 +786,7 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
               <option value="kansascity">Kansas City</option>
               <option value="carolina">Carolina</option>
               <option value="jacksonville">Jacksonville</option>
+              <option value="dayton">Dayton</option>
             </select></div>
             <div><label class="lbl">Deal Price ($) — your asking/MAO</label><input class="field" id="bbPrice" type="number" min="0" step="1000" placeholder="e.g. 80000" /></div>
             <div><label class="lbl">Property Type</label><select class="field" id="bbPropType"><option>Single Family</option><option>Multi-Family</option><option>Condo/Townhome</option><option>Vacant Land</option><option>Commercial</option></select></div>
@@ -3423,6 +3424,7 @@ function bmRing(score){
 }
 function bmBadges(b){
   let h = '';
+  if(b.verified) h += '<span class="badge green" style="font-size:10px">✅ Verified</span> ';
   if(b.isFlipper) h += '<span class="badge orange" style="font-size:10px">🔨 Flipper</span> ';
   if(b.isLandlord) h += '<span class="badge green" style="font-size:10px">🏠 Landlord</span> ';
   if(b.highVolume) h += '<span class="badge gray" style="font-size:10px">🏢 High-Volume</span> ';
@@ -3694,19 +3696,24 @@ function blastLeadToBuyers(leadId){
 
 /* ============ BUYER BLAST (auto-match + draft + review; the dashboard NEVER sends) ============
    Flow: deal in -> match buyers (existing buyer-match fn) -> keep ONLY confirmed-mobile,
-   non-DNC buyers -> draft SMS -> Troy reviews list + exact message -> Approve stages the
-   package (message + phone list) for MANUAL send from HighLevel. No live sending is wired. */
+   non-DNC buyers -> create-or-reuse the deal room for this address -> draft SMS (with the
+   room link) -> Troy reviews list + exact message -> Approve stages the package
+   (message + phone list) for MANUAL send from HighLevel. No live sending is wired.
+   One-click dispo: the blast run does the matching, the room, and the draft in one move. */
 const BB_MARKETS = {
   indianapolis: { label: 'Indianapolis', city: 'indianapolis', state: 'IN' },
   cleveland:    { label: 'Cleveland',    city: 'cleveland',    state: 'OH' },
   kansascity:   { label: 'Kansas City',  city: 'kansas city',  state: 'MO' },
   carolina:     { label: 'Carolina',     city: 'greenville',   state: 'NC' },
   jacksonville: { label: 'Jacksonville', city: 'jacksonville', state: 'FL' },
+  dayton:       { label: 'Dayton',       city: 'dayton',       state: 'OH' },
 };
 let bbDeal = null;
 let bbMatches = [];   // textable buyers, ranked (each has .mobile)
 let bbExcluded = [];  // {name, reason} — shown, never silently dropped
 let bbSelected = {};  // idx -> bool
+let bbRoomLink = null; // deal-room buyer link for this blast (one-click dispo)
+let bbRoomNote = '';   // short room status shown next to the match count
 
 function bbMarketChanged(){
   const m = BB_MARKETS[document.getElementById('bbMarket').value];
@@ -3749,8 +3756,38 @@ function bbDraftMessage(){
   let msg = '🏠 ' + bits[0] + (specs.length ? ' — ' + specs.join('/') : '') + '.';
   if(d.price) msg += ' Asking ' + bbMoney(d.price) + '.';
   if(d.notes) msg += ' ' + d.notes.trim();
+  if(bbRoomLink) msg += ' See photos + details: ' + bbRoomLink + '.';
   msg += ' Reply INTERESTED for details. — Direct Property Buyers';
   return msg;
+}
+/* One-click dispo: create-or-reuse the deal room for this address and put
+   its buyer link in the blast. Reuses the room when one already exists —
+   never duplicates. Best-effort: a room failure never blocks the blast. */
+async function bbEnsureDealRoom(){
+  bbRoomLink = null; bbRoomNote = '';
+  const addr = (bbDeal && bbDeal.address) || '';
+  if(!addr.trim()) return;
+  const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  try{
+    const list = await drApiGet('list');
+    const existing = (list.deals || []).find(d => norm(d.address) === norm(addr));
+    if(existing){
+      const full = await drApiGet('get', {id: existing.id});
+      bbRoomLink = drBuyerLink(full.deal);
+    } else {
+      const j = await drApiPost({ action: 'create', address: addr.trim(), askingPrice: bbDeal.price || '', arv: '', estRepairs: '', mao: '', compSummary: '' });
+      bbRoomLink = j.roomToken ? (location.origin + '/room.html?token=' + j.roomToken) : null;
+      if(!bbRoomLink){
+        const full = await drApiGet('get', {id: j.id});
+        bbRoomLink = drBuyerLink(full.deal);
+      }
+    }
+    bbRoomNote = bbRoomLink ? ' · 🔗 Deal room ready' : ' · ⚠ Deal room link unavailable';
+  }catch(e){
+    bbRoomLink = null;
+    bbRoomNote = ' · ⚠ Deal room not created — blast still works';
+    console.warn('[blast] deal room not created:', e.message);
+  }
 }
 function bbSegCount(t){ return Math.max(1, Math.ceil(t.length / 160)); }
 function bbUpdateMsgCount(){
@@ -3819,7 +3856,9 @@ async function runBuyerBlast(){
       results.innerHTML = '<div class="card" style="text-align:center;padding:34px"><div style="font-size:17px;font-weight:700;margin-bottom:6px">No Textable Buyers Found</div><p style="color:var(--muted);font-size:13px">' + all.length + ' buyers matched the area, but none have a confirmed mobile number that is safe to text. Excluded buyers are listed below — nothing was silently dropped.</p></div>' + bbExcludedHtml();
       return;
     }
-    status.innerHTML = '✅ <strong>' + bbMatches.length + '</strong> textable buyers matched' + (bbExcluded.length ? ' · <span style="color:var(--muted)">' + bbExcluded.length + ' excluded (see below)</span>' : '');
+    // One-click dispo: room first, so the draft can carry its link.
+    await bbEnsureDealRoom();
+    status.innerHTML = '✅ <strong>' + bbMatches.length + '</strong> textable buyers matched' + (bbExcluded.length ? ' · <span style="color:var(--muted)">' + bbExcluded.length + ' excluded (see below)</span>' : '') + bbRoomNote;
     const msg = bbDraftMessage();
     results.innerHTML =
       '<div class="card" style="margin-bottom:14px"><div class="sec-title" style="font-size:14px">✉️ Blast Message <span style="color:var(--muted);font-weight:400;font-size:12px">— edit before review</span></div>' +
@@ -3832,7 +3871,7 @@ async function runBuyerBlast(){
       '<div id="bbList">' + bbMatches.map((b, i) =>
         '<label class="buyer-row" style="cursor:pointer"><input type="checkbox" id="bbChk' + i + '" checked onchange="bbToggle(' + i + ',this.checked)" style="width:18px;height:18px;flex-shrink:0" />' +
         '<div class="buyer-rank">' + (i + 1) + '</div>' +
-        '<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:14px">' + esc(b.name) + '</div>' +
+        '<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:14px">' + esc(b.name) + (b.verified ? ' ✅' : '') + '</div>' +
         '<div style="color:var(--muted);font-size:12px;text-transform:capitalize">' + esc(b.city || '') + (b.state ? ', ' : '') + esc(b.state || '') + ' · match ' + b.score + '% · avg buy ' + bbMoney(b.avgPurchase) + '</div></div>' +
         '<div style="font-size:13px;flex-shrink:0">📱 ' + esc(b.mobile) + ' <span class="badge green" style="font-size:10px">✅ mobile</span></div></label>'
       ).join('') + '</div>' +
@@ -3859,7 +3898,7 @@ function bbReviewBlast(){
   document.getElementById('bbReview').innerHTML =
     '<div class="card" style="margin-top:14px;border:2px solid var(--accent)"><div class="sec-title" style="font-size:15px">👁️ Review — read every word before approving</div>' +
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">' +
-    '<div><div class="lbl">Deal</div><div style="font-size:13px"><strong>' + esc(d.address) + '</strong><br>' + esc([d.city, d.state, d.zip].filter(Boolean).join(' ')) + (d.price ? '<br>Asking ' + bbMoney(d.price) : '') + '<br>Market: ' + esc(d.market) + '</div></div>' +
+    '<div><div class="lbl">Deal</div><div style="font-size:13px"><strong>' + esc(d.address) + '</strong><br>' + esc([d.city, d.state, d.zip].filter(Boolean).join(' ')) + (d.price ? '<br>Asking ' + bbMoney(d.price) : '') + '<br>Market: ' + esc(d.market) + (bbRoomLink ? '<br>Room: <a href="' + esc(bbRoomLink) + '" target="_blank" style="color:var(--accent)">buyer link</a> — also in the message below' : '') + '</div></div>' +
     '<div><div class="lbl">Recipients</div><div style="font-size:13px"><strong>' + sel.length + ' buyers</strong><br>Send-from: <span style="color:var(--muted)">buyer-blast number — chosen in HighLevel at send time</span><br><span style="color:var(--muted)">Only confirmed-mobile, non-DNC numbers. ' + bbExcluded.length + ' excluded buyers stay out.</span></div></div></div>' +
     '<div class="lbl">Exact message — this is what each buyer would receive</div>' +
     '<div style="background:#0d1626;border:1px solid var(--line);border-radius:14px;padding:14px 16px;font-size:14px;line-height:1.55;max-width:420px;margin-bottom:6px">' + esc(msg).replace(/\n/g, '<br>') + '</div>' +
@@ -3879,6 +3918,7 @@ function bbApproveBlast(){
     id: 'bb' + Date.now(),
     at: new Date().toISOString(),
     deal: bbDeal,
+    roomLink: bbRoomLink || '',
     message: msg,
     recipients: sel.map(x => ({ name: x.b.name, mobile: x.b.mobile })),
     status: 'APPROVED — pending manual send',
@@ -3893,6 +3933,7 @@ function bbApproveBlast(){
     '<div class="lbl">Message</div><div class="field" style="height:auto;white-space:pre-wrap;font-size:14px;margin-bottom:8px">' + esc(msg) + '</div>' +
     '<button class="btn small" onclick="bbCopyText(\'bbMsgFinal\')">📋 Copy message</button>' +
     '<textarea id="bbMsgFinal" style="position:absolute;left:-9999px" aria-hidden="true">' + esc(msg) + '</textarea>' +
+    (bbRoomLink ? '<div class="lbl" style="margin-top:14px">Deal room link (also inside the message above)</div><div class="field" style="height:auto;word-break:break-all;font-size:13px">' + esc(bbRoomLink) + '</div><div style="margin-top:8px"><button class="btn small" onclick="bbCopyText(\'bbRoomFinal\')">📋 Copy room link</button><textarea id="bbRoomFinal" style="position:absolute;left:-9999px" aria-hidden="true">' + esc(bbRoomLink) + '</textarea></div>' : '') +
     '<div class="lbl" style="margin-top:14px">Phone list — ' + blast.recipients.length + ' numbers, one per line</div>' +
     '<textarea class="field" rows="6" readonly>' + esc(phones) + '</textarea>' +
     '<div style="margin-top:8px"><button class="btn small" onclick="bbCopyText(\'bbPhonesFinal\')">📋 Copy phone list</button>' +

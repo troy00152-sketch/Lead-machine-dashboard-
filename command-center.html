@@ -288,6 +288,12 @@ async function renderHotLeads(leads){
   const cards=[];
   for(const lead of leads.slice(0,9)){
     const addr=lead.address||lead.name||'';
+    // Base score comes from the feed (CRM signals — stack, list types,
+    // appointment booked). It is REAL: never 0 just because a property
+    // lookup failed. A successful property lookup upgrades it to the
+    // full Distress/Equity/Ownership score.
+    let ws = (lead.score != null) ? { score: lead.score, label: lead.scoreLabel || 'COLD', distress: (lead.scoreParts||{}).distress || 0, equity: (lead.scoreParts||{}).equity || 0, own: (lead.scoreParts||{}).own || 0 } : { score: 0, label: 'NO DATA', distress: 0, equity: 0, own: 0 };
+    let scoreSrc = lead.scoreSource || 'crm';
     let prop=null, arv=null;
     if(addr && addr.length>5){
       try{
@@ -296,22 +302,27 @@ async function renderHotLeads(leads){
         if(d.matched&&d.property){prop=d.property;arv=d.comps&&d.comps.indication?d.comps.indication:(prop.marketValue||null);}
       }catch(e){}
     }
-    const ws=wholesaleScoreSimple(prop);
+    if(prop){
+      ws=wholesaleScoreSimple(prop);
+      scoreSrc='property';
+    }
     const mao=calcMAO(arv,30000);
-    cards.push({lead,addr,prop,arv,ws,mao});
+    cards.push({lead,addr,prop,arv,ws,mao,scoreSrc});
   }
   // Sort by score desc
   cards.sort((a,b)=>b.ws.score-a.ws.score);
   grid.innerHTML=cards.map((c,i)=>{
+    const moneyOrDash = v => (v && v > 0) ? fmtMoney(v) : '—';
+    const breakdown = 'Distress '+c.ws.distress+' · Equity '+c.ws.equity+' · Ownership '+c.ws.own + (c.scoreSrc==='crm' ? ' — equity unmeasured until a property lookup runs' : '');
     return '<div class="lead-card" onclick="analyzeLeadAddress('+i+')" data-addr="'+esc(c.addr).replace(/"/g,'&quot;')+'">'
       +'<div class="addr">'+esc(c.addr||c.lead.name)+'</div>'
-      +'<span class="score-badge '+scoreClass(c.ws.label)+'">🎯 '+c.ws.score+' · '+c.ws.label+'</span>'
+      +'<span class="score-badge '+scoreClass(c.ws.label)+'" title="'+esc(breakdown)+'">🎯 '+c.ws.score+' · '+c.ws.label+'</span>'
       +'<div class="nums">'
-      +'<div><div class="k">ARV</div><div class="v">'+fmtMoney(c.arv)+'</div></div>'
-      +'<div><div class="k">MAO</div><div class="v">'+fmtMoney(c.mao.mao)+'</div></div>'
-      +'<div><div class="k">LAO</div><div class="v">'+fmtMoney(c.mao.lao)+'</div></div>'
+      +'<div><div class="k">ARV</div><div class="v">'+moneyOrDash(c.arv)+'</div></div>'
+      +'<div><div class="k">MAO</div><div class="v">'+moneyOrDash(c.mao.mao)+'</div></div>'
+      +'<div><div class="k">LAO</div><div class="v">'+moneyOrDash(c.mao.lao)+'</div></div>'
       +'</div>'
-      +'<div style="font-size:11px;color:var(--muted)">'+esc(c.lead.stage||'')+' · '+timeAgo(c.lead.createdAt)+' · tap to analyze ↓</div>'
+      +'<div style="font-size:11px;color:var(--muted)">'+esc(c.lead.stage||'')+' · '+timeAgo(c.lead.createdAt)+(c.scoreSrc==='crm' ? ' · CRM score' : '')+' · tap to analyze ↓</div>'
       +'</div>';
   }).join('');
   // Store for click handler
