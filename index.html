@@ -976,6 +976,7 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
           <div id="qoResult" style="display:none"></div>
           <div style="display:flex;gap:8px;margin-top:10px">
             <button class="btn" id="qoCopyBtn" style="display:none" onclick="copyQuickOffer()">📋 Copy Offer Summary</button>
+            <button class="btn" id="qoLiveCallBtn" onclick="openLiveCallFromComps()">📞 Open Live Call</button>
           </div>
         </div>
         <div class="card">
@@ -2685,6 +2686,7 @@ function openLead(id){
       <button class="btn primary" onclick="traceLead('${l.id}')">🔍 Skip Trace</button>
       <button class="btn" onclick="analyzeDeal('${l.id}')">🤖 Analyze Deal</button>
       <button class="btn" onclick="openCompsForLead('${l.id}')">📊 Run Comps</button>
+      <button class="btn" onclick="openLiveCallForLead('${l.id}')">📞 Live Call</button>
       <button class="btn" onclick="matchLeadToBuyers('${l.id}')">🤝 Buyer Match Ai</button>
       <button class="btn" onclick="blastLeadToBuyers('${l.id}')">📣 Blast</button>
       <button class="btn ghost" onclick="pushToGHL('${l.id}')">📤 Send to GHL</button>
@@ -4711,6 +4713,21 @@ function updateQuickOfferResult(){
   // Store for copy
   window._qoData = { addr, arv, repairs, mao, lao, tier, picks };
 }
+/* 📞 LIVE CALL from Quick Offer: opens the prep card with the comps address
+   + ARV + repairs as URL params. Reads the live fields at click time, so a
+   hand-edited ARV/repairs carries over. The Live Call page splits the full
+   address string into street/city/state/ZIP itself. */
+function openLiveCallFromComps(){
+  const addr = (document.getElementById('qoAddr')||{}).value.trim() || (document.getElementById('compListAddr')||{}).value.trim();
+  if(!addr){ alert('Enter a property address first.'); return; }
+  const arv = parseFloat((document.getElementById('compARV')||{}).value) || '';
+  const repairs = parseFloat((document.getElementById('compRepairs')||{}).value) || '';
+  const p = new URLSearchParams();
+  p.set('address', addr);
+  if(arv !== '') p.set('arv', String(arv));
+  if(repairs !== '') p.set('repairs', String(repairs));
+  window.open('/live-call.html?' + p.toString(), '_blank');
+}
 function copyQuickOffer(){
   const d = window._qoData;
   if(!d) return;
@@ -5499,6 +5516,14 @@ async function loadCompsForAddress(retryAttempt){
     renderCompSubjectCard(null, addr, '', true);
     if(msg) msg.textContent = 'Verified comps unavailable right now — type an ARV below to run the math manually.';
   }
+}
+/* 📞 LIVE CALL: one click from a lead opens the prep card pre-filled — the
+   Live Call page reads ?lead=<id> from the dashboard's own lead store
+   (localStorage 'acc_leads', same origin) and auto-builds. New tab; the
+   lead modal stays open. */
+function openLiveCallForLead(id){
+  const l = leads.find(x=>x.id===id); if(!l) return;
+  window.open('/live-call.html?lead=' + encodeURIComponent(l.id), '_blank');
 }
 function openCompsForLead(id){
   const l = leads.find(x=>x.id===id); if(!l) return;

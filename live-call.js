@@ -188,12 +188,147 @@
     return L.join('\n');
   }
 
+  // ---------- auto-fill: open from a lead or a URL (?lead= / ?address=&arv=…) ----------
+  // Pure + Node-testable. The DOM wrapper (autoFillFromUrl, browser only) reads
+  // window.location.search + the dashboard's own lead store (localStorage
+  // 'acc_leads', same origin) and fills the form; the existing "if address,
+  // buildPrep" line at the end of DOMContentLoaded then builds the card.
+  // Manual entry is untouched: with no ?lead= and no deal params, nothing
+  // happens. Missing ARV stays null — never 0, never invented.
+  var LEAD_STORE_KEY = 'acc_leads';
+  var LIST_SOURCE_VALUES = ['probate', 'code violation', 'pre-foreclosure', 'tax delinquent', 'D4D', 'FSBO', 'other'];
+
+  function toNumOrNull(v) {
+    if (v == null || v === '') return null;
+    var n = Number(String(v).replace(/[$,]/g, ''));
+    return isNaN(n) ? null : n;
+  }
+
+  // Split "123 Main St, Greenville, NC 27528" (or with fewer parts) into the
+  // form's separate fields. Tolerates a missing ZIP / state / city; never guesses.
+  function splitAddress(full) {
+    var out = { address: '', city: '', state: '', zip: '' };
+    var s = String(full || '').trim();
+    if (!s) return out;
+    var zipM = s.match(/(\d{5})(?:-\d{4})?\s*$/);
+    var hadZip = !!zipM;
+    if (zipM) { out.zip = zipM[1]; s = s.slice(0, zipM.index).replace(/[,\s]+$/, ''); }
+    // A trailing 2-letter token is a state ONLY in a structured address
+    // (ZIP present, or commas present) — otherwise "123 Main St" would lose
+    // its "St" to the state regex.
+    if (hadZip || s.indexOf(',') !== -1) {
+      var stM = s.match(/([A-Za-z]{2})\s*$/);
+      if (stM) { out.state = stM[1].toUpperCase(); s = s.slice(0, stM.index).replace(/[,\s]+$/, ''); }
+    }
+    var parts = s.split(',').map(function (p) { return p.trim(); }).filter(Boolean);
+    if (parts.length >= 2) {
+      out.city = parts[parts.length - 1];
+      out.address = parts.slice(0, parts.length - 1).join(', ');
+    } else {
+      out.address = s;
+    }
+    return out;
+  }
+
+  // ?lead=lead_42 | ?address=&city=&state=&zip=&arv=&repairs= — returns only
+  // the params actually present (absent = omitted, never a guessed value).
+  function parseAutoFillParams(search) {
+    var out = {};
+    var q = String(search || '').replace(/^\?/, '');
+    if (!q) return out;
+    var params;
+    try { params = new URLSearchParams(q); } catch (e) { return out; }
+    ['lead', 'address', 'city', 'state', 'zip'].forEach(function (k) {
+      var v = params.get(k);
+      if (v != null && v !== '') out[k === 'lead' ? 'leadId' : k] = v;
+    });
+    ['arv', 'repairs'].forEach(function (k) {
+      var v = toNumOrNull(params.get(k));
+      if (v != null) out[k] = v;
+    });
+    return out;
+  }
+
+  function findLeadInStore(store, id) {
+    if (!id || !Array.isArray(store)) return null;
+    var found = store.find(function (l) { return l && String(l.id) === String(id); });
+    return found || null;
+  }
+
+  // Lead distress signal -> Live Call list-source select value.
+  function listSourceForSignal(signal) {
+    var s = String(signal || '').trim().toLowerCase();
+    if (s === 'probate') return 'probate';
+    if (s === 'code violation' || s === 'code violations') return 'code violation';
+    if (s === 'pre-foreclosure' || s === 'preforeclosure') return 'pre-foreclosure';
+    if (s === 'tax delinquent') return 'tax delinquent';
+    if (s === 'd4d' || s === 'driving for dollars') return 'D4D';
+    if (s === 'fsbo') return 'FSBO';
+    return 'other';
+  }
+
+  // Dashboard lead (acc_leads shape) -> deal fields for the form.
+  // ARV resolution matches the dashboard: estimatedValue, then arv, then value.
+  function leadToAutoFill(lead) {
+    if (!lead) return null;
+    var arv = toNumOrNull(lead.estimatedValue != null ? lead.estimatedValue : (lead.arv != null ? lead.arv : lead.value));
+    var repairs = toNumOrNull(lead.repairs);
+    var mobiles = (lead.phones || []).filter(function (p) { return p && (p.type === 'Mobile' || p.type === 'mobile'); });
+    var phone = mobiles.length && mobiles[0].number ? mobiles[0].number : '';
+    var bedsBaths = '';
+    if (lead.bedrooms != null || lead.bathrooms != null) {
+      bedsBaths = (lead.bedrooms != null ? lead.bedrooms : '') + ' / ' + (lead.bathrooms != null ? lead.bathrooms : '');
+    }
+    return {
+      address: lead.address || '',
+      city: lead.city || '',
+      state: lead.state || '',
+      zip: lead.zip || '',
+      listSource: listSourceForSignal(lead.distressSignal),
+      arv: arv,
+      repairs: repairs,
+      bedsBaths: bedsBaths,
+      sqft: lead.sqft != null ? String(lead.sqft) : '',
+      yearBuilt: lead.yearBuilt != null ? String(lead.yearBuilt) : '',
+      ownerName: lead.ownerName || '',
+      sellerPhone: phone,
+      listed: lead.listingStatus === 'listed' || lead.onMarket === true
+    };
+  }
+
+  // Resolve the deal to auto-fill: ?lead=<id> first (dashboard lead store),
+  // then URL params if present. Returns { source, deal } or null when neither
+  // resolves — the page is then left exactly as-is (manual entry still works).
+  function resolveAutoFill(search, store) {
+    var params = parseAutoFillParams(search);
+    if (params.leadId) {
+      var lead = findLeadInStore(store, params.leadId);
+      if (lead) return { source: 'lead', deal: leadToAutoFill(lead) };
+    }
+    if (params.address || params.arv != null || params.repairs != null || params.city || params.state || params.zip) {
+      var split = params.address ? splitAddress(params.address) : { address: '', city: '', state: '', zip: '' };
+      return {
+        source: 'params',
+        deal: {
+          address: split.address, city: params.city || split.city, state: params.state || split.state, zip: params.zip || split.zip,
+          listSource: 'other', arv: params.arv != null ? params.arv : null, repairs: params.repairs != null ? params.repairs : null,
+          bedsBaths: '', sqft: '', yearBuilt: '', ownerName: '', sellerPhone: '', listed: false
+        }
+      };
+    }
+    return null;
+  }
+
   var api = {
     slugify: slugify, todayISO: todayISO, renderReply: renderReply,
     CAT_LABELS: CAT_LABELS, SOURCE_CATS: SOURCE_CATS,
     pickExpectedObjections: pickExpectedObjections, openingLine: openingLine,
     SCORECARD: SCORECARD, verdictFor: verdictFor, scoreDebrief: scoreDebrief,
-    buildDebriefMarkdown: buildDebriefMarkdown
+    buildDebriefMarkdown: buildDebriefMarkdown,
+    LEAD_STORE_KEY: LEAD_STORE_KEY, splitAddress: splitAddress,
+    parseAutoFillParams: parseAutoFillParams, findLeadInStore: findLeadInStore,
+    listSourceForSignal: listSourceForSignal, leadToAutoFill: leadToAutoFill,
+    resolveAutoFill: resolveAutoFill
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.LiveCall = api;
@@ -207,7 +342,8 @@
   var draftTimer = null;
 
   function num(id) {
-    var v = $(id) ? $(id).value.replace(/[$,]/g, '') : '';
+    var v = $(id) ? $(id).value.replace(/[$,]/g, '').trim() : '';
+    if (v === '') return null; // blank is "not entered" — never $0-as-real
     var n = Number(v);
     return isNaN(n) ? null : n;
   }
@@ -221,6 +357,32 @@
   // Unknown market -> null -> tier only; the Indianapolis calibration must
   // never leak onto another market's deals.
   function marketOf() { return (root.OfferMath && root.OfferMath.marketFor) ? root.OfferMath.marketFor(cityOf(), stateOf()) : null; }
+
+  // Auto-fill (browser only): resolve ?lead= / URL params, then fill the
+  // form's deal fields. Clears the deal fields first so a stale draft from
+  // another property can never leak ARV/repairs into this call's card.
+  // Returns 'lead' | 'params' | null (null = nothing resolved, manual entry).
+  function fillDealFields(deal) {
+    if (!deal) return;
+    var set = function (id, v) { var el = $(id); if (el) el.value = (v == null ? '' : String(v)); };
+    set('address', deal.address); set('city', deal.city); set('state', deal.state); set('zip', deal.zip);
+    set('arv', deal.arv); set('repairs', deal.repairs);
+    set('bedsBaths', deal.bedsBaths); set('sqft', deal.sqft); set('yearBuilt', deal.yearBuilt);
+    set('ownerName', deal.ownerName); set('sellerPhone', deal.sellerPhone); set('buyerName', deal.buyerName || '');
+    var ls = $('listSource');
+    if (ls) ls.value = (deal.listSource && LIST_SOURCE_VALUES.indexOf(deal.listSource) !== -1) ? deal.listSource : 'other';
+    var li = $('listed');
+    if (li) li.checked = !!deal.listed;
+  }
+  function autoFillFromUrl() {
+    if (typeof window === 'undefined') return null;
+    var store = [];
+    try { store = JSON.parse(localStorage.getItem(LEAD_STORE_KEY) || '[]'); } catch (e) { store = []; }
+    var resolved = resolveAutoFill(window.location.search, store);
+    if (!resolved) return null;
+    fillDealFields(resolved.deal);
+    return resolved.source;
+  }
 
   function buildPrep() {
     var address = $('address') ? $('address').value.trim() : '';
@@ -416,6 +578,7 @@
 
   document.addEventListener('DOMContentLoaded', function () {
     restoreDraft();
+    autoFillFromUrl(); // ?lead= / URL params win over the restored draft
     renderChips(null);
     renderNotes();
     var buildBtn = $('buildPrep');
