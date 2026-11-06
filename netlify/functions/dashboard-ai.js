@@ -57,14 +57,28 @@ function tierFor(arv) {
 // MAO calibration: when a calibration object is supplied (see loadCalibration),
 // the effective multiplier is min(calibrated, tier) — calibration can only LOWER
 // MAO, never raise it. No calibration = tier only, exactly as before.
-function offerMath(arv, repairs, calibration) {
+// market: the deal's market label (e.g. 'Indianapolis') or null when unknown.
+// Calibration is PER-MARKET: it applies ONLY when the deal's market is known
+// AND equals the calibration file's market (calibration.market, default
+// 'Indianapolis'). Unknown market or a different market -> tier only.
+// NOTE: the chat handler never calls offerMath — the model does the math from
+// the system prompt, whose market instruction ("If a deal is outside the
+// calibrated market, say the market is not calibrated and use the tier") is
+// the AI-path guard. This param exists for the offline check and any future
+// server-side use; the get_comps tool result carries city/state, but no code
+// path computes MAO/LAO from it.
+function offerMath(arv, repairs, calibration, market) {
   const tier = tierFor(arv);
   let multiplier = tier, source = 'tier default';
   if (calibration && calibration.calibrated && calibration.multiplierMedian) {
-    const band = arv < 120000 ? 'under $120k' : arv < 220000 ? '$120k-$220k' : arv < 300000 ? '$220k-$300k' : arv < 400000 ? '$300k-$400k' : '$400k+';
-    const entry = (calibration.byPriceBand || {})[band];
-    const cal = entry && entry.n >= 8 ? entry.median : calibration.multiplierMedian;
-    if (cal < tier) { multiplier = cal; source = 'calibrated'; }
+    const calMarket = String(calibration.market || 'Indianapolis').toLowerCase().trim();
+    const dealMarket = market == null ? null : String(market).toLowerCase().trim();
+    if (dealMarket && dealMarket === calMarket) {
+      const band = arv < 120000 ? 'under $120k' : arv < 220000 ? '$120k-$220k' : arv < 300000 ? '$220k-$300k' : arv < 400000 ? '$300k-$400k' : '$400k+';
+      const entry = (calibration.byPriceBand || {})[band];
+      const cal = entry && entry.n >= 8 ? entry.median : calibration.multiplierMedian;
+      if (cal < tier) { multiplier = cal; source = 'calibrated'; }
+    }
   }
   const mao = (arv - repairs) * multiplier;
   const lao = mao * 0.70;
