@@ -373,6 +373,23 @@
     return out;
   }
 
+  // Pure form of the deal-field reset: every DEAL_FIELD_ID mapped to its
+  // blank state. Text inputs -> '', the listed checkbox -> false, listSource
+  // -> 'other' (its neutral value — NOT selectedIndex 0, which is
+  // 'probate'). clearDraftForNewDeal applies this to the DOM before
+  // fillDealFields fills the new deal on top, so a field the payload does
+  // not supply (ZIP, beds, sqft, year on a params-only open) shows BLANK,
+  // never the previous property's facts.
+  function blankDealFields() {
+    var out = {};
+    DEAL_FIELD_IDS.forEach(function (id) {
+      if (id === 'listed') out[id] = false;
+      else if (id === 'listSource') out[id] = 'other';
+      else out[id] = '';
+    });
+    return out;
+  }
+
   var api = {
     slugify: slugify, todayISO: todayISO, renderReply: renderReply,
     CAT_LABELS: CAT_LABELS, SOURCE_CATS: SOURCE_CATS,
@@ -386,7 +403,7 @@
     DEAL_FIELD_IDS: DEAL_FIELD_IDS, isDealDraftKey: isDealDraftKey,
     isNonDealDraftKey: isNonDealDraftKey, normalizeAddress: normalizeAddress,
     isSameAddress: isSameAddress, shouldClearDraftForDeal: shouldClearDraftForDeal,
-    cleanDraftForNewDeal: cleanDraftForNewDeal
+    cleanDraftForNewDeal: cleanDraftForNewDeal, blankDealFields: blankDealFields
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.LiveCall = api;
@@ -436,22 +453,40 @@
     var li = $('listed');
     if (li) li.checked = !!deal.listed;
   }
-  // Draft carryover (live test, main@6fa6595): when an auto-fill open
-  // resolves to a DIFFERENT address than the restored draft, drop the stale
-  // draft and reset its non-deal fields to their HTML defaults — the previous
+  // Draft carryover (live test, main@6fa6595, extended main@071ef54): when
+  // an auto-fill open resolves to a DIFFERENT address than the restored
+  // draft, drop the stale draft and reset the whole card — the previous
   // call's caller, MCTP answers, scorecard, notes and next action must not
-  // leak onto the new card. Deal fields are NOT reset here: fillDealFields()
-  // overwrites them with the new deal immediately after. The stored draft is
-  // removed outright (not rewritten) so no stale deal key can restore on a
-  // later manual open; buildPrep's saveDraft() persists the fresh state.
+  // leak onto the new card, AND the previous property's deal facts must not
+  // either. Deal fields are blanked FIRST (blankDealFields), then
+  // fillDealFields() fills the new deal's values on top immediately after —
+  // a field the payload does not supply (ZIP, beds, sqft, year on a
+  // params-only open) stays BLANK instead of showing the old property.
+  // The stored draft is removed outright (not rewritten) so no stale deal
+  // key can restore on a later manual open; buildPrep's saveDraft()
+  // persists the fresh state.
   function clearDraftForNewDeal() {
     try { localStorage.removeItem('liveCallDraft.v1'); } catch (e) { /* ignore */ }
+    // Deal fields first: every one blank, before the new deal fills on top.
+    var blank = blankDealFields();
+    DEAL_FIELD_IDS.forEach(function (id) {
+      var el = $(id);
+      if (!el) return;
+      if (id === 'listed') el.checked = false;
+      else el.value = blank[id];
+    });
     document.querySelectorAll('[data-draft]').forEach(function (el) {
       if (!isNonDealDraftKey(el.id)) return;
       if (el.type === 'checkbox') el.checked = false;
       else if (el.tagName === 'SELECT') el.selectedIndex = 0;
       else el.value = el.defaultValue;
     });
+    // Duration: a draft field (debrief section), restored only by
+    // restoreDraft — the loop above already resets it to its default (''),
+    // but reset it explicitly: its placeholder is "12", which reads as a
+    // carried value on a fresh card. Blank, never the previous call's length.
+    var dur = $('durationMin');
+    if (dur) dur.value = '';
     notes = [];
     renderNotes();
     var talk = $('talkPct'), talkVal = $('talkVal');
