@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="holographic">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live Call Console — Prep + Debrief · Direct Property Buyers</title>
+<style>
+/* Holographic theme — same variables as command-center.html / index.html */
+:root{
+  --bg:#050a14; --bg2:rgba(10,18,38,.88); --panel:rgba(13,25,48,.55); --panel2:rgba(20,35,65,.45);
+  --line:rgba(0,212,255,.22); --text:#e8f4ff; --muted:#7a9cc6; --muted2:#4a6a94;
+  --accent:#00d4ff; --accent2:#0090ff; --green:#00ffaa; --red:#ff4466;
+  --blue:#4488ff; --chip:rgba(0,212,255,.12); --radius:14px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  background-color:#050a14; color:var(--text); min-height:100vh;
+  background-image:
+    radial-gradient(ellipse 80% 50% at 15% 0%, rgba(0,212,255,.09), transparent 60%),
+    radial-gradient(ellipse 70% 55% at 85% 100%, rgba(0,102,255,.11), transparent 60%);
+}
+a{color:var(--accent)}
+.wrap{max-width:1060px;margin:0 auto;padding:18px 16px 60px}
+header{display:flex;flex-wrap:wrap;gap:10px;align-items:baseline;justify-content:space-between;margin-bottom:14px}
+h1{font-size:24px;font-weight:800}
+h1 span{color:var(--accent);text-shadow:0 0 18px rgba(0,212,255,.8)}
+.sub{color:var(--muted);font-size:13px;margin-top:4px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px;margin-bottom:14px;backdrop-filter:blur(8px)}
+.panel h2{font-size:16px;margin-bottom:4px}
+.panel h2 .n{color:var(--accent)}
+.panel .hint{color:var(--muted);font-size:13px;margin-bottom:12px}
+.lbl{font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.grid .wide{grid-column:1 / -1}
+.f{display:flex;flex-direction:column;gap:4px}
+.f label{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+input,select,textarea{
+  background:rgba(10,18,38,.7);color:var(--text);border:1px solid var(--line);
+  border-radius:8px;padding:9px 10px;font-size:14px;font-family:inherit;width:100%;
+}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 18px rgba(0,212,255,.2)}
+input[type=checkbox]{width:auto;padding:0;accent-color:var(--accent)}
+input[type=range]{padding:0}
+textarea{min-height:64px;resize:vertical}
+.btn{
+  display:inline-block;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#001220;
+  border:none;border-radius:8px;padding:10px 18px;font-size:14px;font-weight:800;cursor:pointer;
+  box-shadow:0 0 18px rgba(0,212,255,.35);
+}
+.btn:hover{box-shadow:0 0 26px rgba(0,212,255,.65);transform:translateY(-1px)}
+.btn:disabled{opacity:.5;cursor:default;transform:none}
+.btn.ghost{background:transparent;color:var(--accent);border:1px solid var(--line);box-shadow:none}
+.row{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;align-items:center}
+.muted{color:var(--muted);font-size:13px}
+.nums{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:8px;overflow:hidden;margin-top:10px}
+.num{background:var(--panel2);padding:10px 12px}
+.num.key{background:rgba(0,212,255,.10)}
+.num .v{font-size:22px;font-weight:800;letter-spacing:-.02em}
+.num.key .v{color:var(--accent);text-shadow:0 0 16px rgba(0,212,255,.45)}
+.num .sub{font-size:11px;color:var(--muted);margin-top:1px}
+.say{margin-top:8px;padding:13px 14px;background:rgba(0,212,255,.08);border-left:4px solid var(--accent);border-radius:6px;font-size:15px;line-height:1.5}
+.obj{margin-top:10px;padding:10px 12px;background:var(--panel2);border:1px solid var(--line);border-radius:8px}
+.obj-t{font-weight:700;font-size:14px}
+.obj-r{color:var(--text);font-size:14px;margin-top:4px;line-height:1.5}
+.tag{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;padding:3px 7px;border-radius:4px;background:var(--chip);color:var(--accent);border:1px solid var(--line)}
+.chip{background:transparent;color:var(--text);border:1px solid var(--line);border-radius:20px;padding:6px 12px;font-size:12.5px;font-weight:700;cursor:pointer}
+.chip.on{background:var(--chip);color:var(--accent);border-color:var(--accent)}
+.obj-chip{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:7px 10px;font-size:13px;cursor:pointer;text-align:left}
+.obj-chip:hover{border-color:var(--accent)}
+.obj-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px}
+.prep-addr{font-size:19px;font-weight:800}
+.pass-banner{margin-top:10px;padding:12px 14px;background:rgba(255,68,102,.14);border:1px solid var(--red);border-radius:8px;color:#ffb3c0;font-weight:700}
+.score-big{font-size:26px;font-weight:800;color:var(--accent);text-shadow:0 0 16px rgba(0,212,255,.45)}
+.sc-item{display:flex;gap:10px;align-items:flex-start;padding:9px 4px;border-bottom:1px solid var(--line);cursor:pointer}
+.sc-item:last-child{border-bottom:none}
+.sc-item input{margin-top:3px;transform:scale(1.25)}
+.sc-item .t{font-weight:700;font-size:14px}
+.sc-item .d{color:var(--muted);font-size:12.5px}
+.note{padding:6px 2px;border-bottom:1px solid var(--line);font-size:14px}
+footer{color:var(--muted);font-size:12.5px;line-height:1.6;margin-top:8px}
+footer b{color:var(--text)}
+@media(max-width:640px){h1{font-size:20px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div>
+    <h1>📞 Live Call <span>Console</span></h1>
+    <div class="sub">Prep card + debrief scorecard — for Troy and Irish. Second screen for live seller calls.</div>
+  </div>
+  <div class="f" style="min-width:160px">
+    <label for="caller">Who is calling</label>
+    <select id="caller" data-draft>
+      <option value="Troy" selected>Troy</option>
+      <option value="Irish">Irish</option>
+    </select>
+  </div>
+</header>
+
+<div style="margin-bottom:14px"><a href="index.html">← Back to dashboard</a></div>
+
+<!-- ============ 1 · PREP CARD ============ -->
+<section class="panel">
+  <h2><span class="n">1 ·</span> Prep card</h2>
+  <div class="hint">Type the deal, hit “Build prep card.” Numbers come from the dashboard's canonical MAO/LAO math — same tiers as the Deal Analysis page.</div>
+  <div class="grid">
+    <div class="f wide"><label for="address">Property address</label><input id="address" data-draft placeholder="123 Main St, Indianapolis, IN 46201" autocomplete="off"></div>
+    <div class="f"><label for="city">City</label><input id="city" data-draft placeholder="Indianapolis"></div>
+    <div class="f"><label for="state">State</label><input id="state" data-draft placeholder="IN" maxlength="2"></div>
+    <div class="f"><label for="zip">ZIP</label><input id="zip" data-draft placeholder="46201" inputmode="numeric"></div>
+    <div class="f"><label for="listSource">List source</label>
+      <select id="listSource" data-draft>
+        <option value="probate">Probate</option>
+        <option value="code violation" selected>Code violation</option>
+        <option value="pre-foreclosure">Pre-foreclosure</option>
+        <option value="tax delinquent">Tax delinquent</option>
+        <option value="D4D">Driving for dollars</option>
+        <option value="FSBO">FSBO</option>
+        <option value="other">Other</option>
+      </select>
+    </div>
+    <div class="f"><label for="arv">ARV ($)</label><input id="arv" data-draft placeholder="150000" inputmode="numeric"></div>
+    <div class="f"><label for="repairs">Repairs ($)</label><input id="repairs" data-draft placeholder="50000" inputmode="numeric"></div>
+    <div class="f"><label for="bedsBaths">Beds / baths</label><input id="bedsBaths" data-draft placeholder="3 / 2"></div>
+    <div class="f"><label for="sqft">Sqft</label><input id="sqft" data-draft placeholder="1450" inputmode="numeric"></div>
+    <div class="f"><label for="yearBuilt">Year built</label><input id="yearBuilt" data-draft placeholder="1987" inputmode="numeric"></div>
+    <div class="f"><label for="ownerName">Owner on record</label><input id="ownerName" data-draft placeholder="Owner name"></div>
+    <div class="f"><label for="sellerPhone">Seller phone</label><input id="sellerPhone" data-draft placeholder="(317) 555-0100" inputmode="tel"></div>
+    <div class="f"><label for="buyerName">Likely cash buyer (optional — or match below)</label><input id="buyerName" data-draft placeholder="Type a buyer, or use Match buyers"></div>
+    <div class="f wide">
+      <label style="display:flex;gap:8px;align-items:center;text-transform:none;letter-spacing:0;font-size:14px;color:var(--text)">
+        <input type="checkbox" id="listed" data-draft> Listed with a realtor — PASS, no offer, no chase
+      </label>
+    </div>
+  </div>
+  <div class="row">
+    <button type="button" class="btn" id="buildPrep">Build prep card</button>
+    <button type="button" class="btn ghost" id="matchBuyers">Match buyers</button>
+    <span class="muted">Match buyers loads the master buyer list (city / ZIP, top score) — real buyers only.</span>
+  </div>
+  <div id="prepOut" style="margin-top:14px"><p class="muted">No prep card yet.</p></div>
+</section>
+
+<!-- ============ 2 · OBJECTION LINES (instant chips) ============ -->
+<section class="panel">
+  <h2><span class="n">2 ·</span> Objection lines — tap, read, say it</h2>
+  <div class="hint">77 vetted lines from the bot's objection library (same lines Amber uses — with your name swapped in). Zero latency: tap a line, the response appears. Use it when the call is moving.</div>
+  <div id="chipBox"></div>
+</section>
+
+<!-- ============ 3 · DURING THE CALL ============ -->
+<section class="panel">
+  <h2><span class="n">3 ·</span> During the call — MCTP + talk ratio + notes</h2>
+  <div class="hint">You type the hard moments; the page never listens. Fill the MCTP blanks — blanks are the finding.</div>
+  <div class="grid">
+    <div class="f wide"><label for="motivation">Motivation — why are they selling? (the real reason)</label><input id="motivation" data-draft placeholder="e.g. behind on taxes, inherited, tired landlord"></div>
+    <div class="f"><label for="motivationStrength">Motivation strength</label>
+      <select id="motivationStrength" data-draft>
+        <option value="">—</option><option value="need-to-sell">Need to sell</option><option value="want-to-sell">Want to sell</option><option value="tire-kicker">Tire-kicker</option>
+      </select>
+    </div>
+    <div class="f"><label for="repairLevel">Repair level</label>
+      <select id="repairLevel" data-draft>
+        <option value="">—</option><option value="light">Light</option><option value="medium">Medium</option><option value="heavy">Heavy</option>
+      </select>
+    </div>
+    <div class="f wide"><label for="condition">Condition — roof, HVAC, kitchen, floors, known issues</label><input id="condition" data-draft placeholder="e.g. roof 15 yrs, kitchen dated, bath needs work"></div>
+    <div class="f"><label for="timeframe">Timeframe — when do they need it done?</label><input id="timeframe" data-draft placeholder="e.g. within 30 days, auction Mar 12"></div>
+    <div class="f"><label for="sellerPrice">Their price (recorded, not respected)</label><input id="sellerPrice" data-draft placeholder="e.g. $180,000"></div>
+    <div class="f wide"><label for="decisionMakers">Decision makers — who else has to agree? (names)</label><input id="decisionMakers" data-draft placeholder="e.g. spouse, 2 siblings, executor"></div>
+    <div class="f"><label for="direction">Direction</label>
+      <select id="direction" data-draft>
+        <option value="outbound">Outbound — cold call</option><option value="inbound">Inbound — they called in</option><option value="callback">Callback</option><option value="buyer">Buyer call</option>
+      </select>
+    </div>
+    <div class="f"><label for="durationMin">Duration (minutes)</label><input id="durationMin" data-draft placeholder="12" inputmode="numeric"></div>
+    <div class="f wide">
+      <label for="talkPct">Talk ratio — seller talked <span id="talkVal">—</span></label>
+      <input type="range" id="talkPct" data-draft min="0" max="100" step="5" value="50">
+      <div class="muted">Target: seller talks ≥ 80%. If you are talking more than ~20%, shut up and let them finish.</div>
+    </div>
+    <div class="f wide"><label for="noteText">Note log — the hard moments (objection you didn't expect, their counter, “they went quiet”)</label>
+      <div style="display:flex;gap:8px"><input id="noteText" placeholder="Type a note, hit Add"><button type="button" class="btn ghost" id="addNote">Add</button></div>
+      <div id="noteLog" style="margin-top:8px"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 4 · DEBRIEF SCORECARD ============ -->
+<section class="panel">
+  <h2><span class="n">4 ·</span> Debrief scorecard — out of 10</h2>
+  <div class="hint">Grade it honest — this is the only way anyone improves. Check what actually happened on the call.</div>
+  <div id="scorecard">
+    <label class="sc-item"><input type="checkbox" id="sc-opener" data-draft><span><span class="t">1. Opened with the two-question script</span><br><span class="d">Owner of the address → interested in selling</span></span></label>
+    <label class="sc-item"><input type="checkbox" id="sc-talk" data-draft><span><span class="t">2. Seller talked ≥ 80% of the time</span><br><span class="d">Auto-filled from the talk-ratio slider when set — or check by hand</span></span></label>
+    <label class="sc-item"><input type="checkbox" id="sc-mctp" data-draft><span><span class="t">3. All four MCTP fields captured</span><br><span class="d">Motivation, condition, timeframe, price — no blanks</span></span></label>
+    <label class="sc-item"><input type="checkbox" id="sc-conditioned" data-draft><span><span class="t">4. Conditioned for a yes/no decision BEFORE any number</span><br><span class="d">Condition first, number second</span></span></label>
+    <label class="sc-item"><input type="checkbox" id="sc-anchored" data-draft><span><span class="t">5. Anchored low — at or near LAO, not MAO</span><br><span class="d">Opened at LAO; never drifted up toward MAO</span></span></label>
+    <label class="sc-item"><input type="checkbox" id="sc-reverseAnchor" data-draft><span><span class="t">6. Used the reverse price anchor</span><br><span class="d">Blamed the partner for the number</span></span></label>
+    <label class="sc-item"><input type="checkbox" id="sc-nextAction" data-draft><span><span class="t">7. Ended with a committed next action + date</span><br><span class="d">A date, not “I'll think about it”</span></span></label>
+    <label class="sc-item"><input type="checkbox" id="sc-noLeadDistress" data-draft><span><span class="t">8. Did NOT lead with their distress</span><br><span class="d">Never opened with probate, foreclosure, or fines</span></span></label>
+    <label class="sc-item"><input type="checkbox" id="sc-heldAnchor" data-draft><span><span class="t">9. Held the anchor — ignored the SSRP</span><br><span class="d">Their number has no bearing; did not drift toward it</span></span></label>
+    <label class="sc-item"><input type="checkbox" id="sc-decisionMakers" data-draft><span><span class="t">10. All decision makers identified</span><br><span class="d">Present, or the missing one named</span></span></label>
+  </div>
+  <div class="grid" style="margin-top:14px">
+    <div class="f"><label for="offerMade">Offer made ($)</label><input id="offerMade" data-draft placeholder="e.g. $56,000 (LAO) or —"></div>
+    <div class="f"><label for="sellerCounter">Seller counter ($)</label><input id="sellerCounter" data-draft placeholder="e.g. $120,000 or —"></div>
+    <div class="f"><label for="outcome">Outcome</label>
+      <select id="outcome" data-draft>
+        <option value="">—</option><option value="contract">Contract</option><option value="appointment-set">Appointment set</option><option value="follow-up">Follow-up</option><option value="dead">Dead</option>
+      </select>
+    </div>
+    <div class="f"><label for="nextAction">Next action</label><input id="nextAction" data-draft placeholder="e.g. Call back, re-condition, re-anchor at LAO"></div>
+    <div class="f"><label for="nextActionDate">Next action date</label><input id="nextActionDate" data-draft type="date"></div>
+  </div>
+  <div class="row">
+    <button type="button" class="btn" id="scoreBtn">Score this call</button>
+    <button type="button" class="btn ghost" id="downloadBtn">Download debrief (.md)</button>
+    <button type="button" class="btn ghost" id="draftBtn">Save draft</button>
+    <span class="muted" id="saveStatus"></span>
+  </div>
+  <div id="scoreOut" style="margin-top:14px"></div>
+</section>
+
+<footer>
+  <b>Recording caution:</b> this page does not record, listen to, or dial any call — it cannot hear you.
+  If you record a call yourself, get consent first: Florida and 10+ other states are all-party consent.
+  When in doubt, say: “Just so you know, I record my calls for quality — is that alright with you?”
+  Debriefs save as dated notes (<span style="font-family:monospace">YYYY-MM-DD-&lt;address&gt;.md</span>) — move the download into
+  <span style="font-family:monospace">~/workspace/playbook-system/live-call-debriefs/</span>. Over time those notes become
+  training data for a Troy-specific model, built from your last 10 deals per market.
+</footer>
+</div>
+
+<script>window.LIVE_CALL_OBJECTIONS = [{"id": "L001", "cat": "open", "trigger": "Who is this? / Who are you?", "keywords": ["who is this", "who are you", "who's this", "who is this?"], "reply": "I'm Ashley with Direct Property Buyers — my partner and I are looking to take on a few more places around [city]. Are you considering selling yours?"}, {"id": "L003", "cat": "open", "trigger": "What company are you with?", "keywords": ["what company", "who are you with", "what business"], "reply": "Direct Property Buyers. We take on a handful of places a year around [city], as-is, and we cover the closing costs. Is yours something you'd consider selling?"}, {"id": "L004", "cat": "open", "trigger": "Are you a realtor?", "keywords": ["are you a realtor", "are you an agent", "you a realtor", "you an agent"], "reply": "No — I'm not an agent. We work directly with owners, no middleman, and we cover the closing costs."}, {"id": "L005", "cat": "open", "trigger": "Are you a wholesaler?", "keywords": ["are you a wholesaler", "you a wholesaler", "wholesaler?"], "reply": "We work directly with owners and take places as-is. Sometimes we keep them, sometimes my partner handles the rehab. Either way you get paid at closing."}, {"id": "L006", "cat": "open", "trigger": "Is this a scam?", "keywords": ["is this a scam", "is this legit", "is this real", "scam?"], "reply": "Fair question. Everything goes through a licensed title company — you'd never hand us a dollar, they'd hand you one at closing."}, {"id": "L009", "cat": "open", "trigger": "I'm busy right now.", "keywords": ["i'm busy", "i am busy", "busy right now", "not a good time"], "reply": "No problem — thirty seconds. Are you the owner of [address], and would you ever consider selling it?"}, {"id": "L010", "cat": "open", "trigger": "I don't own that property.", "keywords": ["i don't own", "not my property", "don't own that", "not the owner"], "reply": "My mistake. Do you know who does, by any chance?"}, {"id": "L011", "cat": "open", "trigger": "Where are you calling from?", "keywords": ["where are you calling from", "where are you based", "where are you located"], "reply": "I work with a team that takes on places around [city] — my partner handles the local side."}, {"id": "L013", "cat": "price", "trigger": "That's too low.", "keywords": ["too low", "that's low", "that is low"], "reply": "I understand. To take it as-is and close fast, that's where we have to be. A realtor may get you more if you want to go the fixed-up, open-market route."}, {"id": "L014", "cat": "price", "trigger": "That's insulting.", "keywords": ["insulting", "insulted", "offensive"], "reply": "I hear you, and I'm not trying to insult you. That's just what the numbers let us do. What would you consider fair?"}, {"id": "L015", "cat": "price", "trigger": "I don't want a lowball offer.", "keywords": ["lowball", "low ball"], "reply": "What would you consider a lowball number? I want to make sure we're aligned."}, {"id": "L016", "cat": "price", "trigger": "I need $[X] for it.", "keywords": ["i need $", "i want $", "i'm asking $", "my price is", "have to get $"], "reply": "Okay — help me understand where that number comes from, because ours is built off what it'll sell for after repairs."}, {"id": "L017", "cat": "price", "trigger": "Zillow says it's worth more.", "keywords": ["zillow", "redfin", "worth more"], "reply": "Zillow's never been inside. It doesn't know the roof, the A/C, or the flooring. What would it take to make it move-in ready?"}, {"id": "L018", "cat": "price", "trigger": "My neighbor sold for $[X].", "keywords": ["neighbor sold", "neighbour sold", "next door sold"], "reply": "Was theirs updated? Ours has to work after repairs, and that's usually the whole difference."}, {"id": "L019", "cat": "price", "trigger": "I've got too much equity to give it away.", "keywords": ["too much equity", "give it away", "giving it away"], "reply": "You're not giving anything away — you're trading some of it for speed and no repairs. If that trade isn't worth it, a realtor is your move."}, {"id": "L020", "cat": "price", "trigger": "I'll wait for the market to come back.", "keywords": ["wait for the market", "market to come back", "market comes back"], "reply": "You might be right. If the timing changes, just text me back — I'm around."}, {"id": "L021", "cat": "price", "trigger": "I owe more than that.", "keywords": ["i owe more", "owe more than", "underwater", "owe more than that"], "reply": "Got it — what's the payoff? If there's no room I'll tell you straight and I won't waste your time."}, {"id": "L022", "cat": "price", "trigger": "Just make me an offer. (strike 2: car test-drive close)", "keywords": ["make me an offer", "just give me", "give me a number", "give me your number"], "reply": "Happy to get you a real number. But first — have you ever bought a car? Did you test drive it? Same thing. I need to see the place so I can give you a firm number, not one full of loopholes. When can my partner come by?", "strike": 2}, {"id": "L023", "cat": "price", "trigger": "What's your offer? (demanding)", "keywords": ["what's your offer", "what is your offer", "what are you offering", "what would you pay", "how much would you pay"], "reply": "I was talking to my partner about the place and he mentioned a range — but he never saw it. Where are you at on it?"}, {"id": "L024", "cat": "price", "trigger": "Is that your best?", "keywords": ["is that your best", "is that the best", "best you can do", "best number"], "reply": "That's where the numbers put us today. If something about the place changes what we know, tell me and I'll take another look."}, {"id": "L025", "cat": "price", "trigger": "Can you do a little better?", "keywords": ["do a little better", "can you do better", "a little better", "come up a bit", "move up"], "reply": "Maybe. What number gets this signed today?"}, {"id": "L026", "cat": "price", "trigger": "I paid more than that for it.", "keywords": ["i paid more", "paid more than", "i paid $"], "reply": "I believe you. Unfortunately what you paid doesn't set what a buyer pays today — I wish it worked that way."}, {"id": "L027", "cat": "price", "trigger": "I just put a new roof on it.", "keywords": ["new roof", "just put a new", "new kitchen", "just remodeled", "just renovated"], "reply": "That helps — tell me what else got done. It won't get you retail, but it moves our number."}, {"id": "L030", "cat": "stall", "trigger": "I need to think about it. (not conditioned)", "keywords": ["need to think about it", "think about it", "let me think"], "reply": "Understood — specifically, what do you need to think about?"}, {"id": "L031", "cat": "stall", "trigger": "Call me back next week.", "keywords": ["call me back next week", "call me next week", "call back next week", "call me in a week"], "reply": "No problem. Before we set that up — is this a no, or is there a number that would make it a yes?"}, {"id": "L032", "cat": "stall", "trigger": "Send me something in writing.", "keywords": ["send me something in writing", "something in writing", "send it in writing", "put it in writing"], "reply": "My partner can get the agreement over to you once we've got the details sorted — what's the best email?"}, {"id": "L033", "cat": "stall", "trigger": "Just email me the offer.", "keywords": ["just email me", "email me the offer", "email me your number", "email the offer"], "reply": "I can. But the number moves depending on the roof and the A/C, so let's do those two questions now and I'll email you a real one."}, {"id": "L034", "cat": "stall", "trigger": "I'm not in a rush.", "keywords": ["not in a rush", "no rush", "not in any rush"], "reply": "That's fine — then let's not waste each other's time. If the number were right, would you sell today or would you still wait?"}, {"id": "L035", "cat": "stall", "trigger": "I'll get back to you.", "keywords": ["i'll get back to you", "i will get back to you", "get back to you"], "reply": "Sounds good. What day works — Thursday or Friday?"}, {"id": "L036", "cat": "stall", "trigger": "Let me sleep on it.", "keywords": ["sleep on it"], "reply": "Fair. What's the one thing you'd be thinking about tonight?"}, {"id": "L037", "cat": "stall", "trigger": "I've got other people coming to look.", "keywords": ["other people coming", "others coming to look", "other buyers coming", "people coming to look"], "reply": "Good — you should. When's the last one? I'd rather be the last number you get than the first."}, {"id": "L038", "cat": "stall", "trigger": "Not right now, maybe later this year.", "keywords": ["maybe later", "not right now", "later this year", "maybe next year"], "reply": "Understood. If anything changes, just text me back."}, {"id": "L039", "cat": "third", "trigger": "I need to talk to my wife/husband.", "keywords": ["talk to my wife", "talk to my husband", "talk to my spouse", "check with my wife", "check with my husband"], "reply": "Totally fair. When can we get back on a call with both of you?"}, {"id": "L040", "cat": "third", "trigger": "My kids handle this for me.", "keywords": ["my kids handle", "my son handles", "my daughter handles", "kids handle this"], "reply": "Makes sense. What's the best way to get all of us on one call?"}, {"id": "L041", "cat": "third", "trigger": "There are other heirs — my brother and sister.", "keywords": ["other heirs", "my brother and sister", "siblings", "heirs"], "reply": "Got it. Everyone on the deed has to sign, so let's get all of you on one call before we put a number together."}, {"id": "L042", "cat": "third", "trigger": "My lawyer has to review it.", "keywords": ["my lawyer", "my attorney", "lawyer has to review", "attorney review"], "reply": "Totally fair — once we've talked through the details, my partner can get the agreement to your lawyer to look over."}, {"id": "L043", "cat": "third", "trigger": "My accountant told me to wait.", "keywords": ["my accountant", "accountant told me"], "reply": "Understood. Is that about taxes on the sale? That's usually solvable — ask them, and if it clears up, just text me back."}, {"id": "L044", "cat": "third", "trigger": "My friend is a realtor and says I can get more.", "keywords": ["friend is a realtor", "my realtor", "my friend is an agent"], "reply": "They're probably right — on the open market, fixed up, in six to nine months. We're the other option, not the same one."}, {"id": "L045", "cat": "third", "trigger": "I need to talk to the executor.", "keywords": ["talk to the executor", "the executor", "personal representative"], "reply": "That's exactly who we need too. Can you connect us, or get us all on one call?"}, {"id": "L046", "cat": "third", "trigger": "I have power of attorney, is that enough?", "keywords": ["power of attorney", "poa"], "reply": "It might be — the title company will confirm. Can you send a copy so we don't hit a snag at closing?"}, {"id": "L047", "cat": "compete", "trigger": "I got a higher offer.", "keywords": ["higher offer", "got a higher", "better offer", "another offer"], "reply": "That's great — why haven't you closed with them? Send it over."}, {"id": "L049", "cat": "compete", "trigger": "I already signed with another wholesaler.", "keywords": ["signed with another", "already signed", "signed with someone"], "reply": "Then I'll stay out of it — that's their deal. If it falls through, call me, that happens more than you'd think."}, {"id": "L050", "cat": "compete", "trigger": "Opendoor offered me more.", "keywords": ["opendoor", "zillow offers", "ibuyer", "offerpad"], "reply": "They might have. Read what they take off for repairs and fees at the end — if the net still beats ours, take it."}, {"id": "L051", "cat": "compete", "trigger": "My nephew is an agent, he'll list it.", "keywords": ["nephew is an agent", "my nephew", "niece is an agent", "family is an agent"], "reply": "Good — family should get the commission. If it sits, we're still here."}, {"id": "L052", "cat": "compete", "trigger": "I'm just going to list it myself.", "keywords": ["list it myself", "going to list it", "list it on my own", "sell it myself"], "reply": "Go for it. If it sits, give us a shout — we're still here."}, {"id": "L053", "cat": "compete", "trigger": "Three other people called me today.", "keywords": ["other people called", "three other", "everyone is calling", "so many calls"], "reply": "I bet. Did any of them ask you about the roof, or did they just throw a number at you?"}, {"id": "L054", "cat": "compete", "trigger": "Why should I sell to you and not them?", "keywords": ["why should i sell to you", "why you and not them", "why choose you"], "reply": "Because we'll tell you the truth about the number and we'll close on the day we say. Ask them for the last three addresses they closed."}, {"id": "L055", "cat": "process", "trigger": "How does this work?", "keywords": ["how does this work", "how does it work", "how would this work"], "reply": "Straightforward — we look at the place, if it's the right fit we agree on a number, we sign a two-page agreement, it goes to the title company, and you close on your date. As-is, no repairs, no commissions."}, {"id": "L057", "cat": "process", "trigger": "Do I have to pay any fees?", "keywords": ["pay any fees", "any fees", "what are the fees", "are there fees"], "reply": "No commissions, and we cover the closing costs. What the agreement says is what you walk away with."}, {"id": "L058", "cat": "process", "trigger": "Who pays closing costs?", "keywords": ["who pays closing", "closing costs", "who covers closing"], "reply": "We do. That's part of why our number looks the way it does."}, {"id": "L059", "cat": "process", "trigger": "Do you need an inspection?", "keywords": ["need an inspection", "do you inspect", "inspection?"], "reply": "We'll walk it once with my partner to plan repairs. There's no formal inspection and no repair requests."}, {"id": "L060", "cat": "process", "trigger": "Do I have to fix anything?", "keywords": ["have to fix", "do i have to fix", "fix anything", "make repairs"], "reply": "Nothing. We take it exactly as it sits."}, {"id": "L061", "cat": "process", "trigger": "Do I have to clean it out?", "keywords": ["clean it out", "clean out", "have to clean"], "reply": "Leave whatever you don't want. We'll handle it."}, {"id": "L062", "cat": "process", "trigger": "How do I know you'll actually close?", "keywords": ["actually close", "know you'll close", "prove you can close", "how do i know"], "reply": "Fair. Everything runs through a licensed title company — you're welcome to check with them. And we put earnest money down so you're not taking our word for it."}, {"id": "L064", "cat": "process", "trigger": "Can I stay in the house after closing?", "keywords": ["stay in the house", "stay after closing", "rent it back", "rent back"], "reply": "Sometimes that's possible — how long would you need? It's something to sort out on the call."}, {"id": "L065", "cat": "process", "trigger": "Are you just going to flip it and make money off me?", "keywords": ["flip it", "make money off me", "just going to flip"], "reply": "Probably, yeah. That's the business — we take the risk and the repair cost, and you get paid fast with no headaches. If that trade isn't worth it to you, a realtor is the better move."}, {"id": "L066", "cat": "process", "trigger": "Do you actually have the money?", "keywords": ["actually have the money", "do you have the money", "have the money", "proof of funds"], "reply": "Yes — and we'll put earnest money into escrow so you're not taking our word for it."}, {"id": "L067", "cat": "process", "trigger": "Send me proof of funds.", "keywords": ["proof of funds", "send me proof", "show me proof"], "reply": "My partner can get that over to you — what email should it go to?"}, {"id": "L068", "cat": "process", "trigger": "Can I see your real estate license?", "keywords": ["real estate license", "your license", "are you licensed"], "reply": "We don't have one — we're not agents. We work directly with owners."}, {"id": "L069", "cat": "process", "trigger": "What happens to my mortgage?", "keywords": ["my mortgage", "what happens to the mortgage", "mortgage?"], "reply": "It gets paid off at closing out of the sale proceeds. The title company handles it."}, {"id": "L070", "cat": "cond", "trigger": "The house needs a lot of work.", "keywords": ["needs a lot of work", "needs work", "lot of work", "rough shape"], "reply": "That's what we take on. Walk me through it — roof, A/C, kitchen, floors. What's the worst of it?"}, {"id": "L071", "cat": "cond", "trigger": "The house is in perfect condition.", "keywords": ["perfect condition", "great shape", "fully updated", "move-in ready", "mint condition"], "reply": "Then honestly you might do better with a realtor. But tell me about it — how old's the roof?"}, {"id": "L072", "cat": "cond", "trigger": "There's a tenant in it.", "keywords": ["tenant", "rented out", "someone renting", "has a renter"], "reply": "Not a problem — we take places with tenants in them. Are they on a lease, month-to-month, or behind?"}, {"id": "L073", "cat": "cond", "trigger": "It's full of my mother's things.", "keywords": ["full of", "mother's things", "full of stuff", "belongings"], "reply": "Take what matters to you and leave the rest. We'll take care of it."}, {"id": "L074", "cat": "cond", "trigger": "I'm in the middle of a renovation.", "keywords": ["middle of a renovation", "mid-renovation", "half-done", "half finished"], "reply": "We'll take it half-done. What's finished and what isn't?"}, {"id": "L075", "cat": "cond", "trigger": "There's mold / fire damage.", "keywords": ["mold", "fire damage", "water damage", "flood damage"], "reply": "We take those. Most fire damage is one room with a good place around it. What happened?"}, {"id": "L076", "cat": "cond", "trigger": "I can't let you inside.", "keywords": ["can't let you inside", "can't come inside", "won't let you in", "no showings"], "reply": "That's alright. Can you walk me through it on the phone, or send a few photos?"}, {"id": "L077", "cat": "cond", "trigger": "It's vacant and I'm out of state.", "keywords": ["vacant and", "out of state", "i'm out of state", "i live out of state"], "reply": "That's the easiest kind for us. Want my partner to sort out access with you on the call?"}, {"id": "L078", "cat": "situ", "trigger": "My mother just passed. (probate)", "keywords": ["mother just passed", "mom just passed", "my mother passed", "my mom passed", "just passed away", "passed away"], "reply": "I'm sorry — that's a hard thing. I don't want to add to it. Whenever you're ready, I'm happy to talk about the place."}, {"id": "L080", "cat": "situ", "trigger": "I'm going to catch up on my payments. (pre-foreclosure)", "keywords": ["catch up on my payments", "catching up on payments", "catch up on payments"], "reply": "I hope you do. If it doesn't work out, call me before the auction date — after that my hands are tied."}, {"id": "L081", "cat": "situ", "trigger": "I'm doing a loan modification.", "keywords": ["loan modification", "loan mod", "modification"], "reply": "Good. Those take a while — if it doesn't land, just text me back and we'll pick it up from there."}, {"id": "L082", "cat": "situ", "trigger": "I'm going to pay the taxes. (tax delinquent)", "keywords": ["pay the taxes", "paying the taxes", "catch up on taxes"], "reply": "Fair enough. How far behind are you? If it's more than a year the county moves faster than people expect."}, {"id": "L083", "cat": "situ", "trigger": "I'm going to fix the violation. (code)", "keywords": ["fix the violation", "fixing the violation", "take care of the violation", "code violation"], "reply": "What's the fine running at? Those add up daily and they'll follow you to closing either way."}, {"id": "L084", "cat": "situ", "trigger": "We're in the middle of a divorce.", "keywords": ["divorce", "getting divorced", "in the middle of a divorce"], "reply": "Understood. Do you both have to sign, and are you both on the same page about selling?"}, {"id": "L085", "cat": "situ", "trigger": "I'm evicting my tenant.", "keywords": ["evicting", "evict my tenant", "eviction"], "reply": "We'll take it with them in it — you don't have to finish the eviction. Would that help?"}, {"id": "L086", "cat": "situ", "trigger": "My siblings can't agree on what to do.", "keywords": ["siblings can't agree", "can't agree", "family can't agree", "siblings disagree"], "reply": "That's the hard part. Would it help if we gave you one number in writing that everybody could look at together?"}, {"id": "L087", "cat": "situ", "trigger": "I'm out of state and can't get down there.", "keywords": ["can't get down there", "can't come down", "can't get there"], "reply": "You don't need to. We can do everything remotely — the title company handles the signing and you never get on a plane."}];</script>
+<script src="assets/offer-math.js"></script>
+<script src="live-call.js"></script>
+</body>
+</html>
