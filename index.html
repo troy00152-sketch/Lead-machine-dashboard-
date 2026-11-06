@@ -4684,13 +4684,18 @@ function updateQuickOfferResult(){
   const addr = (document.getElementById('qoAddr')||{}).value.trim() || (document.getElementById('compListAddr')||{}).value.trim();
   const arv = parseFloat((document.getElementById('compARV')||{}).value) || 0;
   const repairs = parseFloat((document.getElementById('compRepairs')||{}).value) || 0;
-  // Read MAO/LAO from the comp result area
+  // Read MAO/LAO from the comp result area. The #compResult cards render
+  // number-first, label-second ($80,000 then "MAO (ceiling)"), so the label
+  // must be matched AFTER its own number. The old label-then-next-$ patterns
+  // captured the NEXT card's value — the MAO box showed the LAO and the LAO
+  // box showed the spread. (THIN/listed/land render no such pattern, so
+  // those gates still yield 0/0 exactly as before.)
   const compRes = document.getElementById('compResult');
   let mao = 0, lao = 0, tier = '';
   if(compRes){
     const html = compRes.innerHTML || '';
-    const maoM = html.match(/MAO[^$]*\$([\d,]+)/i);
-    const laoM = html.match(/LAO[^$]*\$([\d,]+)/i);
+    const maoM = html.match(/\$([\d,]+)<\/div><div class="lbl">MAO/i);
+    const laoM = html.match(/\$([\d,]+)<\/div><div class="lbl">LAO/i);
     const tierM = html.match(/(\d+(?:\.\d+)?%)/);
     if(maoM) mao = parseInt(maoM[1].replace(/,/g, ''), 10) || 0;
     if(laoM) lao = parseInt(laoM[1].replace(/,/g, ''), 10) || 0;

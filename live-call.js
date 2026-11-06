@@ -340,6 +340,10 @@
   var objections = root.LIVE_CALL_OBJECTIONS || [];
   var notes = [];
   var draftTimer = null;
+  // RACE guard: a rebuild scheduled while the calibration fetch is still in
+  // flight. At most one pending rebuild per unsettled load — buildPrep is
+  // idempotent, but there is no reason to queue five of them.
+  var calRebuildPending = false;
 
   function num(id) {
     var v = $(id) ? $(id).value.replace(/[$,]/g, '').trim() : '';
@@ -420,6 +424,20 @@
       '<div id="buyerOut">' + (buyer ? '<div class="obj-r">' + esc(buyer) + '</div>' : '<p class="muted">No buyer matched yet — use “Match buyers” below, or type one in.</p>') + '</div>';
     out.innerHTML = html;
     saveDraft();
+    // RACE: if the calibration fetch hasn't settled yet, the card above used
+    // tier-only numbers (MAO_CAL still null). Rebuild once it arrives so a
+    // manual Build pressed during the fetch still ends up calibrated.
+    // Attached once per unsettled load, and only for known markets — an
+    // unknown market can never be calibrated, so there is nothing to rebuild
+    // to. A listed deal shows no numbers, so it never attaches either.
+    var OM = root.OfferMath;
+    if (!listed && math && math.mao != null && !calRebuildPending && OM && OM.isCalibrationSettled && !OM.isCalibrationSettled() && OM.whenCalibrationReady && marketOf()) {
+      calRebuildPending = true;
+      OM.whenCalibrationReady(2000).then(function (ready) {
+        calRebuildPending = false;
+        if (ready) buildPrep();
+      });
+    }
   }
 
   function esc(s) {
@@ -605,7 +623,15 @@
     });
     var talk = $('talkPct');
     if (talk) talk.addEventListener('input', function () { var v = $('talkVal'); if (v) v.textContent = (talk.value || '—') + '%'; });
-    if ($('address') && $('address').value) buildPrep();
+    if ($('address') && $('address').value) {
+      // Wait for the calibration fetch (max ~2s) before auto-building, so a
+      // Comps -> Live Call open shows calibrated numbers on first paint
+      // instead of tier-only numbers from the pre-fetch race. A failed/slow
+      // fetch falls back to tier after the timeout — the page never blocks.
+      var OM = root.OfferMath;
+      if (OM && OM.whenCalibrationReady) OM.whenCalibrationReady(2000).then(function () { buildPrep(); });
+      else buildPrep();
+    }
   });
 
 })(typeof window !== 'undefined' ? window : globalThis);
