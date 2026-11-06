@@ -319,6 +319,60 @@
     return null;
   }
 
+  // ---------- draft carryover: a fresh auto-filled card must not inherit ----------
+  // the previous call's details. The draft (localStorage 'liveCallDraft.v1')
+  // holds every [data-draft] field; auto-fill overwrites only the DEAL fields,
+  // so without this the previous call's caller, MCTP answers, scorecard and
+  // notes leak onto the new card (live test, main@6fa6595: the Greenville
+  // card showed Indy's ZIP 46201). Rule: when an auto-fill open resolves to
+  // an address that DIFFERS from the draft's saved address, the draft's
+  // non-deal fields are cleared first, then the deal is filled. Same address
+  // = same call, draft kept. No draft or no auto-fill = unchanged. A blank
+  // address on either side never triggers a clear — an address-less draft is
+  // not provably another property's.
+  var DEAL_FIELD_IDS = ['address', 'city', 'state', 'zip', 'arv', 'repairs',
+    'bedsBaths', 'sqft', 'yearBuilt', 'ownerName', 'sellerPhone', 'buyerName',
+    'listSource', 'listed'];
+
+  function isDealDraftKey(id) { return DEAL_FIELD_IDS.indexOf(id) !== -1; }
+  function isNonDealDraftKey(id) { return !isDealDraftKey(id); }
+
+  // Case/whitespace/punctuation-insensitive: "303 Elizabeth St, Greenville,
+  // NC" and "303 elizabeth st greenville nc" normalize identically.
+  function normalizeAddress(addr) {
+    return String(addr || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  }
+  // Same address if the normalized forms are equal OR one is a prefix of the
+  // other — the address field holds the street only, while a hand-typed draft
+  // may hold the full "street, city, state". Both must be non-empty; a blank
+  // address never matches (see shouldClearDraftForDeal).
+  function isSameAddress(a, b) {
+    var na = normalizeAddress(a), nb = normalizeAddress(b);
+    if (na === '' || nb === '') return false;
+    return na === nb || na.indexOf(nb) === 0 || nb.indexOf(na) === 0;
+  }
+  // True only when BOTH addresses are present and differ — a blank on either
+  // side means "cannot tell", so the draft is kept (fail-closed: never
+  // destroy notes on an ambiguous match).
+  function shouldClearDraftForDeal(draftAddress, dealAddress) {
+    return normalizeAddress(draftAddress) !== '' && normalizeAddress(dealAddress) !== '' &&
+      !isSameAddress(draftAddress, dealAddress);
+  }
+  // Pure form of the clear: the draft with every non-deal key stripped
+  // (caller, MCTP, scorecard, notes, next action...). Deal keys survive —
+  // fillDealFields overwrites them with the new deal right after. The stored
+  // draft is dropped outright in clearDraftForNewDeal so no stale deal key
+  // can restore on a later manual open; this function pins the classification
+  // for the regression suite.
+  function cleanDraftForNewDeal(draft) {
+    if (!draft) return null;
+    var out = {};
+    Object.keys(draft).forEach(function (k) {
+      if (isDealDraftKey(k)) out[k] = draft[k];
+    });
+    return out;
+  }
+
   var api = {
     slugify: slugify, todayISO: todayISO, renderReply: renderReply,
     CAT_LABELS: CAT_LABELS, SOURCE_CATS: SOURCE_CATS,
@@ -328,7 +382,11 @@
     LEAD_STORE_KEY: LEAD_STORE_KEY, splitAddress: splitAddress,
     parseAutoFillParams: parseAutoFillParams, findLeadInStore: findLeadInStore,
     listSourceForSignal: listSourceForSignal, leadToAutoFill: leadToAutoFill,
-    resolveAutoFill: resolveAutoFill
+    resolveAutoFill: resolveAutoFill,
+    DEAL_FIELD_IDS: DEAL_FIELD_IDS, isDealDraftKey: isDealDraftKey,
+    isNonDealDraftKey: isNonDealDraftKey, normalizeAddress: normalizeAddress,
+    isSameAddress: isSameAddress, shouldClearDraftForDeal: shouldClearDraftForDeal,
+    cleanDraftForNewDeal: cleanDraftForNewDeal
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.LiveCall = api;
@@ -378,12 +436,42 @@
     var li = $('listed');
     if (li) li.checked = !!deal.listed;
   }
+  // Draft carryover (live test, main@6fa6595): when an auto-fill open
+  // resolves to a DIFFERENT address than the restored draft, drop the stale
+  // draft and reset its non-deal fields to their HTML defaults — the previous
+  // call's caller, MCTP answers, scorecard, notes and next action must not
+  // leak onto the new card. Deal fields are NOT reset here: fillDealFields()
+  // overwrites them with the new deal immediately after. The stored draft is
+  // removed outright (not rewritten) so no stale deal key can restore on a
+  // later manual open; buildPrep's saveDraft() persists the fresh state.
+  function clearDraftForNewDeal() {
+    try { localStorage.removeItem('liveCallDraft.v1'); } catch (e) { /* ignore */ }
+    document.querySelectorAll('[data-draft]').forEach(function (el) {
+      if (!isNonDealDraftKey(el.id)) return;
+      if (el.type === 'checkbox') el.checked = false;
+      else if (el.tagName === 'SELECT') el.selectedIndex = 0;
+      else el.value = el.defaultValue;
+    });
+    notes = [];
+    renderNotes();
+    var talk = $('talkPct'), talkVal = $('talkVal');
+    if (talk && talkVal) talkVal.textContent = (talk.value || '—') + '%';
+  }
   function autoFillFromUrl() {
     if (typeof window === 'undefined') return null;
     var store = [];
     try { store = JSON.parse(localStorage.getItem(LEAD_STORE_KEY) || '[]'); } catch (e) { store = []; }
     var resolved = resolveAutoFill(window.location.search, store);
     if (!resolved) return null;
+    // Draft carryover: a restored draft for a DIFFERENT address is another
+    // call's data — clear its non-deal fields before filling this deal.
+    // Same address = same call, draft kept.
+    var draftAddress = null;
+    try {
+      var raw = localStorage.getItem('liveCallDraft.v1');
+      if (raw) { var saved = JSON.parse(raw); draftAddress = saved ? saved.address : null; }
+    } catch (e) { draftAddress = null; }
+    if (shouldClearDraftForDeal(draftAddress, resolved.deal.address)) clearDraftForNewDeal();
     fillDealFields(resolved.deal);
     return resolved.source;
   }
