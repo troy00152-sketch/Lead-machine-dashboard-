@@ -342,7 +342,11 @@ function analyzeComps(subj, comps, today) {
     c.deviations = dev;
   }
 
-  candidates.sort((a, b) => a.score - b.score);
+  // Deterministic pick: ties on score break by amount, then address, so the
+  // same comp set always yields the same best-3 regardless of the upstream
+  // row order (Nov 6: same Gatlin address, ARV $179,167 live vs $154,167 in
+  // the morning — a tie at the cutoff must not flip the pick).
+  candidates.sort((a, b) => (a.score - b.score) || (a.amount - b.amount) || String(a.address || '').localeCompare(String(b.address || '')));
 
   function hardFailReasons(c) {
     const reasons = [];
