@@ -405,9 +405,9 @@
   // come from the typed address (splitAddress); when the typed address is
   // street-only, the record's canonical one-line address fills the rest.
   // Owner is owner1, plus owner2 when the record has one. ARV comes from
-  // the gate (null when thin/low-confidence) — the DOM applier only writes
-  // it into a blank ARV field, so a hand-typed or param-supplied ARV is
-  // never overwritten by the feed.
+  // the gate (null when thin/low-confidence). The result's source and the
+  // picked comps ride along so the status line and the prep card can say
+  // exactly which comps drove the ARV and where they came from.
   function lookupDealFromResult(result, typedAddress) {
     var r = result || {};
     var prop = r.property || {};
@@ -428,6 +428,10 @@
     var gate = arvFromComps(r.comps);
     return {
       address: split.address, city: split.city, state: split.state, zip: split.zip,
+      source: r.source || '',
+      bestComps: (r.comps && r.comps.best || []).filter(function (c) { return c; }).map(function (c) {
+        return { address: c.address || '', amount: c.amount != null ? Math.round(c.amount) : null };
+      }),
       listSource: 'other',
       arv: gate.arv, candidateArv: gate.candidate, compCount: gate.count,
       confidence: gate.confidence, confidenceText: gate.confidenceText, arvPassesGate: gate.passes,
@@ -508,6 +512,52 @@
       else out[id] = '';
     });
     return out;
+  }
+
+  // Address-dependent fields: the facts that belong to ONE address. When
+  // the typed address changes, these are blanked BEFORE the new lookup
+  // returns, so the form never shows the previous address's facts next to
+  // a new address (live test Nov 6 9:24 PM: a Waterbury lookup left
+  // Greenville's city/state and the old ARV on the form). Repairs is NOT
+  // in the list — it is Troy's condition judgment, not a record fact.
+  // listSource / listed / sellerPhone / buyerName are Troy's too.
+  var ADDRESS_FIELD_IDS = ['city', 'state', 'zip', 'arv', 'ownerName', 'bedsBaths', 'sqft', 'yearBuilt'];
+
+  function blankAddressFields() {
+    var out = {};
+    ADDRESS_FIELD_IDS.forEach(function (id) { out[id] = ''; });
+    return out;
+  }
+
+  // ARV write-back decision (pure): the lookup feed vs the ARV already on
+  // the form. fieldArv = number on the form (null when blank); dealArv =
+  // gated ARV from the lookup (null when thin/low-confidence);
+  // arvFromLookup = the form's ARV came from a previous lookup for THIS
+  // address (not hand-typed); addressChanged = the typed address differs
+  // from the last looked-up one.
+  //   write: put dealArv in the field (it becomes lookup-owned).
+  //   blank: clear the field — a gated lookup must never leave the previous
+  //     address's ARV sitting there pretending to be this address's number.
+  //   keep:  leave the field alone — Troy's hand-typed / param-supplied ARV
+  //     for THIS address is his verified number; the feed never overwrites it.
+  function resolveLookupArv(fieldArv, dealArv, arvFromLookup, addressChanged) {
+    if (dealArv != null) {
+      if (fieldArv == null || arvFromLookup || addressChanged) return { action: 'write', value: dealArv };
+      return { action: 'keep', value: fieldArv };
+    }
+    if (arvFromLookup || addressChanged) return { action: 'blank', value: null };
+    return { action: 'keep', value: fieldArv };
+  }
+
+  // User-visible source label for a lookup result ('data provider' is the
+  // PropertyReach path; 'ATTOM+PR' is ATTOM comps over a PR subject record).
+  // The status line names the source so a number that moves between runs
+  // is attributable instead of a mystery.
+  function lookupSourceLabel(source) {
+    if (source === 'data provider') return 'PropertyReach';
+    if (source === 'ATTOM') return 'ATTOM';
+    if (source === 'ATTOM+PR') return 'ATTOM + PropertyReach';
+    return source || '';
   }
 
   // ---------- live coach: match + prompt + guard (pure, Node-testable) ----------
@@ -643,6 +693,8 @@
     isNonDealDraftKey: isNonDealDraftKey, normalizeAddress: normalizeAddress,
     isSameAddress: isSameAddress, shouldClearDraftForDeal: shouldClearDraftForDeal,
     cleanDraftForNewDeal: cleanDraftForNewDeal, blankDealFields: blankDealFields,
+    ADDRESS_FIELD_IDS: ADDRESS_FIELD_IDS, blankAddressFields: blankAddressFields,
+    resolveLookupArv: resolveLookupArv, lookupSourceLabel: lookupSourceLabel,
     matchObjection: matchObjection, extractDollarAmounts: extractDollarAmounts,
     coachSuggestionGuard: coachSuggestionGuard, coachDealContext: coachDealContext,
     buildCoachPrompt: buildCoachPrompt, parseCoachResponse: parseCoachResponse,
@@ -759,17 +811,19 @@
   // lookup fills the record's facts (owner/beds/sqft/year/city/state/ZIP)
   // and the gated ARV, then rebuilds the card. It never writes a field on
   // failure, and it never overwrites an ARV Troy typed or a param supplied.
-  var lookupState = { lastAddress: '', inFlight: false, result: null, deal: null };
+  var lookupState = { lastAddress: '', inFlight: false, result: null, deal: null, arvFromLookup: false };
 
   function lookupStatus(text) { var el = $('lookupStatus'); if (el) el.textContent = text || ''; }
 
-  function applyLookupDeal(deal) {
-    if (!deal) return;
-    var setIfBlank = function (id, v) { var el = $(id); if (el && String(el.value || '').trim() === '' && v != null && String(v) !== '') el.value = String(v); };
+  function applyLookupDeal(deal, opts) {
+    if (!deal) return null;
+    var o = opts || {};
     var setWhenPresent = function (id, v) { var el = $(id); if (el && v != null && String(v) !== '') el.value = String(v); };
-    setIfBlank('city', deal.city); setIfBlank('state', deal.state); setIfBlank('zip', deal.zip);
-    // The record is authoritative for the property facts — it wins when it
-    // speaks, and a hand-typed value survives only when the record is silent.
+    // The record is authoritative for the property facts — the lookup
+    // writes city/state/ZIP every time it speaks. The old setIfBlank left
+    // the previous address's city/state/ZIP on the form (live test Nov 6
+    // 9:24 PM: Greenville/NC/06710 survived a Waterbury lookup).
+    setWhenPresent('city', deal.city); setWhenPresent('state', deal.state); setWhenPresent('zip', deal.zip);
     setWhenPresent('ownerName', deal.ownerName);
     setWhenPresent('bedsBaths', deal.bedsBaths);
     setWhenPresent('sqft', deal.sqft);
@@ -779,9 +833,17 @@
     // must not uncheck a box he checked himself.
     var li = $('listed');
     if (li && deal.listed) li.checked = true;
-    // ARV: only into a blank field — a hand-typed or param-supplied ARV is
-    // Troy's verified number and the feed never overwrites it.
-    if (num('arv') == null && deal.arv != null) { var a = $('arv'); if (a) a.value = String(deal.arv); }
+    // ARV via resolveLookupArv: a passing ARV fills a blank field, replaces
+    // a previous lookup's ARV, or fills after an address change — never over
+    // Troy's hand-typed / param-supplied ARV for THIS address. A gated
+    // lookup BLANKS a lookup-owned or stale ARV instead of leaving the old
+    // number there. Returns the resolution so the status line can say
+    // exactly what happened to the ARV.
+    var res = resolveLookupArv(num('arv'), deal.arv, lookupState.arvFromLookup, !!o.addressChanged);
+    var a = $('arv');
+    if (res.action === 'write' && a) { a.value = String(res.value); lookupState.arvFromLookup = true; }
+    else if (res.action === 'blank') { if (a) a.value = ''; lookupState.arvFromLookup = false; }
+    return res;
   }
 
   async function runAddressLookup(opts) {
@@ -791,6 +853,17 @@
     if (lookupState.inFlight) return null;
     if (!o.manual && normalizeAddress(address) === normalizeAddress(lookupState.lastAddress)) return null;
     if (typeof fetch === 'undefined') return null;
+    // Address change: blank the previous address's facts BEFORE the fetch
+    // returns, so the form never shows Greenville's city/state/ARV next to
+    // a Waterbury address (live test Nov 6 9:24 PM). The blank is saved to
+    // the draft immediately so a reload cannot restore the stale facts.
+    var addressChanged = !!lookupState.lastAddress && !isSameAddress(address, lookupState.lastAddress);
+    if (addressChanged) {
+      var blank = blankAddressFields();
+      Object.keys(blank).forEach(function (id) { var el = $(id); if (el) el.value = blank[id]; });
+      lookupState.result = null; lookupState.deal = null; lookupState.arvFromLookup = false;
+      saveDraft();
+    }
     lookupState.inFlight = true;
     lookupState.lastAddress = address;
     lookupState.result = null; lookupState.deal = null; // never show a stale card under a new address
@@ -812,17 +885,24 @@
     lookupState.result = result;
     var deal = lookupDealFromResult(result, address);
     lookupState.deal = deal;
-    applyLookupDeal(deal);
+    var arvRes = applyLookupDeal(deal, { addressChanged: addressChanged });
     var bits = [];
     if (deal.ownerName) bits.push(deal.ownerName);
     if (deal.bedsBaths) bits.push(deal.bedsBaths);
     if (deal.sqft) bits.push(Number(deal.sqft).toLocaleString() + ' sqft');
     if (deal.yearBuilt) bits.push('built ' + deal.yearBuilt);
     var msg = bits.length ? '✓ Found — ' + bits.join(' · ') : '✓ Found a property record.';
+    var via = lookupSourceLabel(deal.source) ? ' via ' + lookupSourceLabel(deal.source) : '';
     if (deal.arv != null) {
-      msg += ' · ' + deal.compCount + ' comps, ' + deal.confidence + ' — ARV $' + deal.arv.toLocaleString();
+      msg += ' · ' + deal.compCount + ' comps, ' + deal.confidence + ' — ARV $' + deal.arv.toLocaleString() + via;
+      if (arvRes && arvRes.action === 'keep') msg += ' (kept your $' + Number(arvRes.value).toLocaleString() + ')';
     } else if (deal.candidateArv != null) {
-      msg += ' · ' + deal.compCount + ' comp(s), ' + (deal.confidence || 'no confidence') + ' — ARV left blank (candidate $' + deal.candidateArv.toLocaleString() + '; needs 3 HIGH/MEDIUM comps).';
+      var keptArv = num('arv');
+      if (keptArv != null) {
+        msg += ' · ' + deal.compCount + ' comp(s), ' + (deal.confidence || 'no confidence') + ' — kept your ARV $' + keptArv.toLocaleString() + '; feed could not verify (candidate $' + deal.candidateArv.toLocaleString() + via + '; needs 3 HIGH/MEDIUM comps).';
+      } else {
+        msg += ' · ' + deal.compCount + ' comp(s), ' + (deal.confidence || 'no confidence') + ' — ARV left blank (candidate $' + deal.candidateArv.toLocaleString() + via + '; needs 3 HIGH/MEDIUM comps).';
+      }
     } else {
       msg += ' · No verified comps — ARV left blank; type it by hand.';
     }
@@ -858,6 +938,14 @@
         '<div class="num"><div class="lbl">Repairs</div><div class="v">' + money(repairs || 0) + '</div></div>' +
         '<div class="num key"><div class="lbl">MAO — ceiling</div><div class="v">' + money(math.mao) + '</div><div class="sub">' + esc(math.label || '') + ' · never go above</div></div>' +
         '<div class="num key"><div class="lbl">LAO — open here</div><div class="v">' + money(math.lao) + '</div><div class="sub">MAO × 70%</div></div></div>';
+      // The comps that produced this ARV — with their source, so a number
+      // that moves between runs is attributable instead of a mystery (Nov 6
+      // 9:24 PM: same Gatlin address, ARV $179,167 live vs $154,167 in the
+      // morning — different picks from different runs, no record of which).
+      var lc = (lookupState.deal && normalizeAddress(address) === normalizeAddress(lookupState.lastAddress)) ? lookupState.deal : null;
+      if (lc && lc.bestComps && lc.bestComps.length) {
+        html += '<p class="muted">Verified comps' + (lookupSourceLabel(lc.source) ? ' via ' + esc(lookupSourceLabel(lc.source)) : '') + ': ' + lc.bestComps.map(function (c) { return esc(c.address) + ' $' + (c.amount != null ? c.amount.toLocaleString() : '?'); }).join(' · ') + '</p>';
+      }
     } else {
       // A gated lookup candidate (thin or LOW-confidence comps) is shown
       // as a candidate only — never fed into MAO/LAO. Only for the address
@@ -1228,6 +1316,17 @@
     var autoFillSource = autoFillFromUrl(); // ?lead= / URL params win over the restored draft
     renderChips(null);
     renderNotes();
+    // Seed the lookup's "current address" from the restored draft /
+    // auto-fill: without this, the first lookup after a page load cannot
+    // tell a NEW address from the draft's old one, and the stale draft
+    // facts survive the first lookup (Waterbury live test, Nov 6 9:24 PM).
+    if ($('address') && $('address').value) lookupState.lastAddress = $('address').value.trim();
+    // A hand-typed ARV is Troy's verified number: once he types in the ARV
+    // field, the lookup must not overwrite it on a same-address re-lookup.
+    // (Programmatic writes from the lookup itself do not fire input, so
+    // this only ever fires on a real keystroke/paste.)
+    var arvEl = $('arv');
+    if (arvEl) arvEl.addEventListener('input', function () { lookupState.arvFromLookup = false; });
     // Address lookup: tab-out of the address field, or the 🔍 button.
     var addrEl = $('address');
     if (addrEl) addrEl.addEventListener('change', function () { runAddressLookup(); });
@@ -1279,7 +1378,9 @@
       // A plain-URL-params open (?address=... with no ?lead=) has no lead
       // facts, so the lookup fills the record + comps itself. A ?lead=
       // open already carries the full facts and must NOT be re-looked-up.
-      if (autoFillSource === 'params') runAddressLookup();
+      // Forced ({ manual: true }): lastAddress is seeded from the filled
+      // form above, so an unforced call would dedupe itself away.
+      if (autoFillSource === 'params') runAddressLookup({ manual: true });
     }
   });
 

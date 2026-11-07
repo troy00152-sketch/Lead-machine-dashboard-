@@ -478,6 +478,8 @@ function runLiveCallScenario({ draft, search, store, fetchStub }) {
     el(id) { return elements[id]; },
     html(id) { const el = elements[id]; return el ? el.innerHTML : undefined; },
     click(id) { const el = elements[id]; (el && el._listeners.click || []).forEach(fn => fn.call(el)); },
+    change(id) { const el = elements[id]; (el && el._listeners.change || []).forEach(fn => fn.call(el)); },
+    input(id) { const el = elements[id]; (el && el._listeners.input || []).forEach(fn => fn.call(el)); },
   };
 }
 
@@ -667,6 +669,44 @@ const gatlinPRListed = Object.assign({}, gatlinPR, {
 const gatlinPRThin = Object.assign({}, gatlinPR, {
   comps: { confidence: 'LOW', confidenceText: 'LOW — only 2 comps pass', best: gatlinComps3.best.slice(0, 2) },
 });
+// Waterbury fixture (live test Nov 6 9:24 PM): 1 comp, LOW — candidate
+// $495,000, ARV blank.
+const waterburyComps1 = {
+  confidence: 'LOW', confidenceText: 'LOW — fewer than 3 usable comps, do not lock a number on this set',
+  best: [{ address: '55 Water St, Waterbury, CT 06710', amount: 495000 }],
+};
+const waterburyPR = {
+  matched: true, address: '229 Plaza Ave, Waterbury, CT 06710',
+  property: { address: '229 PLAZA AVE, WATERBURY, CT 06710', owner1: 'ANSON GRAY', owner2: '', beds: 7, baths: 2.5, sqft: 3930, yearBuilt: 1913, onMarket: false, listingStatus: null },
+  comps: waterburyComps1,
+};
+// Gatlin with the live-test ARV ($179,167): Greenview + Pittman + a $225,000
+// renovated comp — the automated pick after 405 Arbor St hard-fails the
+// ±20% sqft rule (1,184 sqft vs 986 = +20.08%).
+const gatlinComps179 = {
+  confidence: 'HIGH', confidenceText: 'HIGH — 3 comps pass all selection rules',
+  best: [
+    { address: '405 Greenview Dr, Greenville, NC 27834', amount: 175000 },
+    { address: '503 Pittman Dr, Greenville, NC 27834', amount: 137500 },
+    { address: '225 Renovation Way, Greenville, NC 27834', amount: 225000 },
+  ],
+};
+const gatlinPR179 = Object.assign({}, gatlinPR, { comps: gatlinComps179 });
+// A saved draft holding Gatlin's facts with a stale ARV (the live-test state).
+const gatlinDraft = { address: '705 McDowell St, Greenville, NC 27834', city: 'Greenville', state: 'NC', zip: '27834', arv: 150000, repairs: 30000, bedsBaths: '2 / 1', sqft: '986', yearBuilt: '1961', ownerName: 'WILLARD D GATLIN', sellerPhone: '7573104762', listSource: 'code violation', caller: 'Troy' };
+// Fetch stub that answers per ADDRESS (not per route): data-api returns the
+// fixture for the looked-up address, attom-lookup reports no match.
+function lookupFetchByAddress(map) {
+  return async (url) => {
+    const u = String(url);
+    if (u.indexOf('attom-lookup') !== -1) return { ok: true, json: async () => ({ matched: false }) };
+    const m = u.match(/address=([^&]*)/);
+    const a = m ? decodeURIComponent(m[1]) : '';
+    const body = /waterbury/i.test(a) ? map.waterbury : /mcdowell/i.test(a) ? map.gatlin : null;
+    if (!body) return { ok: false, json: async () => ({}) };
+    return { ok: true, json: async () => body };
+  };
+}
 function lookupFetchStub(routes) {
   return async (url) => {
     for (const k of Object.keys(routes)) {
@@ -810,12 +850,148 @@ async function section13() {
   check('E6 failure: owner untouched', scE6.val('ownerName'), '');
   check('E6 failure: ARV untouched', scE6.val('arv'), '');
   check('E6 failure: status says unavailable', scE6.el('lookupStatus').textContent.includes('unavailable'), true);
+
+  // Pure: blankAddressFields / resolveLookupArv / lookupSourceLabel.
+  check('blankAddressFields', LiveCall.blankAddressFields(), { city: '', state: '', zip: '', arv: '', ownerName: '', bedsBaths: '', sqft: '', yearBuilt: '' });
+  check('resolveLookupArv blank-field write', LiveCall.resolveLookupArv(null, 154167, false, false), { action: 'write', value: 154167 });
+  check('resolveLookupArv lookup-owned overwrite', LiveCall.resolveLookupArv(154167, 179167, true, false), { action: 'write', value: 179167 });
+  check('resolveLookupArv hand-typed keep', LiveCall.resolveLookupArv(150000, 154167, false, false), { action: 'keep', value: 150000 });
+  check('resolveLookupArv address-change write', LiveCall.resolveLookupArv(150000, 154167, false, true), { action: 'write', value: 154167 });
+  check('resolveLookupArv gated blanks lookup-owned', LiveCall.resolveLookupArv(154167, null, true, false), { action: 'blank', value: null });
+  check('resolveLookupArv gated blanks on address change', LiveCall.resolveLookupArv(150000, null, false, true), { action: 'blank', value: null });
+  check('resolveLookupArv gated keeps hand-typed', LiveCall.resolveLookupArv(150000, null, false, false), { action: 'keep', value: 150000 });
+  check('lookupSourceLabel PropertyReach', LiveCall.lookupSourceLabel('data provider'), 'PropertyReach');
+  check('lookupSourceLabel ATTOM', LiveCall.lookupSourceLabel('ATTOM'), 'ATTOM');
+  check('lookupSourceLabel ATTOM+PR', LiveCall.lookupSourceLabel('ATTOM+PR'), 'ATTOM + PropertyReach');
+  check('lookupDeal source rides along', gatlinDeal.source, 'data provider');
+  check('lookupDeal bestComps', gatlinDeal.bestComps, [
+    { address: '405 Greenview Dr, Greenville, NC 27834', amount: 175000 },
+    { address: '405 Arbor St, Greenville, NC 27834', amount: 150000 },
+    { address: '503 Pittman Dr, Greenville, NC 27834', amount: 137500 },
+  ]);
+
+  // DOM E7: the live-test sequence — Gatlin draft restored, then a Waterbury
+  // lookup, then back to Gatlin. Every lookup must write city/state/ZIP/ARV
+  // from ITS result; a gated ARV must blank the field; the card must never
+  // compute from the previous address's ARV.
+  const scE7 = runLiveCallScenario({ draft: gatlinDraft, search: '', store: [], fetchStub: lookupFetchByAddress({ waterbury: waterburyPR, gatlin: gatlinPR }) });
+  check('E7 draft: ARV starts 150000', scE7.val('arv'), '150000');
+  check('E7 draft: city starts Greenville', scE7.val('city'), 'Greenville');
+  scE7.el('address').value = '229 Plaza Ave, Waterbury, CT 06710';
+  scE7.click('lookupBtn');
+  // Synchronous: the address change blanks the stale facts BEFORE the
+  // fetch resolves — the form must never show Greenville next to Waterbury.
+  check('E7 blank-before-result: city blank', scE7.val('city'), '');
+  check('E7 blank-before-result: state blank', scE7.val('state'), '');
+  check('E7 blank-before-result: zip blank', scE7.val('zip'), '');
+  check('E7 blank-before-result: ARV blank', scE7.val('arv'), '');
+  check('E7 blank-before-result: owner blank', scE7.val('ownerName'), '');
+  check('E7 blank-before-result: beds blank', scE7.val('bedsBaths'), '');
+  await new Promise(r => setTimeout(r, 200));
+  check('E7 Waterbury: city Waterbury', scE7.val('city'), 'Waterbury');
+  check('E7 Waterbury: state CT', scE7.val('state'), 'CT');
+  check('E7 Waterbury: zip 06710', scE7.val('zip'), '06710');
+  check('E7 Waterbury: owner ANSON GRAY', scE7.val('ownerName'), 'ANSON GRAY');
+  check('E7 Waterbury: bedsBaths 7 / 2.5', scE7.val('bedsBaths'), '7 / 2.5');
+  check('E7 Waterbury: sqft 3930', scE7.val('sqft'), '3930');
+  check('E7 Waterbury: year 1913', scE7.val('yearBuilt'), '1913');
+  check('E7 Waterbury: gated ARV blank', scE7.val('arv'), '');
+  check('E7 Waterbury: status names candidate', scE7.el('lookupStatus').textContent.includes('candidate $495,000'), true);
+  check('E7 Waterbury: status names source', scE7.el('lookupStatus').textContent.includes('via PropertyReach'), true);
+  check('E7 Waterbury: no stale MAO $96,000', scE7.html('prepOut').includes('$96,000'), false);
+  check('E7 Waterbury: no stale MAO $80,000', scE7.html('prepOut').includes('$80,000'), false);
+  check('E7 Waterbury: card shows candidate note', scE7.html('prepOut').includes('ARV candidate $495,000'), true);
+  // Back to Gatlin — via tab-out (change), not the button.
+  scE7.el('address').value = '705 McDowell St, Greenville, NC 27834';
+  scE7.change('address');
+  check('E7 blank-before-result 2: city blank', scE7.val('city'), '');
+  check('E7 blank-before-result 2: ARV blank', scE7.val('arv'), '');
+  await new Promise(r => setTimeout(r, 200));
+  check('E7 Gatlin: city Greenville', scE7.val('city'), 'Greenville');
+  check('E7 Gatlin: state NC', scE7.val('state'), 'NC');
+  check('E7 Gatlin: zip 27834', scE7.val('zip'), '27834');
+  check('E7 Gatlin: owner WILLARD D GATLIN', scE7.val('ownerName'), 'WILLARD D GATLIN');
+  check('E7 Gatlin: ARV 154167', scE7.val('arv'), '154167');
+  check('E7 Gatlin: status ARV + source', scE7.el('lookupStatus').textContent.includes('ARV $154,167 via PropertyReach'), true);
+  check('E7 Gatlin: card MAO $99,334', scE7.html('prepOut').includes('$99,334'), true);
+  check('E7 Gatlin: card LAO $69,534', scE7.html('prepOut').includes('$69,534'), true);
+  check('E7 Gatlin: card lists picked comps', scE7.html('prepOut').includes('405 Greenview Dr') && scE7.html('prepOut').includes('503 Pittman Dr'), true);
+
+  // DOM E8: a hand-typed ARV for THIS address is never overwritten by the
+  // feed on a same-address re-lookup — the status must say so.
+  const scE8 = runLiveCallScenario({ draft: gatlinDraft, search: '', store: [], fetchStub: lookupFetchByAddress({ waterbury: waterburyPR, gatlin: gatlinPR }) });
+  scE8.click('lookupBtn');
+  await new Promise(r => setTimeout(r, 200));
+  check('E8 hand-typed ARV kept: stays 150000', scE8.val('arv'), '150000');
+  check('E8 hand-typed ARV kept: owner still fills', scE8.val('ownerName'), 'WILLARD D GATLIN');
+  check('E8 hand-typed ARV kept: status says kept', scE8.el('lookupStatus').textContent.includes('kept your $150,000'), true);
+  check('E8 hand-typed ARV kept: card MAO $96,000', scE8.html('prepOut').includes('$96,000'), true);
+
+  // DOM E9: an ARV the LOOKUP wrote is lookup-owned — a second same-address
+  // lookup with a different feed ARV overwrites it. Typing in the field
+  // re-asserts hand-typed status, and the next lookup keeps the typed value.
+  let e9Calls = 0;
+  const e9Fetch = async (url) => {
+    const u = String(url);
+    if (u.indexOf('attom-lookup') !== -1) return { ok: true, json: async () => ({ matched: false }) };
+    e9Calls++;
+    return { ok: true, json: async () => (e9Calls === 1 ? gatlinPR : gatlinPR179) };
+  };
+  const scE9 = runLiveCallScenario({ draft: null, search: '', store: [], fetchStub: e9Fetch });
+  scE9.el('address').value = '705 McDowell St, Greenville, NC 27834';
+  scE9.click('lookupBtn');
+  await new Promise(r => setTimeout(r, 200));
+  check('E9 lookup-owned ARV: first 154167', scE9.val('arv'), '154167');
+  scE9.click('lookupBtn');
+  await new Promise(r => setTimeout(r, 200));
+  check('E9 lookup-owned ARV: overwritten 179167', scE9.val('arv'), '179167');
+  check('E9 lookup-owned ARV: status 179,167', scE9.el('lookupStatus').textContent.includes('ARV $179,167'), true);
+  scE9.el('arv').value = '160000';
+  scE9.input('arv');
+  scE9.click('lookupBtn');
+  await new Promise(r => setTimeout(r, 200));
+  check('E9 typed ARV re-asserted: stays 160000', scE9.val('arv'), '160000');
+  check('E9 typed ARV re-asserted: status says kept', scE9.el('lookupStatus').textContent.includes('kept your $160,000'), true);
 }
 
 (async function () {
   await section8();
   await section12();
   await section13();
+  section14();
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();
+
+// ---- 14. Comp-pick determinism: the same comp set must yield the same
+// best-3 regardless of upstream row order. A score tie at the cutoff used
+// to flip the pick (Nov 6: same Gatlin address, ARV $179,167 live vs
+// $154,167 in the morning). Both server engines now break ties by amount,
+// then address. Fixtures only — no live calls.
+// Tie design (subject 1,000 sqft / 3 beds, Nov 6 2026): C is clearly best;
+// X, Y, Z tie exactly on score, so without a tie-breaker the input order
+// decides which two of the three make the cut — and the mean moves.
+const DataApi = require('./netlify/functions/data-api.js');
+const AttomLookup = require('./netlify/functions/attom-lookup.js');
+const tieSubject = { sqft: 1000, beds: 3, propertyType: 'Single Family Residence' };
+const tieToday = { y: 2026, mo: 11, d: 6 };
+function tieComps() {
+  return [
+    { address: '1 C St', amount: 190000, distance: 0.2, date: '2026-10-01', dateParts: { y: 2026, mo: 10, d: 1 }, sqft: 1000, beds: 3, arms: 'A', onMarket: false },
+    { address: '2 X St', amount: 200000, distance: 0.5, date: '2026-09-01', dateParts: { y: 2026, mo: 9, d: 1 }, sqft: 1000, beds: 3, arms: 'A', onMarket: false },
+    { address: '3 Y St', amount: 210000, distance: 0.5, date: '2026-09-01', dateParts: { y: 2026, mo: 9, d: 1 }, sqft: 1000, beds: 3, arms: 'A', onMarket: false },
+    { address: '4 Z St', amount: 220000, distance: 0.5, date: '2026-09-01', dateParts: { y: 2026, mo: 9, d: 1 }, sqft: 1000, beds: 3, arms: 'A', onMarket: false },
+  ];
+}
+function section14() {
+  console.log('Comp-pick determinism:');
+  for (const [name, mod] of [['data-api', DataApi], ['attom-lookup', AttomLookup]]) {
+    const fwd = mod._test.analyzeComps(tieSubject, tieComps(), tieToday);
+    const rev = mod._test.analyzeComps(tieSubject, tieComps().reverse(), tieToday);
+    check(name + ': tie scores equal', fwd.best.map(c => c.score), rev.best.map(c => c.score));
+    check(name + ': same best-3 in both orders', fwd.best.map(c => c.address), ['1 C St', '2 X St', '3 Y St']);
+    check(name + ': reversed best-3 identical', rev.best.map(c => c.address), ['1 C St', '2 X St', '3 Y St']);
+    check(name + ': same indication both orders', [fwd.indication, rev.indication], [200000, 200000]);
+    check(name + ': confidence HIGH', fwd.confidence, 'HIGH');
+  }
+}
