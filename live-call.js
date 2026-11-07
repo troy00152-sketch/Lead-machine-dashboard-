@@ -520,12 +520,16 @@
   // a new address (live test Nov 6 9:24 PM: a Waterbury lookup left
   // Greenville's city/state and the old ARV on the form). Repairs is NOT
   // in the list — it is Troy's condition judgment, not a record fact.
-  // listSource / listed / sellerPhone / buyerName are Troy's too.
-  var ADDRESS_FIELD_IDS = ['city', 'state', 'zip', 'arv', 'ownerName', 'bedsBaths', 'sqft', 'yearBuilt'];
+  // listSource / sellerPhone / buyerName are Troy's too. 'listed' IS in
+  // the list (Troy Nov 6: "you pick" — the check must reflect the house
+  // on screen, not the last one): a stale checked box would wrongly PASS
+  // a house that isn't listed. The lookup re-adds the PASS below when the
+  // NEW record shows listed; it never unchecks on its own.
+  var ADDRESS_FIELD_IDS = ['city', 'state', 'zip', 'arv', 'ownerName', 'bedsBaths', 'sqft', 'yearBuilt', 'listed'];
 
   function blankAddressFields() {
     var out = {};
-    ADDRESS_FIELD_IDS.forEach(function (id) { out[id] = ''; });
+    ADDRESS_FIELD_IDS.forEach(function (id) { out[id] = id === 'listed' ? false : ''; });
     return out;
   }
 
@@ -830,7 +834,10 @@
     setWhenPresent('yearBuilt', deal.yearBuilt);
     // The lookup can only ADD the PASS, never remove Troy's manual check:
     // an ATTOM-only record carries no listing info, and its listed=false
-    // must not uncheck a box he checked himself.
+    // must not uncheck a box he checked himself. (Unchecking on an
+    // address change is blankAddressFields' job, above — it runs before
+    // the fetch returns; by the time this runs, the box already reflects
+    // the new address or Troy's own check for THIS address.)
     var li = $('listed');
     if (li && deal.listed) li.checked = true;
     // ARV via resolveLookupArv: a passing ARV fills a blank field, replaces
@@ -860,7 +867,11 @@
     var addressChanged = !!lookupState.lastAddress && !isSameAddress(address, lookupState.lastAddress);
     if (addressChanged) {
       var blank = blankAddressFields();
-      Object.keys(blank).forEach(function (id) { var el = $(id); if (el) el.value = blank[id]; });
+      Object.keys(blank).forEach(function (id) {
+        var el = $(id); if (!el) return;
+        if (id === 'listed') el.checked = !!blank[id];
+        else el.value = blank[id];
+      });
       lookupState.result = null; lookupState.deal = null; lookupState.arvFromLookup = false;
       saveDraft();
     }

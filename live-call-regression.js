@@ -852,7 +852,7 @@ async function section13() {
   check('E6 failure: status says unavailable', scE6.el('lookupStatus').textContent.includes('unavailable'), true);
 
   // Pure: blankAddressFields / resolveLookupArv / lookupSourceLabel.
-  check('blankAddressFields', LiveCall.blankAddressFields(), { city: '', state: '', zip: '', arv: '', ownerName: '', bedsBaths: '', sqft: '', yearBuilt: '' });
+  check('blankAddressFields', LiveCall.blankAddressFields(), { city: '', state: '', zip: '', arv: '', ownerName: '', bedsBaths: '', sqft: '', yearBuilt: '', listed: false });
   check('resolveLookupArv blank-field write', LiveCall.resolveLookupArv(null, 154167, false, false), { action: 'write', value: 154167 });
   check('resolveLookupArv lookup-owned overwrite', LiveCall.resolveLookupArv(154167, 179167, true, false), { action: 'write', value: 179167 });
   check('resolveLookupArv hand-typed keep', LiveCall.resolveLookupArv(150000, 154167, false, false), { action: 'keep', value: 150000 });
@@ -952,6 +952,34 @@ async function section13() {
   await new Promise(r => setTimeout(r, 200));
   check('E9 typed ARV re-asserted: stays 160000', scE9.val('arv'), '160000');
   check('E9 typed ARV re-asserted: status says kept', scE9.el('lookupStatus').textContent.includes('kept your $160,000'), true);
+
+  // DOM E10: the Listed checkbox is address-dependent (Troy Nov 6: the
+  // check must reflect the house on screen). A checked box unchecks the
+  // moment the address changes — before the new lookup returns — and a
+  // not-listed result leaves it unchecked.
+  const scE10 = runLiveCallScenario({ draft: gatlinDraft, search: '', store: [], fetchStub: lookupFetchByAddress({ waterbury: waterburyPR, gatlin: gatlinPR }) });
+  scE10.el('listed').checked = true; // Troy checked it for Gatlin (or a listed record did).
+  scE10.el('address').value = '229 Plaza Ave, Waterbury, CT 06710';
+  scE10.change('address');
+  check('E10 address change: listed unchecks before result', scE10.val('listed'), false);
+  await new Promise(r => setTimeout(r, 200));
+  check('E10 not-listed result: listed stays unchecked', scE10.val('listed'), false);
+  check('E10 not-listed result: owner still fills', scE10.val('ownerName'), 'ANSON GRAY');
+
+  // DOM E11: the lookup still only ADDS the PASS — a listed result for the
+  // NEW address re-checks the box the address change just cleared.
+  const waterburyPRListed = Object.assign({}, waterburyPR, {
+    property: Object.assign({}, waterburyPR.property, { onMarket: true, listingStatus: 'listed' }),
+  });
+  const scE11 = runLiveCallScenario({ draft: gatlinDraft, search: '', store: [], fetchStub: lookupFetchByAddress({ waterbury: waterburyPRListed, gatlin: gatlinPR }) });
+  scE11.el('listed').checked = true; // checked for Gatlin; the new address must clear it first.
+  scE11.el('address').value = '229 Plaza Ave, Waterbury, CT 06710';
+  scE11.change('address');
+  check('E11 address change: listed unchecks before result', scE11.val('listed'), false);
+  await new Promise(r => setTimeout(r, 200));
+  check('E11 listed result: listed re-checks', scE11.val('listed'), true);
+  check('E11 listed result: status says LISTED', scE11.el('lookupStatus').textContent.includes('LISTED'), true);
+  check('E11 listed result: PASS banner', scE11.html('prepOut').includes('LISTED WITH A REALTOR — PASS'), true);
 }
 
 (async function () {
