@@ -638,9 +638,184 @@ async function section12() {
   check('coach no-match: honest empty state', scNone.html('coachSuggestions').includes('No line matched'), true);
 }
 
+// ---- 13. Address lookup: property record + verified comps auto-fill ----
+// Fixtures only — zero live API credits. Gatlin numbers from the Nov 6
+// pre-call sheet (ARV $154,167 from 405 Greenview $175,000 / 405 Arbor
+// $150,000 / 503 Pittman $137,500; 2bd/1ba, 986 sqft, 1961).
+const gatlinComps3 = {
+  confidence: 'HIGH', confidenceText: 'HIGH — 3 comps pass all selection rules',
+  best: [
+    { address: '405 Greenview Dr, Greenville, NC 27834', amount: 175000 },
+    { address: '405 Arbor St, Greenville, NC 27834', amount: 150000 },
+    { address: '503 Pittman Dr, Greenville, NC 27834', amount: 137500 },
+  ],
+};
+const gatlinPR = {
+  matched: true, address: '705 McDowell St, Greenville, NC 27834',
+  property: { address: '705 MCDOWELL ST, GREENVILLE, NC 27834', owner1: 'WILLARD D GATLIN', owner2: '', beds: 2, baths: 1, sqft: 986, yearBuilt: 1961, onMarket: false, listingStatus: null },
+  comps: gatlinComps3,
+};
+const gatlinATTOM = {
+  matched: true, address: '705 McDowell St, Greenville, NC 27834',
+  property: { address: '705 MCDOWELL ST, GREENVILLE, NC 27834', owner1: 'WILLARD D GATLIN', owner2: '', beds: 2, baths: 1, sqft: 986, yearBuilt: 1961 },
+  comps: gatlinComps3,
+};
+const gatlinPRNoComps = Object.assign({}, gatlinPR, { comps: { confidence: 'LOW', confidenceText: 'LOW — no comps pass', best: [] } });
+const gatlinPRListed = Object.assign({}, gatlinPR, {
+  property: Object.assign({}, gatlinPR.property, { onMarket: true, listingStatus: 'listed' }),
+});
+const gatlinPRThin = Object.assign({}, gatlinPR, {
+  comps: { confidence: 'LOW', confidenceText: 'LOW — only 2 comps pass', best: gatlinComps3.best.slice(0, 2) },
+});
+function lookupFetchStub(routes) {
+  return async (url) => {
+    for (const k of Object.keys(routes)) {
+      if (String(url).indexOf(k) !== -1) {
+        const body = routes[k];
+        if (body === null) return { ok: false, json: async () => ({}) };
+        return { ok: true, json: async () => body };
+      }
+    }
+    throw new Error('unexpected fetch URL: ' + url);
+  };
+}
+const GATLIN_SEARCH = '?address=705%20McDowell%20St%2C%20Greenville%2C%20NC%2027834';
+async function section13() {
+  // Section 8 deliberately leaves a HANGING calibration promise behind
+  // (loadMaoCalibration(hangFetch)); a real page load starts with a fresh
+  // settled one. Restore the settled state so the lookup's buildPrep is
+  // gated on microtasks, not the 2s timeout — the timeout fallback itself
+  // is already proven by section 8's own checks.
+  OfferMath.loadMaoCalibration();
+  // lookupPropertyAndComps: PR path (same sequence as the Comps page).
+  const prRes = await LiveCall.lookupPropertyAndComps('705 McDowell St, Greenville, NC 27834', lookupFetchStub({ 'data-api': gatlinPR, 'attom-lookup': gatlinATTOM }));
+  check('lookup PR: matched', prRes && prRes.matched, true);
+  check('lookup PR: source', prRes && prRes.source, 'data provider');
+  check('lookup PR: owner', prRes && prRes.property.owner1, 'WILLARD D GATLIN');
+  check('lookup PR: 3 comps', prRes && prRes.comps.best.length, 3);
+  // PR matched but no comps -> ATTOM comps, PR subject merged over ATTOM.
+  const attomRes = await LiveCall.lookupPropertyAndComps('705 McDowell St, Greenville, NC 27834', lookupFetchStub({ 'data-api': gatlinPRNoComps, 'attom-lookup': gatlinATTOM }));
+  check('lookup PR-no-comps: source ATTOM+PR', attomRes && attomRes.source, 'ATTOM+PR');
+  check('lookup PR-no-comps: owner from PR', attomRes && attomRes.property.owner1, 'WILLARD D GATLIN');
+  check('lookup PR-no-comps: comps from ATTOM', attomRes && attomRes.comps.best.length, 3);
+  // PR down -> ATTOM alone.
+  const attomOnly = await LiveCall.lookupPropertyAndComps('705 McDowell St, Greenville, NC 27834', async (url) => {
+    if (url.indexOf('data-api') !== -1) throw new Error('PR down');
+    return { ok: true, json: async () => gatlinATTOM };
+  });
+  check('lookup PR down: source ATTOM', attomOnly && attomOnly.source, 'ATTOM');
+  // Neither matched -> null (no record, not an error).
+  check('lookup both unmatched: null', await LiveCall.lookupPropertyAndComps('705 McDowell St, Greenville, NC 27834', lookupFetchStub({ 'data-api': { matched: false }, 'attom-lookup': { matched: false } })), null);
+  // Both fetches throw -> throws (caller says "unavailable").
+  let threw = false;
+  try { await LiveCall.lookupPropertyAndComps('705 McDowell St, Greenville, NC 27834', async () => { throw new Error('down'); }); } catch (e) { threw = true; }
+  check('lookup both down: throws', threw, true);
+  // PR matched, no comps, ATTOM down -> record still fills, comps null.
+  const prOnly = await LiveCall.lookupPropertyAndComps('705 McDowell St, Greenville, NC 27834', async (url) => {
+    if (url.indexOf('data-api') !== -1) return { ok: true, json: async () => gatlinPRNoComps };
+    throw new Error('ATTOM down');
+  });
+  check('lookup PR-only: source data provider', prOnly && prOnly.source, 'data provider');
+  check('lookup PR-only: comps null', prOnly && prOnly.comps, null);
+  // ARV gate: HIGH/MEDIUM with 3+ pass; LOW-MEDIUM and thin do not.
+  check('arvFromComps HIGH 3: arv 154167', LiveCall.arvFromComps(gatlinComps3), { arv: 154167, candidate: 154167, count: 3, confidence: 'HIGH', confidenceText: 'HIGH — 3 comps pass all selection rules', passes: true });
+  const med = { confidence: 'MEDIUM', confidenceText: 'MEDIUM', best: gatlinComps3.best };
+  check('arvFromComps MEDIUM 3: passes', LiveCall.arvFromComps(med).passes, true);
+  check('arvFromComps MEDIUM 3: arv 154167', LiveCall.arvFromComps(med).arv, 154167);
+  const lowMed = { confidence: 'LOW-MEDIUM', confidenceText: 'LOW-MEDIUM', best: gatlinComps3.best };
+  check('arvFromComps LOW-MEDIUM 3: arv null', LiveCall.arvFromComps(lowMed).arv, null);
+  check('arvFromComps LOW-MEDIUM 3: candidate kept', LiveCall.arvFromComps(lowMed).candidate, 154167);
+  check('arvFromComps LOW-MEDIUM 3: not passes', LiveCall.arvFromComps(lowMed).passes, false);
+  check('arvFromComps LOW 2: arv null', LiveCall.arvFromComps(gatlinPRThin.comps).arv, null);
+  check('arvFromComps LOW 2: candidate 162500', LiveCall.arvFromComps(gatlinPRThin.comps).candidate, 162500);
+  check('arvFromComps LOW 2: count 2', LiveCall.arvFromComps(gatlinPRThin.comps).count, 2);
+  check('arvFromComps no comps: arv null', LiveCall.arvFromComps(null).arv, null);
+  check('arvFromComps no comps: candidate null', LiveCall.arvFromComps(null).candidate, null);
+  // lookupDealFromResult: Gatlin mapping end to end.
+  const gatlinDeal = LiveCall.lookupDealFromResult(prRes, '705 McDowell St, Greenville, NC 27834');
+  check('lookupDeal Gatlin: owner', gatlinDeal.ownerName, 'WILLARD D GATLIN');
+  check('lookupDeal Gatlin: bedsBaths', gatlinDeal.bedsBaths, '2 / 1');
+  check('lookupDeal Gatlin: sqft', gatlinDeal.sqft, '986');
+  check('lookupDeal Gatlin: yearBuilt', gatlinDeal.yearBuilt, '1961');
+  check('lookupDeal Gatlin: city/state/zip', [gatlinDeal.city, gatlinDeal.state, gatlinDeal.zip], ['Greenville', 'NC', '27834']);
+  check('lookupDeal Gatlin: arv 154167', gatlinDeal.arv, 154167);
+  check('lookupDeal Gatlin: listed false', gatlinDeal.listed, false);
+  check('lookupDeal Gatlin: confidence HIGH', gatlinDeal.confidence, 'HIGH');
+  // Listed record -> PASS.
+  const listedDeal = LiveCall.lookupDealFromResult({ matched: true, source: 'data provider', property: gatlinPRListed.property, comps: gatlinComps3 }, '705 McDowell St, Greenville, NC 27834');
+  check('lookupDeal listed: listed true', listedDeal.listed, true);
+  // owner2 joins with &.
+  const twoOwner = LiveCall.lookupDealFromResult({ matched: true, property: Object.assign({}, gatlinPR.property, { owner2: 'MARY GATLIN' }), comps: gatlinComps3 }, '705 McDowell St, Greenville, NC 27834');
+  check('lookupDeal owner2: joined', twoOwner.ownerName, 'WILLARD D GATLIN & MARY GATLIN');
+  // Street-only typed address -> city/state/zip from the record's one-line.
+  const streetOnly = LiveCall.lookupDealFromResult(prRes, '705 McDowell St');
+  check('lookupDeal street-only: city/state/zip from record', [streetOnly.city, streetOnly.state, streetOnly.zip], ['Greenville', 'NC', '27834']);
+  // Thin deal: ARV null, candidate kept, gate fails.
+  const thinDeal = LiveCall.lookupDealFromResult({ matched: true, source: 'data provider', property: gatlinPR.property, comps: gatlinPRThin.comps }, '705 McDowell St, Greenville, NC 27834');
+  check('lookupDeal thin: arv null', thinDeal.arv, null);
+  check('lookupDeal thin: candidate 162500', thinDeal.candidateArv, 162500);
+  check('lookupDeal thin: gate false', thinDeal.arvPassesGate, false);
+  // MAO/LAO end to end on the auto-filled ARV (Carolina, tier-only).
+  check('lookup MAO end-to-end: 99334', OfferMath.offerMath(154167, 30000, undefined, OfferMath.marketFor('Greenville', 'NC')).mao, 99334);
+  check('lookup LAO end-to-end: 69534', OfferMath.offerMath(154167, 30000, undefined, OfferMath.marketFor('Greenville', 'NC')).lao, 69534);
+
+  // DOM: params open + Indy draft -> params win AND the lookup fills the card.
+  const scE1 = runLiveCallScenario({ draft: domIndyDraft, search: GATLIN_SEARCH + '&repairs=30000', store: [], fetchStub: lookupFetchStub({ 'data-api': gatlinPR, 'attom-lookup': gatlinATTOM }) });
+  await new Promise(r => setTimeout(r, 200));
+  check('E1 params+lookup: draft dropped (caller Troy)', scE1.val('caller'), 'Troy');
+  check('E1 params+lookup: owner filled', scE1.val('ownerName'), 'WILLARD D GATLIN');
+  check('E1 params+lookup: bedsBaths', scE1.val('bedsBaths'), '2 / 1');
+  check('E1 params+lookup: sqft', scE1.val('sqft'), '986');
+  check('E1 params+lookup: yearBuilt', scE1.val('yearBuilt'), '1961');
+  check('E1 params+lookup: city/state/zip', [scE1.val('city'), scE1.val('state'), scE1.val('zip')], ['Greenville', 'NC', '27834']);
+  check('E1 params+lookup: ARV filled 154167', scE1.val('arv'), '154167');
+  check('E1 params+lookup: listed false', scE1.val('listed'), false);
+  check('E1 params+lookup: status names HIGH + ARV', scE1.el('lookupStatus').textContent.includes('HIGH') && scE1.el('lookupStatus').textContent.includes('154,167'), true);
+  check('E1 params+lookup: card MAO $99,334', scE1.html('prepOut').includes('$99,334'), true);
+  check('E1 params+lookup: card LAO $69,534', scE1.html('prepOut').includes('$69,534'), true);
+  // DOM: a param-supplied ARV is Troy's verified number — never overwritten.
+  const scE2 = runLiveCallScenario({ draft: null, search: GATLIN_SEARCH + '&arv=150000&repairs=30000', store: [], fetchStub: lookupFetchStub({ 'data-api': gatlinPR, 'attom-lookup': gatlinATTOM }) });
+  await new Promise(r => setTimeout(r, 200));
+  check('E2 ARV preserved: stays 150000', scE2.val('arv'), '150000');
+  check('E2 ARV preserved: owner still fills', scE2.val('ownerName'), 'WILLARD D GATLIN');
+  check('E2 ARV preserved: card MAO $96,000', scE2.html('prepOut').includes('$96,000'), true);
+  // DOM: listed record -> checkbox + PASS banner, MAO/LAO cleared.
+  const scE3 = runLiveCallScenario({ draft: null, search: GATLIN_SEARCH + '&repairs=30000', store: [], fetchStub: lookupFetchStub({ 'data-api': gatlinPRListed, 'attom-lookup': gatlinATTOM }) });
+  await new Promise(r => setTimeout(r, 200));
+  check('E3 listed: checkbox checked', scE3.val('listed'), true);
+  check('E3 listed: PASS banner', scE3.html('prepOut').includes('LISTED WITH A REALTOR — PASS'), true);
+  check('E3 listed: MAO cleared', scE3.html('prepOut').includes('$99,334'), false);
+  check('E3 listed: status says LISTED', scE3.el('lookupStatus').textContent.includes('LISTED'), true);
+  // DOM: thin comps -> ARV stays blank, candidate note shown, no math fed.
+  const scE4 = runLiveCallScenario({ draft: null, search: GATLIN_SEARCH + '&repairs=30000', store: [], fetchStub: lookupFetchStub({ 'data-api': gatlinPRThin, 'attom-lookup': { matched: false } }) });
+  await new Promise(r => setTimeout(r, 200));
+  check('E4 thin: ARV stays blank', scE4.val('arv'), '');
+  check('E4 thin: status names candidate', scE4.el('lookupStatus').textContent.includes('candidate'), true);
+  check('E4 thin: card shows candidate note', scE4.html('prepOut').includes('ARV candidate'), true);
+  check('E4 thin: no MAO from candidate', scE4.html('prepOut').includes('$99,334'), false);
+  // DOM: the 🔍 button path (manual open, type address, tap lookup).
+  const scE5 = runLiveCallScenario({ draft: null, search: '', store: [], fetchStub: lookupFetchStub({ 'data-api': gatlinPR, 'attom-lookup': gatlinATTOM }) });
+  scE5.el('address').value = '705 McDowell St, Greenville, NC 27834';
+  scE5.click('lookupBtn');
+  await new Promise(r => setTimeout(r, 200));
+  check('E5 button: owner filled', scE5.val('ownerName'), 'WILLARD D GATLIN');
+  check('E5 button: ARV filled', scE5.val('arv'), '154167');
+  check('E5 button: city filled from typed address', scE5.val('city'), 'Greenville');
+  check('E5 button: card MAO at $0 repairs $123,334', scE5.html('prepOut').includes('$123,334'), true);
+  // DOM: lookup failure writes nothing.
+  const scE6 = runLiveCallScenario({ draft: null, search: '', store: [], fetchStub: async () => { throw new Error('down'); } });
+  scE6.el('address').value = '705 McDowell St, Greenville, NC 27834';
+  scE6.click('lookupBtn');
+  await new Promise(r => setTimeout(r, 200));
+  check('E6 failure: owner untouched', scE6.val('ownerName'), '');
+  check('E6 failure: ARV untouched', scE6.val('arv'), '');
+  check('E6 failure: status says unavailable', scE6.el('lookupStatus').textContent.includes('unavailable'), true);
+}
+
 (async function () {
   await section8();
   await section12();
+  await section13();
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

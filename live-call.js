@@ -331,6 +331,114 @@
     return null;
   }
 
+  // ---------- address lookup: property record + verified comps ----------
+  // SAME lookup path as the Comps page (index.html loadCompsForAddress):
+  // PropertyReach (data-api) first, ATTOM (attom-lookup) as fallback, PR
+  // subject merged over ATTOM when PR matched. The scoring, best-3 picking
+  // and confidence live server-side in those two functions — this code only
+  // reads d.property / d.comps, never re-scores and never invents a comp.
+  // fetchFn is injected (the browser passes the real fetch) so tests run
+  // on fixtures with zero API credits. Returns null when neither source
+  // matched the address; THROWS only when both fetches failed (network
+  // down) so the caller can say "unavailable" instead of "no record".
+  async function lookupPropertyAndComps(address, fetchFn) {
+    var addr = String(address || '').trim();
+    if (!addr || typeof fetchFn !== 'function') return null;
+    var enc = encodeURIComponent(addr);
+    var prSubject = null, prComps = null, prMatched = false, prError = false, attomError = false;
+    try {
+      var prRes = await fetchFn('/.netlify/functions/data-api?address=' + enc);
+      if (prRes && prRes.ok) {
+        var pj = null;
+        try { pj = await prRes.json(); } catch (e) { pj = null; }
+        if (pj && pj.matched) {
+          prMatched = true;
+          prSubject = pj.property || null;
+          if (pj.comps && (pj.comps.best || []).length) prComps = pj.comps;
+        }
+      } else { prError = true; }
+    } catch (e) { prError = true; }
+    if (prComps) {
+      return { matched: true, source: 'data provider', property: prSubject, comps: prComps };
+    }
+    var attomJson = null;
+    try {
+      var atRes = await fetchFn('/.netlify/functions/attom-lookup?address=' + enc);
+      if (atRes && atRes.ok) {
+        try { attomJson = await atRes.json(); } catch (e) { attomJson = null; }
+      } else { attomError = true; }
+    } catch (e) { attomError = true; }
+    if (attomJson) {
+      if (prSubject) {
+        attomJson.property = Object.assign({}, attomJson.property || {}, prSubject);
+        if (!attomJson.matched) attomJson.matched = true;
+      }
+      if (!attomJson.matched) return null;
+      return { matched: true, source: prSubject ? 'ATTOM+PR' : 'ATTOM', property: attomJson.property || null, comps: attomJson.comps || null };
+    }
+    // PR matched the property but ATTOM is down and PR had no comps: the
+    // record is still worth filling (owner/beds/sqft/year) with comps null
+    // — ARV stays gated, nothing is invented.
+    if (prMatched) {
+      return { matched: true, source: 'data provider', property: prSubject, comps: null };
+    }
+    if (prError && attomError) throw new Error('lookup unavailable: both sources failed');
+    return null;
+  }
+
+  // ARV gate (standing rule): ARV fills ONLY from 3+ picked comps AND
+  // confidence HIGH or MEDIUM. Anything else leaves ARV blank — the mean of
+  // the picked set is still returned as `candidate` so the card can show it
+  // as "candidate, not an offer basis", never fed into MAO/LAO.
+  function arvFromComps(comps) {
+    var c = comps || {};
+    var best = (c.best || []).filter(function (r) { return r && r.amount != null; });
+    var candidate = best.length
+      ? Math.round(best.reduce(function (s, r) { return s + Number(r.amount); }, 0) / best.length)
+      : null;
+    var confidence = c.confidence || '';
+    var passes = best.length >= 3 && (confidence === 'HIGH' || confidence === 'MEDIUM');
+    return { arv: passes ? candidate : null, candidate: candidate, count: best.length, confidence: confidence, confidenceText: c.confidenceText || '', passes: passes };
+  }
+
+  // Lookup result -> deal fields for the prep card form. City/state/ZIP
+  // come from the typed address (splitAddress); when the typed address is
+  // street-only, the record's canonical one-line address fills the rest.
+  // Owner is owner1, plus owner2 when the record has one. ARV comes from
+  // the gate (null when thin/low-confidence) — the DOM applier only writes
+  // it into a blank ARV field, so a hand-typed or param-supplied ARV is
+  // never overwritten by the feed.
+  function lookupDealFromResult(result, typedAddress) {
+    var r = result || {};
+    var prop = r.property || {};
+    var split = splitAddress(typedAddress);
+    if ((!split.city || !split.state || !split.zip) && prop.address) {
+      var rs = splitAddress(prop.address);
+      // The record's canonical one-line is uppercase ("GREENVILLE") —
+      // title-case the city it supplies so the form reads like Troy typed it.
+      var rsCity = rs.city ? String(rs.city).toLowerCase().replace(/\b\w/g, function (c) { return c.toUpperCase(); }) : '';
+      split = { address: split.address || rs.address, city: split.city || rsCity, state: split.state || rs.state, zip: split.zip || rs.zip };
+    }
+    var owner = prop.owner1 || '';
+    if (prop.owner2) owner = owner ? owner + ' & ' + prop.owner2 : prop.owner2;
+    var bedsBaths = '';
+    if (prop.beds != null || prop.baths != null) {
+      bedsBaths = (prop.beds != null ? prop.beds : '') + ' / ' + (prop.baths != null ? prop.baths : '');
+    }
+    var gate = arvFromComps(r.comps);
+    return {
+      address: split.address, city: split.city, state: split.state, zip: split.zip,
+      listSource: 'other',
+      arv: gate.arv, candidateArv: gate.candidate, compCount: gate.count,
+      confidence: gate.confidence, confidenceText: gate.confidenceText, arvPassesGate: gate.passes,
+      bedsBaths: bedsBaths,
+      sqft: prop.sqft != null ? String(prop.sqft) : '',
+      yearBuilt: prop.yearBuilt != null ? String(prop.yearBuilt) : '',
+      ownerName: owner, sellerPhone: '',
+      listed: prop.onMarket === true || prop.listingStatus === 'listed'
+    };
+  }
+
   // ---------- draft carryover: a fresh auto-filled card must not inherit ----------
   // the previous call's details. The draft (localStorage 'liveCallDraft.v1')
   // holds every [data-draft] field; auto-fill overwrites only the DEAL fields,
@@ -529,6 +637,8 @@
     parseAutoFillParams: parseAutoFillParams, findLeadInStore: findLeadInStore,
     listSourceForSignal: listSourceForSignal, leadToAutoFill: leadToAutoFill,
     resolveAutoFill: resolveAutoFill,
+    lookupPropertyAndComps: lookupPropertyAndComps, arvFromComps: arvFromComps,
+    lookupDealFromResult: lookupDealFromResult,
     DEAL_FIELD_IDS: DEAL_FIELD_IDS, isDealDraftKey: isDealDraftKey,
     isNonDealDraftKey: isNonDealDraftKey, normalizeAddress: normalizeAddress,
     isSameAddress: isSameAddress, shouldClearDraftForDeal: shouldClearDraftForDeal,
@@ -644,6 +754,87 @@
     return resolved.source;
   }
 
+  // ---------- address lookup: property record + verified comps (DOM) ----------
+  // Trigger: tab-out of the address field (change) or the 🔍 button. The
+  // lookup fills the record's facts (owner/beds/sqft/year/city/state/ZIP)
+  // and the gated ARV, then rebuilds the card. It never writes a field on
+  // failure, and it never overwrites an ARV Troy typed or a param supplied.
+  var lookupState = { lastAddress: '', inFlight: false, result: null, deal: null };
+
+  function lookupStatus(text) { var el = $('lookupStatus'); if (el) el.textContent = text || ''; }
+
+  function applyLookupDeal(deal) {
+    if (!deal) return;
+    var setIfBlank = function (id, v) { var el = $(id); if (el && String(el.value || '').trim() === '' && v != null && String(v) !== '') el.value = String(v); };
+    var setWhenPresent = function (id, v) { var el = $(id); if (el && v != null && String(v) !== '') el.value = String(v); };
+    setIfBlank('city', deal.city); setIfBlank('state', deal.state); setIfBlank('zip', deal.zip);
+    // The record is authoritative for the property facts — it wins when it
+    // speaks, and a hand-typed value survives only when the record is silent.
+    setWhenPresent('ownerName', deal.ownerName);
+    setWhenPresent('bedsBaths', deal.bedsBaths);
+    setWhenPresent('sqft', deal.sqft);
+    setWhenPresent('yearBuilt', deal.yearBuilt);
+    // The lookup can only ADD the PASS, never remove Troy's manual check:
+    // an ATTOM-only record carries no listing info, and its listed=false
+    // must not uncheck a box he checked himself.
+    var li = $('listed');
+    if (li && deal.listed) li.checked = true;
+    // ARV: only into a blank field — a hand-typed or param-supplied ARV is
+    // Troy's verified number and the feed never overwrites it.
+    if (num('arv') == null && deal.arv != null) { var a = $('arv'); if (a) a.value = String(deal.arv); }
+  }
+
+  async function runAddressLookup(opts) {
+    var o = opts || {};
+    var address = $('address') ? $('address').value.trim() : '';
+    if (!address) { lookupStatus(''); return null; }
+    if (lookupState.inFlight) return null;
+    if (!o.manual && normalizeAddress(address) === normalizeAddress(lookupState.lastAddress)) return null;
+    if (typeof fetch === 'undefined') return null;
+    lookupState.inFlight = true;
+    lookupState.lastAddress = address;
+    lookupState.result = null; lookupState.deal = null; // never show a stale card under a new address
+    lookupStatus('Looking up property records…');
+    var result = null;
+    try {
+      result = await lookupPropertyAndComps(address, fetch);
+    } catch (e) {
+      lookupState.lastAddress = ''; // failed, not "looked up" — a later blur retries
+      lookupState.inFlight = false;
+      lookupStatus('Lookup unavailable right now — type the details by hand.');
+      return null;
+    }
+    lookupState.inFlight = false;
+    if (!result) {
+      lookupStatus('No property record found for this address — type the details by hand.');
+      return null;
+    }
+    lookupState.result = result;
+    var deal = lookupDealFromResult(result, address);
+    lookupState.deal = deal;
+    applyLookupDeal(deal);
+    var bits = [];
+    if (deal.ownerName) bits.push(deal.ownerName);
+    if (deal.bedsBaths) bits.push(deal.bedsBaths);
+    if (deal.sqft) bits.push(Number(deal.sqft).toLocaleString() + ' sqft');
+    if (deal.yearBuilt) bits.push('built ' + deal.yearBuilt);
+    var msg = bits.length ? '✓ Found — ' + bits.join(' · ') : '✓ Found a property record.';
+    if (deal.arv != null) {
+      msg += ' · ' + deal.compCount + ' comps, ' + deal.confidence + ' — ARV $' + deal.arv.toLocaleString();
+    } else if (deal.candidateArv != null) {
+      msg += ' · ' + deal.compCount + ' comp(s), ' + (deal.confidence || 'no confidence') + ' — ARV left blank (candidate $' + deal.candidateArv.toLocaleString() + '; needs 3 HIGH/MEDIUM comps).';
+    } else {
+      msg += ' · No verified comps — ARV left blank; type it by hand.';
+    }
+    if (deal.listed) msg = '⛔ LISTED — PASS, no offer, no chase. ' + msg;
+    lookupStatus(msg);
+    saveDraft();
+    var OM = root.OfferMath;
+    if (OM && OM.whenCalibrationReady) OM.whenCalibrationReady(2000).then(function () { buildPrep(); });
+    else buildPrep();
+    return result;
+  }
+
   function buildPrep() {
     var address = $('address') ? $('address').value.trim() : '';
     var listSource = $('listSource') ? $('listSource').value : 'other';
@@ -668,7 +859,15 @@
         '<div class="num key"><div class="lbl">MAO — ceiling</div><div class="v">' + money(math.mao) + '</div><div class="sub">' + esc(math.label || '') + ' · never go above</div></div>' +
         '<div class="num key"><div class="lbl">LAO — open here</div><div class="v">' + money(math.lao) + '</div><div class="sub">MAO × 70%</div></div></div>';
     } else {
-      html += '<p class="muted">Enter ARV and repairs to compute MAO/LAO.</p>';
+      // A gated lookup candidate (thin or LOW-confidence comps) is shown
+      // as a candidate only — never fed into MAO/LAO. Only for the address
+      // the lookup actually ran on; a new address blanks it.
+      var cand = (lookupState.deal && normalizeAddress(address) === normalizeAddress(lookupState.lastAddress)) ? lookupState.deal : null;
+      if (cand && cand.candidateArv != null) {
+        html += '<p class="muted">ARV candidate $' + cand.candidateArv.toLocaleString() + ' from ' + cand.compCount + ' comp(s) (' + esc(cand.confidence || 'no confidence') + ') — needs 3 HIGH/MEDIUM comps to fill. Type an ARV to run the math manually.</p>';
+      } else {
+        html += '<p class="muted">Enter ARV and repairs to compute MAO/LAO.</p>';
+      }
     }
     html += '<div class="lbl" style="margin-top:14px">Open with</div><div class="say">' + esc(openingLine(address, callerName(), listSource)) + '</div>';
     html += '<div class="lbl" style="margin-top:14px">Expect — 2–3 most likely objections</div>';
@@ -1026,9 +1225,14 @@
 
   document.addEventListener('DOMContentLoaded', function () {
     restoreDraft();
-    autoFillFromUrl(); // ?lead= / URL params win over the restored draft
+    var autoFillSource = autoFillFromUrl(); // ?lead= / URL params win over the restored draft
     renderChips(null);
     renderNotes();
+    // Address lookup: tab-out of the address field, or the 🔍 button.
+    var addrEl = $('address');
+    if (addrEl) addrEl.addEventListener('change', function () { runAddressLookup(); });
+    var lookupBtn = $('lookupBtn');
+    if (lookupBtn) lookupBtn.addEventListener('click', function () { runAddressLookup({ manual: true }); });
     var buildBtn = $('buildPrep');
     if (buildBtn) buildBtn.addEventListener('click', buildPrep);
     var coachBtn = $('coachToggle');
@@ -1072,6 +1276,10 @@
       var OM = root.OfferMath;
       if (OM && OM.whenCalibrationReady) OM.whenCalibrationReady(2000).then(function () { buildPrep(); });
       else buildPrep();
+      // A plain-URL-params open (?address=... with no ?lead=) has no lead
+      // facts, so the lookup fills the record + comps itself. A ?lead=
+      // open already carries the full facts and must NOT be re-looked-up.
+      if (autoFillSource === 'params') runAddressLookup();
     }
   });
 

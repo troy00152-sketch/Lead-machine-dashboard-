@@ -104,9 +104,13 @@ footer b{color:var(--text)}
 <!-- ============ 1 · PREP CARD ============ -->
 <section class="panel">
   <h2><span class="n">1 ·</span> Prep card</h2>
-  <div class="hint">Type the deal, hit “Build prep card.” Numbers come from the dashboard's canonical MAO/LAO math — same tiers as the Deal Analysis page.</div>
+  <div class="hint">Type an address and tab out — owner, beds, sqft, year built and verified comps fill themselves. ARV fills only from 3+ HIGH/MEDIUM comps; repairs is still your call on the phone. Numbers come from the dashboard's canonical MAO/LAO math — same tiers as the Deal Analysis page.</div>
   <div class="grid">
     <div class="f wide"><label for="address">Property address</label><input id="address" data-draft placeholder="123 Main St, Indianapolis, IN 46201" autocomplete="off"></div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;grid-column:1/-1">
+      <button type="button" class="btn ghost" id="lookupBtn">🔍 Look up property + comps</button>
+      <span class="muted" id="lookupStatus">Type an address — owner, beds, sqft and comps fill themselves.</span>
+    </div>
     <div class="f"><label for="city">City</label><input id="city" data-draft placeholder="Indianapolis"></div>
     <div class="f"><label for="state">State</label><input id="state" data-draft placeholder="IN" maxlength="2"></div>
     <div class="f"><label for="zip">ZIP</label><input id="zip" data-draft placeholder="46201" inputmode="numeric"></div>
