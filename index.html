@@ -12,6 +12,8 @@
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 <script src="assets/offer-math.js"></script>
 <script src="assets/sellability.js"></script>
+<script src="assets/buyer-map-data.js"></script>
+<script src="assets/buyer-map.js"></script>
 <title>Acquisition Command Center</title>
 <script>
 /* White-label branding hook — additive, fails safe to Troy's defaults.
@@ -772,6 +774,18 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
             <button class="btn" onclick="unverifyBuyer()">Remove</button>
             <span id="mbVerifyMsg" style="font-size:12px;color:var(--muted)"></span>
           </div>
+          <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center;flex-wrap:wrap" id="mbViewRow">
+            <button class="btn small" id="mbViewListBtn" onclick="setMbView('list')">📋 List</button>
+            <button class="btn small ghost" id="mbViewMapBtn" onclick="setMbView('map')">🗺️ Map</button>
+            <input class="field" id="mbMapSearch" placeholder="Map: city or ZIP — e.g. Indianapolis or 46202" style="width:250px" onkeydown="if(event.key==='Enter'){event.preventDefault();mbGoToArea();}" />
+            <button class="btn small" onclick="mbGoToArea()">🎯 Go to area</button>
+            <button class="btn small ghost" id="mbTilesStreet" onclick="setMbTiles('street')">🛣️ Street</button>
+            <button class="btn small ghost" id="mbTilesSat" onclick="setMbTiles('satellite')">🛰️ Satellite</button>
+            <button class="btn small ghost" id="mbDrawBtn" onclick="mbToggleDraw()">✏️ Draw area</button>
+            <button class="btn small ghost" id="mbClearDrawBtn" onclick="mbClearDraw()" style="display:none">✕ Clear area</button>
+          </div>
+          <div id="mbMap" style="display:none;height:480px;border-radius:12px;margin-bottom:12px;border:1px solid var(--line);z-index:0"></div>
+          <div id="mbMapNote" style="display:none;font-size:12px;color:var(--muted);margin-bottom:12px"></div>
           <div id="mbResults" style="max-height:600px;overflow-y:auto"></div>
           <div id="mbPagination" style="margin-top:12px;text-align:center"></div>
         </div>
@@ -1327,6 +1341,7 @@ function showPage(name){
   if(name === 'listimport') liLoadConn();
   if(name === 'dealrooms' && typeof drLoadDeals === 'function') drLoadDeals();
   if(name === 'comps'){ renderCompMap(); setTimeout(()=>{ if(compMap){ compMap.invalidateSize(); renderCompMap(); } }, 150); }
+  if(name === 'masterbuyers' && typeof syncMbView === 'function'){ setTimeout(()=>{ if(mbMap){ mbMap.invalidateSize(); if(mbView === 'map') renderBuyerMap(); } }, 150); }
   /* Leaving Comps wipes it (never on entering, never on a same-page
      re-click): a return shows a blank page, never the previous property. */
   if(wasComps && name !== 'comps') resetCompsPage();
@@ -3636,6 +3651,7 @@ async function searchMasterBuyers(){
   }
   mbPage = 0;
   window._mbSortDir = 1; /* reset to score-desc on new search */
+  if(typeof mbResetDraw === 'function') mbResetDraw(); /* a new search clears any drawn-area filter */
   renderMasterBuyers(results);
 }
 function mbScoreBadge(b){
@@ -3666,9 +3682,10 @@ function renderMasterBuyers(results){
   const start = mbPage * MB_PER_PAGE;
   const page = results.slice(start, start + MB_PER_PAGE);
   let html = '<table style="width:100%;font-size:13px;border-collapse:collapse"><thead><tr style="border-bottom:1px solid var(--line);text-align:left"><th style="padding:8px;cursor:pointer;white-space:nowrap" onclick="mbToggleSort()" title="Sort by score">Score ' + arrow + '</th><th style="padding:8px">Name</th><th style="padding:8px">Phone</th><th style="padding:8px">Buy Box</th><th style="padding:8px">City</th><th style="padding:8px">ST</th><th style="padding:8px">Props</th></tr></thead><tbody>';
-  for(const b of page){
+  for(let ri = 0; ri < page.length; ri++){
+    const b = page[ri];
     const buyBox = (b.st||'') + (b.ap ? ' · $' + Math.round(b.ap/1000) + 'K avg' : '');
-    html += `<tr style="border-bottom:1px solid var(--line)"><td style="padding:8px">${mbScoreBadge(b)}</td><td style="padding:8px">${esc(b.n||'—')}${mbVerifiedBadge(b)}</td><td style="padding:8px">${b.p?esc(formatPhone(b.p)):'—'}</td><td style="padding:8px">${esc(buyBox||'—')}</td><td style="padding:8px">${esc(b.c||'—')}</td><td style="padding:8px">${esc(b.s||'—')}</td><td style="padding:8px">${b.pc||0}</td></tr>`;
+    html += `<tr id="mbRow-${ri}" style="border-bottom:1px solid var(--line)"><td style="padding:8px">${mbScoreBadge(b)}</td><td style="padding:8px">${esc(b.n||'—')}${mbVerifiedBadge(b)}</td><td style="padding:8px">${b.p?esc(formatPhone(b.p)):'—'}</td><td style="padding:8px">${esc(buyBox||'—')}</td><td style="padding:8px">${esc(b.c||'—')}</td><td style="padding:8px">${esc(b.s||'—')}</td><td style="padding:8px">${b.pc||0}</td></tr>`;
   }
   html += '</tbody></table>';
   box.innerHTML = html;
@@ -3678,6 +3695,215 @@ function renderMasterBuyers(results){
   if(mbPage > 0) ph += `<button class="btn" style="margin:4px" onclick="mbPage--;renderMasterBuyers(window._mbResults)">← Prev</button>`;
   if(mbPage < totalPages - 1) ph += `<button class="btn" style="margin:4px" onclick="mbPage++;renderMasterBuyers(window._mbResults)">Next →</button>`;
   pag.innerHTML = ph;
+  /* Map view follows the list: re-plot pins whenever the page changes. */
+  if(mbView === 'map' && typeof renderBuyerMap === 'function') renderBuyerMap();
+}
+
+/* ============ MASTER BUYERS — MAP VIEW (ranked investor map, Nov 8) ============
+   Same Leaflet + markercluster pattern as the Property Search map (see
+   renderPropMap). Pins are numbered by list rank, clustered at city zoom,
+   hover shows portfolio stats, click opens a popup with a deep-link back
+   to the buyer in the list. Pins plot ONLY at bundled ZIP centroids
+   (assets/buyer-map-data.js) — a buyer with no centroid entry is never
+   placed anywhere; it shows in the list as unplotted. Zoom/pan never
+   re-ranks the list: pins always follow the current search page. */
+let mbView = 'list';
+let mbMap = null, mbMapTileLayer = null, mbMapCluster = null, mbMapBoundary = null;
+let mbMapMarkers = [], mbMapTiles = 'street', mbAreaKey = null;
+let mbDrawMode = false, mbDrawPts = [], mbDrawLayer = null, mbDrawFilter = null;
+
+function setMbView(v){ mbView = v; syncMbView(); }
+function syncMbView(){
+  const listBtn = document.getElementById('mbViewListBtn');
+  const mapBtn = document.getElementById('mbViewMapBtn');
+  const results = document.getElementById('mbResults');
+  const pag = document.getElementById('mbPagination');
+  const mapEl = document.getElementById('mbMap');
+  const note = document.getElementById('mbMapNote');
+  if(!results || !mapEl) return;
+  if(mbView === 'map'){
+    if(listBtn) listBtn.className = 'btn small ghost';
+    if(mapBtn) mapBtn.className = 'btn small';
+    results.style.display = 'none';
+    mapEl.style.display = 'block'; if(note) note.style.display = 'block';
+    renderBuyerMap();
+    setTimeout(()=>{ if(mbMap) mbMap.invalidateSize(); }, 150);
+  }else{
+    if(listBtn) listBtn.className = 'btn small';
+    if(mapBtn) mapBtn.className = 'btn small ghost';
+    results.style.display = ''; if(pag) pag.style.display = '';
+    mapEl.style.display = 'none'; if(note) note.style.display = 'none';
+    mbSetDrawMode(false);
+  }
+}
+function bmRankIcon(rank){
+  return L.divIcon({
+    className: 'bm-rank-pin',
+    html: '<div style="background:#ff6b1a;color:#fff;font-weight:800;font-size:12px;line-height:26px;text-align:center;width:26px;height:26px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 6px rgba(0,0,0,.45)">#' + rank + '</div>',
+    iconSize: [26, 26], iconAnchor: [13, 13]
+  });
+}
+function mbTileUrl(){
+  return (typeof BuyerMap !== 'undefined') ? BuyerMap.TILES[mbMapTiles].url : 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+}
+function mbTileAttr(){
+  return (typeof BuyerMap !== 'undefined') ? BuyerMap.TILES[mbMapTiles].attribution : '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+}
+function setMbTiles(mode){
+  mbMapTiles = (mode === 'satellite') ? 'satellite' : 'street';
+  const s = document.getElementById('mbTilesStreet'), a = document.getElementById('mbTilesSat');
+  if(s) s.className = 'btn small' + (mbMapTiles === 'street' ? '' : ' ghost');
+  if(a) a.className = 'btn small' + (mbMapTiles === 'satellite' ? '' : ' ghost');
+  if(mbMap){
+    if(mbMapTileLayer){ mbMap.removeLayer(mbMapTileLayer); mbMapTileLayer = null; }
+    mbMapTileLayer = L.tileLayer(mbTileUrl(), { attribution: mbTileAttr(), maxZoom: 19 }).addTo(mbMap);
+  }
+}
+function renderBuyerMap(){
+  const note = document.getElementById('mbMapNote');
+  if(typeof L === 'undefined'){
+    if(note) note.textContent = 'Map needs an internet connection to load.';
+    return;
+  }
+  if(typeof BuyerMap === 'undefined' || typeof window.BUYER_MAP_DATA === 'undefined'){
+    if(note) note.textContent = 'Buyer map data did not load.';
+    return;
+  }
+  const data = window.BUYER_MAP_DATA;
+  const results = window._mbResults || [];
+  const ranked = BuyerMap.rankPage(results, mbPage, MB_PER_PAGE);
+  const split = BuyerMap.splitPlottable(ranked, data.zipCoords);
+  let plotted = split.plotted;
+  if(mbDrawFilter) plotted = BuyerMap.filterInside(plotted, mbDrawFilter);
+  if(note){
+    note.textContent = results.length
+      ? plotted.length + ' pins on this page' + (split.unplotted.length ? ' · ' + split.unplotted.length + ' unplotted (ZIP not geocoded yet — in list only)' : '') + ' · 📍 pins are ZIP centroids, not exact addresses' + (mbDrawFilter ? ' · ✏️ showing drawn area only' : '')
+      : 'Search buyers to plot them — the map starts empty, like XLeads.';
+  }
+  if(!mbMap){
+    mbMap = L.map('mbMap', { scrollWheelZoom: false });
+    mbMap.on('focus', ()=> mbMap.scrollWheelZoom.enable());
+    mbMap.on('blur', ()=> mbMap.scrollWheelZoom.disable());
+    mbMap.on('click', mbMapClick);
+    mbMap.on('dblclick', ()=>{ if(mbDrawMode) mbFinishDraw(); });
+  }
+  if(mbMapTileLayer){ mbMap.removeLayer(mbMapTileLayer); mbMapTileLayer = null; }
+  mbMapTileLayer = L.tileLayer(mbTileUrl(), { attribution: mbTileAttr(), maxZoom: 19 }).addTo(mbMap);
+  if(mbMapCluster){ mbMap.removeLayer(mbMapCluster); mbMapCluster = null; }
+  mbMap.eachLayer(l=>{ if(l instanceof L.Marker) mbMap.removeLayer(l); });
+  if(mbMapBoundary){ mbMap.removeLayer(mbMapBoundary); mbMapBoundary = null; }
+  mbMapMarkers = [];
+  if(!plotted.length){
+    if(!results.length) mbMap.setView([39.8283, -98.5795], 4); /* whole US, no pins yet */
+    return;
+  }
+  const bounds = L.latLngBounds();
+  const useCluster = (typeof L.markerClusterGroup === 'function');
+  if(useCluster){
+    mbMapCluster = L.markerClusterGroup({ showCoverageOnHover: false, maxClusterRadius: 55 });
+    mbMap.addLayer(mbMapCluster);
+  }
+  plotted.forEach(p=>{
+    const m = L.marker([p.lat, p.lon], { icon: bmRankIcon(p.rank) });
+    m.bindTooltip(BuyerMap.tooltipHtml(p), { direction: 'top', offset: [0, -14] });
+    m.bindPopup(BuyerMap.popupHtml(p));
+    if(useCluster) mbMapCluster.addLayer(m); else m.addTo(mbMap);
+    mbMapMarkers.push(m);
+    bounds.extend([p.lat, p.lon]);
+  });
+  /* Boundary of the area being viewed: the market from Go to area, else
+     the market named in the list search box. L.geoJSON handles Polygon and
+     MultiPolygon (with holes) natively. */
+  const q = (document.getElementById('mbSearch') || {}).value || '';
+  const hit = BuyerMap.marketForQuery(q, data);
+  const areaKey = mbAreaKey || (hit && hit.kind === 'market' ? hit.key : null);
+  if(areaKey && data.boundaries[areaKey]){
+    mbMapBoundary = L.geoJSON(data.boundaries[areaKey], { color: '#00d4ff', weight: 2, fill: false }).addTo(mbMap);
+    bounds.extend(mbMapBoundary.getBounds());
+  }
+  if(bounds.isValid()) mbMap.fitBounds(bounds.pad(0.25));
+}
+function mbGoToArea(){
+  if(typeof BuyerMap === 'undefined' || typeof window.BUYER_MAP_DATA === 'undefined'){ toast('Buyer map data did not load.'); return; }
+  const data = window.BUYER_MAP_DATA;
+  const q = (document.getElementById('mbMapSearch') || {}).value || '';
+  const hit = BuyerMap.marketForQuery(q, data);
+  if(!hit){ toast('Area not found — try a market city (Indianapolis, Cleveland…) or a ZIP in the geocoded set.'); return; }
+  if(mbView !== 'map') setMbView('map');
+  if(hit.kind === 'market'){
+    mbAreaKey = hit.key;
+    const s = document.getElementById('mbSearch');
+    if(s) s.value = data.markets[hit.key].city; /* list + map agree on the area */
+    searchMasterBuyers();
+  }else{
+    mbAreaKey = null;
+    if(mbMap) mbMap.flyTo([hit.lat, hit.lon], 12, { duration: 1 });
+    const note = document.getElementById('mbMapNote');
+    if(note) note.textContent = 'ZIP ' + hit.zip + ' — centroid ' + hit.lat + ', ' + hit.lon + '. Search the list for buyers in this ZIP to plot them.';
+  }
+  setTimeout(()=>{ if(mbMap) mbMap.invalidateSize(); }, 150);
+}
+function mbFocusBuyer(globalIndex){
+  const results = window._mbResults || [];
+  if(globalIndex == null || globalIndex < 0 || globalIndex >= results.length) return;
+  if(mbView !== 'list') setMbView('list');
+  mbPage = Math.floor(globalIndex / MB_PER_PAGE);
+  renderMasterBuyers(results);
+  showPage('masterbuyers');
+  setTimeout(()=>{
+    const row = document.getElementById('mbRow-' + (globalIndex % MB_PER_PAGE));
+    if(row){
+      row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      row.style.background = 'rgba(255,107,26,.15)';
+      setTimeout(()=>{ row.style.background = ''; }, 2500);
+    }
+  }, 100);
+}
+/* ---- Polygon draw tool: click corners on the map, double-click (or Draw
+   again) to finish. Buyers count as inside when their ZIP centroid is
+   inside the drawn ring. No new dependency — plain Leaflet + point-in-
+   polygon from assets/buyer-map.js. ---- */
+function mbSetDrawMode(on){
+  mbDrawMode = !!on;
+  const b = document.getElementById('mbDrawBtn');
+  if(b) b.className = 'btn small' + (mbDrawMode ? '' : ' ghost');
+  if(mbMap) mbMap.doubleClickZoom[mbDrawMode ? 'disable' : 'enable']();
+  if(!mbDrawMode && mbDrawLayer && mbMap){ mbMap.removeLayer(mbDrawLayer); mbDrawLayer = null; mbDrawPts = []; }
+}
+function mbToggleDraw(){
+  if(mbView !== 'map') setMbView('map');
+  if(!mbMap){ toast('Open the map first.'); return; }
+  mbSetDrawMode(!mbDrawMode);
+  if(mbDrawMode) toast('Draw mode: click the map to add corners, double-click (or Draw again) to finish.');
+}
+function mbMapClick(e){
+  if(!mbDrawMode || !mbMap) return;
+  mbDrawPts.push([e.latlng.lat, e.latlng.lng]);
+  if(mbDrawLayer) mbMap.removeLayer(mbDrawLayer);
+  mbDrawLayer = L.polygon(mbDrawPts, { color: '#f59e0b', weight: 2, dashArray: '6 4', fillOpacity: 0.08 }).addTo(mbMap);
+}
+function mbFinishDraw(){
+  if(!mbDrawMode || mbDrawPts.length < 3){ toast('Draw at least 3 corners to make an area.'); return; }
+  mbDrawFilter = mbDrawPts.slice();
+  mbDrawFilter.push(mbDrawPts[0]); /* close the ring */
+  mbSetDrawMode(false);
+  const c = document.getElementById('mbClearDrawBtn');
+  if(c) c.style.display = '';
+  const results = window._mbResults || [];
+  const ranked = BuyerMap.rankPage(results, 0, results.length);
+  const split = BuyerMap.splitPlottable(ranked, window.BUYER_MAP_DATA.zipCoords);
+  const inside = BuyerMap.filterInside(split.plotted, mbDrawFilter);
+  mbPage = 0;
+  renderMasterBuyers(inside.map(p=>p.rec));
+  toast(inside.length + ' buyers inside the drawn area.');
+}
+function mbClearDraw(){ mbResetDraw(); searchMasterBuyers(); }
+function mbResetDraw(){
+  mbDrawFilter = null;
+  mbDrawPts = [];
+  if(mbDrawLayer && mbMap){ mbMap.removeLayer(mbDrawLayer); mbDrawLayer = null; }
+  const c = document.getElementById('mbClearDrawBtn');
+  if(c) c.style.display = 'none';
 }
 
 function blastLeadToBuyers(leadId){
