@@ -15,6 +15,8 @@
 <script src="assets/buyer-map-data.js"></script>
 <script src="assets/buyer-map.js"></script>
 <script src="assets/buyer-detail.js"></script>
+<script src="assets/buyer-portfolio-data.js"></script>
+<script src="assets/buyer-portfolio.js"></script>
 <title>Acquisition Command Center</title>
 <script>
 /* White-label branding hook — additive, fails safe to Troy's defaults.
@@ -1176,6 +1178,13 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
   <div class="modal" style="max-width:640px">
     <div class="modal-head"><h3 id="mbDetailTitle">Buyer Detail</h3><button class="modal-x" onclick="mbCloseDetail()">✕</button></div>
     <div class="modal-body" id="mbDetailBody"></div>
+  </div>
+</div>
+<!-- BUYER PORTFOLIO MODAL — portfolio view with price pins (Nov 8) -->
+<div class="modal-overlay" id="mbPortfolioModal">
+  <div class="modal" style="max-width:720px">
+    <div class="modal-head"><h3 id="mbPortfolioTitle">Buyer Portfolio</h3><button class="modal-x" onclick="mbClosePortfolio()">✕</button></div>
+    <div class="modal-body" id="mbPortfolioBody"></div>
   </div>
 </div>
 <!-- SPOTLIGHT EDITOR -->
@@ -3888,8 +3897,12 @@ function mbOpenDetail(globalIndex){
   const title = document.getElementById('mbDetailTitle');
   if(!modal || !body) return;
   if(title) title.textContent = b.n || 'Buyer Detail';
+  let pfCount = null;
+  if(typeof BuyerPortfolio !== 'undefined' && typeof window.BUYER_PORTFOLIO_DATA !== 'undefined'){
+    pfCount = BuyerPortfolio.lookup(b.n, window.BUYER_PORTFOLIO_DATA).total;
+  }
   body.innerHTML = (typeof BuyerDetail !== 'undefined')
-    ? BuyerDetail.detailHtml(b, { rank: globalIndex + 1, total: results.length, globalIndex: globalIndex, verifiedBadge: mbVerifiedBadge(b) })
+    ? BuyerDetail.detailHtml(b, { rank: globalIndex + 1, total: results.length, globalIndex: globalIndex, verifiedBadge: mbVerifiedBadge(b), portfolioCount: pfCount })
     : '<p style="color:var(--muted)">Buyer detail did not load.</p>';
   modal.classList.add('open');
 }
@@ -3900,10 +3913,14 @@ function mbCloseDetail(){
 (function(){
   const m = document.getElementById('mbDetailModal');
   if(m) m.addEventListener('click', e=>{ if(e.target.id==='mbDetailModal') mbCloseDetail(); });
+  const pf = document.getElementById('mbPortfolioModal');
+  if(pf) pf.addEventListener('click', e=>{ if(e.target.id==='mbPortfolioModal') mbClosePortfolio(); });
   document.addEventListener('keydown', e=>{
     if(e.key === 'Escape'){
       const d = document.getElementById('mbDetailModal');
       if(d && d.classList.contains('open')) mbCloseDetail();
+      const p = document.getElementById('mbPortfolioModal');
+      if(p && p.classList.contains('open')) mbClosePortfolio();
     }
   });
 })();
@@ -3924,6 +3941,152 @@ function mbShowOnMap(globalIndex){
     if(m && mbMap){ mbMap.setView(m.getLatLng(), 10); m.openPopup(); }
     else toast('This buyer is not plotted on the map — its ZIP has no centroid yet (in list only).');
   }, 250);
+}
+/* ---- Buyer portfolio view (Nov 8): sample properties linked by tax
+   mailing address, with a map mode with price pins. Opens from the buyer
+   detail for the buyer at globalIndex in window._mbResults — the SAME
+   index the list / detail / map use, so list / detail / portfolio / map
+   always resolve to the same record. Price pins show ONLY when a real
+   per-property Retail value is on file (none is today) — otherwise
+   numbered pins, and the popup says "Value not on file". Properties
+   with no ZIP on file are list-only, never placed on the map. ---- */
+let mbPfGlobalIndex = null, mbPfView = 'list', mbPfMap = null, mbPfTileLayer = null, mbPfCluster = null, mbPfTiles = 'street', mbPfProps = [];
+function mbOpenPortfolio(globalIndex){
+  const results = window._mbResults || [];
+  if(globalIndex == null || globalIndex < 0 || globalIndex >= results.length) return;
+  if(typeof BuyerPortfolio === 'undefined' || typeof window.BUYER_PORTFOLIO_DATA === 'undefined'){ toast('Portfolio data did not load.'); return; }
+  const b = results[globalIndex];
+  const port = BuyerPortfolio.lookup(b.n, window.BUYER_PORTFOLIO_DATA);
+  if(!port.total){ toast('No linked properties on file for this buyer.'); return; }
+  mbPfGlobalIndex = globalIndex;
+  mbPfProps = BuyerPortfolio.allProps(port);
+  mbCloseDetail();
+  const modal = document.getElementById('mbPortfolioModal');
+  const body = document.getElementById('mbPortfolioBody');
+  const title = document.getElementById('mbPortfolioTitle');
+  if(!modal || !body) return;
+  if(title) title.textContent = '🏠 ' + (b.n || 'Buyer') + ' — Portfolio';
+  let h = '<div style="font-size:13px;line-height:1.7">';
+  h += '<div><b>' + port.total + ' propert' + (port.total === 1 ? 'y' : 'ies') + ' linked by tax mailing address</b>';
+  if(port.shared.length) h += ' — includes ' + port.shared.reduce((a,g)=>a+g.props.length,0) + ' from ' + port.sharedOwnerNames.map(x=>esc(x)).join(', ') + ' (same mailing address)';
+  h += '</div>';
+  h += '<div style="font-size:12px;color:var(--muted);border:1px solid var(--line);border-radius:8px;padding:8px;margin:8px 0">' + esc(BuyerPortfolio.disclaimerHtml()) + '</div>';
+  h += '<div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap">';
+  h += '<button id="mbPfViewListBtn" class="btn small" onclick="mbPfSetView(\'list\')">📋 List</button>';
+  h += '<button id="mbPfViewMapBtn" class="btn small ghost" onclick="mbPfSetView(\'map\')">🗺️ Map</button>';
+  h += '<button class="btn small ghost" onclick="mbPfSetTiles(\'street\')" id="mbPfTilesStreet">Street</button>';
+  h += '<button class="btn small ghost" onclick="mbPfSetTiles(\'satellite\')" id="mbPfTilesSat">Satellite</button>';
+  h += '<button class="btn small ghost" onclick="mbPortfolioBack()">← Back to buyer</button>';
+  h += '</div>';
+  h += '<div id="mbPfMap" style="display:none;height:420px;border-radius:12px;margin-bottom:12px;border:1px solid var(--line);z-index:0"></div>';
+  h += '<div id="mbPfMapNote" style="display:none;font-size:12px;color:var(--muted);margin-bottom:12px"></div>';
+  h += '<div id="mbPfList">';
+  mbPfProps.forEach((p, i)=>{ h += BuyerPortfolio.propertyCardHtml(p, i); });
+  h += '</div></div>';
+  body.innerHTML = h;
+  mbPfView = 'list';
+  modal.classList.add('open');
+}
+function mbClosePortfolio(){
+  const m = document.getElementById('mbPortfolioModal');
+  if(m) m.classList.remove('open');
+}
+function mbPortfolioBack(){
+  mbClosePortfolio();
+  if(mbPfGlobalIndex != null) mbOpenDetail(mbPfGlobalIndex);
+}
+function mbPfSetView(v){
+  mbPfView = v;
+  const l = document.getElementById('mbPfViewListBtn'), m = document.getElementById('mbPfViewMapBtn');
+  const list = document.getElementById('mbPfList'), mapEl = document.getElementById('mbPfMap'), note = document.getElementById('mbPfMapNote');
+  if(!list || !mapEl) return;
+  if(v === 'map'){
+    if(l) l.className = 'btn small ghost'; if(m) m.className = 'btn small';
+    list.style.display = 'none'; mapEl.style.display = 'block'; if(note) note.style.display = 'block';
+    renderPortfolioMap();
+    setTimeout(()=>{ if(mbPfMap) mbPfMap.invalidateSize(); }, 150);
+  }else{
+    if(l) l.className = 'btn small'; if(m) m.className = 'btn small ghost';
+    list.style.display = ''; mapEl.style.display = 'none'; if(note) note.style.display = 'none';
+  }
+}
+function mbPfTileUrl(){
+  return (typeof BuyerMap !== 'undefined') ? BuyerMap.TILES[mbPfTiles].url : 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+}
+function mbPfTileAttr(){
+  return (typeof BuyerMap !== 'undefined') ? BuyerMap.TILES[mbPfTiles].attribution : '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+}
+function mbPfSetTiles(mode){
+  mbPfTiles = (mode === 'satellite') ? 'satellite' : 'street';
+  const s = document.getElementById('mbPfTilesStreet'), a = document.getElementById('mbPfTilesSat');
+  if(s) s.className = 'btn small' + (mbPfTiles === 'street' ? '' : ' ghost');
+  if(a) a.className = 'btn small' + (mbPfTiles === 'satellite' ? '' : ' ghost');
+  if(mbPfMap){
+    if(mbPfTileLayer){ mbPfMap.removeLayer(mbPfTileLayer); mbPfTileLayer = null; }
+    mbPfTileLayer = L.tileLayer(mbPfTileUrl(), { attribution: mbPfTileAttr(), maxZoom: 19 }).addTo(mbPfMap);
+  }
+}
+function mbPfPopupHtml(p){
+  const label = BuyerPortfolio.pricePinLabel(p);
+  let h = '<div style="font-size:13px;line-height:1.7;min-width:200px">';
+  h += '<div style="font-weight:800">' + esc(p.st || '—') + '</div>';
+  const place = [p.c || '', p.s || '', p.z || ''].filter(Boolean).join(', ');
+  if(place) h += '<div style="opacity:.75">' + esc(place) + '</div>';
+  h += '<div>Owner: ' + esc(p.ownerName || p.owner || '—') + '</div>';
+  h += '<div>' + (label ? 'Retail ' + esc(label) : 'Value not on file') + '</div>';
+  h += '<div style="font-size:11px;opacity:.6">📍 Plotted at ZIP centroid</div>';
+  h += '</div>';
+  return h;
+}
+function renderPortfolioMap(){
+  const note = document.getElementById('mbPfMapNote');
+  if(typeof L === 'undefined'){
+    if(note) note.textContent = 'Map needs an internet connection to load.';
+    return;
+  }
+  if(typeof BuyerPortfolio === 'undefined' || typeof window.BUYER_MAP_DATA === 'undefined'){
+    if(note) note.textContent = 'Portfolio map data did not load.';
+    return;
+  }
+  const split = BuyerPortfolio.splitPlottable(mbPfProps, window.BUYER_MAP_DATA.zipCoords);
+  const anyPrice = mbPfProps.some(p=>BuyerPortfolio.pricePinLabel(p));
+  if(note){
+    note.textContent = split.plotted.length + ' propert' + (split.plotted.length === 1 ? 'y' : 'ies') + ' plotted'
+      + (split.unplotted.length ? ' · ' + split.unplotted.length + ' list-only (no ZIP on file — never placed on the map)' : '')
+      + ' · 📍 pins are ZIP centroids, not exact addresses'
+      + (anyPrice ? '' : ' · no price pins: no Retail value is on file for these properties');
+  }
+  if(!mbPfMap){
+    mbPfMap = L.map('mbPfMap', { scrollWheelZoom: false });
+    mbPfMap.on('focus', ()=> mbPfMap.scrollWheelZoom.enable());
+    mbPfMap.on('blur', ()=> mbPfMap.scrollWheelZoom.disable());
+  }
+  if(mbPfTileLayer){ mbPfMap.removeLayer(mbPfTileLayer); mbPfTileLayer = null; }
+  mbPfTileLayer = L.tileLayer(mbPfTileUrl(), { attribution: mbPfTileAttr(), maxZoom: 19 }).addTo(mbPfMap);
+  if(mbPfCluster){ mbPfMap.removeLayer(mbPfCluster); mbPfCluster = null; }
+  mbPfMap.eachLayer(l=>{ if(l instanceof L.Marker) mbPfMap.removeLayer(l); });
+  if(!split.plotted.length){
+    mbPfMap.setView([39.8283, -98.5795], 4);
+    return;
+  }
+  const bounds = L.latLngBounds();
+  const useCluster = (typeof L.markerClusterGroup === 'function');
+  if(useCluster){
+    mbPfCluster = L.markerClusterGroup({ showCoverageOnHover: false, maxClusterRadius: 55 });
+    mbPfMap.addLayer(mbPfCluster);
+  }
+  split.plotted.forEach(p=>{
+    const label = BuyerPortfolio.pricePinLabel(p);
+    const icon = label
+      ? L.divIcon({ className: 'bm-price-pin', html: '<div style="background:#22c55e;color:#fff;font-weight:800;font-size:12px;line-height:26px;text-align:center;min-width:52px;padding:0 6px;height:26px;border-radius:13px;border:2px solid #fff;box-shadow:0 1px 6px rgba(0,0,0,.45)">'+esc(label)+'</div>', iconSize: [52, 26], iconAnchor: [26, 13] })
+      : bmRankIcon(p.index + 1);
+    const m = L.marker([p.lat, p.lon], { icon: icon });
+    m.bindTooltip(esc(p.st || ''), { direction: 'top', offset: [0, -14] });
+    m.bindPopup(mbPfPopupHtml(p));
+    if(useCluster) mbPfCluster.addLayer(m); else m.addTo(mbPfMap);
+    bounds.extend([p.lat, p.lon]);
+  });
+  if(bounds.isValid()) mbPfMap.fitBounds(bounds.pad(0.25));
 }
 /* ---- Polygon draw tool: click corners on the map, double-click (or Draw
    again) to finish. Buyers count as inside when their ZIP centroid is

@@ -160,9 +160,16 @@
     if (opts.globalIndex != null) {
       h += '<div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">';
       h += '<button onclick="mbShowOnMap(' + opts.globalIndex + ')" style="background:#00d4ff;color:#04121a;border:0;border-radius:8px;padding:7px 12px;font-weight:700;cursor:pointer">🗺️ View on map</button>';
+      /* Portfolio: shown only when the caller passes a count. N > 0 opens
+         the portfolio view; 0 renders an honest "none on file" line so the
+         button is never a dead end. Undefined = pre-portfolio callers. */
+      if (opts.portfolioCount != null && opts.portfolioCount > 0) {
+        h += '<button onclick="mbOpenPortfolio(' + opts.globalIndex + ')" style="background:#22c55e;color:#fff;border:0;border-radius:8px;padding:7px 12px;font-weight:700;cursor:pointer">🏠 View portfolio (' + Number(opts.portfolioCount).toLocaleString('en-US') + ')</button>';
+      }
       h += '<button onclick="mbFocusBuyer(' + opts.globalIndex + ')" style="background:#ff6b1a;color:#fff;border:0;border-radius:8px;padding:7px 12px;font-weight:700;cursor:pointer">📋 View in list</button>';
       h += '<button onclick="mbCloseDetail()" style="background:transparent;color:var(--muted);border:1px solid var(--line);border-radius:8px;padding:7px 12px;cursor:pointer">✕ Close</button>';
       h += '</div>';
+      if (opts.portfolioCount === 0) h += '<div style="font-size:12px;color:var(--muted);margin-top:8px">No linked properties on file for this buyer.</div>';
     }
     h += '</div>';
     return h;
