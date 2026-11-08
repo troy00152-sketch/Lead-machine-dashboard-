@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Test Title Email — Direct Property Buyers</title>
+<style>
+  body { font-family: system-ui, -apple-system, sans-serif; background: #0f172a; color: #e2e8f0; margin: 0; padding: 24px; }
+  .card { max-width: 640px; margin: 0 auto; background: #1e293b; border-radius: 12px; padding: 24px; }
+  h1 { font-size: 20px; margin: 0 0 8px; }
+  p { color: #94a3b8; line-height: 1.5; }
+  button { background: #2563eb; color: #fff; border: 0; border-radius: 8px; padding: 12px 20px; font-size: 16px; cursor: pointer; }
+  button:disabled { background: #475569; cursor: default; }
+  #result { margin-top: 16px; white-space: pre-wrap; word-break: break-word; background: #0f172a; border-radius: 8px; padding: 12px; font-family: monospace; font-size: 13px; min-height: 20px; }
+  .meta { font-size: 13px; color: #94a3b8; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Test Title Email</h1>
+  <p>Test-only tool. Sends <strong>one</strong> email — the Gatlin title-order test — to <strong>troy00152@gmail.com only</strong>. The recipient is fixed; this button can never send to a title company or anyone else.</p>
+  <p class="meta">To: troy00152@gmail.com<br>Subject: Title order — 705 McDowell St, Greenville, NC 27834</p>
+  <button id="sendBtn">Send test email</button>
+  <div id="result"></div>
+</div>
+<script>
+document.getElementById('sendBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('sendBtn');
+  const out = document.getElementById('result');
+  btn.disabled = true;
+  out.textContent = 'Sending...';
+  const payload = {
+    to: 'troy00152@gmail.com',
+    subject: 'Title order — 705 McDowell St, Greenville, NC 27834',
+    body: "Hello Innovative Closing Solutions team,\n\nPlease open title for the following purchase:\n\nProperty: 705 McDowell St, Greenville, NC 27834\nPurchase price: $60,000\nEarnest money deposit: $100\nContract date: November 7, 2026\nClosing date: December 7, 2026\nSeller: Willard Gatlin\nBuyer: Fitness Lead Machine LLC (Paula Thomas, Managing Member)\nAPN: 008539\nLegal description: LINCOLN PARK ADDITION 1\n\nPlease confirm receipt and let us know what you need from us to proceed.\n\nThank you,\nTroy\nDirect Property Buyers",
+    dealId: 'gatlin-705-mcdowell-test',
+    market: 'greenville'
+  };
+  try {
+    const r = await fetch('/.netlify/functions/title-order-email', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(payload)
+    });
+    const text = await r.text();
+    out.textContent = 'Status: ' + r.status + '\n' + text;
+  } catch (e) {
+    out.textContent = 'Error: ' + (e && e.message ? e.message : e);
+  }
+  btn.disabled = false;
+});
+</script>
+</body>
+</html>
