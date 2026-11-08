@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="dark">
+<title>Closing Tracker — Direct Property Buyers</title>
+<style>
+  :root{
+    --bg:#0d1117; --bg2:#131a24; --panel:#161e2b; --panel2:#1c2536;
+    --line:#26314a; --text:#e8edf5; --muted:#8b96ad; --muted2:#5d6a84;
+    --accent:#ff6b1a; --accent2:#ff8c42; --green:#2ecc71; --red:#e74c3c;
+    --blue:#3498db; --chip:#223052;
+    --radius:10px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,-apple-system,sans-serif;font-size:14px;line-height:1.5}
+  a{color:var(--accent2)}
+  .wrap{max-width:960px;margin:0 auto;padding:20px 16px 60px}
+  .topbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:20px}
+  .topbar h1{font-size:22px}
+  .topbar h1 span{color:var(--accent)}
+  .topbar small{color:var(--muted);display:block;font-size:13px}
+  .back{margin-left:auto;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:24px;padding:9px 16px;font-size:13px;font-weight:600;text-decoration:none;white-space:nowrap}
+  .back:hover{border-color:var(--accent);color:var(--accent)}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:18px;margin-bottom:16px}
+  .card h2{font-size:17px;margin-bottom:4px}
+  .card .sub{color:var(--muted);font-size:13px;margin-bottom:12px}
+  .btn{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px 16px;font-size:14px;font-weight:600;cursor:pointer}
+  .btn:hover{border-color:var(--accent)}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .btn.primary:hover{background:var(--accent2)}
+  .btn.danger{color:var(--red);border-color:var(--red)}
+  .btn:disabled{background:var(--panel2);color:var(--muted2);border-color:var(--line);cursor:default}
+  .btn.small{padding:6px 10px;font-size:13px}
+  .field{width:100%;background:var(--bg2);border:1px solid var(--line);border-radius:8px;color:var(--text);padding:9px 10px;font-size:14px;font-family:inherit}
+  .field:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(255,107,26,.15)}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px}
+  .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .form-grid .full{grid-column:1 / -1}
+  @media (max-width:640px){ .form-grid{grid-template-columns:1fr} }
+  .facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px 16px;margin:12px 0}
+  .fact .k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+  .fact .v{font-weight:600}
+  .fact .v.tbd{color:var(--accent2)}
+  .pill{display:inline-block;font-size:11px;font-weight:700;border-radius:99px;padding:2px 10px;background:var(--chip);color:var(--text)}
+  .pill.green{background:rgba(46,204,113,.15);color:var(--green)}
+  .pill.orange{background:rgba(255,107,26,.15);color:var(--accent2)}
+  .pill.red{background:rgba(231,76,60,.15);color:var(--red)}
+  .pill.grey{background:var(--panel2);color:var(--muted)}
+  .row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .row .spacer{flex:1}
+  .sec-title{font-size:13px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:16px 0 8px}
+  .milestone{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;margin-bottom:6px;background:var(--bg2)}
+  .milestone.done{opacity:.65}
+  .milestone.done .ms-label{text-decoration:line-through}
+  .milestone input[type="checkbox"]{width:18px;height:18px;accent-color:var(--green);flex-shrink:0}
+  .milestone .ms-label{flex:1}
+  .milestone .ms-x{background:none;border:0;color:var(--muted);cursor:pointer;font-size:16px;padding:2px 6px}
+  .milestone .ms-x:hover{color:var(--red)}
+  .titlefile{border:1px solid var(--line);border-radius:8px;padding:14px;background:var(--bg2)}
+  .titlefile .sent{color:var(--green);font-weight:600;font-size:13px}
+  .note{color:var(--muted);font-size:13px}
+  .warn{background:rgba(255,107,26,.12);border:1px solid var(--accent);color:var(--accent2);border-radius:8px;padding:10px 12px;font-size:13px;margin-bottom:12px}
+  .error{background:rgba(231,76,60,.12);border:1px solid var(--red);color:#ff8a7a;border-radius:8px;padding:12px;font-size:14px;margin-bottom:16px}
+  .empty{text-align:center;color:var(--muted);padding:32px 16px}
+  .empty .big{font-size:32px;margin-bottom:8px}
+  /* modal */
+  .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.65);display:none;align-items:flex-start;justify-content:center;padding:24px 12px;z-index:50;overflow-y:auto}
+  .modal-overlay.open{display:flex}
+  .modal{background:var(--panel);border:1px solid var(--line);border-radius:12px;max-width:640px;width:100%;padding:20px}
+  .modal h3{font-size:18px;margin-bottom:12px}
+  .modal .prev{background:var(--bg2);border:1px solid var(--line);border-radius:8px;padding:12px;font-size:13px}
+  .modal .prev .k{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em}
+  .modal pre{white-space:pre-wrap;word-break:break-word;font-family:inherit;font-size:13px;margin-top:4px}
+  .modal .actions{display:flex;gap:10px;justify-content:flex-end;margin-top:16px}
+  #toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px 18px;font-size:14px;display:none;z-index:60;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+  .hidden{display:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <div>
+      <h1>📁 Closing <span>Tracker</span></h1>
+      <small>Under-contract deals — title orders, EMD, and the closing checklist</small>
+    </div>
+    <a class="back" href="/index.html">← Back to Dashboard</a>
+  </div>
+
+  <div id="authError" class="error hidden">
+    Not signed in — open the <a href="/index.html">dashboard</a> and sign in first, then come back here.
+  </div>
+  <div id="loadError" class="error hidden"></div>
+
+  <div class="card">
+    <div class="row">
+      <h2 id="formTitle" style="flex:1">Add a deal</h2>
+      <button class="btn small" id="toggleFormBtn" type="button">Show form</button>
+    </div>
+    <form id="dealForm" class="hidden" style="margin-top:12px">
+      <div class="form-grid">
+        <div class="full"><label>Property address *</label><input class="field" id="f-address" required placeholder="e.g. 123 Main St"></div>
+        <div><label>City</label><input class="field" id="f-city" placeholder="City"></div>
+        <div><label>State</label><input class="field" id="f-state" placeholder="NC" maxlength="20"></div>
+        <div><label>ZIP</label><input class="field" id="f-zip" placeholder="ZIP" maxlength="20"></div>
+        <div><label>Seller</label><input class="field" id="f-seller" placeholder="Seller name"></div>
+        <div><label>Market</label>
+          <select class="field" id="f-market">
+            <option value="">— Pick a market —</option>
+            <option value="indianapolis">Indianapolis, IN</option>
+            <option value="cleveland">Cleveland, OH</option>
+            <option value="kansas_city">Kansas City, MO/KS</option>
+            <option value="greenville">Greenville, NC (Pitt County)</option>
+            <option value="jacksonville">Jacksonville, FL</option>
+            <option value="dayton">Dayton, OH</option>
+            <option value="charlotte">Charlotte, NC</option>
+          </select>
+        </div>
+        <div><label>Contract price ($)</label><input class="field" id="f-price" type="number" min="0" step="1" placeholder="60000"></div>
+        <div><label>EMD ($)</label><input class="field" id="f-emd" type="number" min="0" step="1" placeholder="100"></div>
+        <div><label>Contract date</label><input class="field" id="f-contract-date" type="date"></div>
+        <div><label>Closing date</label><input class="field" id="f-closing-date" type="date"></div>
+        <div><label>APN</label><input class="field" id="f-apn" placeholder="APN"></div>
+        <div><label>Legal description</label><input class="field" id="f-legal" placeholder="Legal description"></div>
+      </div>
+      <div class="row" style="margin-top:14px">
+        <button class="btn primary" type="submit" id="formSubmitBtn">Add deal</button>
+        <button class="btn hidden" type="button" id="formCancelBtn">Cancel edit</button>
+        <span class="note">New deals get the 6 standard closing checklist steps. The board is under-contract deals only.</span>
+      </div>
+      <div id="formError" class="error hidden" style="margin-top:12px"></div>
+    </form>
+  </div>
+
+  <div id="board"></div>
+</div>
+
+<!-- Title-order preview modal -->
+<div class="modal-overlay" id="titleModal">
+  <div class="modal">
+    <h3>Send title order</h3>
+    <div id="titleWarn" class="warn hidden"></div>
+    <div class="prev">
+      <div><span class="k">To</span><div id="pv-to"></div></div>
+      <div style="margin-top:8px"><span class="k">Subject</span><div id="pv-subject"></div></div>
+      <div style="margin-top:8px"><span class="k">Body</span><pre id="pv-body"></pre></div>
+    </div>
+    <div class="actions">
+      <button class="btn" id="pv-cancel" type="button">Cancel</button>
+      <button class="btn primary" id="pv-send" type="button">Confirm Send</button>
+    </div>
+    <div id="pv-error" class="error hidden" style="margin-top:12px"></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+'use strict';
+/* Title companies — mirror of ~/workspace/title-companies/defaults.md.
+   carolina sms -> greenville (NOT Charlotte). Charlotte/Harry Marsh is
+   manual-only, no tag. Keep this in sync with defaults.md + tracker-api.js. */
+const TITLE_COMPANIES = {
+  indianapolis: { market: 'Indianapolis, IN', company: 'Hocker Title (Hocker & Associates)', phone: '(317) 578-1630', emailOrders: 'contracts@hockerlaw.com' },
+  cleveland: { market: 'Cleveland, OH', company: 'Ohio Real Title Agency', phone: '(216) 373-9900', emailOrders: 'info@ohiorealtitle.com' },
+  kansas_city: { market: 'Kansas City, MO/KS', company: 'Clear Title Nationwide', phone: '(816) 251-4590', emailOrders: 'orders@mycleartitle.com' },
+  greenville: { market: 'Greenville, NC (Pitt County)', company: 'Innovative Closing Solutions', phone: '336-793-1953', emailOrders: 'orders@innovativeclosingsolutions.com' },
+  jacksonville: { market: 'Jacksonville, FL', company: 'Title Company of Florida', phone: '904-938-4853', emailOrders: 'orders@titlecompanyofflorida.com' },
+  dayton: { market: 'Dayton, OH', company: 'CLOSED Title', phone: '800-405-7150', emailOrders: 'order@closedtitle.com' },
+  charlotte: { market: 'Charlotte, NC', company: 'Harry Marsh Law', phone: '(704) 743-6387', emailOrders: 'Closings@HarryMarshLaw.com' },
+};
+
+const TRACKER_API = '/.netlify/functions/tracker-api';
+const TITLE_ORDER_API = '/.netlify/functions/title-order-email';
+const BUYER_LINE = 'Fitness Lead Machine LLC (Paula Thomas, Managing Member)';
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+function fmtMoney(n) {
+  if (n == null || n === '') return 'TBD';
+  const v = Number(n);
+  if (!isFinite(v)) return 'TBD';
+  return '$' + Math.round(v).toLocaleString('en-US');
+}
+const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+function fmtDateLong(iso) {
+  if (!iso) return 'TBD';
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso).slice(0, 10));
+  if (!m) return 'TBD';
+  return MONTHS[parseInt(m[2], 10) - 1] + ' ' + parseInt(m[3], 10) + ', ' + m[1];
+}
+function fmtDateShort(iso) {
+  if (!iso) return '';
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso).slice(0, 10));
+  if (!m) return String(iso).slice(0, 10);
+  return m[2] + '/' + m[3] + '/' + m[1];
+}
+function fullAddress(d) {
+  const parts = [d.address, d.city, (d.state || '') + (d.zip ? ' ' + d.zip : '')].filter(function (p) { return p && String(p).trim(); });
+  return parts.join(', ');
+}
+function resolveTitleCompany(market) {
+  if (!market) return null;
+  return TITLE_COMPANIES[String(market).toLowerCase()] || null;
+}
+/* Compose the title-order email for a deal. Missing values show as TBD —
+   never invented. Returns {to, subject, body, missing[]} — to is null when
+   the deal has no market with a title-company match. */
+function composeTitleOrder(d) {
+  const tc = resolveTitleCompany(d.market);
+  const missing = [];
+  if (!d.city) missing.push('City');
+  if (!d.state) missing.push('State');
+  if (!d.zip) missing.push('ZIP');
+  if (d.contractPrice == null || d.contractPrice === '') missing.push('Purchase price');
+  if (d.emdAmount == null || d.emdAmount === '') missing.push('Earnest money deposit');
+  if (!d.contractDate) missing.push('Contract date');
+  if (!d.closingDate) missing.push('Closing date');
+  if (!d.seller) missing.push('Seller');
+  if (!d.apn) missing.push('APN');
+  if (!d.legalDescription) missing.push('Legal description');
+  const propLine = (d.address || 'TBD') + ', ' + (d.city || 'TBD') + ', ' + (d.state || 'TBD') + ' ' + (d.zip || 'TBD');
+  const body = [
+    'Hello ' + (tc ? tc.company : 'Title Team') + ' team,',
+    '',
+    'Please open title for the following purchase:',
+    '',
+    'Property: ' + propLine,
+    'Purchase price: ' + fmtMoney(d.contractPrice),
+    'Earnest money deposit: ' + fmtMoney(d.emdAmount),
+    'Contract date: ' + fmtDateLong(d.contractDate),
+    'Closing date: ' + fmtDateLong(d.closingDate),
+    'Seller: ' + (d.seller || 'TBD'),
+    'Buyer: ' + BUYER_LINE,
+    'APN: ' + (d.apn || 'TBD'),
+    'Legal description: ' + (d.legalDescription || 'TBD'),
+    '',
+    'Please confirm receipt and let us know what you need from us to proceed.',
+    '',
+    'Thank you,',
+    'Troy',
+    'Direct Property Buyers',
+  ].join('\n');
+  return {
+    to: tc ? tc.emailOrders : null,
+    subject: 'Title order — ' + fullAddress(d),
+    body: body,
+    missing: missing,
+  };
+}
+
+let board = [];
+let editingId = null;
+let modalDealId = null;
+let modalComposed = null;
+
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.display = 'block';
+  setTimeout(function () { t.style.display = 'none'; }, 3500);
+}
+function showError(id, msg) {
+  const el = document.getElementById(id);
+  el.textContent = msg;
+  el.classList.remove('hidden');
+}
+function hideError(id) {
+  document.getElementById(id).classList.add('hidden');
+}
+
+async function api(action, body) {
+  const opts = { credentials: 'include' };
+  if (body !== undefined) {
+    opts.method = 'POST';
+    opts.headers = { 'Content-Type': 'application/json' };
+    opts.body = JSON.stringify(Object.assign({ action: action }, body));
+  }
+  const r = await fetch(TRACKER_API + (body === undefined ? '?action=' + encodeURIComponent(action) : ''), opts);
+  const text = await r.text();
+  let data = {};
+  try { data = JSON.parse(text); } catch (e) { data = {}; }
+  if (!r.ok) {
+    const err = new Error((data && data.error) || ('Request failed (HTTP ' + r.status + ')'));
+    err.status = r.status;
+    throw err;
+  }
+  return data;
+}
+
+function statusPill(status) {
+  if (status === 'closed') return '<span class="pill green">Closed</span>';
+  if (status === 'closing') return '<span class="pill orange">Closing</span>';
+  if (status === 'dead') return '<span class="pill red">Dead</span>';
+  return '<span class="pill">Under contract</span>';
+}
+function emdPill(s) {
+  if (s === 'confirmed at title') return '<span class="pill green">EMD confirmed</span>';
+  if (s === 'sent') return '<span class="pill orange">EMD sent</span>';
+  if (s === 'due') return '<span class="pill orange">EMD due</span>';
+  return '<span class="pill grey">EMD not due</span>';
+}
+function fact(label, value, isTbd) {
+  return '<div class="fact"><div class="k">' + esc(label) + '</div><div class="v' + (isTbd ? ' tbd' : '') + '">' + esc(value) + '</div></div>';
+}
+function dealCard(d) {
+  const tc = resolveTitleCompany(d.market);
+  const done = (d.milestones || []).filter(function (m) { return m.done; }).length;
+  const total = (d.milestones || []).length;
+  const sent = d.titleOrderSentAt ? '<div class="sent">✓ Title order sent ' + esc(fmtDateShort(d.titleOrderSentAt)) + ' to ' + esc(d.titleOrderSentTo || '') + '</div>' : '';
+  const canSend = !!tc;
+  const sendNote = canSend ? '' : '<div class="note" style="margin-top:6px">Title order unavailable — set a market on this deal first.</div>';
+  const ms = (d.milestones || []).map(function (m) {
+    return '<div class="milestone' + (m.done ? ' done' : '') + '">' +
+      '<input type="checkbox" data-ms="' + esc(m.id) + '" data-deal="' + esc(d.id) + '" ' + (m.done ? 'checked' : '') + '>' +
+      '<span class="ms-label">' + esc(m.label) + '</span>' +
+      '<button class="ms-x" data-ms-del="' + esc(m.id) + '" data-deal="' + esc(d.id) + '" title="Remove step">×</button></div>';
+  }).join('');
+  return '<div class="card" data-deal-card="' + esc(d.id) + '">' +
+    '<div class="row"><h2 style="flex:1">' + esc(d.address) + '</h2>' + statusPill(d.status) + ' ' + emdPill(d.emdStatus) + '</div>' +
+    '<div class="sub">' + esc(fullAddress(d)) + (tc ? ' · ' + esc(tc.market) : '') + '</div>' +
+    '<div class="facts">' +
+      fact('Seller', d.seller || 'TBD', !d.seller) +
+      fact('Purchase price', fmtMoney(d.contractPrice), d.contractPrice == null) +
+      fact('EMD', fmtMoney(d.emdAmount), d.emdAmount == null) +
+      fact('Contract date', fmtDateLong(d.contractDate), !d.contractDate) +
+      fact('Closing date', fmtDateLong(d.closingDate), !d.closingDate) +
+      fact('APN', d.apn || 'TBD', !d.apn) +
+      fact('Legal description', d.legalDescription || 'TBD', !d.legalDescription) +
+      fact('Title company', tc ? tc.company : 'TBD', !tc) +
+      fact('Title phone', tc ? tc.phone : 'TBD', !tc) +
+    '</div>' +
+    '<div class="row">' +
+      '<label style="margin:0">Status</label>' +
+      '<select class="field" style="width:auto" data-status="' + esc(d.id) + '">' +
+        ['under contract', 'closing', 'closed', 'dead'].map(function (s) {
+          return '<option value="' + s + '"' + (d.status === s ? ' selected' : '') + '>' + s + '</option>';
+        }).join('') +
+      '</select>' +
+      '<label style="margin:0">EMD</label>' +
+      '<select class="field" style="width:auto" data-emd="' + esc(d.id) + '">' +
+        ['not due', 'due', 'sent', 'confirmed at title'].map(function (s) {
+          return '<option value="' + s + '"' + (d.emdStatus === s ? ' selected' : '') + '>' + s + '</option>';
+        }).join('') +
+      '</select>' +
+      '<span class="spacer"></span>' +
+      '<button class="btn small" data-edit="' + esc(d.id) + '">Edit</button>' +
+      '<button class="btn small danger" data-del="' + esc(d.id) + '">Delete</button>' +
+    '</div>' +
+    '<div class="sec-title">Closing checklist — ' + done + ' of ' + total + ' done</div>' +
+    '<div>' + ms + '</div>' +
+    '<div class="row" style="margin-top:8px">' +
+      '<input class="field" style="flex:1" placeholder="Add a checklist step..." data-ms-add="' + esc(d.id) + '">' +
+      '<button class="btn small" data-ms-add-btn="' + esc(d.id) + '">Add step</button>' +
+    '</div>' +
+    '<div class="sec-title">Title file</div>' +
+    '<div class="titlefile">' +
+      sent +
+      '<div class="row" style="margin-top:' + (sent ? '8px' : '0') + '">' +
+        '<button class="btn primary" data-send="' + esc(d.id) + '"' + (canSend ? '' : ' disabled') + '>' + (d.titleOrderSentAt ? 'Send again' : 'Send title order') + '</button>' +
+        (d.titleOrderSentAt ? '<span class="note">Last sent ' + esc(fmtDateShort(d.titleOrderSentAt)) + '</span>' : '<span class="note">Sends from troy00152@gmail.com to ' + (tc ? esc(tc.emailOrders) : 'the market default') + '</span>') +
+      '</div>' +
+      sendNote +
+    '</div>' +
+  '</div>';
+}
+
+function renderBoard() {
+  const el = document.getElementById('board');
+  if (!board.length) {
+    el.innerHTML = '<div class="card empty"><div class="big">📁</div><div>No deals under contract yet.</div><div class="note">Add a deal above when a contract is signed — the board is under-contract deals only.</div></div>';
+    return;
+  }
+  el.innerHTML = board.map(dealCard).join('');
+}
+
+async function loadBoard() {
+  try {
+    const data = await api('getBoard');
+    board = Array.isArray(data.deals) ? data.deals : [];
+    document.getElementById('authError').classList.add('hidden');
+    hideError('loadError');
+    renderBoard();
+  } catch (e) {
+    if (e && e.status === 401) {
+      document.getElementById('authError').classList.remove('hidden');
+      document.getElementById('board').innerHTML = '';
+    } else {
+      showError('loadError', 'Could not load the board: ' + (e && e.message ? e.message : e));
+    }
+  }
+}
+
+function fillForm(d) {
+  document.getElementById('f-address').value = d.address || '';
+  document.getElementById('f-city').value = d.city || '';
+  document.getElementById('f-state').value = d.state || '';
+  document.getElementById('f-zip').value = d.zip || '';
+  document.getElementById('f-seller').value = d.seller || '';
+  document.getElementById('f-market').value = d.market || '';
+  document.getElementById('f-price').value = d.contractPrice == null ? '' : d.contractPrice;
+  document.getElementById('f-emd').value = d.emdAmount == null ? '' : d.emdAmount;
+  document.getElementById('f-contract-date').value = d.contractDate ? String(d.contractDate).slice(0, 10) : '';
+  document.getElementById('f-closing-date').value = d.closingDate ? String(d.closingDate).slice(0, 10) : '';
+  document.getElementById('f-apn').value = d.apn || '';
+  document.getElementById('f-legal').value = d.legalDescription || '';
+}
+function readForm() {
+  return {
+    address: document.getElementById('f-address').value.trim(),
+    city: document.getElementById('f-city').value.trim(),
+    state: document.getElementById('f-state').value.trim(),
+    zip: document.getElementById('f-zip').value.trim(),
+    seller: document.getElementById('f-seller').value.trim(),
+    market: document.getElementById('f-market').value,
+    contractPrice: document.getElementById('f-price').value,
+    emdAmount: document.getElementById('f-emd').value,
+    contractDate: document.getElementById('f-contract-date').value,
+    closingDate: document.getElementById('f-closing-date').value,
+    apn: document.getElementById('f-apn').value.trim(),
+    legalDescription: document.getElementById('f-legal').value.trim(),
+  };
+}
+function resetForm() {
+  editingId = null;
+  document.getElementById('dealForm').reset();
+  document.getElementById('formTitle').textContent = 'Add a deal';
+  document.getElementById('formSubmitBtn').textContent = 'Add deal';
+  document.getElementById('formCancelBtn').classList.add('hidden');
+  hideError('formError');
+}
+
+/* ---- title-order modal ---- */
+function openTitleModal(deal) {
+  modalDealId = deal.id;
+  modalComposed = composeTitleOrder(deal);
+  document.getElementById('pv-to').textContent = modalComposed.to || 'No title company — set a market on this deal first.';
+  document.getElementById('pv-subject').textContent = modalComposed.subject;
+  document.getElementById('pv-body').textContent = modalComposed.body;
+  const warn = document.getElementById('titleWarn');
+  if (modalComposed.missing.length) {
+    warn.textContent = 'Missing: ' + modalComposed.missing.join(', ') + ' — shown as TBD. Fill them in on the deal before sending, or send as-is.';
+    warn.classList.remove('hidden');
+  } else {
+    warn.classList.add('hidden');
+  }
+  hideError('pv-error');
+  document.getElementById('pv-send').disabled = !modalComposed.to;
+  document.getElementById('titleModal').classList.add('open');
+}
+function closeTitleModal() {
+  document.getElementById('titleModal').classList.remove('open');
+  modalDealId = null;
+  modalComposed = null;
+}
+
+async function sendTitleOrder() {
+  if (!modalDealId || !modalComposed || !modalComposed.to) return;
+  const btn = document.getElementById('pv-send');
+  btn.disabled = true;
+  btn.textContent = 'Sending...';
+  hideError('pv-error');
+  try {
+    const deal = board.find(function (d) { return d.id === modalDealId; }) || {};
+    const r = await fetch(TITLE_ORDER_API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        to: modalComposed.to,
+        subject: modalComposed.subject,
+        body: modalComposed.body,
+        dealId: modalDealId,
+        market: deal.market || '',
+      }),
+    });
+    const text = await r.text();
+    let data = {};
+    try { data = JSON.parse(text); } catch (e) { data = {}; }
+    if (!r.ok) throw new Error((data && data.error) || ('Send failed (HTTP ' + r.status + ')'));
+    await api('markTitleOrderSent', { id: modalDealId, to: modalComposed.to });
+    closeTitleModal();
+    await loadBoard();
+    toast('Title order sent to ' + modalComposed.to);
+  } catch (e) {
+    showError('pv-error', e && e.message ? e.message : String(e));
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Confirm Send';
+  }
+}
+
+function init() {
+  document.getElementById('toggleFormBtn').addEventListener('click', function () {
+    const f = document.getElementById('dealForm');
+    f.classList.toggle('hidden');
+    this.textContent = f.classList.contains('hidden') ? 'Show form' : 'Hide form';
+  });
+  document.getElementById('formCancelBtn').addEventListener('click', function () {
+    resetForm();
+    document.getElementById('dealForm').classList.add('hidden');
+    document.getElementById('toggleFormBtn').textContent = 'Show form';
+  });
+  document.getElementById('dealForm').addEventListener('submit', async function (ev) {
+    ev.preventDefault();
+    hideError('formError');
+    const vals = readForm();
+    if (!vals.address) { showError('formError', 'Property address is required.'); return; }
+    const btn = document.getElementById('formSubmitBtn');
+    btn.disabled = true;
+    try {
+      if (editingId) {
+        await api('updateDeal', Object.assign({ id: editingId }, vals));
+        toast('Deal updated.');
+      } else {
+        await api('createDeal', vals);
+        toast('Deal added to the board.');
+      }
+      resetForm();
+      document.getElementById('dealForm').classList.add('hidden');
+      document.getElementById('toggleFormBtn').textContent = 'Show form';
+      await loadBoard();
+    } catch (e) {
+      showError('formError', e && e.message ? e.message : String(e));
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  document.getElementById('board').addEventListener('click', async function (ev) {
+    const t = ev.target;
+    const sendBtn = t.closest ? t.closest('[data-send]') : null;
+    if (sendBtn) {
+      const deal = board.find(function (d) { return d.id === sendBtn.getAttribute('data-send'); });
+      if (deal) openTitleModal(deal);
+      return;
+    }
+    const editBtn = t.closest ? t.closest('[data-edit]') : null;
+    if (editBtn) {
+      const deal = board.find(function (d) { return d.id === editBtn.getAttribute('data-edit'); });
+      if (!deal) return;
+      editingId = deal.id;
+      fillForm(deal);
+      document.getElementById('formTitle').textContent = 'Edit deal — ' + deal.address;
+      document.getElementById('formSubmitBtn').textContent = 'Save changes';
+      document.getElementById('formCancelBtn').classList.remove('hidden');
+      document.getElementById('dealForm').classList.remove('hidden');
+      document.getElementById('toggleFormBtn').textContent = 'Hide form';
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    const delBtn = t.closest ? t.closest('[data-del]') : null;
+    if (delBtn) {
+      const deal = board.find(function (d) { return d.id === delBtn.getAttribute('data-del'); });
+      if (!deal) return;
+      if (!confirm('Delete this deal (' + deal.address + ') and its checklist?')) return;
+      try {
+        await api('deleteDeal', { id: deal.id });
+        toast('Deal deleted.');
+        await loadBoard();
+      } catch (e) {
+        toast('Delete failed: ' + (e && e.message ? e.message : e));
+      }
+      return;
+    }
+    const msDel = t.closest ? t.closest('[data-ms-del]') : null;
+    if (msDel) {
+      try {
+        await api('deleteMilestone', { id: msDel.getAttribute('data-deal'), milestoneId: msDel.getAttribute('data-ms-del') });
+        await loadBoard();
+      } catch (e) {
+        toast('Could not remove step: ' + (e && e.message ? e.message : e));
+      }
+      return;
+    }
+    const msAddBtn = t.closest ? t.closest('[data-ms-add-btn]') : null;
+    if (msAddBtn) {
+      const dealId = msAddBtn.getAttribute('data-ms-add-btn');
+      const input = document.querySelector('[data-ms-add="' + dealId + '"]');
+      const label = input ? input.value.trim() : '';
+      if (!label) return;
+      try {
+        await api('addMilestone', { id: dealId, label: label });
+        await loadBoard();
+      } catch (e) {
+        toast('Could not add step: ' + (e && e.message ? e.message : e));
+      }
+      return;
+    }
+  });
+
+  document.getElementById('board').addEventListener('change', async function (ev) {
+    const t = ev.target;
+    if (t.matches('[data-ms]')) {
+      try {
+        await api('setMilestoneDone', { id: t.getAttribute('data-deal'), milestoneId: t.getAttribute('data-ms'), done: t.checked });
+        const d = board.find(function (x) { return x.id === t.getAttribute('data-deal'); });
+        if (d) {
+          const m = (d.milestones || []).find(function (x) { return x.id === t.getAttribute('data-ms'); });
+          if (m) m.done = t.checked;
+        }
+        renderBoard();
+      } catch (e) {
+        toast('Could not update step: ' + (e && e.message ? e.message : e));
+        loadBoard();
+      }
+      return;
+    }
+    if (t.matches('[data-status]')) {
+      try {
+        await api('setDealStatus', { id: t.getAttribute('data-status'), status: t.value });
+        toast('Status updated.');
+        await loadBoard();
+      } catch (e) {
+        toast('Could not update status: ' + (e && e.message ? e.message : e));
+        loadBoard();
+      }
+      return;
+    }
+    if (t.matches('[data-emd]')) {
+      try {
+        await api('setEmdStatus', { id: t.getAttribute('data-emd'), emdStatus: t.value });
+        toast('EMD status updated.');
+        await loadBoard();
+      } catch (e) {
+        toast('Could not update EMD status: ' + (e && e.message ? e.message : e));
+        loadBoard();
+      }
+      return;
+    }
+  });
+
+  document.getElementById('pv-cancel').addEventListener('click', closeTitleModal);
+  document.getElementById('pv-send').addEventListener('click', sendTitleOrder);
+  document.getElementById('titleModal').addEventListener('click', function (ev) {
+    if (ev.target === this) closeTitleModal();
+  });
+
+  loadBoard();
+}
+
+if (typeof document !== 'undefined' && document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', init);
+} else if (typeof document !== 'undefined') {
+  init();
+}
+</script>
+</body>
+</html>
