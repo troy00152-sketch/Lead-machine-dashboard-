@@ -208,6 +208,7 @@ a{color:var(--accent)}
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="subject-lookup.js"></script>
+<script src="assets/sellability.js"></script>
 <script>
 'use strict';
 /* ============ UTILITIES ============ */
@@ -215,27 +216,16 @@ function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;',
 function fmtMoney(n){const v=Number(n);if(!isFinite(v))return'—';return'$'+Math.round(v).toLocaleString('en-US');}
 function timeAgo(iso){try{const d=new Date(iso);const s=(Date.now()-d.getTime())/1000;if(s<60)return'just now';if(s<3600)return Math.floor(s/60)+'m ago';if(s<86400)return Math.floor(s/3600)+'h ago';return Math.floor(s/86400)+'d ago';}catch(e){return'';}}
 
-/* ============ WHOLESALE SCORE (from index.html) ============ */
+/* ============ WHOLESALE SCORE (shared module — assets/sellability.js) ============
+   0-1000, same formula as index.html: Distress/400 + Equity/300 +
+   Ownership/150 + Stack & Condition/150. The data-api subject shape maps
+   straight onto it (preForeclosure, taxDelinquency, vacant, lienCount,
+   estimatedEquityRatio, absentee, freeAndClear, ownershipMonths,
+   yearBuilt, flags). */
 function wholesaleScoreSimple(prop){
-  // Simplified: Distress/45 + Equity/35 + Ownership/20
-  let distress=0, equity=0, own=0;
-  if(!prop) return {score:0,label:'NO DATA'};
-  if(prop.taxDelinquency){distress+=16;}
-  if(prop.preForeclosure){distress+=18;}
-  if(prop.vacant){distress+=12;}
-  if(prop.bankruptcy){distress+=14;}
-  if(prop.lienCount>0){distress+=10;}
-  if(prop.codeViolation){distress+=12;}
-  distress=Math.min(45,distress);
-  const eqPct = prop.estimatedEquityRatio!=null ? prop.estimatedEquityRatio*100 : null;
-  if(eqPct!=null){equity = eqPct>=90?35:eqPct>=75?31:eqPct>=60?26:eqPct>=50?21:eqPct>=35?15:eqPct>=20?9:eqPct>0?4:0;}
-  if(prop.absentee){own+=6;}
-  if(prop.freeAndClear){own+=4;}
-  if(prop.ownershipMonths>=60){own+=3;}else if(prop.ownershipMonths>=12){own+=1;}
-  own=Math.min(20,own);
-  const score=Math.max(0,Math.min(100,distress+equity+own));
-  const label=score>=75?'LAYUP':score>=55?'HOT':score>=35?'WARM':score>=15?'COOL':'COLD';
-  return {score,label,distress,equity,own};
+  if(!prop) return {score:0,label:'NO DATA',distress:0,equity:0,own:0};
+  if(typeof wholesaleScore !== 'function'){ console.warn('sellability.js not loaded — score unavailable'); return {score:0,label:'NO DATA',distress:0,equity:0,own:0}; }
+  return wholesaleScore(prop);
 }
 function scoreClass(label){return label==='LAYUP'?'score-layup':label==='HOT'?'score-hot':label==='WARM'?'score-warm':'score-cool';}
 
@@ -291,8 +281,11 @@ async function renderHotLeads(leads){
     // Base score comes from the feed (CRM signals — stack, list types,
     // appointment booked). It is REAL: never 0 just because a property
     // lookup failed. A successful property lookup upgrades it to the
-    // full Distress/Equity/Ownership score.
-    let ws = (lead.score != null) ? { score: lead.score, label: lead.scoreLabel || 'COLD', distress: (lead.scoreParts||{}).distress || 0, equity: (lead.scoreParts||{}).equity || 0, own: (lead.scoreParts||{}).own || 0 } : { score: 0, label: 'NO DATA', distress: 0, equity: 0, own: 0 };
+    // full property-based score.
+    // The feed's CRM score is 0-100 (Distress/45 + Equity/35 +
+    // Ownership/20, cc-data.js); scale it x10 onto the 0-1000
+    // Sellability scale so CRM and property cards rank together.
+    let ws = (lead.score != null) ? { score: Math.round(lead.score * 10), label: lead.scoreLabel || 'COLD', distress: Math.min(400, ((lead.scoreParts||{}).distress || 0) * 10), equity: Math.min(300, ((lead.scoreParts||{}).equity || 0) * 10), own: Math.min(150, ((lead.scoreParts||{}).own || 0) * 10) } : { score: 0, label: 'NO DATA', distress: 0, equity: 0, own: 0 };
     let scoreSrc = lead.scoreSource || 'crm';
     let prop=null, arv=null;
     if(addr && addr.length>5){
@@ -313,7 +306,7 @@ async function renderHotLeads(leads){
   cards.sort((a,b)=>b.ws.score-a.ws.score);
   grid.innerHTML=cards.map((c,i)=>{
     const moneyOrDash = v => (v && v > 0) ? fmtMoney(v) : '—';
-    const breakdown = 'Distress '+c.ws.distress+' · Equity '+c.ws.equity+' · Ownership '+c.ws.own + (c.scoreSrc==='crm' ? ' — equity unmeasured until a property lookup runs' : '');
+    const breakdown = 'Distress '+c.ws.distress+'/400 · Equity '+c.ws.equity+'/300 · Ownership '+c.ws.own+'/150' + (c.scoreSrc==='crm' ? ' — equity unmeasured until a property lookup runs' : '');
     return '<div class="lead-card" onclick="analyzeLeadAddress('+i+')" data-addr="'+esc(c.addr).replace(/"/g,'&quot;')+'">'
       +'<div class="addr">'+esc(c.addr||c.lead.name)+'</div>'
       +'<span class="score-badge '+scoreClass(c.ws.label)+'" title="'+esc(breakdown)+'">🎯 '+c.ws.score+' · '+c.ws.label+'</span>'
