@@ -16,12 +16,11 @@
      no centroid entry is NEVER placed anywhere: it stays in the list as
      unplotted. No jitter, no guessing, no city-centre fallback.
    - Stats shown come ONLY from the Master Buyers bundle fields
-     (n/p/c/s/z/pc/st/ap/pv/w/sc/ti). There is NO profit field in our data
+     (n/p/c/s/z/pc/st/ap/pv/w/sc/ti/fl). There is NO profit field in our data
      (XLeads' gross profit comes from deed buy-vs-sell history, which we do
-     not have) and the bundle does not carry `flips` (only 2,657 of 28,423
-     records have it in the source JSON) — so the tooltip shows properties
-     owned, avg purchase and portfolio value instead, and never claims
-     flips or profit. A zero value means "not on file" and renders as "—".
+     not have) — so the tooltip never claims profit. Flips (`fl`, added
+     Nov 8 2026; only 2,657 of 28,423 records have flips on file) show on
+     hover when > 0. A zero value means "not on file" and renders as "—".
    - One source of truth: every aggregated figure on the map is computed from
      the same record the list row shows. Nothing is re-derived from a second
      feed (the XLeads review found list-vs-detail disagreements; we do not
@@ -98,12 +97,15 @@
     return { plotted: plotted, unplotted: unplotted };
   }
 
-  /* Hover tooltip — portfolio stats from bundle fields only. No flips, no
-     profit: those fields do not exist in the bundle (see header). */
+  /* Hover tooltip — portfolio stats from bundle fields only. Flips
+     show when fl > 0 (bundle field `fl`, added Nov 8 2026); no profit:
+     no profit field exists anywhere in our data (XLeads' gross profit
+     comes from deed buy-vs-sell history, which we do not have). */
   function tooltipHtml(p) {
     var b = p.rec || {};
     var lines = '#' + p.rank + ' · ' + esc(b.n || '—');
     lines += '<br>' + count(b.pc) + ' properties · Avg buy ' + money(b.ap);
+    if (b.fl != null && !isNaN(Number(b.fl)) && Number(b.fl) > 0) lines += ' · Flips ' + Number(b.fl).toLocaleString('en-US');
     lines += '<br>Portfolio ' + money(b.pv) + (b.ti ? ' · ' + esc(b.ti) : '');
     return lines;
   }
@@ -121,7 +123,7 @@
     h += '<div>💰 Portfolio ' + money(b.pv) + '</div>';
     if (b.p) h += '<div>📞 ' + esc(String(b.p)) + '</div>';
     h += '<div style="font-size:11px;opacity:.6;margin-top:2px">📍 Plotted at ZIP centroid — exact address not geocoded yet</div>';
-    h += '<div style="margin-top:6px"><button onclick="mbFocusBuyer(' + p.globalIndex + ')" style="background:#ff6b1a;color:#fff;border:0;border-radius:8px;padding:6px 10px;cursor:pointer">📋 View in list →</button></div>';
+    h += '<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap"><button onclick="mbFocusBuyer(' + p.globalIndex + ')" style="background:#ff6b1a;color:#fff;border:0;border-radius:8px;padding:6px 10px;cursor:pointer">📋 View in list →</button><button onclick="mbOpenDetail(' + p.globalIndex + ')" style="background:#00d4ff;color:#04121a;border:0;border-radius:8px;padding:6px 10px;font-weight:700;cursor:pointer">👁 View details</button></div>';
     h += '</div>';
     return h;
   }

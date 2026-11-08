@@ -1,7 +1,7 @@
 /* Ranked investor map — regression tests. Fixtures only, zero credits.
    Run: node buyer-map-regression.js (exit 1 on any failure).
    Fixture buyers are REAL records copied verbatim from
-   assets/master-buyers.js (bundle fields n/p/c/s/z/pc/st/ap/pv/w/sc/ti),
+   assets/master-buyers.js (bundle fields n/p/c/s/z/pc/st/ap/pv/w/sc/ti/fl),
    cross-checked against ~/workspace/buyer-hunt-2026/master-buyers.json.
    Coordinates come only from assets/buyer-map-data.js (Census 2025
    Gazetteer ZCTA centroids, bundled Nov 8 2026). Nothing here is invented.
@@ -29,23 +29,23 @@ const DATA = dataCtx.window.BUYER_MAP_DATA;
    no-ZIP record (Eliasar Vasquez, z 00000, blank city) for the unplotted
    path — it is a real bundle record, not a synthetic one. */
 const FIXTURES = [
-  { n: 'Slb Assets Ix LLC', p: '3179388454', c: 'Indianapolis', s: 'IN', z: '46202', pc: 720, st: 'Flipper+Landlord', ap: 1427317, pv: 140251214, w: 0, sc: 85, ti: 'A - Top buyer' },
-  { n: 'In Motion Homes', p: '3174078418', c: 'Indianapolis', s: 'IN', z: '46214', pc: 230, st: 'Flipper+Landlord', ap: 13624, pv: 32917377, w: 0, sc: 85, ti: 'A - Top buyer' },
-  { n: 'Indy Boo Boo LLC', p: '7073499250', c: 'Indianapolis', s: 'IN', z: '46227', pc: 123, st: 'Flipper+Landlord', ap: 509261, pv: 26279658, w: 0, sc: 85, ti: 'A - Top buyer' },
-  { n: '22nd And Wyandotte LLC', p: '3175016452', c: 'Indianapolis', s: 'IN', z: '46203', pc: 64, st: 'Flipper+Landlord', ap: 140277, pv: 8548247, w: 0, sc: 75, ti: 'B - Solid buyer' },
-  { n: 'Ownez Holdings 1 LLC', p: '9512286086', c: 'Indianapolis', s: 'IN', z: '46268', pc: 41, st: 'Flipper+Landlord', ap: 91461, pv: 7788153, w: 0, sc: 85, ti: 'A - Top buyer' },
-  { n: 'Grace Home LLC', p: '3174124701', c: 'Indianapolis', s: 'IN', z: '46239', pc: 40, st: 'Flipper+Landlord', ap: 105365, pv: 6997834, w: 0, sc: 75, ti: 'B - Solid buyer' },
-  { n: 'City Of Indianapolis', p: '8128310827', c: 'Indianapolis', s: 'IN', z: '46204', pc: 40, st: 'Landlord', ap: 11069, pv: 442750, w: 0, sc: 65, ti: 'B - Solid buyer' },
-  { n: 'Rtolt LLC', p: '4632495426', c: 'Indianapolis', s: 'IN', z: '46250', pc: 34, st: 'Flipper+Landlord', ap: 35618, pv: 6186963, w: 0, sc: 85, ti: 'A - Top buyer' },
-  { n: 'Christopher F. Meyer', p: '3175900961', c: 'Indianapolis', s: 'IN', z: '46220', pc: 29, st: 'Landlord', ap: 29449, pv: 4661127, w: 0, sc: 85, ti: 'A - Top buyer' },
-  { n: 'Bilal Karim LLC', p: '3179036046', c: 'Indianapolis', s: 'IN', z: '46278', pc: 24, st: 'Flipper+Landlord', ap: 11885, pv: 3000035, w: 0, sc: 75, ti: 'B - Solid buyer' },
-  { n: 'Bsz Rehab Business LLC', p: '3174506089', c: 'Indianapolis', s: 'IN', z: '46239', pc: 0, st: 'Flipper', ap: 0, pv: 0, w: 0, sc: 45, ti: 'C - Possible buyer' },
-  { n: 'Nathaniel  Smith', p: '9174555667', c: 'Indianapolis', s: 'IN', z: '46219', pc: 0, st: 'Flipper', ap: 0, pv: 0, w: 0, sc: 55, ti: 'C - Possible buyer' },
-  { n: 'R & N Rei LLC', p: '3174807208', c: 'Indianapolis', s: 'IN', z: '46227', pc: 0, st: 'Flipper', ap: 0, pv: 0, w: 0, sc: 55, ti: 'C - Possible buyer' },
-  { n: 'Tlc Investments Indy LLC', p: '3176505028', c: 'Greenwood', s: 'IN', z: '46142', pc: 1, st: 'Flipper+Landlord', ap: 136000, pv: 254320, w: 0, sc: 75, ti: 'B - Solid buyer' },
-  { n: 'Tranquil Abodes LLC', p: '3179192303', c: 'Carmel', s: 'IN', z: '46032', pc: 7, st: 'Flipper+Landlord', ap: 672258, pv: 1004819, w: 0, sc: 85, ti: 'A - Top buyer' },
-  { n: 'Kai Holdings LLC', p: '7633509442', c: 'Fishers', s: 'IN', z: '46038', pc: 16, st: 'Flipper+Landlord', ap: 90863, pv: 3050261, w: 0, sc: 85, ti: 'A - Top buyer' },
-  { n: 'Eliasar Vasquez', p: '4802865991', c: '', s: 'IN', z: '00000', pc: 1, st: 'Landlord', ap: 10000, pv: 10000, w: 0, sc: 55, ti: 'C - Possible buyer' }
+  { n: 'Slb Assets Ix LLC', p: '3179388454', c: 'Indianapolis', s: 'IN', z: '46202', pc: 720, st: 'Flipper+Landlord', ap: 1427317, pv: 140251214, w: 0, sc: 85, ti: 'A - Top buyer', fl: 67 },
+  { n: 'In Motion Homes', p: '3174078418', c: 'Indianapolis', s: 'IN', z: '46214', pc: 230, st: 'Flipper+Landlord', ap: 13624, pv: 32917377, w: 0, sc: 85, ti: 'A - Top buyer', fl: 54 },
+  { n: 'Indy Boo Boo LLC', p: '7073499250', c: 'Indianapolis', s: 'IN', z: '46227', pc: 123, st: 'Flipper+Landlord', ap: 509261, pv: 26279658, w: 0, sc: 85, ti: 'A - Top buyer', fl: 204 },
+  { n: '22nd And Wyandotte LLC', p: '3175016452', c: 'Indianapolis', s: 'IN', z: '46203', pc: 64, st: 'Flipper+Landlord', ap: 140277, pv: 8548247, w: 0, sc: 75, ti: 'B - Solid buyer', fl: 4 },
+  { n: 'Ownez Holdings 1 LLC', p: '9512286086', c: 'Indianapolis', s: 'IN', z: '46268', pc: 41, st: 'Flipper+Landlord', ap: 91461, pv: 7788153, w: 0, sc: 85, ti: 'A - Top buyer', fl: 31 },
+  { n: 'Grace Home LLC', p: '3174124701', c: 'Indianapolis', s: 'IN', z: '46239', pc: 40, st: 'Flipper+Landlord', ap: 105365, pv: 6997834, w: 0, sc: 75, ti: 'B - Solid buyer', fl: 38 },
+  { n: 'City Of Indianapolis', p: '8128310827', c: 'Indianapolis', s: 'IN', z: '46204', pc: 40, st: 'Landlord', ap: 11069, pv: 442750, w: 0, sc: 65, ti: 'B - Solid buyer', fl: 0 },
+  { n: 'Rtolt LLC', p: '4632495426', c: 'Indianapolis', s: 'IN', z: '46250', pc: 34, st: 'Flipper+Landlord', ap: 35618, pv: 6186963, w: 0, sc: 85, ti: 'A - Top buyer', fl: 2 },
+  { n: 'Christopher F. Meyer', p: '3175900961', c: 'Indianapolis', s: 'IN', z: '46220', pc: 29, st: 'Landlord', ap: 29449, pv: 4661127, w: 0, sc: 85, ti: 'A - Top buyer', fl: 0 },
+  { n: 'Bilal Karim LLC', p: '3179036046', c: 'Indianapolis', s: 'IN', z: '46278', pc: 24, st: 'Flipper+Landlord', ap: 11885, pv: 3000035, w: 0, sc: 75, ti: 'B - Solid buyer', fl: 5 },
+  { n: 'Bsz Rehab Business LLC', p: '3174506089', c: 'Indianapolis', s: 'IN', z: '46239', pc: 0, st: 'Flipper', ap: 0, pv: 0, w: 0, sc: 45, ti: 'C - Possible buyer', fl: 1 },
+  { n: 'Nathaniel  Smith', p: '9174555667', c: 'Indianapolis', s: 'IN', z: '46219', pc: 0, st: 'Flipper', ap: 0, pv: 0, w: 0, sc: 55, ti: 'C - Possible buyer', fl: 3 },
+  { n: 'R & N Rei LLC', p: '3174807208', c: 'Indianapolis', s: 'IN', z: '46227', pc: 0, st: 'Flipper', ap: 0, pv: 0, w: 0, sc: 55, ti: 'C - Possible buyer', fl: 27 },
+  { n: 'Tlc Investments Indy LLC', p: '3176505028', c: 'Greenwood', s: 'IN', z: '46142', pc: 1, st: 'Flipper+Landlord', ap: 136000, pv: 254320, w: 0, sc: 75, ti: 'B - Solid buyer', fl: 8 },
+  { n: 'Tranquil Abodes LLC', p: '3179192303', c: 'Carmel', s: 'IN', z: '46032', pc: 7, st: 'Flipper+Landlord', ap: 672258, pv: 1004819, w: 0, sc: 85, ti: 'A - Top buyer', fl: 24 },
+  { n: 'Kai Holdings LLC', p: '7633509442', c: 'Fishers', s: 'IN', z: '46038', pc: 16, st: 'Flipper+Landlord', ap: 90863, pv: 3050261, w: 0, sc: 85, ti: 'A - Top buyer', fl: 19 },
+  { n: 'Eliasar Vasquez', p: '4802865991', c: '', s: 'IN', z: '00000', pc: 1, st: 'Landlord', ap: 10000, pv: 10000, w: 0, sc: 55, ti: 'C - Possible buyer', fl: 0 }
 ];
 
 console.log('buyer-map regression:');
@@ -79,17 +79,20 @@ t('splitPlottable with empty table plots nothing, unplots everything', (function
   return s.plotted.length === 0 && s.unplotted.length === 17;
 })());
 
-/* ---- tooltip: real fields only, never flips/profit ---- */
+/* ---- tooltip: real fields only, flips when on file, never profit ---- */
 var tipSlb = BuyerMap.tooltipHtml({ rec: FIXTURES[0], rank: 1, globalIndex: 0 });
 t('tooltip shows rank + name + properties + avg buy + portfolio + tier', tipSlb.indexOf('#1') !== -1 && tipSlb.indexOf('Slb Assets Ix LLC') !== -1 && tipSlb.indexOf('720 properties') !== -1 && tipSlb.indexOf('$1,427,317') !== -1 && tipSlb.indexOf('$140,251,214') !== -1 && tipSlb.indexOf('A - Top buyer') !== -1);
 var tipBsz = BuyerMap.tooltipHtml({ rec: FIXTURES[10], rank: 11, globalIndex: 10 });
 t('tooltip renders zero-data fields as — (never $0)', tipBsz.indexOf('0 properties') !== -1 && tipBsz.indexOf('Avg buy —') !== -1 && tipBsz.indexOf('Portfolio —') !== -1 && tipBsz.indexOf('$0') === -1);
-t('tooltip never claims flips or profit (fields do not exist in bundle)', !/flip|profit/i.test(tipSlb) && !/flip|profit/i.test(tipBsz));
+t('tooltip shows flips when on file (Slb fl=67)', tipSlb.indexOf('Flips 67') !== -1);
+t('tooltip omits flips when fl=0 (City Of Indianapolis)', BuyerMap.tooltipHtml({ rec: FIXTURES[6], rank: 7, globalIndex: 6 }).indexOf('Flips') === -1);
+t('tooltip never claims profit (no such field anywhere)', !/profit/i.test(tipSlb) && !/profit/i.test(tipBsz));
 t('tooltip escapes HTML in names', BuyerMap.tooltipHtml({ rec: { n: 'A <b> & Co', pc: 1, ap: 100, pv: 200, ti: 'A' }, rank: 1 }).indexOf('<b>') === -1);
 
 /* ---- popup: deep link + honesty note ---- */
 var pop = BuyerMap.popupHtml({ rec: FIXTURES[0], rank: 1, globalIndex: 0 });
 t('popup has deep-link button to globalIndex 0', pop.indexOf('mbFocusBuyer(0)') !== -1);
+t('popup has View details button to globalIndex 0', pop.indexOf('mbOpenDetail(0)') !== -1);
 var popLast = BuyerMap.popupHtml({ rec: FIXTURES[15], rank: 16, globalIndex: 15 });
 t('popup deep-link tracks the buyer (globalIndex 15)', popLast.indexOf('mbFocusBuyer(15)') !== -1);
 t('popup shows place, strategy, score, phone', pop.indexOf('Indianapolis') !== -1 && pop.indexOf('Flipper+Landlord') !== -1 && pop.indexOf('85%') !== -1 && pop.indexOf('3179388454') !== -1);

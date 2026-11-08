@@ -14,6 +14,7 @@
 <script src="assets/sellability.js"></script>
 <script src="assets/buyer-map-data.js"></script>
 <script src="assets/buyer-map.js"></script>
+<script src="assets/buyer-detail.js"></script>
 <title>Acquisition Command Center</title>
 <script>
 /* White-label branding hook — additive, fails safe to Troy's defaults.
@@ -1168,6 +1169,13 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
   <div class="modal">
     <div class="modal-head"><h3 id="lmTitle">Lead Detail</h3><button class="modal-x" onclick="closeModal()">✕</button></div>
     <div class="modal-body" id="lmBody"></div>
+  </div>
+</div>
+<!-- BUYER DETAIL MODAL — investor performance card + detail (Nov 8) -->
+<div class="modal-overlay" id="mbDetailModal">
+  <div class="modal" style="max-width:640px">
+    <div class="modal-head"><h3 id="mbDetailTitle">Buyer Detail</h3><button class="modal-x" onclick="mbCloseDetail()">✕</button></div>
+    <div class="modal-body" id="mbDetailBody"></div>
   </div>
 </div>
 <!-- SPOTLIGHT EDITOR -->
@@ -3681,11 +3689,17 @@ function renderMasterBuyers(results){
   const totalPages = Math.ceil(results.length / MB_PER_PAGE);
   const start = mbPage * MB_PER_PAGE;
   const page = results.slice(start, start + MB_PER_PAGE);
-  let html = '<table style="width:100%;font-size:13px;border-collapse:collapse"><thead><tr style="border-bottom:1px solid var(--line);text-align:left"><th style="padding:8px;cursor:pointer;white-space:nowrap" onclick="mbToggleSort()" title="Sort by score">Score ' + arrow + '</th><th style="padding:8px">Name</th><th style="padding:8px">Phone</th><th style="padding:8px">Buy Box</th><th style="padding:8px">City</th><th style="padding:8px">ST</th><th style="padding:8px">Props</th></tr></thead><tbody>';
+  let html = '<table style="width:100%;font-size:13px;border-collapse:collapse"><thead><tr style="border-bottom:1px solid var(--line);text-align:left"><th style="padding:8px;cursor:pointer;white-space:nowrap" onclick="mbToggleSort()" title="Sort by score">Score ' + arrow + '</th><th style="padding:8px">Name</th><th style="padding:8px">Phone</th><th style="padding:8px">Buy Box</th><th style="padding:8px">Flips</th><th style="padding:8px">City</th><th style="padding:8px">ST</th><th style="padding:8px">Props · Value</th><th style="padding:8px"></th></tr></thead><tbody>';
   for(let ri = 0; ri < page.length; ri++){
     const b = page[ri];
+    const gi = start + ri; /* globalIndex into window._mbResults — the same index the map pin and detail use */
     const buyBox = (b.st||'') + (b.ap ? ' · $' + Math.round(b.ap/1000) + 'K avg' : '');
-    html += `<tr id="mbRow-${ri}" style="border-bottom:1px solid var(--line)"><td style="padding:8px">${mbScoreBadge(b)}</td><td style="padding:8px">${esc(b.n||'—')}${mbVerifiedBadge(b)}</td><td style="padding:8px">${b.p?esc(formatPhone(b.p)):'—'}</td><td style="padding:8px">${esc(buyBox||'—')}</td><td style="padding:8px">${esc(b.c||'—')}</td><td style="padding:8px">${esc(b.s||'—')}</td><td style="padding:8px">${b.pc||0}</td></tr>`;
+    const pills = (typeof BuyerDetail !== 'undefined') ? BuyerDetail.pillsHtml(b) : '';
+    const flipsCell = (typeof BuyerDetail !== 'undefined') ? BuyerDetail.flips(b.fl) : ((b.fl && b.fl > 0) ? b.fl.toLocaleString('en-US') : '—');
+    const propsCell = (typeof BuyerDetail !== 'undefined')
+      ? (BuyerDetail.count(b.pc) + ' · ' + BuyerDetail.shortMoney(b.pv))
+      : ((b.pc||0) + ' · ' + (b.pv ? '$' + Math.round(b.pv/1000) + 'K' : '—'));
+    html += `<tr id="mbRow-${ri}" style="border-bottom:1px solid var(--line)"><td style="padding:8px">${mbScoreBadge(b)}</td><td style="padding:8px"><span style="cursor:pointer;color:#00d4ff" onclick="mbOpenDetail(${gi})" title="Open buyer detail">${esc(b.n||'—')}</span>${mbVerifiedBadge(b)}${pills ? ' ' + pills : ''}</td><td style="padding:8px">${b.p?esc(formatPhone(b.p)):'—'}</td><td style="padding:8px">${esc(buyBox||'—')}</td><td style="padding:8px">${flipsCell}</td><td style="padding:8px">${esc(b.c||'—')}</td><td style="padding:8px">${esc(b.s||'—')}</td><td style="padding:8px;white-space:nowrap">${propsCell}</td><td style="padding:8px"><button class="btn small" onclick="mbOpenDetail(${gi})" title="Open buyer detail">👁 View</button></td></tr>`;
   }
   html += '</tbody></table>';
   box.innerHTML = html;
@@ -3793,6 +3807,7 @@ function renderBuyerMap(){
   mbMap.eachLayer(l=>{ if(l instanceof L.Marker) mbMap.removeLayer(l); });
   if(mbMapBoundary){ mbMap.removeLayer(mbMapBoundary); mbMapBoundary = null; }
   mbMapMarkers = [];
+  mbMapMarkerByIndex = {}; /* globalIndex -> marker, for detail "View on map" */
   if(!plotted.length){
     if(!results.length) mbMap.setView([39.8283, -98.5795], 4); /* whole US, no pins yet */
     return;
@@ -3809,6 +3824,7 @@ function renderBuyerMap(){
     m.bindPopup(BuyerMap.popupHtml(p));
     if(useCluster) mbMapCluster.addLayer(m); else m.addTo(mbMap);
     mbMapMarkers.push(m);
+    mbMapMarkerByIndex[p.globalIndex] = m;
     bounds.extend([p.lat, p.lon]);
   });
   /* Boundary of the area being viewed: the market from Go to area, else
@@ -3858,6 +3874,56 @@ function mbFocusBuyer(globalIndex){
       setTimeout(()=>{ row.style.background = ''; }, 2500);
     }
   }, 100);
+}
+/* ---- Buyer detail modal: investor performance card + detail (Nov 8).
+   Opens for the buyer at globalIndex in window._mbResults — the SAME
+   index the map pin popup and the list row use, so list / detail / map
+   always resolve to the same record. ---- */
+function mbOpenDetail(globalIndex){
+  const results = window._mbResults || [];
+  if(globalIndex == null || globalIndex < 0 || globalIndex >= results.length) return;
+  const b = results[globalIndex];
+  const modal = document.getElementById('mbDetailModal');
+  const body = document.getElementById('mbDetailBody');
+  const title = document.getElementById('mbDetailTitle');
+  if(!modal || !body) return;
+  if(title) title.textContent = b.n || 'Buyer Detail';
+  body.innerHTML = (typeof BuyerDetail !== 'undefined')
+    ? BuyerDetail.detailHtml(b, { rank: globalIndex + 1, total: results.length, globalIndex: globalIndex, verifiedBadge: mbVerifiedBadge(b) })
+    : '<p style="color:var(--muted)">Buyer detail did not load.</p>';
+  modal.classList.add('open');
+}
+function mbCloseDetail(){
+  const m = document.getElementById('mbDetailModal');
+  if(m) m.classList.remove('open');
+}
+(function(){
+  const m = document.getElementById('mbDetailModal');
+  if(m) m.addEventListener('click', e=>{ if(e.target.id==='mbDetailModal') mbCloseDetail(); });
+  document.addEventListener('keydown', e=>{
+    if(e.key === 'Escape'){
+      const d = document.getElementById('mbDetailModal');
+      if(d && d.classList.contains('open')) mbCloseDetail();
+    }
+  });
+})();
+/* Detail -> map: switch to Map view, jump to the page holding this buyer,
+   re-plot, and open its pin popup. A buyer with no plotted pin (ZIP not
+   geocoded) stays in the list — the map never invents a location. */
+let mbMapMarkerByIndex = {};
+function mbShowOnMap(globalIndex){
+  const results = window._mbResults || [];
+  if(globalIndex == null || globalIndex < 0 || globalIndex >= results.length) return;
+  mbCloseDetail();
+  mbPage = Math.floor(globalIndex / MB_PER_PAGE);
+  renderMasterBuyers(results);
+  showPage('masterbuyers');
+  if(mbView !== 'map') setMbView('map');
+  setTimeout(()=>{
+    const m = mbMapMarkerByIndex[globalIndex];
+    if(m && mbMap){ mbMap.setView(m.getLatLng(), 10); m.openPopup(); }
+    else toast('This buyer is not plotted on the map — its ZIP has no centroid yet (in list only).');
+  }, 250);
 }
 /* ---- Polygon draw tool: click corners on the map, double-click (or Draw
    again) to finish. Buyers count as inside when their ZIP centroid is
