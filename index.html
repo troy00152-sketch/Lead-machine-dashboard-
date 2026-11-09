@@ -3969,8 +3969,12 @@ function mbOpenPortfolio(globalIndex){
   let h = '<div style="font-size:13px;line-height:1.7">';
   h += '<div><b>' + port.total + ' propert' + (port.total === 1 ? 'y' : 'ies') + ' linked by tax mailing address</b>';
   if(port.shared.length) h += ' — includes ' + port.shared.reduce((a,g)=>a+g.props.length,0) + ' from ' + port.sharedOwnerNames.map(x=>esc(x)).join(', ') + ' (same mailing address)';
+  if(port.sharedParcels && port.sharedParcels.length) h += ' — includes ' + port.sharedParcels.length + ' shared-address parcel' + (port.sharedParcels.length === 1 ? '' : 's') + ' (owner shown on each card)';
   h += '</div>';
   h += '<div style="font-size:12px;color:var(--muted);border:1px solid var(--line);border-radius:8px;padding:8px;margin:8px 0">' + esc(BuyerPortfolio.disclaimerHtml()) + '</div>';
+  if(mbPfProps.some(function(p){ return p.parcel; })){
+    h += '<div style="font-size:12px;color:var(--muted);border:1px solid var(--line);border-radius:8px;padding:8px;margin:8px 0">' + esc(BuyerPortfolio.countyNoteHtml()) + '</div>';
+  }
   h += '<div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap">';
   h += '<button id="mbPfViewListBtn" class="btn small" onclick="mbPfSetView(\'list\')">📋 List</button>';
   h += '<button id="mbPfViewMapBtn" class="btn small ghost" onclick="mbPfSetView(\'map\')">🗺️ Map</button>';
