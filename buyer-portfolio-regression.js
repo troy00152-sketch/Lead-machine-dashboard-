@@ -5,7 +5,8 @@
    assets/master-buyers.js (bundle) and assets/buyer-portfolio-data.js
    (built Nov 9 2026 by buyer-hunt-2026/merge_all_counties.py from the
    Nov 8 Marion bundle + the Pitt / Jackson / Cuyahoga / Duval county
-   pilots + the Nov 8-9 Nominatim geocode pass).
+   pilots + the Nov 8-9 Nominatim geocode pass + the Nov 9 follow-on
+   (Nominatim) and Census batch geocode, 49,383 keys total).
    Nothing here is invented. The portfolio holds ADDRESSES ONLY: no
    per-property sqft, beds, baths, type, value, rent, or LTV exists on
    disk for these properties (audit Nov 8 2026), so the cards must show
@@ -209,7 +210,7 @@ t('card WITH a real Retail shows Retail + labeled wholesale estimate', (function
     });
   });
   t('no invented coordinates in the full dataset (' + plottedExact + ' exact / ' + plottedZip + ' centroid / ' + unplotted + ' unplotted)', bad === 0, 'bad=' + bad);
-  t('plottable share is 49,175 of 50,861 (96.7% — 23,087 exact + 26,088 ZIP centroid)', plottedExact === 23087 && plottedZip === 26088, 'got exact=' + plottedExact + ' zip=' + plottedZip);
+  t('plottable share is 49,433 of 50,861 (97.2% — 43,897 exact + 5,536 ZIP centroid)', plottedExact === 43897 && plottedZip === 5536, 'got exact=' + plottedExact + ' zip=' + plottedZip);
   t('exact pins verified against the geocode source (' + (fixtureMode ? 'embedded fixtures' : 'full geocode-results.json') + ', ' + checkedExact + ' checked)', checkedExact === plottedExact && checkedExact > 0, 'checked=' + checkedExact);
 })();
 
