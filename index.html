@@ -12,6 +12,7 @@
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 <script src="assets/offer-math.js"></script>
 <script src="assets/sellability.js"></script>
+<script src="assets/buyer-match-score.js"></script>
 <script src="assets/buyer-map-data.js"></script>
 <script src="assets/buyer-map.js"></script>
 <script src="assets/buyer-detail.js"></script>
@@ -3474,6 +3475,7 @@ async function runBuyerMatch(prefill){
   let subj = (prefill && prefill.city) ? { city: prefill.city, state: prefill.state, zip: prefill.zip||'' } : bmParseAddress(address);
   let price = parseFloat(document.getElementById('bmPrice').value) || (prefill && prefill.price) || 0;
   // Enrich from data provider property lookup (value, beds, type)
+  let propType = '';
   try {
     const r = await fetch('/.netlify/functions/data-api?address=' + encodeURIComponent(address));
     const pj = await r.json();
@@ -3481,6 +3483,7 @@ async function runBuyerMatch(prefill){
     if(d){
       const val = d.marketValue || d.estimatedValue;
       if(!price && val) price = val;
+      if(d.propertyType) propType = d.propertyType;
       const pa = bmParseAddress(pj.address || address);
       subj = { city: subj.city || pa.city, state: subj.state || pa.state, zip: subj.zip || pa.zip };
       document.getElementById('bmPropSummary').innerHTML = `<div style="background:var(--panel2,#16233c);border:1px solid var(--line,#22345a);border-radius:10px;padding:10px 12px;font-size:13px">🏠 <strong>${esc(pj.address || address)}</strong> · Est. value <strong>$${(val||0).toLocaleString()}</strong> · ${d.beds||'—'} bd / ${d.baths||'—'} ba · ${esc(d.propertyType||'')} · Built ${d.yearBuilt||'—'}</div>`;
@@ -3488,7 +3491,7 @@ async function runBuyerMatch(prefill){
       document.getElementById('bmPropSummary').innerHTML = '';
     }
   } catch(e){ /* lookup is best-effort; matching still runs on the typed address */ }
-  bmSubject = { address, ...subj, price };
+  bmSubject = { address, ...subj, price, propertyType: propType };
   const filters = {
     investorType: document.getElementById('bmFInvestor').value,
     entityType: document.getElementById('bmFEntity').value,
@@ -3504,6 +3507,15 @@ async function runBuyerMatch(prefill){
     const r = await fetch('/.netlify/functions/buyer-match', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ zip: subj.zip, city: subj.city, state: subj.state, price, filters }) });
     const d = await r.json();
     bmResults = d.buyers || [];
+    // Buyer Match Score 0-1000 (assets/buyer-match-score.js) — same signals
+    // as the 0-99 server score, with reasons. Re-sorts the list by the new
+    // score; the server ring stays visible. Guarded: if the module failed
+    // to load, the page works exactly as before.
+    const bmDeal = { city: bmSubject.city, state: bmSubject.state, zip: bmSubject.zip, price: bmSubject.price, propertyType: bmSubject.propertyType || '' };
+    if (typeof buyerMatchScore === 'function') {
+      bmResults = bmResults.map(function (b) { b._match = buyerMatchScore(bmDeal, b); return b; })
+        .sort(function (x, y) { return y._match.score - x._match.score || y.score - x.score; });
+    }
     document.getElementById('bmDbBadge').textContent = (d.database||0).toLocaleString() + ' BUYER DATABASE';
     if(!bmResults.length){
       status.innerHTML = '';
@@ -3519,6 +3531,7 @@ async function runBuyerMatch(prefill){
           <div style="font-weight:700;font-size:15px">${esc(b.name)}</div>
           <div style="color:var(--muted);font-size:12px;text-transform:capitalize">${esc(b.city||'')}${b.state?', ':''}${esc(b.state||'')} ${esc(b.zip||'')}</div>
           <div style="margin-top:4px">${bmBadges(b)}</div>
+          ${b._match ? `<div style="margin-top:6px;font-size:12px;line-height:1.5"><strong style="color:var(--text)">🎯 Match ${b._match.score} · ${esc(b._match.label)}</strong><br><span style="color:var(--muted)">${esc(b._match.topReasons.join(' · '))}</span>${b._match.missing.length ? `<br><span style="color:var(--muted)">⚠️ ${esc(b._match.missing.join('; '))}</span>` : ''}</div>` : ''}
         </div>
         <div style="text-align:right;font-size:12px;color:var(--muted);flex-shrink:0">
           <div>🏘️ <strong style="color:var(--text)">${b.portfolioCount}</strong> properties</div>
@@ -3537,6 +3550,7 @@ function openBuyerProfile(i){
   const emails = (b.emails||[]).map(e=>`<div style="font-size:13px;margin-bottom:4px">✉️ <a href="mailto:${esc(e)}" style="color:var(--accent)">${esc(e)}</a></div>`).join('') || '<p style="color:var(--muted);font-size:13px">No email on file.</p>';
   document.getElementById('bmProfileBody').innerHTML = `
     <div style="display:flex;gap:14px;align-items:center;margin-bottom:6px">${bmRing(b.score)}<div><div style="font-size:18px;font-weight:800">${esc(b.name)}</div><div style="color:var(--muted);font-size:13px;text-transform:capitalize">${esc(b.city||'')}${b.state?', ':''}${esc(b.state||'')} ${esc(b.zip||'')}</div><div style="margin-top:4px">${bmBadges(b)}</div></div></div>
+    ${b._match ? `<h3 style="color:var(--accent);font-size:13px;text-transform:uppercase;letter-spacing:.5px;margin:16px 0 8px">Match Score</h3><div style="font-size:14px;margin-bottom:4px"><strong>🎯 ${b._match.score} / 1000 · ${esc(b._match.label)}</strong> <span style="color:var(--muted);font-size:12px">(server score ${b.score}/99)</span></div><div style="font-size:13px;line-height:1.6">${b._match.topReasons.map(function (r) { return '• ' + esc(r); }).join('<br>')}</div>${b._match.missing.length ? `<div style="font-size:12px;color:var(--muted);margin-top:6px">⚠️ ${esc(b._match.missing.join('; '))}</div>` : ''}` : ''}
     <h3 style="color:var(--accent);font-size:13px;text-transform:uppercase;letter-spacing:.5px;margin:16px 0 8px">Portfolio</h3>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px">
       <div class="chip"><span>Portfolio Size</span><b>${b.portfolioCount} properties</b></div>
@@ -4038,7 +4052,7 @@ function mbPfPopupHtml(p){
   if(place) h += '<div style="opacity:.75">' + esc(place) + '</div>';
   h += '<div>Owner: ' + esc(p.ownerName || p.owner || '—') + '</div>';
   h += '<div>' + (label ? 'Retail ' + esc(label) : 'Value not on file') + '</div>';
-  h += '<div style="font-size:11px;opacity:.6">📍 Plotted at ZIP centroid</div>';
+  h += '<div style="font-size:11px;opacity:.6">' + (p.plot === 'exact' ? '📍 Exact address' : '📍 Plotted at ZIP centroid') + '</div>';
   h += '</div>';
   return h;
 }
@@ -4055,9 +4069,15 @@ function renderPortfolioMap(){
   const split = BuyerPortfolio.splitPlottable(mbPfProps, window.BUYER_MAP_DATA.zipCoords);
   const anyPrice = mbPfProps.some(p=>BuyerPortfolio.pricePinLabel(p));
   if(note){
+    const nExact = split.plotted.filter(p=>p.plot === 'exact').length;
+    const nZip = split.plotted.length - nExact;
+    let pinNote = '';
+    if(nExact && nZip) pinNote = ' · 📍 ' + nExact + ' exact-address pin' + (nExact === 1 ? '' : 's') + ', ' + nZip + ' ZIP-centroid pin' + (nZip === 1 ? '' : 's');
+    else if(nExact) pinNote = ' · 📍 all pins at exact addresses';
+    else if(nZip) pinNote = ' · 📍 pins are ZIP centroids, not exact addresses';
     note.textContent = split.plotted.length + ' propert' + (split.plotted.length === 1 ? 'y' : 'ies') + ' plotted'
       + (split.unplotted.length ? ' · ' + split.unplotted.length + ' list-only (no ZIP on file — never placed on the map)' : '')
-      + ' · 📍 pins are ZIP centroids, not exact addresses'
+      + pinNote
       + (anyPrice ? '' : ' · no price pins: no Retail value is on file for these properties');
   }
   if(!mbPfMap){

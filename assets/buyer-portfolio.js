@@ -15,6 +15,16 @@
      beds / baths / living sq ft / year built from the county property
      card where one was fetched. Those are REAL holdings for that
      mailing address, not samples.
+   - Four more counties, Nov 9 2026 (same pattern, free public county
+     records): Pitt NC (Greenville), Jackson MO (Kansas City),
+     Cuyahoga OH (Cleveland), Duval FL (Jacksonville). Each object
+     carries `co` (county) and county-specific labeling: Cuyahoga's
+     `av` is the county's TAXABLE value (avKind 'taxable') with the
+     Ohio 35% figure as `av35`; Jackson's values are tax year 2024
+     (avYear '2024'); Pitt lot sq ft is computed from acres
+     (lotSrc 'acres'); Duval card values win over the layer and its
+     baths is a single number (bathsSingle). See the county
+     descriptions in assets/buyer-portfolio-data.js.
    - Shared tax-mailing-address groups: buyers sharing one mailing
      address have their properties listed together, each card labeled
      with its real owner name (the XLeads Aj-style mix, reproduced
@@ -33,15 +43,26 @@
      buy-vs-sell history. A Wholesale figure appears ONLY when a real
      Retail value exists, and is labeled "Wholesale estimate
      (Retail × 0.65)" — never presented as a recorded value.
-   - Pins plot ONLY at bundled ZIP centroids (buyer-map-data.js).
-     A property with no ZIP on file is list-only, never placed
-     anywhere. No jitter, no guessing, no city-centre fallback.
+   - Pins plot at the property's EXACT street address when the
+     Nov 8-9 geocode pass matched it (lat/lon on the record,
+     plot 'exact'); otherwise at the bundled ZIP centroid
+     (buyer-map-data.js, plot 'zip'). A property with no ZIP on file
+     and no geocode hit is list-only, never placed anywhere. No
+     jitter, no guessing, no city-centre fallback.
    - COUNTY DETAIL LABELING (hard rule): assessed value is a TAX
      value, never a retail/market price. Cards show it ONLY as
-     "Assessed value". It NEVER feeds price pins (pricePinLabel reads
-     `retail` only) and NEVER feeds the wholesale estimate. Lot sq ft
-     (ESTSQFT, the parcel's lot) and living sq ft (property-card
-     Fin.Liv.Area) are separate rows — never merged into one "Sq ft". */
+     "Assessed value" — except Cuyahoga, whose `av` is the county's
+     TAXABLE value ("Taxable Value", avKind 'taxable', with the Ohio
+     35% figure as a separate "Assessed (35%)" row from `av35`), and
+     Jackson, whose values are tax year 2024 ("Assessed value
+     (2024)", avYear '2024'). It NEVER feeds price pins
+     (pricePinLabel reads `retail` only) and NEVER feeds the
+     wholesale estimate. Lot sq ft (the parcel's lot) and living sq
+     ft (property-card living area) are separate rows — never merged
+     into one "Sq ft". Pitt lot sq ft is computed from the county's
+     Acres (lotSrc 'acres') and is labeled as computed, never as a
+     measured lot. Duval baths is a single county number
+     (bathsSingle) — rendered "2.5 baths", never "2.5 full". */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
   else root.BuyerPortfolio = factory();
@@ -76,24 +97,35 @@
 
   /* Normalize one portfolio-data entry into a property object.
      Array form [street, city, state, zip] is what the build emits
-     for sample addresses; object form carries county detail:
+     for sample addresses; a geocoded sample carries [4]=lat, [5]=lon.
+     Object form carries county detail:
      lotsqft (parcel lot sq ft), livsqft (living area), beds,
-     baths (full baths), bathsHalf (half baths), year (year built),
+     baths (full baths) or a single county baths number (bathsSingle),
+     bathsHalf (half baths), year (year built), year_efftv, rooms,
      type, av (assessed value — TAX value, never retail), avLand,
-     avImp, parcel (county parcel number), retail, rent, ltv.
+     avImp, avKind ('taxable' for Cuyahoga), avYear ('2024' for
+     Jackson), av35 (Cuyahoga 35% assessed), lotSrc ('acres' for Pitt
+     computed-from-acres lot), parcel (county parcel number), co
+     (county: marion/pitt/jackson/cuyahoga/duval), lat/lon (exact
+     geocode hit), retail, rent, ltv.
      `av` is deliberately NOT mapped to `retail`. */
   function toProp(entry, ownerNorm, ownerName) {
     var p = { owner: ownerNorm || '', ownerName: ownerName || '' };
     if (Array.isArray(entry)) {
       p.st = entry[0] || ''; p.c = entry[1] || '';
       p.s = entry[2] || ''; p.z = entry[3] || '';
+      if (entry.length > 5 && isFinite(entry[4]) && isFinite(entry[5])) {
+        p.lat = entry[4]; p.lon = entry[5];
+      }
     } else if (entry && typeof entry === 'object') {
       p.st = entry.st || entry.street || ''; p.c = entry.c || entry.city || '';
       p.s = entry.s || entry.state || ''; p.z = entry.z || entry.zip || '';
+      if (entry.lat != null && entry.lon != null) { p.lat = entry.lat; p.lon = entry.lon; }
       if (entry.sqft != null) p.sqft = entry.sqft;
       if (entry.beds != null) p.beds = entry.beds;
       if (entry.baths != null) p.baths = entry.baths;
       if (entry.bathsHalf != null) p.bathsHalf = entry.bathsHalf;
+      if (entry.bathsSingle) p.bathsSingle = true;
       if (entry.type) p.type = entry.type;
       if (entry.retail != null) p.retail = entry.retail;
       if (entry.rent != null) p.rent = entry.rent;
@@ -101,11 +133,18 @@
       if (entry.av != null) p.av = entry.av;
       if (entry.avLand != null) p.avLand = entry.avLand;
       if (entry.avImp != null) p.avImp = entry.avImp;
+      if (entry.avKind) p.avKind = entry.avKind;
+      if (entry.avYear) p.avYear = entry.avYear;
+      if (entry.av35 != null) p.av35 = entry.av35;
+      if (entry.lotSrc) p.lotSrc = entry.lotSrc;
       if (entry.lotsqft != null) p.lotsqft = entry.lotsqft;
       if (entry.livsqft != null) p.livsqft = entry.livsqft;
       if (entry.year != null) p.year = entry.year;
+      if (entry.year_efftv != null) p.year_efftv = entry.year_efftv;
+      if (entry.rooms != null) p.rooms = entry.rooms;
       if (entry.parcel) p.parcel = entry.parcel;
       if (entry.oid != null) p.oid = entry.oid;
+      if (entry.co) p.co = entry.co;
       /* County owner name (entry.on) is the LEGAL owner per the county
          and overrides the buyer-name param: the match is by mailing
          address, and the legal owner often differs (manager / trustee
@@ -188,19 +227,28 @@
     return { value: Math.round(Number(retail) * 0.65), label: 'Wholesale estimate (Retail × 0.65)' };
   }
 
-  /* Split properties into plotted / unplotted. A plotted pin's lat/lon
-     is copied EXACTLY from the ZIP centroid table — never rounded, never
-     jittered, never defaulted. Anything without a centroid entry lands in
-     `unplotted` with its index kept, so the list can still show it. */
+  /* Split properties into plotted / unplotted. An EXACT geocode hit
+     (p.lat/p.lon from the Nov 8-9 Nominatim pass) always wins and is
+     marked plot 'exact'. Otherwise the pin falls back to the ZIP
+     centroid table, copied EXACTLY — never rounded, never jittered,
+     never defaulted — and is marked plot 'zip'. Anything with neither
+     lands in `unplotted` with its index kept, so the list can still
+     show it. */
   function splitPlottable(props, zipCoords) {
     var plotted = [], unplotted = [];
     var table = zipCoords || {};
     (props || []).forEach(function (p, i) {
+      var q = {}; for (var k in p) q[k] = p[k];
+      q.index = i;
+      if (p && isFinite(p.lat) && isFinite(p.lon)) {
+        q.lat = p.lat; q.lon = p.lon; q.plot = 'exact';
+        plotted.push(q);
+        return;
+      }
       var z = String((p && p.z) || '').trim();
       var c = table[z];
       if (c && isFinite(c[0]) && isFinite(c[1])) {
-        var q = {}; for (var k in p) q[k] = p[k];
-        q.lat = c[0]; q.lon = c[1]; q.plot = 'zip'; q.index = i;
+        q.lat = c[0]; q.lon = c[1]; q.plot = 'zip';
         plotted.push(q);
       } else {
         unplotted.push({ prop: p, index: i });
@@ -229,17 +277,33 @@
     var rows = [];
     if (p.sqft != null && p.sqft !== '') rows.push(['Sq ft', Number(p.sqft).toLocaleString('en-US')]);
     if (p.livsqft != null && p.livsqft !== '') rows.push(['Living sq ft', Number(p.livsqft).toLocaleString('en-US')]);
-    if (p.lotsqft != null && p.lotsqft !== '') rows.push(['Lot sq ft', Number(p.lotsqft).toLocaleString('en-US')]);
+    if (p.lotsqft != null && p.lotsqft !== '') rows.push([p.lotSrc === 'acres' ? 'Lot sq ft (from acres)' : 'Lot sq ft', Number(p.lotsqft).toLocaleString('en-US')]);
     if (p.beds != null && p.beds !== '') rows.push(['Beds', esc(String(p.beds))]);
-    if ((p.baths != null && p.baths !== '') || (p.bathsHalf != null && p.bathsHalf !== '')) {
+    if (p.bathsSingle) {
+      /* Duval: the county reports ONE baths number (may be fractional)
+         — "2.5 baths", never "2.5 full". */
+      if (p.baths != null && p.baths !== '') rows.push(['Baths', esc(String(p.baths))]);
+    } else if ((p.baths != null && p.baths !== '') || (p.bathsHalf != null && p.bathsHalf !== '')) {
       var b = '';
       if (p.baths != null && p.baths !== '') b = String(p.baths) + ' full';
       if (p.bathsHalf != null && p.bathsHalf !== '') b = (b ? b + ' · ' : '') + String(p.bathsHalf) + ' half';
       rows.push(['Baths', esc(b)]);
     }
+    if (p.rooms != null && p.rooms !== '') rows.push(['Rooms', esc(String(p.rooms))]);
     if (p.type) rows.push(['Type', esc(p.type)]);
     if (p.year != null && p.year !== '') rows.push(['Year built', esc(String(p.year))]);
-    if (p.av != null && p.av !== '' && Number(p.av) > 0) rows.push(['Assessed value', money(p.av)]);
+    if (p.year_efftv != null && p.year_efftv !== '' && p.year_efftv !== p.year) rows.push(['Effective year', esc(String(p.year_efftv))]);
+    /* Assessed-value label is county-specific (hard rule): Cuyahoga's
+       `av` is the county's TAXABLE value; Jackson's values are tax
+       year 2024; everything else is plain "Assessed value". The
+       Cuyahoga 35% figure rides as a separate "Assessed (35%)" row. */
+    if (p.av != null && p.av !== '' && Number(p.av) > 0) {
+      var avLabel = 'Assessed value';
+      if (p.avKind === 'taxable') avLabel = 'Taxable value';
+      else if (p.avYear) avLabel = 'Assessed value (' + p.avYear + ')';
+      rows.push([avLabel, money(p.av)]);
+    }
+    if (p.av35 != null && p.av35 !== '' && Number(p.av35) > 0) rows.push(['Assessed (35%)', money(p.av35)]);
     if (p.retail != null && p.retail !== '' && Number(p.retail) > 0) rows.push(['Retail value', money(p.retail)]);
     if (p.rent != null && p.rent !== '') rows.push(['Rent', esc(String(p.rent))]);
     if (p.ltv != null && p.ltv !== '') rows.push(['LTV', esc(String(p.ltv))]);
@@ -267,7 +331,7 @@
      county parcels (any prop with a parcel number). States the source
      and the assessed-value rule in plain language. */
   function countyNoteHtml() {
-    return 'County detail (Marion County, Indianapolis pilot): lot sq ft, property type and assessed value come from the Marion County Assessor parcel layer (2026 assessment year); beds, baths, living sq ft and year built come from the county property card for that parcel, where one was fetched. Assessed value is a TAX value, not a market or retail price — it never appears as a price pin or a retail value. Fields the county does not carry for a property show as not on file.';
+    return 'County detail (Marion IN, Pitt NC, Jackson MO, Cuyahoga OH, Duval FL — free public county records): lot sq ft, property type and assessed value come from the county parcel layer; beds, baths, living sq ft and year built come from the county property card for that parcel, where one was fetched. Assessed value is a TAX value, not a market or retail price — it never appears as a price pin or a retail value. Cuyahoga values are the county\'s Taxable Value (full appraised), with the Ohio 35% figure shown separately as Assessed (35%); Jackson values are tax year 2024; Pitt lot sq ft is computed from the county\'s Acres. Fields the county does not carry for a property show as not on file.';
   }
 
   return {
