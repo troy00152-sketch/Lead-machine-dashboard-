@@ -3460,6 +3460,14 @@ function bmBadges(b){
 function bmParseAddress(a){
   const m = a.match(/^(.*?)[,\s]+([A-Za-z .'-]+?)[,\s]+([A-Za-z]{2})\s*(\d{5})?\s*$/);
   if(m) return { street: m[1].replace(/,$/,''), city: m[2].trim(), state: m[3].toUpperCase(), zip: m[4]||'' };
+  // No state given ("3326 w Michigan st Indianapolis 46222") — the old code
+  // fell through to ZIP-only and the match collapsed to 1 buyer. City + ZIP
+  // alone still matches (server geoScore gives same-city 34 with no state).
+  // Anchor on the street suffix so "w Michigan st" stays in the street and
+  // multi-word cities ("Kansas City") still parse. Known gap: "St Louis"
+  // without a state parses as city "Louis" — use the state form there.
+  const m2 = a.match(/^(.*\b(?:St|Street|Ave|Avenue|Rd|Road|Dr|Drive|Ln|Lane|Blvd|Boulevard|Ct|Court|Way|Pl|Place|Ter|Terrace|Cir|Circle|Hwy|Highway)\b)[,\s]+([A-Za-z.'-]+(?: [A-Za-z.'-]+){0,2})\s+(\d{5})\s*$/i);
+  if(m2) return { street: m2[1].replace(/,$/,''), city: m2[2].trim(), state: '', zip: m2[3] };
   const z = a.match(/(\d{5})\s*$/);
   return { street: a, city: '', state: '', zip: z ? z[1] : '' };
 }
