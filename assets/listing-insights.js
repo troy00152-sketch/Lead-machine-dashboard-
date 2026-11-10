@@ -2,13 +2,16 @@
 // Pure, testable: MLS status set, LISTED-FIRST gate mapping, $/sqft,
 // above/below math, RentCast /listings/sale mapping, and the panel HTML.
 // Tests run on fixtures only — zero live API credits, zero network.
-// The panel's data is hand-checked (Zillow / DealMachine) and typed in by
-// Troy. The live-feed seam is fetchListingInsights() below, ON since Nov 9
-// (Troy: "Turn auto-fill back on") on the RentCast free tier — 50 calls/mo
-// shared with the ZIP search + AVM lookup; over 50 it bills $0.20/call
-// with no hard cap, so usage stays under 50. RentCast has NO description
-// field and cannot tell EXPIRED from WITHDRAWN from SOLD (all "Inactive") —
-// description and the exact inactive reason stay hand-checked.
+// The panel's data is hand-checked and typed in by Troy. The live-feed seam
+// is fetchListingInsights() below, ON since Nov 9 (Troy: "Turn auto-fill
+// back on") on the RentCast free tier — 50 calls/mo; over 50 it bills
+// $0.20/call with no hard cap, so usage stays under 50. The key lives
+// server-side only (RENTCAST_API_KEY in Netlify env, read by the
+// rentcast-listing proxy function) — NO key in the browser, no key field in
+// Settings (Troy, Nov 9: no one may find the key when the system is sold).
+// RentCast has NO description field and cannot tell EXPIRED from WITHDRAWN
+// from SOLD (all "Inactive") — description and the exact inactive reason
+// stay hand-checked.
 (function (root) {
   'use strict';
 
@@ -184,12 +187,12 @@
   var LISTING_AUTOFETCH_ENABLED = true;
   function fetchListingInsights(address) {
     if (!LISTING_AUTOFETCH_ENABLED) return Promise.resolve(null);
-    if (typeof fetch === 'undefined' || typeof getRentcastKey !== 'function') return Promise.resolve(null);
-    var key = '';
-    try { key = getRentcastKey(); } catch (e) { key = ''; }
-    if (!key || !address) return Promise.resolve(null);
-    var url = 'https://api.rentcast.io/v1/listings/sale?address=' + encodeURIComponent(address) + '&limit=5';
-    return fetch(url, { headers: { 'X-Api-Key': key, 'accept': 'application/json' } })
+    if (typeof fetch === 'undefined') return Promise.resolve(null);
+    if (!address) return Promise.resolve(null);
+    // Server-side key: the rentcast-listing Netlify function holds the key
+    // (RENTCAST_API_KEY env). The browser never sees it — no key here.
+    var url = '/.netlify/functions/rentcast-listing?address=' + encodeURIComponent(address);
+    return fetch(url, { headers: { 'accept': 'application/json' } })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (j) {
         if (!j || !Array.isArray(j) || !j.length) return null;

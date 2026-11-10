@@ -245,21 +245,62 @@ console.log('Detail view: free & clear:');
 const fcHtml = PDV.detailViewHtml(Object.assign({}, chardayView, { mortgage: { freeClear: true } }));
 contains('free & clear loans section', fcHtml, 'Free &amp; Clear');
 
-// ---- 10. Settings: RentCast key field exists (Nov 9 — the field was
-// missing from the deployed Settings, so getRentcastKey() always returned
-// '' and nothing auto-filled; the save/toggle functions were orphaned) ----
-console.log('Settings: RentCast key field:');
+// ---- 10. No key in the browser (Nov 9 — Troy sells the system; the key
+// lives server-side only, in the rentcast-listing proxy function) ----
+console.log('No key in the browser:');
 const indexHtml = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
-check('index.html has RentCast key input', indexHtml.includes('id="rentcastKey"'), true);
-check('index.html wires Save Key', indexHtml.includes('onclick="saveRentcastKey()"'), true);
-check('index.html wires Show/Hide toggle', indexHtml.includes('onclick="toggleRentcastKeyVis()"'), true);
-check('index.html has saved-state span', indexHtml.includes('id="rentcastKeySavedMsg"'), true);
-check('settings open shows saved state', indexHtml.includes("if(name === 'settings') rentcastKeyState();"), true);
+const liSrc = fs.readFileSync(path.join(__dirname, 'assets/listing-insights.js'), 'utf8');
+check('no RentCast key field in Settings', indexHtml.indexOf('id="rentcastKey"'), -1);
+check('no RentCast key in localStorage', indexHtml.indexOf('acc_rentcast_key'), -1);
+check('no direct RentCast fetch in page', indexHtml.indexOf('api.rentcast.io'), -1);
+check('no key helpers in page', indexHtml.indexOf('getRentcastKey'), -1);
+check('no key save in page', indexHtml.indexOf('saveRentcastKey'), -1);
+check('adapter calls the proxy', liSrc.includes('/.netlify/functions/rentcast-listing'), true);
+check('adapter never calls RentCast direct', liSrc.indexOf('api.rentcast.io'), -1);
+check('adapter never reads a browser key', liSrc.indexOf('getRentcastKey'), -1);
 check('no stale "no live feed" copy', indexHtml.indexOf('no live feed supplies them yet'), -1);
-check('saveRentcastKey clears the field after save', indexHtml.includes("getElementById('rentcastKey').value = '';"), true);
-check('saveRentcastKey re-masks after save', indexHtml.includes("getElementById('rentcastKey').type = 'password';"), true);
 check('description label has no paste prompt', indexHtml.indexOf('paste from Zillow'), -1);
 check('description placeholder has no paste prompt', indexHtml.indexOf('Paste the listing description here'), -1);
 
-console.log('\n' + pass + ' passed, ' + fail + ' failed');
-process.exit(fail ? 1 : 0);
+// ---- 11. APN + legal description show in the detail view (Nov 9) ----
+console.log('Detail view: APN + legal description:');
+check('detail data passes APN', indexHtml.includes("apn: prop ? (prop.apn || '') : ''"), true);
+check('detail data passes legal description', indexHtml.includes("legalDescription: prop ? (prop.legalDescription || '') : ''"), true);
+const apnView = Object.assign({}, chardayView, { apn: '49-11-04-162-032.000-901', legalDescription: 'A V BROWNS WESTMORELAND PLACE L10' });
+const apnHtml = PDV.detailViewHtml(apnView);
+contains('APN chip shows parcel', apnHtml, '49-11-04-162-032.000-901');
+contains('legal description shows', apnHtml, 'A V BROWNS WESTMORELAND PLACE L10');
+contains('empty view shows APN label', emptyViewHtml, 'APN');
+contains('empty view shows legal label', emptyViewHtml, 'Legal Description:');
+
+// ---- 12. Proxy handler: server-side key only (async) ----
+(async function () {
+  console.log('Proxy: rentcast-listing:');
+  const proxy = require('./netlify/functions/rentcast-listing.js');
+  const savedKey = process.env.RENTCAST_API_KEY;
+  const savedFetch = global.fetch;
+  try {
+    delete process.env.RENTCAST_API_KEY;
+    var noKey = await proxy.handler({ queryStringParameters: { address: '3326 W Michigan St, Indianapolis, IN 46222' } });
+    check('proxy without key returns 503', noKey.statusCode, 503);
+    check('proxy without key says NO_KEY', JSON.parse(noKey.body).error, 'NO_KEY');
+    process.env.RENTCAST_API_KEY = 'test-key-123';
+    var noAddr = await proxy.handler({ queryStringParameters: {} });
+    check('proxy without address returns 400', noAddr.statusCode, 400);
+    var seen = {};
+    global.fetch = async function (url, opts) {
+      seen.url = url; seen.headers = opts.headers;
+      return { status: 200, text: async function () { return JSON.stringify([{ formattedAddress: '3326 W Michigan St, Indianapolis, IN 46222', status: 'Inactive', price: 152400 }]); } };
+    };
+    var ok = await proxy.handler({ queryStringParameters: { address: '3326 W Michigan St, Indianapolis, IN 46222' } });
+    check('proxy with key returns 200', ok.statusCode, 200);
+    check('proxy passes the listing through', JSON.parse(ok.body)[0].price, 152400);
+    check('proxy sends the env key', seen.headers['X-Api-Key'], 'test-key-123');
+    check('proxy calls listings/sale', seen.url.indexOf('https://api.rentcast.io/v1/listings/sale?address=') === 0, true);
+  } finally {
+    if (savedKey === undefined) delete process.env.RENTCAST_API_KEY; else process.env.RENTCAST_API_KEY = savedKey;
+    global.fetch = savedFetch;
+  }
+  console.log('\n' + pass + ' passed, ' + fail + ' failed');
+  process.exit(fail ? 1 : 0);
+})();

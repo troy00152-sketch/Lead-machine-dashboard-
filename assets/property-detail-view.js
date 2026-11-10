@@ -135,7 +135,9 @@
       + chip('Year Built', dash(v.yearBuilt)) + chip('Type', dash(v.type))
       + chip('Units', dash(v.units || 1)) + chip('Lot Size', lot)
       + chip('Owner', dash(v.owner)) + chip('Last Sale', v.lastSale && v.lastSale.amount != null ? money(v.lastSale.amount) + (v.lastSale.date ? ' · ' + fmtDate(String(v.lastSale.date).slice(0, 10)) : '') : '—')
-      + '</div>';
+      + chip('APN', dash(v.apn))
+      + '</div>'
+      + '<div style="font-size:13px;line-height:1.5;margin-top:10px"><span style="color:var(--muted)">Legal Description:</span> ' + (v.legalDescription ? esc(v.legalDescription) : '—') + '</div>';
   }
   function dealInsightsHtml(v) {
     var s = v.sellability || {};

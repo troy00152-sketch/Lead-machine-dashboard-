@@ -1099,14 +1099,6 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
           <p style="color:var(--muted);font-size:13px;margin-bottom:10px">All property data, skip tracing, and mortgage info comes through our secure data feed.</p>
         </div>
         <div class="card" style="margin-bottom:14px">
-          <div class="sec-title" style="font-size:14px">🔑 RentCast Key <span class="badge green" style="font-size:10px">FREE TIER</span></div>
-          <p style="color:var(--muted);font-size:13px;margin-bottom:10px">Listing auto-fill runs on your RentCast free key (50 calls/mo, shared with the ZIP search and value lookup). Paste it once — it stays in this browser only.</p>
-          <div style="margin-bottom:12px"><label class="lbl">RentCast API key</label><input class="field" id="rentcastKey" type="password" placeholder="Paste your RentCast API key" /></div>
-          <button class="btn" onclick="saveRentcastKey()">Save Key</button>
-          <button class="btn" onclick="toggleRentcastKeyVis()" style="margin-left:6px">Show / Hide</button>
-          <span id="rentcastKeySavedMsg" style="font-size:12px;margin-left:8px"></span>
-        </div>
-        <div class="card" style="margin-bottom:14px">
           <div class="sec-title" style="font-size:14px">💳 Data Credits</div>
           <p style="color:var(--muted);font-size:13px;margin-bottom:8px">Property data, skip tracing, and mortgage info all run through the built-in data feed. No separate accounts or API keys needed.</p>
         </div>
@@ -1374,7 +1366,6 @@ function showPage(name){
   if(el) el.classList.add('active');
   document.querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active', b.dataset.nav===name));
   if(name === 'listimport') liLoadConn();
-  if(name === 'settings') rentcastKeyState();
   if(name === 'dealrooms' && typeof drLoadDeals === 'function') drLoadDeals();
   if(name === 'comps'){ renderCompMap(); setTimeout(()=>{ if(compMap){ compMap.invalidateSize(); renderCompMap(); } }, 150); }
   if(name === 'masterbuyers' && typeof syncMbView === 'function'){ setTimeout(()=>{ if(mbMap){ mbMap.invalidateSize(); if(mbView === 'map') renderBuyerMap(); } }, 150); }
@@ -1554,28 +1545,6 @@ function propertyReachToLead(pj, typedAddress){
   };
 }
 /* dealMachineToLead removed Nov 4 — DealMachine canceled, data provider is the data source */
-async function searchPropertiesByZipCode(zip, key, statusEl, resultsEl){
-  if(!key){ statusEl.innerHTML = '<span style="color:var(--red)">Add your RentCast API key in Settings first.</span>'; return; }
-  statusEl.innerHTML = '<span style="color:var(--muted)">🔍 Searching RentCast for ' + esc(zip) + '…</span>';
-  resultsEl.innerHTML = '';
-  try{
-    const resp = await fetch('https://api.rentcast.io/v1/properties?zipCode=' + zip + '&limit=100', {
-      headers: { 'X-Api-Key': key, 'accept': 'application/json' }
-    });
-    if(resp.status === 401){ statusEl.innerHTML = '<span style="color:var(--red)">RentCast key rejected (401). Check your key in Settings.</span>'; return; }
-    if(!resp.ok){ statusEl.innerHTML = '<span style="color:var(--red)">RentCast error ' + resp.status + '. Try again.</span>'; return; }
-    const props = await resp.json();
-    propSearchCache = Array.isArray(props) ? props : [];
-    propSearchExact = false;
-    if(!propSearchCache.length){ statusEl.innerHTML = '<span style="color:var(--muted)">No properties returned for ' + esc(zip) + '.</span>'; return; }
-    statusEl.innerHTML = '<span style="color:var(--green)">✓ Found ' + propSearchCache.length + ' properties in ' + esc(zip) + '</span> <button class="btn small primary" style="margin-left:10px" onclick="addAllPropSearchToLeads()">➕ Add All to My Leads</button>';
-    renderPropSearchResults();
-    recentSearches.unshift({q:'RentCast: ' + zip, at:new Date().toISOString()});
-    recentSearches = recentSearches.slice(0,8); saveState(); renderRecentSearches();
-  }catch(e){
-    statusEl.innerHTML = '<span style="color:var(--red)">Search failed: ' + esc(e.message) + '</span>';
-  }
-}
 function isAbsenteeProp(p){
   try{
     if(p.ownerOccupied === false) return true;
@@ -2089,72 +2058,6 @@ function addAllListResultsToLeads(){
    =========================================================================== */
 
 /* Single-address lookup via RentCast AVM + property records */
-async function searchPropertyByAddress(raw, key, statusEl, resultsEl){
-  statusEl.innerHTML = '<span style="color:var(--muted)">🔍 Looking up ' + esc(raw) + '…</span>';
-  resultsEl.innerHTML = '';
-  try{
-    // Try parsing "123 Main St, Indianapolis, IN 46201" format
-    let address = raw, city = '', state = '', zipCode = '';
-    const parts = raw.split(',').map(s=>s.trim());
-    if(parts.length >= 1) address = parts[0];
-    if(parts.length >= 2){
-      const csz = parts[1].trim().split(/\s+/);
-      if(csz.length >= 2 && /^[A-Z]{2}$/i.test(csz[csz.length-1])){
-        state = csz.pop().toUpperCase(); city = csz.join(' ');
-      } else { city = parts[1].trim(); }
-    }
-    if(parts.length >= 3){
-      const sz = parts[2].trim().split(/\s+/);
-      if(sz.length >= 1 && /^[A-Z]{2}$/i.test(sz[0])){ state = sz[0].toUpperCase(); }
-      const zm = parts[2].match(/\b\d{5}\b/); if(zm) zipCode = zm[0];
-    }
-    const zm1 = raw.match(/\b\d{5}\b/); if(zm1 && !zipCode) zipCode = zm1[0];
-    const params = new URLSearchParams({ address });
-    if(city) params.set('city', city);
-    if(state) params.set('state', state);
-    if(zipCode) params.set('zipCode', zipCode);
-    const resp = await fetch('https://api.rentcast.io/v1/avm/value?' + params.toString(), {
-      headers: { 'X-Api-Key': key, 'accept': 'application/json' }
-    });
-    if(resp.status === 401){ statusEl.innerHTML = '<span style="color:var(--red)">RentCast key rejected (401). Check your key in Settings.</span>'; return; }
-    if(!resp.ok){ statusEl.innerHTML = '<span style="color:var(--red)">RentCast error ' + resp.status + '. Try "123 Main St, City, ST 12345" format.</span>'; return; }
-    const data = await resp.json();
-    if(!data || !data.addressLine1){ statusEl.innerHTML = '<span style="color:var(--muted)">No property found for that address.</span>'; return; }
-    // Normalize AVM result into the same card shape as zip search
-    const p = {
-      addressLine1: data.addressLine1, city: data.city, state: data.state, zipCode: data.zipCode,
-      bedrooms: data.bedrooms, bathrooms: data.bathrooms, squareFootage: data.squareFootage,
-      yearBuilt: data.yearBuilt, propertyType: data.propertyType,
-      owner: { names: data.ownerName ? [data.ownerName] : [] },
-      latitude: data.latitude, longitude: data.longitude,
-      _avm: data.price, _avmLow: data.priceRangeLow, _avmHigh: data.priceRangeHigh
-    };
-    propSearchCache = [p];
-    statusEl.innerHTML = '<span style="color:var(--green)">✓ Found ' + esc(data.addressLine1 || raw) + '</span>';
-    const avmHtml = data.price
-      ? `<div style="margin:6px 0;padding:8px;background:var(--panel2);border-radius:8px"><div style="font-size:11px;color:var(--muted)">EST. VALUE (ARV)</div><div style="font-size:18px;font-weight:700;color:var(--green)">$${Number(data.price).toLocaleString()}</div>${data.priceRangeLow?`<div style="font-size:11px;color:var(--muted)">Range: $${Number(data.priceRangeLow).toLocaleString()} – $${Number(data.priceRangeHigh).toLocaleString()}</div>`:''}</div>` : '';
-    resultsEl.innerHTML = `<div class="lead-card">
-      <div class="lead-card-top"><div style="flex:1">
-        <div class="lead-addr">${esc(p.addressLine1 || '')}</div>
-        <div class="lead-sub">${esc(p.city || '')}, ${esc(p.state || '')} ${esc(p.zipCode || '')}</div>
-      </div></div>
-      <div class="lead-badges"><span class="badge gray">${p.bedrooms||'?'}bd / ${p.bathrooms||'?'}ba · ${p.squareFootage?p.squareFootage.toLocaleString():'?'} sqft · ${p.yearBuilt||'?'}</span>${p.propertyType?`<span class="badge blue">${esc(p.propertyType)}</span>`:''}</div>
-      ${avmHtml}
-      <div class="lead-status-row">
-        <span class="badge orange">Address Lookup</span>
-        <div class="lead-actions"><button class="btn small primary" onclick="addPropSearchToLeads(0)">➕ Add to Leads</button></div>
-      </div>
-    </div>`;
-    recentSearches.unshift({q:'Address: ' + raw, at:new Date().toISOString()});
-    recentSearches = recentSearches.slice(0,8); saveState(); renderRecentSearches();
-    syncPropView();
-  }catch(e){
-    statusEl.innerHTML = '<span style="color:var(--red)">Lookup failed: ' + esc(e.message) + '</span>';
-  }
-}
-
-/* ============ PASTE-TO-INGEST (improved) ============ */
-const FILTER_WORDS = ['condo','townhouse','twnhs','unit ','unit-','ste ','suite','apt ','apartment','#'];
 function shouldFilter(address, signal){
   const lower = (address+' '+(signal||'')).toLowerCase();
   return FILTER_WORDS.some(w => lower.includes(w));
@@ -3216,33 +3119,6 @@ function saveAvaKey(){
 function toggleAvaKeyVis(){
   const i = document.getElementById('avaDataKey');
   i.type = i.type==='password' ? 'text' : 'password';
-}
-/* ============ RENTCAST (Free ARV + Comps) ============ */
-function getRentcastKey(){ return localStorage.getItem('acc_rentcast_key') || ''; }
-function saveRentcastKey(){
-  const k = document.getElementById('rentcastKey').value.trim();
-  if(!k){ toast('Enter a key first'); return; }
-  localStorage.setItem('acc_rentcast_key', k);
-  document.getElementById('rentcastKey').value = '';
-  document.getElementById('rentcastKey').type = 'password';
-  document.getElementById('rentcastKeySavedMsg').innerHTML = '<span style="color:var(--green)">✓ Key saved in this browser</span>';
-  toast('RentCast key saved');
-}
-function toggleRentcastKeyVis(){
-  const i = document.getElementById('rentcastKey');
-  i.type = i.type==='password' ? 'text' : 'password';
-}
-function rentcastKeyState(){
-  const m = document.getElementById('rentcastKeySavedMsg');
-  if(m) m.innerHTML = getRentcastKey() ? '<span style="color:var(--green)">✓ Key saved in this browser</span>' : '';
-}
-async function callRentcastAVM(address, city, state, zip){
-  const key = getRentcastKey();
-  if(!key) throw new Error('NO_KEY');
-  const url = 'https://api.rentcast.io/v1/avm/value?address='+encodeURIComponent(address)+'&city='+encodeURIComponent(city)+'&state='+encodeURIComponent(state)+'&zipCode='+encodeURIComponent(zip);
-  const resp = await fetch(url, {headers:{'X-Api-Key':key}});
-  if(!resp.ok) throw new Error('HTTP '+resp.status);
-  return resp.json();
 }
 async function getARV(id){
   const l = leads.find(x=>x.id===id); if(!l) return;
@@ -4817,6 +4693,8 @@ function compDetailViewData(){
     address: (compDetailData && compDetailData.matchedAddress) || addr,
     city: prop ? (prop.city || '') : '', state: prop ? (prop.state || '') : '', zip: prop ? (prop.zipCode || prop.zip || '') : '',
     county: prop ? (prop.county || '') : '',
+    apn: prop ? (prop.apn || '') : '',
+    legalDescription: prop ? (prop.legalDescription || '') : '',
     beds: prop ? prop.beds : null, baths: prop ? prop.baths : null,
     sqft: prop ? prop.sqft : (listing.sqft || null),
     units: prop ? (prop.units || 1) : 1, type: listing.type || (prop ? prop.propertyType : '') || '',
