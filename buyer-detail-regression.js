@@ -124,8 +124,8 @@ var d7 = BuyerDetail.detailHtml(SLB, { rank: 8, total: 28423, globalIndex: 7, ve
 t('detail for the same buyer calls mbShowOnMap(7) + mbFocusBuyer(7)', d7.indexOf('mbShowOnMap(7)') !== -1 && d7.indexOf('mbFocusBuyer(7)') !== -1);
 t('map tooltip and detail agree on Slb figures (one source of truth)', BuyerMap.tooltipHtml({ rec: SLB, rank: 1, globalIndex: 7 }).indexOf('$140,251,214') !== -1 && d7.indexOf('$140,251,214') !== -1 && d7.indexOf('67') !== -1);
 
-/* ---- bundle field presence (full 28,423-record bundle) ---- */
-t('bundle has 28,423 records', BUNDLE.length === 28423);
+/* ---- bundle field presence (full 28,670-record bundle; was 28,423 before the Nov 9 trace merge: +248 merged, −1 CASH4YOURHOME dropped) ---- */
+t('bundle has 28,670 records', BUNDLE.length === 28670);
 t('every bundle record carries fl (number)', BUNDLE.every(function (r) { return typeof r.fl === 'number'; }));
 t('bundle flips>0 count is exactly 2,657', BUNDLE.filter(function (r) { return r.fl > 0; }).length === 2657);
 t('bundle Rei Nation matches source JSON exactly', (function () {
