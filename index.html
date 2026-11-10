@@ -12,6 +12,8 @@
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 <script src="assets/offer-math.js"></script>
 <script src="assets/sellability.js"></script>
+<script src="assets/listing-insights.js"></script>
+<script src="assets/property-detail-view.js"></script>
 <script src="assets/buyer-match-score.js"></script>
 <script src="assets/buyer-map-data.js"></script>
 <script src="assets/buyer-map.js"></script>
@@ -1004,17 +1006,24 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
           <div id="compSubjectCard" style="display:none;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:12px"></div>
           <div style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:12px">
             <div style="font-weight:800;font-size:13px;margin-bottom:4px">🚦 Listing Check — FIRST, before any comp math</div>
-            <p style="color:var(--muted);font-size:12px;margin:0 0 10px">If it's listed with a realtor, PASS immediately — no MAO, no LAO, no offer. Check the listing, then set the status here. Listing fields are set by hand from the check — no feed supplies them.</p>
+            <p style="color:var(--muted);font-size:12px;margin:0 0 10px">If it's listed with a realtor, PASS immediately — no MAO, no LAO, no offer. Check the listing (Zillow / DealMachine), then set the fields here. Listing fields are set by hand — no live feed supplies them yet. The panel below shows the full picture: status, price + $/sqft, status-change date, above/below value, and the description.</p>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px">
               <div><label class="lbl">Property address (for listing links)</label><input class="field" id="compListAddr" placeholder="e.g. 123 Main St, Indianapolis, IN 46205" oninput="updateCompLinks()" onkeydown="if(event.key==='Enter'){event.preventDefault();loadCompsForAddress();}" /><button class="btn primary" style="margin-top:8px" onclick="loadCompsForAddress()" title="Load everything for this address — comps, map, mortgage, and offer math">🔍 Search</button></div>
-              <div><label class="lbl">Listing status *</label><select class="field" id="compListStatus" onchange="calcComp()"><option value="">Not checked yet</option><option value="not-listed">Not listed — clear to comp</option><option value="listed">Listed with a realtor — PASS</option></select></div>
+              <div><label class="lbl">Listing status *</label><select class="field" id="compListStatus" onchange="calcComp()"><option value="">Not checked yet</option><option value="active">Active — listed with a realtor — PASS</option><option value="pending">Pending — under contract — PASS</option><option value="expired">Expired — no live listing</option><option value="withdrawn">Withdrawn — no live listing</option><option value="sold">Sold — PASS</option><option value="inactive">Inactive — reason unknown (confirm)</option><option value="not-listed">Not listed — clear to comp</option></select></div>
               <div><label class="lbl">Listing agent</label><input class="field" id="compListAgent" placeholder="Agent name / brokerage" oninput="calcComp()" /></div>
               <div><label class="lbl">List price ($)</label><input class="field" id="compListPrice" type="number" placeholder="Enter list price" oninput="calcComp()" /></div>
               <div><label class="lbl">Days on market</label><input class="field" id="compListDom" type="number" placeholder="Enter DOM" oninput="calcComp()" /></div>
               <div><label class="lbl">Listing date</label><input class="field" id="compListDate" type="date" onchange="calcComp()" /></div>
+              <div><label class="lbl">Status change date</label><input class="field" id="compListStatusDate" type="date" onchange="calcComp()" /></div>
+              <div><label class="lbl">MLS # (optional)</label><input class="field" id="compListMls" placeholder="e.g. 21912345" oninput="calcComp()" /></div>
+              <div><label class="lbl">Property type</label><input class="field" id="compListType" placeholder="e.g. Single Family" oninput="calcComp()" /></div>
+              <div><label class="lbl">Agent phone</label><input class="field" id="compListAgentPhone" placeholder="Agent phone" oninput="calcComp()" /></div>
+              <div><label class="lbl">Agent email</label><input class="field" id="compListAgentEmail" placeholder="Agent email" oninput="calcComp()" /></div>
+              <div><label class="lbl">Listing office</label><input class="field" id="compListOffice" placeholder="Brokerage / office" oninput="calcComp()" /></div>
               <div><label class="lbl">Home sq ft (optional — for $/sqft)</label><input class="field" id="compListSqft" type="number" placeholder="Auto-fills on load" oninput="calcComp()" /></div>
               <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap"><a id="compZillowLink" class="btn" href="https://www.zillow.com/" target="_blank" rel="noopener" style="text-decoration:none" onclick="stampListingChecked()">🏠 Check on Zillow ↗</a><span id="compCheckedNote" style="font-size:12px;color:var(--muted)"></span></div>
             </div>
+            <div style="margin-bottom:10px"><label class="lbl">Listing description (paste from Zillow / DealMachine)</label><textarea class="field" id="compListDesc" rows="3" placeholder="Paste the listing description here — it shows in the Listing Insights panel below." oninput="calcComp()"></textarea></div>
             <div id="compGateMsg"></div>
           </div>
           <div id="compInsights" style="margin-bottom:12px"></div>
@@ -4478,6 +4487,7 @@ let compLoadedAddr = '';
 let compConfidence = '';
 let compConfidenceText = '';
 let compSubjectSqft = null;
+let compSubjectAvm = null; // AVM value from the comps lookup (ATTOM screen-only, or PR market value) — reference for the panel's above/below when no ARV is picked; never an offer basis.
 let compSubjectBeds = null;
 let compStabilityWarns = [];
 let compPrevLoads = {};
@@ -4582,13 +4592,41 @@ function compStatus(){
   const st = document.getElementById('compListStatus');
   return st ? st.value : '';
 }
+/* Listing Insights gate (Nov 9, 2026) — thin wrappers over
+   assets/listing-insights.js. PASS fires ONLY on a live listing or a deal
+   already done (active / pending / sold). EXPIRED and WITHDRAWN are NOT a
+   pass — no live listing. */
+function compPassStatus(){ return window.ListingInsights ? window.ListingInsights.isPassStatus(compStatus()) : compStatus() === 'listed'; }
+function compPassReason(){ return window.ListingInsights ? window.ListingInsights.passReason(compStatus()) : 'Listed with a realtor'; }
+function compStatusLabel(){ return window.ListingInsights ? window.ListingInsights.statusLabel(compStatus()) : compStatus(); }
+function compListingData(){
+  const v = (id)=> (document.getElementById(id)||{}).value || '';
+  const num = (id)=> parseFloat((document.getElementById(id)||{}).value)||0;
+  return {
+    status: compStatus(),
+    price: num('compListPrice'),
+    sqft: num('compListSqft'),
+    listedDate: v('compListDate'),
+    statusDate: v('compListStatusDate'),
+    dom: v('compListDom'),
+    agent: v('compListAgent'),
+    agentPhone: v('compListAgentPhone'),
+    agentEmail: v('compListAgentEmail'),
+    office: v('compListOffice'),
+    type: v('compListType'),
+    mls: v('compListMls'),
+    description: v('compListDesc'),
+    arv: num('compARV'),
+    avm: (typeof compSubjectAvm === 'number') ? compSubjectAvm : 0
+  };
+}
 function compListingGroupSet(){
   const v = (id)=> (document.getElementById(id)||{}).value || '';
-  return compStatus() !== '' || v('compListAgent') !== '' || v('compListPrice') !== '' || v('compListDom') !== '' || v('compListDate') !== '' || v('compListSqft') !== '';
+  return compStatus() !== '' || v('compListAgent') !== '' || v('compListPrice') !== '' || v('compListDom') !== '' || v('compListDate') !== '' || v('compListSqft') !== '' || v('compListStatusDate') !== '' || v('compListMls') !== '' || v('compListDesc') !== '' || v('compListType') !== '' || v('compListAgentPhone') !== '' || v('compListAgentEmail') !== '' || v('compListOffice') !== '';
 }
 function resetCompListingGate(){
   const st = document.getElementById('compListStatus'); if(st) st.value = '';
-  ['compListAgent','compListPrice','compListDom','compListDate','compListSqft'].forEach(id=>{ const el = document.getElementById(id); if(el) el.value = ''; });
+  ['compListAgent','compListPrice','compListDom','compListDate','compListSqft','compListStatusDate','compListMls','compListDesc','compListType','compListAgentPhone','compListAgentEmail','compListOffice'].forEach(id=>{ const el = document.getElementById(id); if(el) el.value = ''; });
   const n = document.getElementById('compCheckedNote'); if(n) n.textContent = '';
   compGateAddr = '';
   calcComp();
@@ -4611,12 +4649,12 @@ function resetCompsPage(){
   const z = document.getElementById('compZillowLink');
   if(z) z.href = 'https://www.zillow.com/';
   const st = document.getElementById('compListStatus'); if(st) st.value = '';
-  ['compListAgent','compListPrice','compListDom','compListDate','compListSqft'].forEach(id=>{ const el = document.getElementById(id); if(el) el.value = ''; });
+  ['compListAgent','compListPrice','compListDom','compListDate','compListSqft','compListStatusDate','compListMls','compListDesc','compListType','compListAgentPhone','compListAgentEmail','compListOffice'].forEach(id=>{ const el = document.getElementById(id); if(el) el.value = ''; });
   const n = document.getElementById('compCheckedNote'); if(n) n.textContent = '';
   compGateAddr = ''; compLastAddr = '';
   const sc = document.getElementById('compSubjectCard'); if(sc){ sc.innerHTML = ''; sc.style.display = 'none'; }
   compRows = []; compPicks = []; compLoadedAddr = '';
-  compConfidence = ''; compConfidenceText = ''; compSubjectSqft = null; compSubjectBeds = null; resetCompFilters(); compStabilityWarns = []; compPrevLoads = {};
+  compConfidence = ''; compConfidenceText = ''; compSubjectSqft = null; compSubjectAvm = null; compSubjectBeds = null; compDetailData = null; resetCompFilters(); compStabilityWarns = []; compPrevLoads = {};
   const wb = document.getElementById('compWarnBar'); if(wb) wb.innerHTML = '';
   const arvEl = document.getElementById('compARV'); if(arvEl) arvEl.value = '';
   const repEl = document.getElementById('compRepairs'); if(repEl) repEl.value = '';
@@ -4661,7 +4699,7 @@ function updateCompLinks(){
        property under a new address. Confidence, subject sqft, and price
        warnings are load-derived too, so they clear here as well. */
     const sc = document.getElementById('compSubjectCard'); if(sc){ sc.innerHTML = ''; sc.style.display = 'none'; }
-    compConfidence = ''; compConfidenceText = ''; compSubjectSqft = null; compSubjectBeds = null; resetCompFilters(); compStabilityWarns = [];
+    compConfidence = ''; compConfidenceText = ''; compSubjectSqft = null; compSubjectAvm = null; compSubjectBeds = null; compDetailData = null; resetCompFilters(); compStabilityWarns = [];
     const wb = document.getElementById('compWarnBar'); if(wb) wb.innerHTML = '';
   }
   compLastAddr = v;
@@ -4675,7 +4713,7 @@ function updateCompLinks(){
     if(bar) bar.innerHTML = '';
     const b3 = document.getElementById('compBest3');
     if(b3) b3.innerHTML = '';
-    compConfidence = ''; compConfidenceText = ''; compSubjectSqft = null; compSubjectBeds = null; resetCompFilters(); compStabilityWarns = [];
+    compConfidence = ''; compConfidenceText = ''; compSubjectSqft = null; compSubjectAvm = null; compSubjectBeds = null; compDetailData = null; resetCompFilters(); compStabilityWarns = [];
     const wb2 = document.getElementById('compWarnBar'); if(wb2) wb2.innerHTML = '';
     renderCompMap();
   }
@@ -4703,32 +4741,135 @@ function compPpsf(){
 }
 function renderCompInsights(){
   const box = document.getElementById('compInsights'); if(!box) return;
-  const st = compStatus();
-  const agent = (document.getElementById('compListAgent')||{}).value || '';
-  const lp = parseFloat((document.getElementById('compListPrice')||{}).value)||0;
-  const dom = (document.getElementById('compListDom')||{}).value || '';
-  const dt = (document.getElementById('compListDate')||{}).value || '';
-  const arv = parseFloat((document.getElementById('compARV')||{}).value)||0;
-  const ppsf = compPpsf();
-  const statusLabel = st === 'listed' ? '⛔ Listed with a realtor — PASS' : st === 'not-listed' ? '✓ Not listed — clear to comp' : '⚠️ Not checked yet';
-  let abv = '';
-  if(lp && arv){
-    const diff = lp - arv;
-    const pct = arv ? (diff/arv*100) : 0;
-    const dir = diff > 0 ? 'above' : diff < 0 ? 'below' : 'at';
-    abv = '<div class="prop-chip"><span class="k">Above / Below Value</span><span class="v">' + (diff>=0?'+':'−') + '$' + Math.abs(diff).toLocaleString() + ' (' + Math.abs(pct).toFixed(1) + '% ' + dir + ' value)</span></div>';
+  if(!window.PropertyDetailView){
+    box.innerHTML = '<div class="sec-title" style="font-size:14px">📋 Listing Insights</div>'
+      + '<div style="font-size:13px;color:var(--muted)">Listing Insights failed to load — check the listing fields above.</div>';
+    return;
   }
-  const chip = (k,v)=> v ? '<div class="prop-chip"><span class="k">'+k+'</span><span class="v">'+v+'</span></div>' : '';
-  box.innerHTML = '<div class="sec-title" style="font-size:14px">📋 Listing Insights</div>'
-    + '<div class="prop-grid">'
-    + chip('Listing Status', statusLabel)
-    + chip('Listing Price', lp ? '$' + lp.toLocaleString() + (ppsf ? ' ($' + ppsf + '/sqft)' : '') : '')
-    + chip('Listing Date', dt ? compFmtDate(dt) : '')
-    + chip('Days On Market', dom ? dom + ' days' : '')
-    + chip('Listing Agent', agent ? esc(agent) : '')
-    + abv
-    + '</div>';
+  const data = compDetailViewData();
+  if(!data){ box.innerHTML = ''; return; }
+  const open = [];
+  box.querySelectorAll('details[data-detail-section][open]').forEach(function(d){ open.push(d.getAttribute('data-detail-section')); });
+  box.innerHTML = window.PropertyDetailView.detailViewHtml(data, open.length ? open : undefined);
 }
+/* ---- Property detail view data (Nov 9, 2026) ----
+   compDetailData is set by loadCompsForAddress on a successful lookup and
+   cleared on address change / reset / no-match. The view renders from the
+   lookup record + the hand-entered listing fields + the mortgage block;
+   anything a source doesn't supply renders "—", never invented. */
+let compDetailData = null;
+function compDetailPhotos(prop, addr){
+  const photos = [];
+  const photoUrl = prop && (prop.photoUrl || prop.photo_url);
+  if(photoUrl) photos.push({src: photoUrl, label: 'Property photo'});
+  if(typeof GOOGLE_MAPS_KEY !== 'undefined' && GOOGLE_MAPS_KEY){
+    const svLoc = (prop && prop.latitude != null && prop.longitude != null) ? prop.latitude + ',' + prop.longitude : encodeURIComponent(addr || '');
+    const labels = ['Street View — front', 'Street View — right', 'Street View — back', 'Street View — left'];
+    [0, 90, 180, 270].forEach(function(h, i){
+      photos.push({src: 'https://maps.googleapis.com/maps/api/streetview?size=800x500&location=' + svLoc + '&heading=' + h + '&key=' + GOOGLE_MAPS_KEY, label: labels[i]});
+    });
+  }
+  return photos;
+}
+function compDetailViewData(){
+  const listing = compListingData();
+  const addr = (document.getElementById('compListAddr')||{}).value.trim();
+  const prop = (compDetailData && compDetailData.property) || null;
+  const avmRaw = (compDetailData && compDetailData.avm) || null;
+  if(!prop && !compListingGroupSet() && !addr) return null;
+  const owners = prop ? [prop.owner1, prop.owner2].filter(Boolean).join(' & ') : '';
+  const mort = (typeof compMortDetail !== 'undefined' && compMortDetail) || {};
+  let sellability = null;
+  try{
+    if(window.Sellability && prop){
+      const rec = Object.assign({}, prop);
+      if(prop.lastSaleDate) rec.ownershipMonths = Math.max(0, Math.round((Date.now() - new Date(String(prop.lastSaleDate).slice(0, 10)).getTime()) / (30.44 * 24 * 3600 * 1000)));
+      const s = window.Sellability.wholesaleScore(rec);
+      if(s && s.label && s.label !== 'NO DATA') sellability = {score: s.score, label: s.label, reasons: s.topReasons || s.reasons || []};
+    }
+  }catch(e){}
+  const dFlags = [];
+  if(prop){
+    if(prop.preProbate) dFlags.push('PRE-PROBATE');
+    if(prop.bankruptcy) dFlags.push('BANKRUPTCY');
+    if(prop.taxDelinquency) dFlags.push('TAX DELINQUENT' + (prop.taxDelinquencyYear ? ' ' + prop.taxDelinquencyYear : ''));
+    if(prop.vacant) dFlags.push('VACANT');
+    if(prop.distressed) dFlags.push('DISTRESSED');
+    if(prop.lienCount) dFlags.push(prop.lienCount + ' LIEN' + (prop.lienCount > 1 ? 'S' : ''));
+  }
+  const zAddr = addr ? addr.replace(/,/g, '').trim().replace(/\s+/g, '-') : '';
+  return {
+    address: (compDetailData && compDetailData.matchedAddress) || addr,
+    city: prop ? (prop.city || '') : '', state: prop ? (prop.state || '') : '', zip: prop ? (prop.zipCode || prop.zip || '') : '',
+    county: prop ? (prop.county || '') : '',
+    beds: prop ? prop.beds : null, baths: prop ? prop.baths : null,
+    sqft: prop ? prop.sqft : (listing.sqft || null),
+    units: prop ? (prop.units || 1) : 1, type: listing.type || (prop ? prop.propertyType : '') || '',
+    yearBuilt: prop ? prop.yearBuilt : null,
+    lotSqft: prop ? prop.lotSqft : null, lotAcres: prop ? prop.lotAcres : null,
+    condition: prop ? prop.condition : null,
+    stories: prop ? (prop.stories || null) : null, basement: prop ? (prop.basement || null) : null,
+    garage: prop ? (prop.garage || null) : null, pool: prop ? (prop.pool || null) : null,
+    construction: prop ? (prop.construction || null) : null, exterior: prop ? (prop.exterior || null) : null,
+    roof: prop ? (prop.roof || null) : null, heating: prop ? (prop.heating || null) : null, cooling: prop ? (prop.cooling || null) : null,
+    owner: owners || '', ownerMailing: prop ? (prop.mailingAddress || prop.ownerMailing || '') : '',
+    ownerPhones: [], ownerEmail: '',
+    photos: compDetailPhotos(prop, addr),
+    zillowUrl: zAddr ? 'https://www.zillow.com/homes/' + zAddr + '_rb/' : 'https://www.zillow.com/',
+    listing: listing,
+    avm: avmRaw ? {value: avmRaw.value != null ? Number(avmRaw.value) : null, low: avmRaw.low != null ? Number(avmRaw.low) : null, high: avmRaw.high != null ? Number(avmRaw.high) : null, score: avmRaw.score != null ? avmRaw.score : null, source: 'Property records', date: null} : null,
+    countyValue: prop ? (prop.assessedValue != null ? prop.assessedValue : (prop.taxAssessed != null ? prop.taxAssessed : null)) : null,
+    tax: prop ? (prop.taxAmount != null ? prop.taxAmount : null) : null,
+    taxYear: prop ? (prop.taxYear || null) : null,
+    rent: prop ? (prop.rentEstimate != null ? prop.rentEstimate : null) : null,
+    mortgage: {freeClear: (typeof compMortFreeClear !== 'undefined') ? compMortFreeClear : false, amount: (mort.amount != null ? mort.amount : (mort.balance != null ? mort.balance : null)), lender: mort.lender || '', loanType: mort.loanType || '', termMonths: mort.termMonths != null ? mort.termMonths : null, recordedDate: mort.recordedDate || null, dueDate: mort.dueDate || null},
+    lastSale: prop ? {date: prop.lastSaleDate || null, amount: prop.lastSaleAmount != null ? prop.lastSaleAmount : null} : null,
+    saleHistory: prop ? (prop.saleHistory || null) : null,
+    linkedProperties: (compDetailData && compDetailData.linkedProperties) || [],
+    sellability: sellability,
+    distress: {preForeclosure: !!(prop && prop.preForeclosure), detail: dFlags.join(' · ')},
+    listingHistory: null
+  };
+}
+/* Detail-view header buttons — all call existing dashboard flows. */
+function detailAddToLeads(){
+  try{
+    const addr = (document.getElementById('compListAddr')||{}).value.trim();
+    const prop = (compDetailData && compDetailData.property) || null;
+    if(!addr && !prop) return;
+    let l = null;
+    try{ if(typeof propToLead === 'function') l = propToLead(Object.assign({}, prop || {}, {address: (compDetailData && compDetailData.matchedAddress) || addr})); }catch(e){ l = null; }
+    if(!l){
+      const parts = addr.split(',').map(function(s){ return s.trim(); });
+      l = {id: 'rc' + Date.now() + Math.floor(Math.random() * 9999), address: parts[0] || addr, city: parts[1] || '', state: '', zip: '', owner: prop ? [prop.owner1, prop.owner2].filter(Boolean).join(' & ') : '', status: 'New Lead', addedAt: new Date().toISOString(), source: 'comps-detail'};
+    }
+    if(!leads.some(function(x){ return ((x.address || '') + '|' + (x.zip || '')).toLowerCase() === ((l.address || '') + '|' + (l.zip || '')).toLowerCase(); })){
+      leads.push(l); saveState(); renderLeads(); updateStats();
+    }
+  }catch(e){}
+}
+function detailGoBuyerMatch(){
+  const addr = (document.getElementById('compListAddr')||{}).value.trim();
+  const bm = document.getElementById('bmAddress'); if(bm && addr) bm.value = addr;
+  showPage('buyers');
+  if(addr && typeof runBuyerMatch === 'function') runBuyerMatch();
+}
+function detailGoogleResults(){
+  const addr = (document.getElementById('compListAddr')||{}).value.trim();
+  if(addr) window.open('https://www.google.com/search?q=' + encodeURIComponent(addr), '_blank');
+}
+async function detailPostDeal(){
+  try{
+    const addr = (document.getElementById('compListAddr')||{}).value.trim();
+    const lp = parseFloat((document.getElementById('compListPrice')||{}).value) || '';
+    if(!addr || typeof bbEnsureDealRoom !== 'function') return;
+    bbDeal = {address: addr, price: lp};
+    await bbEnsureDealRoom();
+    if(bbRoomLink) window.open(bbRoomLink, '_blank');
+  }catch(e){}
+}
+function detailCollapseAll(){ document.querySelectorAll('#compInsights details[data-detail-section]').forEach(function(d){ d.open = false; }); }
+function detailExpandAll(){ document.querySelectorAll('#compInsights details[data-detail-section]').forEach(function(d){ d.open = true; }); }
 /* ---- Mortgage block on the Comps page: fills itself from the comps lookup
    (property records already carry mortgage data at zero extra cost); the
    backup lookup covers records gaps; hand entry is a labeled last resort
@@ -4966,27 +5107,43 @@ function downloadCompReport(){
   const addr = (document.getElementById('compListAddr')||{}).value || 'Subject property';
   const st = compStatus();
   const agent = (document.getElementById('compListAgent')||{}).value || '';
+  const agentPhone = (document.getElementById('compListAgentPhone')||{}).value || '';
+  const agentEmail = (document.getElementById('compListAgentEmail')||{}).value || '';
+  const office = (document.getElementById('compListOffice')||{}).value || '';
+  const listType = (document.getElementById('compListType')||{}).value || '';
   const lp = parseFloat((document.getElementById('compListPrice')||{}).value)||0;
   const dom = (document.getElementById('compListDom')||{}).value || '';
   const dt = (document.getElementById('compListDate')||{}).value || '';
+  const sdt = (document.getElementById('compListStatusDate')||{}).value || '';
+  const mls = (document.getElementById('compListMls')||{}).value || '';
+  const desc = (document.getElementById('compListDesc')||{}).value || '';
   const sq = parseFloat((document.getElementById('compListSqft')||{}).value)||0;
   const ppsf = compPpsf();
   const arv = parseFloat((document.getElementById('compARV')||{}).value)||0;
   const rep = parseFloat((document.getElementById('compRepairs')||{}).value)||0;
-  const listed = st === 'listed';
-  const statusLabel = listed ? 'Listed with a realtor — PASS' : st === 'not-listed' ? 'Not listed — clear to comp' : 'Not checked yet';
+  const listed = compPassStatus();
+  const statusLabel = compStatusLabel();
   let abv = '—';
-  if(lp && arv){
-    const diff = lp - arv;
-    const pct = arv ? Math.abs(diff/arv*100) : 0;
-    abv = (diff>=0?'+':'−') + '$' + Math.abs(diff).toLocaleString() + ' (' + pct.toFixed(1) + '% ' + (diff>0?'above':diff<0?'below':'at') + ' value)';
+  const refVal = arv || ((typeof compSubjectAvm === 'number') ? compSubjectAvm : 0);
+  const refLabel = arv ? 'vs ARV' : 'vs AVM (screen only)';
+  if(lp && refVal){
+    const diff = lp - refVal;
+    const pct = refVal ? Math.abs(diff/refVal*100) : 0;
+    abv = (diff>=0?'+':'−') + '$' + Math.abs(diff).toLocaleString() + ' (' + pct.toFixed(1) + '% ' + (diff>0?'above':diff<0?'below':'at') + ' value, ' + refLabel + ')';
   }
   const kv = (k,v)=> '<p style="margin:4px 0"><b>' + k + ':</b> ' + v + '</p>';
   let listingHtml = kv('Listing status', esc(statusLabel))
     + kv('List price', lp ? '$' + lp.toLocaleString() + (ppsf ? ' ($' + ppsf + '/sqft)' : '') : '—')
     + kv('Listing date', dt ? compFmtDate(dt) : '—')
+    + kv('Status change date', sdt ? compFmtDate(sdt) : '—')
     + kv('Days on market', dom ? dom + ' days' : '—')
     + kv('Listing agent', agent ? esc(agent) : '—')
+    + kv('Agent phone', agentPhone ? esc(agentPhone) : '—')
+    + kv('Agent email', agentEmail ? esc(agentEmail) : '—')
+    + kv('Office', office ? esc(office) : '—')
+    + kv('Type', listType ? esc(listType) : '—')
+    + kv('MLS #', mls ? esc(mls) : '—')
+    + kv('Listing description', desc ? esc(desc) : '—')
     + kv('Above / below value', abv);
   const amtEl = document.getElementById('compMortAmt');
   const lenEl = document.getElementById('compMortLender');
@@ -5027,7 +5184,7 @@ function downloadCompReport(){
   }
   let mathHtml = '';
   if(listed){
-    mathHtml = '<p><b>PASS — Listed with a realtor. No MAO, no LAO, no offer.</b></p>';
+    mathHtml = '<p><b>PASS — ' + esc(compPassReason()) + '. No MAO, no LAO, no offer.</b></p>';
   } else if(arv){
     if(compLoadForAddr() && compPickedCount() < 3){
       mathHtml = '<p><b>⛔ THIN COMPS — do not offer on this set.</b> Only ' + compPickedCount() + ' usable sale(s) found. Verify against county records and add comps before any number is quoted. ARV shown is screen only — not an offer basis.</p>';
@@ -5200,7 +5357,7 @@ function calcComp(){
   const el = document.getElementById('compResult');
   const arvEl = document.getElementById('compARV');
   const repEl = document.getElementById('compRepairs');
-  const listed = st && st.value === 'listed';
+  const listed = compPassStatus();
   if(arvEl) arvEl.disabled = !!listed;
   if(repEl) repEl.disabled = !!listed;
   if(listed){
@@ -5208,7 +5365,10 @@ function calcComp(){
     const lp = (document.getElementById('compListPrice')||{}).value || '';
     const dom = (document.getElementById('compListDom')||{}).value || '';
     const dt = (document.getElementById('compListDate')||{}).value || '';
-    if(gate) gate.innerHTML = '<div style="background:#3d0d0d;border:1px solid #ff4d4d;border-radius:8px;padding:10px;font-size:13px;font-weight:800;color:#ff8080">⛔ PASS — Listed with a realtor' + (agent ? ' · ' + esc(agent) : '') + (lp ? ' · list $' + Number(lp).toLocaleString() : '') + (dom ? ' · ' + dom + ' days on market' : '') + (dt ? ' · listed ' + compFmtDate(dt) : '') + '<br><span style="font-weight:400;color:var(--muted)">No MAO, no LAO, no offer. Move on.</span></div>';
+    const sdt = (document.getElementById('compListStatusDate')||{}).value || '';
+    const reason = compPassReason();
+    const sdtLabel = window.ListingInsights ? window.ListingInsights.statusDateLabel(compStatus()).toLowerCase() : 'status change';
+    if(gate) gate.innerHTML = '<div style="background:#3d0d0d;border:1px solid #ff4d4d;border-radius:8px;padding:10px;font-size:13px;font-weight:800;color:#ff8080">⛔ PASS — ' + esc(reason) + (agent ? ' · ' + esc(agent) : '') + (lp ? ' · list $' + Number(lp).toLocaleString() : '') + (dom ? ' · ' + dom + ' days on market' : '') + (dt ? ' · listed ' + compFmtDate(dt) : '') + (sdt ? ' · ' + esc(sdtLabel) + ' ' + compFmtDate(sdt) : '') + '<br><span style="font-weight:400;color:var(--muted)">No MAO, no LAO, no offer. Move on.</span></div>';
     if(el) el.innerHTML = '';
     renderCompInsights();
     const tt = document.getElementById('compTierTable'); if(tt) tt.innerHTML = '';
@@ -5217,7 +5377,7 @@ function calcComp(){
     clearQuickOfferResult();
     return;
   }
-  if(gate) gate.innerHTML = (st && st.value === 'not-listed') ? '<div style="font-size:12px;color:var(--green)">✓ Not listed — clear to comp.</div>' : '<div style="font-size:12px;color:var(--muted)">⚠️ Listing status not checked — check before offering.</div>';
+  if(gate) gate.innerHTML = (st && st.value === 'not-listed') ? '<div style="font-size:12px;color:var(--green)">✓ Not listed — clear to comp.</div>' : (compStatus() === 'expired' || compStatus() === 'withdrawn' || compStatus() === 'inactive') ? '<div style="font-size:12px;color:#e6a200">' + esc(compStatusLabel()) + ' — clear to comp.</div>' : '<div style="font-size:12px;color:var(--muted)">⚠️ Listing status not checked — check before offering.</div>';
   renderCompInsights();
   renderCompList(); /* re-render on every gate change: clears the listed-only "reference only" banners and restores pick checkboxes when switching back to not-listed */
   /* LAND MODE: buyer-price-minus-fee math, no MAO/LAO tiers. */
@@ -5331,7 +5491,7 @@ function compPickAvg(){
    the actual picks. */
 function renderCompBest3(){
   const el = document.getElementById('compBest3'); if(!el) return;
-  const listed = compStatus() === 'listed';
+  const listed = compPassStatus();
   const best = compRows.filter(r => (!r.kind || r.kind === 'best') && r.amount != null).slice(0,3);
   if(!compRows.length || !best.length){ el.innerHTML = ''; return; }
   const reason = (r)=>{
@@ -5360,7 +5520,7 @@ function renderCompBest3(){
 function renderCompList(){
   const box = document.getElementById('compListBox'); if(!box) return;
   const bar = document.getElementById('compPickBar');
-  const listed = compStatus() === 'listed';
+  const listed = compPassStatus();
   renderCompMap();
   renderCompBest3();
   if(!compRows.length){
@@ -5524,7 +5684,7 @@ function renderCompMap(){
   const note = document.getElementById('compMapNote');
   if(!el) return;
   if(typeof L === 'undefined'){ if(note) note.textContent = 'Map needs an internet connection to load.'; return; }
-  const listed = compStatus() === 'listed';
+  const listed = compPassStatus();
   const num = (v)=> (v != null && v !== '' && !isNaN(Number(v))) ? Number(v) : null;
   const pinned = compRows.filter(r => num(r.latitude) != null && num(r.longitude) != null);
   const noCoords = compRows.length - pinned.length;
@@ -5900,12 +6060,14 @@ async function loadCompsForAddress(retryAttempt){
       }
     }
     compDataSource = compSource;
-    if(!d.matched){ compRows = []; compPicks = []; compLoadedAddr = ''; compSubjectLat = null; compSubjectLng = null; compConfidence = ''; compConfidenceText = ''; compSubjectSqft = null; compSubjectBeds = null; compStabilityWarns = []; resetCompFilters(); resetCompMortgage(); renderCompSubjectCard(null, addr, ''); if(msg) msg.textContent = 'No ownership records found for this address — type an ARV below to run the math manually.'; renderCompList(); renderCompMortgage(); calcComp(); return; }
+    if(!d.matched){ compRows = []; compPicks = []; compLoadedAddr = ''; compSubjectLat = null; compSubjectLng = null; compConfidence = ''; compConfidenceText = ''; compSubjectSqft = null; compSubjectAvm = null; compSubjectBeds = null; compDetailData = null; compStabilityWarns = []; resetCompFilters(); resetCompMortgage(); renderCompSubjectCard(null, addr, ''); if(msg) msg.textContent = 'No ownership records found for this address — type an ARV below to run the math manually.'; renderCompList(); renderCompMortgage(); calcComp(); return; }
     renderCompSubjectCard(d.property || null, addr, d.address || '', null, d.linkedProperties || []);
     applyCompMortgageFromAttom(d.property || null, addr);
     compConfidence = (d.comps && d.comps.confidence) || '';
     compConfidenceText = (d.comps && d.comps.confidenceText) || '';
     compSubjectSqft = (d.property && d.property.sqft) ? Number(d.property.sqft) : null;
+    compSubjectAvm = (d.avm && d.avm.value != null) ? Number(d.avm.value) : null;
+    compDetailData = {property: d.property || null, avm: d.avm || null, linkedProperties: d.linkedProperties || [], address: addr, matchedAddress: d.address || ''};
     compSubjectBeds = (d.property && d.property.beds != null && d.property.beds !== '') ? Number(d.property.beds) : null;
     resetCompFilters();
     const seen = {};
@@ -5966,6 +6128,11 @@ async function loadCompsForAddress(retryAttempt){
        missing ones browser-side (Nominatim, ~1 req/sec) so pins land on the
        map. Fire-and-forget; never touches the subject or the offer math. */
     geocodeMissingCompRows();
+    /* Listing Insights live feed (OFF unless Troy approves the spend):
+       fetchListingInsights() returns null while disabled — no request, no
+       cost. When enabled it fills only EMPTY listing fields, never
+       overwriting Troy's hand entries. */
+    if(window.ListingInsights) window.ListingInsights.fetchListingInsights(addr).then(function(data){ if(data && window.ListingInsights.applyListingInsights(data)){ calcComp(); } });
   }catch(e){
     renderCompSubjectCard(null, addr, '', true);
     if(msg) msg.textContent = 'Verified comps unavailable right now — type an ARV below to run the math manually.';
@@ -5986,9 +6153,12 @@ function openCompsForLead(id){
   const addr = [l.address, l.city, l.state, l.zip].filter(Boolean).join(', ');
   const addrEl = document.getElementById('compListAddr'); if(addrEl) addrEl.value = addr;
   /* A lead's listing set is carried ONLY as a whole: no status means no
-     price/DOM/agent either — never numbers without a status. */
+     price/DOM/agent either — never numbers without a status. The lead stores
+     the old binary status; 'listed' maps to the new 'active' value. The new
+     detail fields (status date, MLS, description) are not on the lead, so
+     they stay empty on prefill. */
   const hasListingStatus = l.listingStatus === 'listed' || l.listingStatus === 'not-listed';
-  const st = document.getElementById('compListStatus'); if(st) st.value = hasListingStatus ? l.listingStatus : '';
+  const st = document.getElementById('compListStatus'); if(st) st.value = hasListingStatus ? (l.listingStatus === 'listed' ? 'active' : l.listingStatus) : '';
   const ag = document.getElementById('compListAgent'); if(ag) ag.value = hasListingStatus ? (l.listingAgent || '') : '';
   const lp = document.getElementById('compListPrice'); if(lp) lp.value = hasListingStatus ? (l.listingPrice || '') : '';
   const dm = document.getElementById('compListDom'); if(dm) dm.value = hasListingStatus ? (l.listingDom || '') : '';
