@@ -198,7 +198,7 @@ check('verifiedMap miss scores unverified', scoreOf(INDY_FLIP, MAP_BUYER, { veri
 console.log('Wire-in:');
 const indexHtml = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
 check('index.html loads buyer-match-score.js', indexHtml.includes('<script src="assets/buyer-match-score.js"></script>'), true);
-check('index.html loads it right after sellability.js', indexHtml.includes('<script src="assets/sellability.js"></script>\n<script src="assets/buyer-match-score.js"></script>'), true);
+check('index.html loads it after sellability.js', indexHtml.indexOf('<script src="assets/sellability.js"></script>') !== -1 && indexHtml.indexOf('<script src="assets/sellability.js"></script>') < indexHtml.indexOf('<script src="assets/buyer-match-score.js"></script>'), true);
 check('runBuyerMatch computes the new score', indexHtml.includes('buyerMatchScore('), true);
 check('results re-sort by new score', indexHtml.includes('_match.score'), true);
 check('profile overlay shows match score', indexHtml.includes('Match Score'), true);

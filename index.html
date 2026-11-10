@@ -6128,11 +6128,6 @@ async function loadCompsForAddress(retryAttempt){
        missing ones browser-side (Nominatim, ~1 req/sec) so pins land on the
        map. Fire-and-forget; never touches the subject or the offer math. */
     geocodeMissingCompRows();
-    /* Listing Insights live feed (OFF unless Troy approves the spend):
-       fetchListingInsights() returns null while disabled — no request, no
-       cost. When enabled it fills only EMPTY listing fields, never
-       overwriting Troy's hand entries. */
-    if(window.ListingInsights) window.ListingInsights.fetchListingInsights(addr).then(function(data){ if(data && window.ListingInsights.applyListingInsights(data)){ calcComp(); } });
   }catch(e){
     renderCompSubjectCard(null, addr, '', true);
     if(msg) msg.textContent = 'Verified comps unavailable right now — type an ARV below to run the math manually.';
