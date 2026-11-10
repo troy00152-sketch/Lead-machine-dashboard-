@@ -4372,6 +4372,7 @@ function compTierLabel(arv){
 let compRows = [];
 let compPicks = [];
 let compLoadedAddr = '';
+let compListingAddr = ''; /* last address the listing auto-fill fired for (once per search; retry re-runs loadCompsForAddress) */
 /* Comp correctness gates (Oct 28): confidence, subject sqft, and price
    stability are load-derived state, cleared with everything else on
    address change. compPrevLoads is page-session memory keyed by address. */
@@ -5963,6 +5964,17 @@ async function loadCompsForAddress(retryAttempt){
     compDetailData = {property: d.property || null, avm: d.avm || null, linkedProperties: d.linkedProperties || [], address: addr, matchedAddress: d.address || ''};
     compSubjectBeds = (d.property && d.property.beds != null && d.property.beds !== '') ? Number(d.property.beds) : null;
     resetCompFilters();
+    /* Listing Insights live feed (ON — Troy, Nov 9, free tier 50/mo):
+       fetchListingInsights() fills only EMPTY listing fields, never
+       overwriting Troy's hand entries. It MUST run here, right after
+       the subject match — the old spot sat after the no-comps
+       early-return, so it never ran for thin-feed addresses like
+       Charday (PR pool 0 + ATTOM no comps = "No verified sales found
+       on two attempts" before the fetch line). Pass the MATCHED full
+       address (state + ZIP), not the raw search text — RentCast
+       returns nothing for a partial address. Fires once per address
+       per page session; the retry re-runs this function. */
+    if(window.ListingInsights && compListingAddr !== addr){ compListingAddr = addr; window.ListingInsights.fetchListingInsights((compDetailData && compDetailData.matchedAddress) || addr).then(function(data){ if(data && window.ListingInsights.applyListingInsights(data)){ calcComp(); } }); }
     const seen = {};
     const rows = [];
     const pushRow = (c, kind)=>{ if(!c || !c.address || seen[c.address]) return; seen[c.address] = 1; const row = Object.assign({}, c); row.kind = kind; rows.push(row); };
@@ -6021,13 +6033,6 @@ async function loadCompsForAddress(retryAttempt){
        missing ones browser-side (Nominatim, ~1 req/sec) so pins land on the
        map. Fire-and-forget; never touches the subject or the offer math. */
     geocodeMissingCompRows();
-    /* Listing Insights live feed (ON — Troy, Nov 9, free tier 50/mo):
-       fetchListingInsights() fills only EMPTY listing fields, never
-       overwriting Troy's hand entries. Pass the MATCHED full address
-       (state + ZIP), not the raw search text — RentCast returns nothing
-       for a partial address (proven Nov 9: full address returned the
-       listing, "3326 W Michigan St, Indianapolis" returned []). */
-    if(window.ListingInsights) window.ListingInsights.fetchListingInsights((compDetailData && compDetailData.matchedAddress) || addr).then(function(data){ if(data && window.ListingInsights.applyListingInsights(data)){ calcComp(); } });
   }catch(e){
     renderCompSubjectCard(null, addr, '', true);
     if(msg) msg.textContent = 'Verified comps unavailable right now — type an ARV below to run the math manually.';

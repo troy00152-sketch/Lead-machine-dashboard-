@@ -259,6 +259,9 @@ check('adapter calls the proxy', liSrc.includes('/.netlify/functions/rentcast-li
 check('adapter never calls RentCast direct', liSrc.indexOf('api.rentcast.io'), -1);
 check('adapter never reads a browser key', liSrc.indexOf('getRentcastKey'), -1);
 check('auto-fill uses the matched full address', indexHtml.includes('fetchListingInsights((compDetailData && compDetailData.matchedAddress) || addr)'), true);
+check('auto-fill runs before the no-comps early-return', indexHtml.indexOf('fetchListingInsights((compDetailData') < indexHtml.indexOf('No verified sales found on two attempts'), true);
+check('auto-fill fires once per address (retry guard)', indexHtml.includes('compListingAddr !== addr'), true);
+check('auto-fill call site is single', indexHtml.split('fetchListingInsights((compDetailData').length - 1, 1);
 check('no stale "no live feed" copy', indexHtml.indexOf('no live feed supplies them yet'), -1);
 check('description label has no paste prompt', indexHtml.indexOf('paste from Zillow'), -1);
 check('description placeholder has no paste prompt', indexHtml.indexOf('Paste the listing description here'), -1);
