@@ -6023,8 +6023,11 @@ async function loadCompsForAddress(retryAttempt){
     geocodeMissingCompRows();
     /* Listing Insights live feed (ON — Troy, Nov 9, free tier 50/mo):
        fetchListingInsights() fills only EMPTY listing fields, never
-       overwriting Troy's hand entries. */
-    if(window.ListingInsights) window.ListingInsights.fetchListingInsights(addr).then(function(data){ if(data && window.ListingInsights.applyListingInsights(data)){ calcComp(); } });
+       overwriting Troy's hand entries. Pass the MATCHED full address
+       (state + ZIP), not the raw search text — RentCast returns nothing
+       for a partial address (proven Nov 9: full address returned the
+       listing, "3326 W Michigan St, Indianapolis" returned []). */
+    if(window.ListingInsights) window.ListingInsights.fetchListingInsights((compDetailData && compDetailData.matchedAddress) || addr).then(function(data){ if(data && window.ListingInsights.applyListingInsights(data)){ calcComp(); } });
   }catch(e){
     renderCompSubjectCard(null, addr, '', true);
     if(msg) msg.textContent = 'Verified comps unavailable right now — type an ARV below to run the math manually.';
