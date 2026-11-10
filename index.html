@@ -1006,7 +1006,7 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
           <div id="compSubjectCard" style="display:none;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:12px"></div>
           <div style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:12px">
             <div style="font-weight:800;font-size:13px;margin-bottom:4px">🚦 Listing Check — FIRST, before any comp math</div>
-            <p style="color:var(--muted);font-size:12px;margin:0 0 10px">If it's listed with a realtor, PASS immediately — no MAO, no LAO, no offer. Check the listing (Zillow / DealMachine), then set the fields here. Listing fields are set by hand — no live feed supplies them yet. The panel below shows the full picture: status, price + $/sqft, status-change date, above/below value, and the description.</p>
+            <p style="color:var(--muted);font-size:12px;margin:0 0 10px">If it's listed with a realtor, PASS immediately — no MAO, no LAO, no offer. Listing fields fill themselves in from RentCast (free tier) — anything it can't find, check (Zillow / DealMachine) and set by hand. The panel below shows the full picture: status, price + $/sqft, status-change date, above/below value, and the description.</p>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px">
               <div><label class="lbl">Property address (for listing links)</label><input class="field" id="compListAddr" placeholder="e.g. 123 Main St, Indianapolis, IN 46205" oninput="updateCompLinks()" onkeydown="if(event.key==='Enter'){event.preventDefault();loadCompsForAddress();}" /><button class="btn primary" style="margin-top:8px" onclick="loadCompsForAddress()" title="Load everything for this address — comps, map, mortgage, and offer math">🔍 Search</button></div>
               <div><label class="lbl">Listing status *</label><select class="field" id="compListStatus" onchange="calcComp()"><option value="">Not checked yet</option><option value="active">Active — listed with a realtor — PASS</option><option value="pending">Pending — under contract — PASS</option><option value="expired">Expired — no live listing</option><option value="withdrawn">Withdrawn — no live listing</option><option value="sold">Sold — PASS</option><option value="inactive">Inactive — reason unknown (confirm)</option><option value="not-listed">Not listed — clear to comp</option></select></div>
@@ -1096,7 +1096,15 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
         <div class="sec-title">⚙️ Settings</div>
         <div class="card" style="margin-bottom:14px">
           <div class="sec-title" style="font-size:14px">📊 Data Source <span class="badge green" style="font-size:10px">LIVE</span></div>
-          <p style="color:var(--muted);font-size:13px;margin-bottom:10px">All property data, skip tracing, and mortgage info comes through our secure data feed. No API keys needed in your browser.</p>
+          <p style="color:var(--muted);font-size:13px;margin-bottom:10px">All property data, skip tracing, and mortgage info comes through our secure data feed.</p>
+        </div>
+        <div class="card" style="margin-bottom:14px">
+          <div class="sec-title" style="font-size:14px">🔑 RentCast Key <span class="badge green" style="font-size:10px">FREE TIER</span></div>
+          <p style="color:var(--muted);font-size:13px;margin-bottom:10px">Listing auto-fill runs on your RentCast free key (50 calls/mo, shared with the ZIP search and value lookup). Paste it once — it stays in this browser only.</p>
+          <div style="margin-bottom:12px"><label class="lbl">RentCast API key</label><input class="field" id="rentcastKey" type="password" placeholder="Paste your RentCast API key" /></div>
+          <button class="btn" onclick="saveRentcastKey()">Save Key</button>
+          <button class="btn" onclick="toggleRentcastKeyVis()" style="margin-left:6px">Show / Hide</button>
+          <span id="rentcastKeySavedMsg" style="font-size:12px;margin-left:8px"></span>
         </div>
         <div class="card" style="margin-bottom:14px">
           <div class="sec-title" style="font-size:14px">💳 Data Credits</div>
@@ -1366,6 +1374,7 @@ function showPage(name){
   if(el) el.classList.add('active');
   document.querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active', b.dataset.nav===name));
   if(name === 'listimport') liLoadConn();
+  if(name === 'settings') rentcastKeyState();
   if(name === 'dealrooms' && typeof drLoadDeals === 'function') drLoadDeals();
   if(name === 'comps'){ renderCompMap(); setTimeout(()=>{ if(compMap){ compMap.invalidateSize(); renderCompMap(); } }, 150); }
   if(name === 'masterbuyers' && typeof syncMbView === 'function'){ setTimeout(()=>{ if(mbMap){ mbMap.invalidateSize(); if(mbView === 'map') renderBuyerMap(); } }, 150); }
@@ -3220,6 +3229,10 @@ function saveRentcastKey(){
 function toggleRentcastKeyVis(){
   const i = document.getElementById('rentcastKey');
   i.type = i.type==='password' ? 'text' : 'password';
+}
+function rentcastKeyState(){
+  const m = document.getElementById('rentcastKeySavedMsg');
+  if(m) m.innerHTML = getRentcastKey() ? '<span style="color:var(--green)">✓ Key saved in this browser</span>' : '';
 }
 async function callRentcastAVM(address, city, state, zip){
   const key = getRentcastKey();

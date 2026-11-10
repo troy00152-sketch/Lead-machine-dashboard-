@@ -6,6 +6,8 @@
 // (read Nov 9, 8:37 PM) and the RentCast API docs. Exits 1 on any failure.
 const LI = require('./assets/listing-insights.js');
 const PDV = require('./assets/property-detail-view.js');
+const fs = require('fs');
+const path = require('path');
 
 let pass = 0, fail = 0;
 function check(name, actual, expected) {
@@ -242,6 +244,18 @@ contains('empty carousel fallback', PDV.carouselHtml([]), 'No property photo ava
 console.log('Detail view: free & clear:');
 const fcHtml = PDV.detailViewHtml(Object.assign({}, chardayView, { mortgage: { freeClear: true } }));
 contains('free & clear loans section', fcHtml, 'Free &amp; Clear');
+
+// ---- 10. Settings: RentCast key field exists (Nov 9 — the field was
+// missing from the deployed Settings, so getRentcastKey() always returned
+// '' and nothing auto-filled; the save/toggle functions were orphaned) ----
+console.log('Settings: RentCast key field:');
+const indexHtml = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+check('index.html has RentCast key input', indexHtml.includes('id="rentcastKey"'), true);
+check('index.html wires Save Key', indexHtml.includes('onclick="saveRentcastKey()"'), true);
+check('index.html wires Show/Hide toggle', indexHtml.includes('onclick="toggleRentcastKeyVis()"'), true);
+check('index.html has saved-state span', indexHtml.includes('id="rentcastKeySavedMsg"'), true);
+check('settings open shows saved state', indexHtml.includes("if(name === 'settings') rentcastKeyState();"), true);
+check('no stale "no live feed" copy', indexHtml.indexOf('no live feed supplies them yet'), -1);
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
