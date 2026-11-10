@@ -256,6 +256,10 @@ check('index.html wires Show/Hide toggle', indexHtml.includes('onclick="toggleRe
 check('index.html has saved-state span', indexHtml.includes('id="rentcastKeySavedMsg"'), true);
 check('settings open shows saved state', indexHtml.includes("if(name === 'settings') rentcastKeyState();"), true);
 check('no stale "no live feed" copy', indexHtml.indexOf('no live feed supplies them yet'), -1);
+check('saveRentcastKey clears the field after save', indexHtml.includes("getElementById('rentcastKey').value = '';"), true);
+check('saveRentcastKey re-masks after save', indexHtml.includes("getElementById('rentcastKey').type = 'password';"), true);
+check('description label has no paste prompt', indexHtml.indexOf('paste from Zillow'), -1);
+check('description placeholder has no paste prompt', indexHtml.indexOf('Paste the listing description here'), -1);
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

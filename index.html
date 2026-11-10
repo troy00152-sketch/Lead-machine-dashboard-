@@ -1023,7 +1023,7 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
               <div><label class="lbl">Home sq ft (optional — for $/sqft)</label><input class="field" id="compListSqft" type="number" placeholder="Auto-fills on load" oninput="calcComp()" /></div>
               <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap"><a id="compZillowLink" class="btn" href="https://www.zillow.com/" target="_blank" rel="noopener" style="text-decoration:none" onclick="stampListingChecked()">🏠 Check on Zillow ↗</a><span id="compCheckedNote" style="font-size:12px;color:var(--muted)"></span></div>
             </div>
-            <div style="margin-bottom:10px"><label class="lbl">Listing description (paste from Zillow / DealMachine)</label><textarea class="field" id="compListDesc" rows="3" placeholder="Paste the listing description here — it shows in the Listing Insights panel below." oninput="calcComp()"></textarea></div>
+            <div style="margin-bottom:10px"><label class="lbl">Listing description</label><textarea class="field" id="compListDesc" rows="3" placeholder="Blank unless a listing feed returns one." oninput="calcComp()"></textarea></div>
             <div id="compGateMsg"></div>
           </div>
           <div id="compInsights" style="margin-bottom:12px"></div>
@@ -3223,6 +3223,8 @@ function saveRentcastKey(){
   const k = document.getElementById('rentcastKey').value.trim();
   if(!k){ toast('Enter a key first'); return; }
   localStorage.setItem('acc_rentcast_key', k);
+  document.getElementById('rentcastKey').value = '';
+  document.getElementById('rentcastKey').type = 'password';
   document.getElementById('rentcastKeySavedMsg').innerHTML = '<span style="color:var(--green)">✓ Key saved in this browser</span>';
   toast('RentCast key saved');
 }
