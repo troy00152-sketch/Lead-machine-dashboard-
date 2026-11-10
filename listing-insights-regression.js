@@ -3,7 +3,7 @@
 // Run: node listing-insights-regression.js
 // Fixtures only — zero live API credits, zero network. Expected values are
 // hand-computed in the comments from the 3326 W Michigan St XLeads page
-// (read Nov 9, 8:37 PM). Exits 1 on any failure.
+// (read Nov 9, 8:37 PM) and the RentCast API docs. Exits 1 on any failure.
 const LI = require('./assets/listing-insights.js');
 const PDV = require('./assets/property-detail-view.js');
 
@@ -23,6 +23,8 @@ function contains(name, html, needle) {
 console.log('Module shape:');
 check('ListingInsights exports isPassStatus', typeof LI.isPassStatus, 'function');
 check('ListingInsights exports panelHtml', typeof LI.panelHtml, 'function');
+check('ListingInsights exports mapRentcastListing', typeof LI.mapRentcastListing, 'function');
+check('autofetch is ON (Troy, free tier)', LI.LISTING_AUTOFETCH_ENABLED, true);
 check('PropertyDetailView exports detailViewHtml', typeof PDV.detailViewHtml, 'function');
 check('PropertyDetailView exports carouselHtml', typeof PDV.carouselHtml, 'function');
 
@@ -54,7 +56,46 @@ check('aboveBelow 152400 vs 151465', LI.aboveBelow(152400, 151465).text, '+$935 
 check('aboveBelow 152400 vs 167500', LI.aboveBelow(152400, 167500).text, '−$15,100 (9% below value)');
 check('aboveBelow missing ref -> null', LI.aboveBelow(152400, 0), null);
 
-// ---- 4. Listing Insights panel: Charday EXPIRED (XLeads page values) ----
+// ---- 4. RentCast mapping (fixtures from the live RentCast docs) ----
+console.log('RentCast mapping:');
+const rcActive = {
+  status: 'Active', price: 899000, listingType: 'Standard',
+  listedDate: '2024-06-24T00:00:00.000Z', removedDate: null,
+  lastSeenDate: '2024-09-30T13:11:47.157Z', daysOnMarket: 99,
+  mlsName: 'UnlockMLS', mlsNumber: '5519228',
+  listingAgent: { name: 'Jennifer Welch', phone: '5124313110', email: 'j@example.com' },
+  listingOffice: { name: 'Gottesman Residential R.E.', phone: '5124512422' },
+  squareFootage: 2345, propertyType: 'Single Family'
+};
+const mapped = LI.mapRentcastListing(rcActive);
+check('RentCast active -> active', mapped.status, 'active');
+check('RentCast price', mapped.price, 899000);
+check('RentCast listedDate', mapped.listedDate, '2024-06-24');
+check('RentCast statusDate empty while active', mapped.statusDate, '');
+check('RentCast dom', mapped.dom, '99');
+check('RentCast agent', mapped.agent, 'Jennifer Welch');
+check('RentCast agent phone', mapped.agentPhone, '5124313110');
+check('RentCast agent email', mapped.agentEmail, 'j@example.com');
+check('RentCast office', mapped.office, 'Gottesman Residential R.E.');
+check('RentCast mls', mapped.mls, '5519228');
+check('RentCast type', mapped.type, 'Single Family');
+check('RentCast sqft', mapped.sqft, 2345);
+check('RentCast has NO description', mapped.description, '');
+const rcInactive = {
+  status: 'Inactive', price: 152400, listingType: 'Standard',
+  listedDate: '2025-09-01T00:00:00.000Z', removedDate: '2026-11-01T00:00:00.000Z',
+  daysOnMarket: 61, mlsNumber: '406063160',
+  listingAgent: { name: 'Anthony Burris', phone: '3176570923', email: 'rrealtyinvestments@gmail.com' },
+  listingOffice: { name: 'Resilient Realty Investments' },
+  squareFootage: 1822, propertyType: 'Single Family'
+};
+const mappedIn = LI.mapRentcastListing(rcInactive);
+check('RentCast inactive -> inactive (reason unknown)', mappedIn.status, 'inactive');
+check('RentCast removedDate -> statusDate', mappedIn.statusDate, '2026-11-01');
+check('RentCast inactive is NOT a pass', LI.isPassStatus(mappedIn.status), false);
+check('RentCast null -> null', LI.mapRentcastListing(null), null);
+
+// ---- 5. Listing Insights panel: Charday EXPIRED (XLeads page values) ----
 console.log('Panel: Charday EXPIRED:');
 const chardayListing = {
   status: 'expired', price: 152400, sqft: 1822,
@@ -79,7 +120,7 @@ contains('description', chardayHtml, '3 bed, 2 bath home on a fully fenced lot.'
 contains('no PASS on expired panel', chardayHtml.indexOf('PASS') === -1, true);
 check('expired is not a pass', LI.isPassStatus(chardayListing.status), false);
 
-// ---- 5. Listing Insights panel: ACTIVE triggers PASS ----
+// ---- 6. Listing Insights panel: ACTIVE triggers PASS ----
 console.log('Panel: ACTIVE:');
 const activeHtml = LI.panelHtml({
   status: 'active', price: 200000, sqft: 2000, listedDate: '2026-10-15',
@@ -91,14 +132,14 @@ contains('active price + $/sqft', activeHtml, '$200,000 ($100/sqft)');
 contains('active above/below', activeHtml, '+$10,000 (5% above value) vs AVM');
 check('active is a pass', LI.isPassStatus('active'), true);
 
-// ---- 6. Listing Insights panel: no data shows dashes, never invented ----
+// ---- 7. Listing Insights panel: no data shows dashes, never invented ----
 console.log('Panel: empty:');
 const emptyHtml = LI.panelHtml({});
 contains('empty status', emptyHtml, 'Not checked yet');
 contains('empty price dash', emptyHtml, 'Listing Price');
 check('empty panel has dashes', (emptyHtml.match(/—/g) || []).length >= 5, true);
 
-// ---- 7. Property detail view: Charday fixture ----
+// ---- 8. Property detail view: Charday fixture ----
 console.log('Detail view: Charday:');
 const chardayView = {
   address: '3326 W Michigan St', city: 'Indianapolis', state: 'IN', zip: '46222', county: 'Marion County',
@@ -189,7 +230,7 @@ contains('no pre-foreclosure', viewHtml, 'No pre-foreclosure on record');
 check('no XLeads branding', viewHtml.indexOf('XLeads'), -1);
 check('no DealMachine branding', viewHtml.indexOf('DealMachine'), -1);
 
-// ---- 8. Detail view: empty view renders dashes, never crashes ----
+// ---- 9. Detail view: empty view renders dashes, never crashes ----
 console.log('Detail view: empty:');
 const emptyViewHtml = PDV.detailViewHtml({});
 check('empty view renders', typeof emptyViewHtml, 'string');
@@ -197,7 +238,7 @@ check('empty view has dashes', (emptyViewHtml.match(/—/g) || []).length >= 5, 
 contains('empty view still has sections', emptyViewHtml, 'Listing Insights');
 contains('empty carousel fallback', PDV.carouselHtml([]), 'No property photo available');
 
-// ---- 9. Detail view: free & clear loan ----
+// ---- 10. Detail view: free & clear loan ----
 console.log('Detail view: free & clear:');
 const fcHtml = PDV.detailViewHtml(Object.assign({}, chardayView, { mortgage: { freeClear: true } }));
 contains('free & clear loans section', fcHtml, 'Free &amp; Clear');
