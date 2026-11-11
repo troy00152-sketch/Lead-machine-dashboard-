@@ -1,0 +1,251 @@
+// assets/esign.js — "Send for Signature" sheet (Nov 11, 2026).
+// HighLevel signing surfaced in the dashboard. FREE — no paid vendor, no
+// per-envelope fee. The sheet: pick one of Troy's 9 HL templates -> the
+// dashboard validates the contract fields on the HL contact -> creates a
+// DRAFT first -> checks every signer has Signature + Date fields -> only
+// then, on Troy's confirm tap, sends by email (seller + Troy CC'd) and
+// texts the seller their HL signing link. Nothing sends without the
+// confirm tap, and there is NO test mode for HL signing — a send is a
+// real, legally binding signing request. "Prepare" is the safe dry-run.
+// Field placement stays Troy's: the dashboard verifies fields, never
+// places them. Contract text comes only from the HL template.
+(function () {
+  'use strict';
+
+  var ESIGN_FN = '/.netlify/functions/esign';
+  var current = null; // { leadId, contactId, templates, envelope, fieldsCheck }
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+  function money(v) {
+    var n = Number(String(v || '').replace(/[$,\s]/g, ''));
+    if (!Number.isFinite(n)) return String(v || '—');
+    return '$' + n.toLocaleString('en-US', { maximumFractionDigits: 0 });
+  }
+  function findLead(id) {
+    var list = (window.leads || window.LEADS || []);
+    for (var i = 0; i < list.length; i++) if (String(list[i].id) === String(id)) return list[i];
+    return null;
+  }
+  async function callEsign(action, body) {
+    var url = ESIGN_FN + '?action=' + encodeURIComponent(action);
+    var opts = { method: body ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json' } };
+    if (body) opts.body = JSON.stringify(body);
+    var res = await fetch(url, opts);
+    var data = null;
+    try { data = await res.json(); } catch (e) { data = null; }
+    if (!res.ok) {
+      var err = new Error((data && data.error) || ('Request failed (HTTP ' + res.status + ').'));
+      err.data = data;
+      throw err;
+    }
+    return data;
+  }
+
+  function renderError(msg) {
+    var b = document.getElementById('esignBody');
+    if (b) b.innerHTML = '<p style="color:#d33;font-weight:600">Could not load the signature sheet: ' + esc(msg) + ' Nothing was changed.</p>';
+  }
+
+  function stateLabel(state) {
+    var map = { prepared: 'Prepared', draft: 'Draft ready — not sent', 'fields-blocked': 'BLOCKED — fields missing', sent: 'Sent — awaiting signature', viewed: 'Viewed by seller', completed: 'Signed — complete', accepted: 'Signed — accepted' };
+    return map[state] || state || '—';
+  }
+
+  function renderSheet() {
+    var b = document.getElementById('esignBody');
+    if (!b || !current) return;
+    var lead = current.lead;
+    var env = current.envelope;
+    var fc = current.fieldsCheck;
+    var html = '';
+    html += '<p style="color:var(--muted);font-size:13px;margin-top:0">HighLevel signing — <b>$0, no per-signature fee</b>. The seller signs on HighLevel\'s signing page from the link they are emailed; you watch it here. Contract text comes only from your HighLevel template — nothing is invented.</p>';
+    html += '<p style="background:#fff3cd;border:1px solid #e6c34d;border-radius:8px;padding:10px 12px;font-size:13px;margin:8px 0"><b>⚠️ A send is REAL.</b> HighLevel signing has no test mode. Preparing a draft sends nothing; sending emails a legally binding signing request to the seller and Troy.</p>';
+    if (current.staleTemplates) {
+      html += '<p style="color:#a60;font-size:13px">Live template list failed — showing the 9 templates verified Nov 11, 2026. Verify in HighLevel before sending.</p>';
+    }
+    // Template picker
+    html += '<div class="sec-title" style="font-size:14px">📄 Contract template</div>';
+    html += '<select id="esignTemplate" style="width:100%;padding:10px;border:1px solid #ddd;border-radius:8px;font-size:14px">';
+    (current.templates || []).forEach(function (t) {
+      var sel = env && env.templateId === t.id ? ' selected' : '';
+      html += '<option value="' + esc(t.id) + '"' + sel + '>' + esc(t.name) + '</option>';
+    });
+    html += '</select>';
+    // Contract summary (read-only — edits happen on the HL contact)
+    if (env && env.contract) {
+      var c = env.contract;
+      html += '<div class="sec-title" style="font-size:14px;margin-top:14px">🧾 Contract — auto-filled from the HighLevel contact</div>';
+      html += '<table style="width:100%;font-size:14px;border-collapse:collapse">'
+        + '<tr><td style="padding:4px 0;color:var(--muted)">Price</td><td style="text-align:right"><b>' + esc(money(c.price)) + '</b></td></tr>'
+        + '<tr><td style="padding:4px 0;color:var(--muted)">EMD</td><td style="text-align:right"><b>' + esc(money(c.emd)) + '</b></td></tr>'
+        + '<tr><td style="padding:4px 0;color:var(--muted)">APN</td><td style="text-align:right">' + esc(c.apn) + '</td></tr>'
+        + '<tr><td style="padding:4px 0;color:var(--muted)">Legal description</td><td style="text-align:right">' + esc(c.legal) + '</td></tr>'
+        + '<tr><td style="padding:4px 0;color:var(--muted)">County</td><td style="text-align:right">' + esc(c.county) + '</td></tr>'
+        + '<tr><td style="padding:4px 0;color:var(--muted)">Contract date</td><td style="text-align:right">' + esc(c.contractDate || '—') + '</td></tr>'
+        + '<tr><td style="padding:4px 0;color:var(--muted)">Closing date (contract + 30 days)</td><td style="text-align:right"><b>' + esc(c.closingDate || '—') + '</b></td></tr>'
+        + '</table>';
+      if (current.disclosureReminder) {
+        html += '<p style="color:#a60;font-size:13px">Ohio deal — the SB 155 wholesaler disclosure (boldface, ≥12pt) must be in the template before the contract binds. Confirm it is in your template.</p>';
+      }
+      // Signers
+      html += '<div class="sec-title" style="font-size:14px;margin-top:14px">✍️ Signers</div>';
+      html += '<ul style="margin:0;padding-left:18px;font-size:14px">';
+      (env.signers || []).forEach(function (s) {
+        html += '<li><b>' + esc(s.name) + '</b> — ' + esc(s.role) + (s.email ? ' · ' + esc(s.email) : '') + (s.note ? '<br><span style="color:var(--muted);font-size:12px">' + esc(s.note) + '</span>' : '') + '</li>';
+      });
+      html += '</ul>';
+      if (env.draftRecipients && env.draftRecipients.length) {
+        html += '<p style="font-size:13px;color:var(--muted)">Recipients on the HighLevel draft: ' + esc(env.draftRecipients.map(function (r) { return r.contactName || r.id; }).join(', ')) + '. Check co-sellers are listed.</p>';
+      }
+    }
+    // Fields check
+    if (fc) {
+      if (fc.ready) {
+        html += '<p style="color:#1a7f37;font-weight:600;margin:12px 0 4px">✅ Fields check passed — every signer has a Signature and a Date field on the draft.</p>';
+      } else {
+        html += '<p style="color:#d33;font-weight:600;margin:12px 0 4px">⛔ Fields check FAILED — this contract cannot be sent.</p>';
+        html += '<ul style="margin:0 0 8px;padding-left:18px;font-size:13px;color:#d33">';
+        (fc.missing || []).forEach(function (m) { html += '<li>' + esc(m) + '</li>'; });
+        html += '</ul>';
+        if (fc.reason) html += '<p style="font-size:13px;color:var(--muted)">' + esc(fc.reason) + ' Place the fields in HighLevel, then prepare again.</p>';
+      }
+    }
+    // Missing contract fields
+    if (current.missing && current.missing.length) {
+      html += '<p style="color:#d33;font-weight:600">⛔ Contract is not ready — fill these on the HighLevel contact first:</p>';
+      html += '<ul style="margin:0;padding-left:18px;font-size:13px;color:#d33">';
+      current.missing.forEach(function (m) { html += '<li>' + esc(m) + '</li>'; });
+      html += '</ul>';
+    }
+    // Status / audit
+    if (env) {
+      html += '<div class="sec-title" style="font-size:14px;margin-top:14px">📋 Status — ' + esc(stateLabel(env.state)) + '</div>';
+      if (env.sms) html += '<p style="font-size:13px">' + (env.sms.sent ? '📱 Signing link texted to the seller.' : esc(env.sms.reason || 'Signing link sent by email only.')) + '</p>';
+      if (env.events && env.events.length) {
+        html += '<ul style="margin:0;padding-left:18px;font-size:13px;color:var(--muted)">';
+        env.events.slice(-6).forEach(function (e) { html += '<li>' + esc(e.at) + ' — ' + esc(e.action) + ': ' + esc(e.detail || '') + '</li>'; });
+        html += '</ul>';
+      }
+    }
+    // Actions
+    html += '<div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap">';
+    if (!env) {
+      html += '<button class="btn primary" onclick="esignPrepare()">1️⃣ Prepare draft — sends nothing</button>';
+    } else if (env.state === 'fields-blocked') {
+      html += '<button class="btn primary" onclick="esignPrepare(true)">↻ Prepare again after fixing fields in HighLevel</button>';
+    } else if (env.state === 'draft') {
+      html += '<label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;width:100%"><input type="checkbox" id="esignFieldsConfirmed" style="margin-top:3px"> I checked in HighLevel — every signer has a Signature and a Date field placed on this contract.</label>';
+      html += '<button class="btn primary" onclick="esignSend()">✍️ 2️⃣ Send for signature — real contract</button>';
+      html += '<button class="btn" onclick="esignCloseSheet()">Close</button>';
+    } else {
+      html += '<button class="btn" onclick="esignRefresh()">↻ Check signing status</button>';
+      html += '<button class="btn" onclick="esignCloseSheet()">Close</button>';
+    }
+    html += '</div>';
+    if (env && env.state === 'draft') {
+      html += '<p style="font-size:12px;color:var(--muted)">Sending emails the contract to the seller and Troy at the same time, and texts the seller their signing link (unless they are DND).</p>';
+    }
+    b.innerHTML = html;
+  }
+
+  window.esignOpenSheet = async function (leadId) {
+    var lead = findLead(leadId);
+    if (!lead) { alert('Lead not found.'); return; }
+    var contactId = lead.ghlContactId || lead.hlContactId || null;
+    current = { leadId: leadId, lead: lead, contactId: contactId, templates: [], envelope: null, fieldsCheck: null, missing: [], staleTemplates: false, disclosureReminder: false };
+    var modal = document.getElementById('esignModal');
+    if (modal) modal.classList.add('open');
+    var b = document.getElementById('esignBody');
+    if (b) b.innerHTML = '<p style="color:var(--muted)">Loading your HighLevel templates…</p>';
+    if (!contactId) {
+      renderError('This lead has no HighLevel contact linked yet — push it to GHL first, then send for signature.');
+      return;
+    }
+    try {
+      var tpl = await callEsign('templates');
+      current.templates = tpl.templates || [];
+      current.staleTemplates = Boolean(tpl.stale);
+      // Pre-select the template matching the lead's state.
+      var st = String((lead.state || lead.propertyState || '')).toUpperCase();
+      var match = null;
+      current.templates.forEach(function (t) {
+        var name = String(t.name || '').toUpperCase();
+        if (!match && st && name.indexOf(st) !== -1) match = t;
+        if (!match && st === 'MO' && name.indexOf(' KC') !== -1) match = t;
+        if (!match && st === 'KS' && name.indexOf(' KC') !== -1) match = t;
+      });
+      if (match) current.preferredTemplateId = match.id;
+      renderSheet();
+      // Pre-select in the dropdown.
+      var sel = document.getElementById('esignTemplate');
+      if (sel && current.preferredTemplateId) sel.value = current.preferredTemplateId;
+    } catch (e) {
+      renderError(e.message || 'Could not load templates.');
+    }
+  };
+
+  window.esignPrepare = async function (retry) {
+    if (!current) return;
+    var sel = document.getElementById('esignTemplate');
+    var templateId = (sel && sel.value) || (current.envelope && current.envelope.templateId) || current.preferredTemplateId || '';
+    if (!templateId) { alert('Pick a contract template first.'); return; }
+    var b = document.getElementById('esignBody');
+    if (b) b.innerHTML = '<p style="color:var(--muted)">Preparing the draft — validating contract fields and checking signature fields. Nothing is being sent…</p>';
+    try {
+      var res = await callEsign('prepare', {
+        action: 'prepare',
+        contactId: current.contactId,
+        leadId: current.leadId,
+        templateId: templateId,
+        contractDate: new Date().toISOString().slice(0, 10),
+        forceNew: Boolean(retry),
+      });
+      current.envelope = res.envelope;
+      current.fieldsCheck = res.fieldsCheck || (res.envelope && res.envelope.fieldsCheck) || null;
+      current.disclosureReminder = Boolean(res.disclosureReminder);
+      current.missing = [];
+      renderSheet();
+    } catch (e) {
+      if (e && e.data && e.data.missing) { current.missing = e.data.missing; renderSheet(); return; }
+      renderError(e.message || 'Prepare failed.');
+    }
+  };
+
+  window.esignSend = async function () {
+    if (!current || !current.envelope) return;
+    var box = document.getElementById('esignFieldsConfirmed');
+    if (!box || !box.checked) {
+      alert('Confirm the Signature and Date fields are placed in HighLevel first — that checkbox is the guard that stops a field-less contract going out.');
+      return;
+    }
+    if (!confirm('This sends a REAL contract for signature by email to the seller and Troy. Send it?')) return;
+    var b = document.getElementById('esignBody');
+    if (b) b.innerHTML = '<p style="color:var(--muted)">Sending the contract…</p>';
+    try {
+      var res = await callEsign('send', { action: 'send', envelopeId: current.envelope.id, fieldsConfirmed: true });
+      current.envelope = res.envelope;
+      renderSheet();
+    } catch (e) {
+      renderError(e.message || 'Send failed. Nothing was changed on the seller side if the error came before the send.');
+    }
+  };
+
+  window.esignRefresh = async function () {
+    if (!current || !current.envelope) return;
+    try {
+      var res = await callEsign('refresh', { action: 'refresh', envelopeId: current.envelope.id });
+      current.envelope = res.envelope;
+      renderSheet();
+    } catch (e) {
+      renderError(e.message || 'Status check failed.');
+    }
+  };
+
+  window.esignCloseSheet = function () {
+    var modal = document.getElementById('esignModal');
+    if (modal) modal.classList.remove('open');
+    current = null;
+  };
+})();
