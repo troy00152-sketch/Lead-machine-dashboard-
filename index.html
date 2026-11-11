@@ -20,6 +20,7 @@
 <script src="assets/buyer-detail.js"></script>
 <script src="assets/buyer-portfolio-data.js"></script>
 <script src="assets/buyer-portfolio.js"></script>
+<script src="assets/mail.js"></script>
 <title>Acquisition Command Center</title>
 <script>
 /* White-label branding hook — additive, fails safe to Troy's defaults.
@@ -1191,6 +1192,16 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
   </div>
 </div>
 <!-- BUYER DETAIL MODAL — investor performance card + detail (Nov 8) -->
+<!-- MAIL MODAL — direct-mail postcard confirm sheet (Nov 11). The sheet is
+     rendered by assets/mail.js: template picker + live design preview +
+     size + recipient address + price + month spend vs $100 cap. Nothing
+     sends without Troy's confirm tap in the sheet. -->
+<div class="modal-overlay" id="mailModal">
+  <div class="modal" style="max-width:680px">
+    <div class="modal-head"><h3 id="mailTitle">✉️ Send Mail</h3><button class="modal-x" onclick="closeMailSheet()">✕</button></div>
+    <div class="modal-body" id="mailBody"></div>
+  </div>
+</div>
 <div class="modal-overlay" id="mbDetailModal">
   <div class="modal" style="max-width:640px">
     <div class="modal-head"><h3 id="mbDetailTitle">Buyer Detail</h3><button class="modal-x" onclick="mbCloseDetail()">✕</button></div>
@@ -2592,6 +2603,7 @@ function openLead(id){
       <button class="btn" onclick="openLiveCallForLead('${l.id}')">📞 Live Call</button>
       <button class="btn" onclick="matchLeadToBuyers('${l.id}')">🤝 Buyer Match Ai</button>
       <button class="btn" onclick="blastLeadToBuyers('${l.id}')">📣 Blast</button>
+      <button class="btn" onclick="mailOpenSheet('${l.id}')">✉️ Send Mail</button>
       <button class="btn ghost" onclick="pushToGHL('${l.id}')">📤 Send to GHL</button>
     </div>
     <div id="analysisBox"></div>`;
