@@ -183,13 +183,27 @@ function hlHeaders(token) {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
   };
 }
+// HighLevel's real error text, extracted from its response body. HL returns
+// the cause in `message` (string or string[]) or `error`; without this the
+// caller only ever saw "failed (HTTP 422)" and the cause was invisible.
+function hlErrorText(parsed) {
+  if (!parsed || typeof parsed !== 'object') return '';
+  if (typeof parsed.message === 'string' && parsed.message) return parsed.message;
+  if (Array.isArray(parsed.message) && parsed.message.length) return parsed.message.join('; ');
+  if (typeof parsed.error === 'string' && parsed.error) return parsed.error;
+  if (parsed.data && typeof parsed.data.message === 'string' && parsed.data.message) return parsed.data.message;
+  const keys = Object.keys(parsed);
+  if (keys.length) return JSON.stringify(parsed).slice(0, 400);
+  return '';
+}
 async function hlJson(token, method, path, body, impl) {
   const url = HL_API_BASE + path;
   const res = await (impl || httpsReq)(url, { method, headers: hlHeaders(token), body: body ? JSON.stringify(body) : '' });
   let parsed = {};
   try { parsed = JSON.parse(res.text || '{}'); } catch (e) { parsed = {}; }
   if (res.status < 200 || res.status >= 300) {
-    const err = new Error(`HighLevel ${method} ${path} failed (HTTP ${res.status}).`);
+    const detail = hlErrorText(parsed);
+    const err = new Error(`HighLevel ${method} ${path} failed (HTTP ${res.status})${detail ? ': ' + detail : '.'}`);
     err.status = res.status; err.body = parsed;
     throw err;
   }
@@ -476,7 +490,7 @@ async function hlSendSms(token, contactId, message, impl) {
 }
 
 // ---- handler ----
-const handler = async (event) => {
+exports.handler = async (event) => {
   if ((event.httpMethod || 'GET') === 'OPTIONS') return ok({ ok: true });
   if (!isAdmin(event)) return unauth();
   const method = event.httpMethod || 'GET';
@@ -575,7 +589,7 @@ const handler = async (event) => {
     let created;
     try {
       created = await hlJson(token, 'POST', '/proposals/templates/send', buildSendTemplateBody({ templateId, userId: senderUserId, contactId, opportunityId: body.opportunityId || '', sendDocument: false }));
-    } catch (e) { return unavailable('HighLevel could not create the contract draft: ' + (e.message || 'unknown error')); }
+    } catch (e) { return json(503, { error: 'HighLevel could not create the contract draft: ' + (e.message || 'unknown error'), hlStatus: e.status || null, hlError: e.body || null }); }
     const links = created.links || [];
     const documentId = (links[0] && links[0].documentId) || created.documentId || '';
     // Read the draft back and verify its fields.
@@ -630,7 +644,7 @@ const handler = async (event) => {
     let sent;
     try {
       sent = await hlJson(token, 'POST', '/proposals/document/send', buildSendDocumentBody({ documentId: envelope.documentId, sentBy: senderUserId, medium: 'email', ccRecipients }));
-    } catch (e) { return unavailable('HighLevel could not send the contract: ' + (e.message || 'unknown error')); }
+    } catch (e) { return json(503, { error: 'HighLevel could not send the contract: ' + (e.message || 'unknown error'), hlStatus: e.status || null, hlError: e.body || null }); }
     envelope.state = 'sent';
     envelope.fieldsConfirmedByTroy = true;
     envelope.sentAt = new Date().toISOString();
@@ -694,7 +708,6 @@ const handler = async (event) => {
 };
 
 module.exports = {
-  handler,
   closingDatePlus30,
   buildLegalDescription,
   customField,
@@ -713,6 +726,7 @@ module.exports = {
   buildSendTemplateBody,
   buildSendDocumentBody,
   signingLinkFor,
+  hlErrorText,
   FIELD_IDS,
   KNOWN_TEMPLATES,
   ENVELOPE_STATES,

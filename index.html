@@ -2087,7 +2087,10 @@ function addAllListResultsToLeads(){
    =========================================================================== */
 
 /* Single-address lookup via RentCast AVM + property records */
-const FILTER_WORDS = ['condo', 'unit', 'apt', 'apartment', 'townhouse', 'townhome', 'suite'];
+/* FILTER_WORDS was referenced here but defined nowhere (Nov 11) — every
+   valid pasted row threw a ReferenceError and ingested nothing. List
+   restored from the pre-DealMachine-removal backup (same words). */
+const FILTER_WORDS = ['condo','townhouse','twnhs','unit ','unit-','ste ','suite','apt ','apartment','#'];
 function shouldFilter(address, signal){
   const lower = (address+' '+(signal||'')).toLowerCase();
   return FILTER_WORDS.some(w => lower.includes(w));

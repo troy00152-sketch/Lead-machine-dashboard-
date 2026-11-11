@@ -24,7 +24,7 @@
     return '$' + n.toLocaleString('en-US', { maximumFractionDigits: 0 });
   }
   function findLead(id) {
-  var list = (window.leads || window.LEADS || (typeof leads !== 'undefined' ? leads : []) || []);
+    var list = (window.leads || window.LEADS || []);
     for (var i = 0; i < list.length; i++) if (String(list[i].id) === String(id)) return list[i];
     return null;
   }

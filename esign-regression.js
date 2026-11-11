@@ -232,6 +232,20 @@ t('templates: ids unique', new Set(esign.KNOWN_TEMPLATES.map((x) => x.id)).size 
   t('free: UI names no paid vendor either', !banned.test(ui));
 })();
 
+// ---- 12b. HighLevel error surfacing (Nov 11 422 bug) ----
+// The prepare step used to return only "failed (HTTP 422)" — HL's real
+// reason (in `message` / `error`) was thrown away. hlErrorText must
+// surface it so the sheet shows the actual cause.
+(function () {
+  t('hlerr: string message passes through', esign.hlErrorText({ message: 'Template not found' }) === 'Template not found');
+  t('hlerr: message array joins', esign.hlErrorText({ message: ['companyId must be a string', 'companyId should not be empty'] }) === 'companyId must be a string; companyId should not be empty');
+  t('hlerr: error string passes through', esign.hlErrorText({ error: 'Unprocessable Entity' }) === 'Unprocessable Entity');
+  t('hlerr: nested data.message passes through', esign.hlErrorText({ data: { message: 'User not found' } }) === 'User not found');
+  t('hlerr: empty body -> empty (no invented cause)', esign.hlErrorText({}) === '');
+  t('hlerr: null body -> empty', esign.hlErrorText(null) === '');
+  t('hlerr: unknown shape falls back to JSON, truncated', esign.hlErrorText({ statusCode: 422, traceId: 'x' }).includes('422'));
+})();
+
 // ---- 13. UI: manual HighLevel contact link (Nov 11 v1 bug) ----
 // The v1 sheet dead-ended on EVERY unlinked lead: openEsignSheet blocked
 // when lead.ghlContactId was empty, and nothing in the repo ever set
