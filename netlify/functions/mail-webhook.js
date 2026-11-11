@@ -1,33 +1,40 @@
 // netlify/functions/mail-webhook.js
-// Lob tracking-event receiver for the Command Center direct-mail build.
+// PostGrid tracking-event receiver for the Command Center direct-mail build.
 //
-// Lob posts one event per tracking step (created, in_transit, in_local_area,
-// processed_for_delivery, delivered, re_routed, returned_to_sender). This
-// function updates the Blobs send log and, on delivery, tags the HighLevel
-// contact `mail-delivered` (on a return, `mail-returned`).
+// PostGrid Starter allows ONE webhook: register this endpoint URL in the
+// PostGrid dashboard with enabled events postcard.created + postcard.updated.
+// PostGrid posts one event per status change; this function updates the
+// Blobs send log and, on delivery, tags the HighLevel contact
+// `mail-delivered` (on a return, `mail-returned`).
+//
+// Delivery detection (PostGrid has no per-step "delivered" event type):
+//   - postcard.updated with status "completed" (PostGrid sets status to
+//     completed once the carrier reports delivery), OR carrierTracking
+//     .status === "delivered".
+//   - returned when imbStatus === "returned_to_sender".
 //
 // SECURITY — signature verification is mandatory, fail-closed:
-//   Lob signs webhooks one of two ways (both are HMAC-SHA256 with the
-//   webhook signing secret from the Lob dashboard, env var
-//   LOB_WEBHOOK_SECRET — Troy sets it in Netlify when he registers this
-//   endpoint URL in Lob):
-//     a) Lob-Signature: "t=<unix seconds>,v1=<hex>" — signed message is
-//        "<timestamp>.<raw body>" (hex digest).
-//     b) Standard Webhooks headers: webhook-id / webhook-timestamp /
-//        webhook-signature "v1,<base64>" — signed message is
-//        "<webhook-id>.<webhook-timestamp>.<raw body>" (base64 digest).
-//   Either scheme verifies; timestamps older than 5 minutes are rejected
-//   (replay protection). If LOB_WEBHOOK_SECRET is unset, EVERY request is
-//   rejected (401) — an unsigned event is never processed.
+//   PostGrid signs webhooks with the webhook secret (env var
+//   POSTGRID_WEBHOOK_SECRET — Troy sets it in Netlify when he registers
+//   this endpoint URL in PostGrid). Two payload formats are supported:
+//     a) JWT (PostGrid's default): the whole body is a JWT signed with
+//        HMAC-SHA256 using the secret. Verified here with Node built-ins
+//        only (no JWT library): signature over header.payload, plus the
+//        exp/iat claims when present (older than 5 minutes = stale).
+//     b) JSON payload: PostGrid sends a `PostGrid-Signature` header.
+//        Verified as HMAC-SHA256 of the raw body (hex or base64 digest).
+//   Either scheme verifies. If POSTGRID_WEBHOOK_SECRET is unset, EVERY
+//   request is rejected (503) — an unsigned event is never processed.
 //   The raw body is verified BEFORE any JSON parsing.
 //
-// Lob event envelope (docs.lob.com): { id, event_type, date_created,
-// body: { id, object: "postcard", metadata: {...}, ... } }. The handler
-// also tolerates `type` for event_type and a top-level resource, so a
-// Lob payload-shape change degrades to "ignored" instead of crashing.
+// Event envelope (guides.postgrid.com): { id, type, createdAt, data:
+// { id, object: "postcard", status, imbStatus, carrierTracking,
+// metadata: {...}, ... } }. The parser also tolerates `event_type`
+// for the type and a top-level resource, so a payload-shape change
+// degrades to "ignored" instead of crashing.
 //
 // Responses are always 200 for a verified event (even unknown event types
-// — Lob retries 4xx/5xx, and an unknown type is not an error). A bad
+// — PostGrid retries non-200s, and an unknown type is not an error). A bad
 // signature is 401; a missing secret is 503 (webhook not configured).
 'use strict';
 
@@ -51,25 +58,21 @@ const JSON_HEADERS = {
   'Content-Type': 'application/json',
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Lob-Signature, Lob-Signature-Timestamp, webhook-id, webhook-timestamp, webhook-signature',
+  'Access-Control-Allow-Headers': 'Content-Type, PostGrid-Signature',
   'Cache-Control': 'no-store',
 };
 function json(status, obj) {
   return { statusCode: status, headers: JSON_HEADERS, body: JSON.stringify(obj) };
 }
 
-function parseLobSignature(header) {
-  // "t=1712345678,v1=abcdef..." -> { t, v1 }
-  const out = {};
-  if (!header) return out;
-  for (const part of String(header).split(',')) {
-    const [k, ...rest] = part.trim().split('=');
-    if (k && rest.length) out[k.trim()] = rest.join('=').trim();
-  }
-  return out;
+function base64urlDecode(s) {
+  const b64 = String(s).replace(/-/g, '+').replace(/_/g, '/');
+  return Buffer.from(b64, 'base64');
 }
-
-function safeEqualHex(a, b) {
+function base64urlEncode(buf) {
+  return Buffer.from(buf).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function safeEqual(a, b) {
   try {
     const ba = Buffer.from(String(a), 'utf8');
     const bb = Buffer.from(String(b), 'utf8');
@@ -80,48 +83,52 @@ function safeEqualHex(a, b) {
 }
 
 // Pure verifier, exported for the fixture regression suite.
-// headers: plain object with lowercase keys. Returns { ok, reason? }.
+// headers: plain object with lowercase keys.
+// Returns { ok, scheme?, payload?, reason? }. For the JWT scheme the
+// decoded payload is returned so the handler never re-parses the body.
 function verifySignature({ headers, rawBody, secret, nowMs }) {
   if (!secret) return { ok: false, reason: 'no_secret' };
   const nowSec = Math.floor((nowMs || Date.now()) / 1000);
   const h = headers || {};
+  const raw = String(rawBody || '');
+  // Trimmed copy is used ONLY to recognise a JWT; the HMAC below always
+  // runs over the exact raw bytes, so any tamper (even trailing space)
+  // fails verification.
+  const body = raw.trim();
 
-  // Scheme (a): Lob-Signature "t=...,v1=..." (+ optional timestamp header).
-  const lobSig = h['lob-signature'] || h['Lob-Signature'] || '';
-  if (lobSig) {
-    const parts = parseLobSignature(lobSig);
-    const t = parts.t || h['lob-signature-timestamp'] || h['Lob-Signature-Timestamp'] || '';
-    const v1 = parts.v1 || '';
-    if (!t || !v1) return { ok: false, reason: 'bad_lob_signature_format' };
-    const ts = parseInt(t, 10);
-    if (!Number.isFinite(ts) || Math.abs(nowSec - ts) > TOLERANCE_SECONDS)
+  // Scheme (a): JWT — three base64url segments, HMAC-SHA256 signed.
+  const parts = body.split('.');
+  if (parts.length === 3 && parts.every((p) => /^[A-Za-z0-9_-]+$/.test(p))) {
+    let payload;
+    try {
+      payload = JSON.parse(base64urlDecode(parts[1]).toString('utf8'));
+    } catch (e) {
+      return { ok: false, reason: 'bad_jwt_payload' };
+    }
+    if (typeof payload !== 'object' || payload === null) {
+      return { ok: false, reason: 'bad_jwt_payload' };
+    }
+    if (Number.isFinite(payload.exp) && nowSec > payload.exp) {
       return { ok: false, reason: 'stale_timestamp' };
-    const expected = crypto
-      .createHmac('sha256', secret)
-      .update(`${t}.${rawBody}`, 'utf8')
-      .digest('hex');
-    if (!safeEqualHex(expected, v1)) return { ok: false, reason: 'signature_mismatch' };
-    return { ok: true, scheme: 'lob' };
+    }
+    if (Number.isFinite(payload.iat) && nowSec - payload.iat > TOLERANCE_SECONDS) {
+      return { ok: false, reason: 'stale_timestamp' };
+    }
+    const expected = base64urlEncode(
+      crypto.createHmac('sha256', secret).update(`${parts[0]}.${parts[1]}`, 'utf8').digest(),
+    );
+    if (!safeEqual(expected, parts[2])) return { ok: false, reason: 'signature_mismatch' };
+    return { ok: true, scheme: 'jwt', payload };
   }
 
-  // Scheme (b): Standard Webhooks — webhook-signature "v1,<base64>".
-  const whSig = h['webhook-signature'] || h['Webhook-Signature'] || '';
-  const whId = h['webhook-id'] || h['Webhook-Id'] || '';
-  const whTs = h['webhook-timestamp'] || h['Webhook-Timestamp'] || '';
-  if (whSig && whId && whTs) {
-    const ts = parseInt(whTs, 10);
-    if (!Number.isFinite(ts) || Math.abs(nowSec - ts) > TOLERANCE_SECONDS)
-      return { ok: false, reason: 'stale_timestamp' };
-    const expected = crypto
-      .createHmac('sha256', secret)
-      .update(`${whId}.${whTs}.${rawBody}`, 'utf8')
-      .digest('base64');
-    const candidates = String(whSig)
-      .split(' ')
-      .map((s) => s.replace(/^v1,/, '').trim())
-      .filter(Boolean);
-    for (const c of candidates) {
-      if (safeEqualHex(expected, c)) return { ok: true, scheme: 'standard-webhooks' };
+  // Scheme (b): JSON payload + PostGrid-Signature header (HMAC-SHA256
+  // of the raw body, hex or base64).
+  const pgSig = h['postgrid-signature'] || h['PostGrid-Signature'] || '';
+  if (pgSig) {
+    const hex = crypto.createHmac('sha256', secret).update(raw, 'utf8').digest('hex');
+    const b64 = crypto.createHmac('sha256', secret).update(raw, 'utf8').digest('base64');
+    if (safeEqual(hex, pgSig) || safeEqual(b64, pgSig)) {
+      return { ok: true, scheme: 'postgrid-signature' };
     }
     return { ok: false, reason: 'signature_mismatch' };
   }
@@ -130,18 +137,37 @@ function verifySignature({ headers, rawBody, secret, nowMs }) {
 }
 
 // Pure event parser, exported for fixtures.
-function parseLobEvent(body) {
+function parsePostGridEvent(body) {
   if (!body || typeof body !== 'object') return null;
-  const eventType = body.event_type || body.type || '';
-  const resource = body.body && typeof body.body === 'object' ? body.body : body.resource || body;
-  const lobId = (resource && resource.id) || null;
+  const eventType = body.type || body.event_type || '';
+  const resource =
+    body.data && typeof body.data === 'object'
+      ? body.data
+      : body.body && typeof body.body === 'object'
+        ? body.body
+        : body.resource || body;
+  const postgridId = (resource && resource.id) || null;
   const metadata = (resource && resource.metadata) || {};
+  const carrierStatus =
+    (resource && resource.carrierTracking && resource.carrierTracking.status) || null;
+  const status = (resource && resource.status) || null;
+  const imbStatus = (resource && resource.imbStatus) || null;
+  const delivered = status === 'completed' || carrierStatus === 'delivered';
+  const returned =
+    imbStatus === 'returned_to_sender' ||
+    status === 'returned_to_sender' ||
+    status === 'returned';
   return {
     eventType: String(eventType),
-    lobId: lobId ? String(lobId) : null,
+    postgridId: postgridId ? String(postgridId) : null,
     contactId: metadata.contactId ? String(metadata.contactId) : null,
     object: (resource && resource.object) || null,
-    dateCreated: body.date_created || null,
+    status,
+    imbStatus,
+    carrierStatus,
+    delivered,
+    returned,
+    dateCreated: body.createdAt || body.date_created || null,
   };
 }
 
@@ -179,15 +205,35 @@ function postJsonHttps(urlStr, { headers = {}, body = '' }) {
     req.end();
   });
 }
-function getLogStore() {
+function getLogStoreFor(event) {
+  // Same Blobs-context rule as mail-templates.js / mail-send.js (Nov 11
+  // fix): connectLambda(event) must run before getStore(), or getStore()
+  // throws MissingBlobsEnvironmentError in production. Never throws:
+  // on any Blobs failure returns null and the webhook falls back to
+  // tagging only (the log update is best-effort; the handler never 500s
+  // a webhook retry loop on our own bug).
   if (!blobs) return null;
-  return blobs.getStore(LOG_STORE);
+  try {
+    if (typeof blobs.connectLambda === 'function') blobs.connectLambda(event);
+  } catch (e) {
+    /* best-effort; getStore may still work with ambient context */
+  }
+  try {
+    return blobs.getStore(LOG_STORE);
+  } catch (e) {
+    return null;
+  }
+}
+
+function getLogStore() {
+  return getLogStoreFor(null);
 }
 
 async function updateLogEntry(store, parsed) {
-  // Find the send entry by lobId: entries live at sends/<month>/<lobId>.json.
-  // The month is not in the event, so scan the current and previous month.
-  if (!store || !parsed.lobId) return false;
+  // Find the send entry by postgridId: entries live at
+  // sends/<month>/<postgridId>.json. The month is not in the event, so
+  // scan the current and previous month.
+  if (!store || !parsed.postgridId) return false;
   const now = new Date();
   const months = [data.monthKey(now)];
   const prev = new Date(now);
@@ -195,12 +241,12 @@ async function updateLogEntry(store, parsed) {
   months.push(data.monthKey(prev));
   for (const month of months) {
     try {
-      const key = `sends/${month}/${parsed.lobId}.json`;
+      const key = `sends/${month}/${parsed.postgridId}.json`;
       const entry = await store.get(key, { type: 'json' });
       if (!entry) continue;
-      entry.status = parsed.eventType.replace(/^postcard\./, '') || entry.status;
-      if (parsed.eventType === 'postcard.delivered') entry.deliveredAt = new Date().toISOString();
-      if (parsed.eventType === 'postcard.returned_to_sender') entry.returnedAt = new Date().toISOString();
+      entry.status = parsed.status || parsed.eventType.replace(/^postcard\./, '') || entry.status;
+      if (parsed.delivered) entry.deliveredAt = new Date().toISOString();
+      if (parsed.returned) entry.returnedAt = new Date().toISOString();
       entry.lastEventAt = new Date().toISOString();
       await store.setJSON(key, entry);
       return true;
@@ -216,7 +262,7 @@ exports.handler = async (event) => {
     if (event.httpMethod === 'OPTIONS') return json(200, {});
     if (event.httpMethod !== 'POST') return json(400, { error: 'POST only.' });
 
-    const secret = process.env.LOB_WEBHOOK_SECRET || '';
+    const secret = process.env.POSTGRID_WEBHOOK_SECRET || '';
     const rawBody = event.isBase64Encoded
       ? Buffer.from(event.body || '', 'base64').toString('utf8')
       : event.body || '';
@@ -227,30 +273,29 @@ exports.handler = async (event) => {
       secret,
     });
     if (!check.ok) {
-      if (check.reason === 'no_secret') return json(503, { error: 'Mail webhook is not configured yet (LOB_WEBHOOK_SECRET missing).' });
+      if (check.reason === 'no_secret') return json(503, { error: 'Mail webhook is not configured yet (POSTGRID_WEBHOOK_SECRET missing).' });
       return json(401, { error: 'Bad webhook signature — event ignored.' });
     }
 
     let parsedBody;
-    try {
-      parsedBody = JSON.parse(rawBody);
-    } catch (e) {
-      return json(200, { ok: true, ignored: 'not-json' });
+    if (check.scheme === 'jwt') {
+      parsedBody = check.payload;
+    } else {
+      try {
+        parsedBody = JSON.parse(rawBody);
+      } catch (e) {
+        return json(200, { ok: true, ignored: 'not-json' });
+      }
     }
-    const parsed = parseLobEvent(parsedBody);
+    const parsed = parsePostGridEvent(parsedBody);
     if (!parsed || !parsed.eventType) return json(200, { ok: true, ignored: 'no-event-type' });
 
-    const store = getLogStore();
+    const store = getLogStoreFor(event);
     const logUpdated = await updateLogEntry(store, parsed);
 
     // Delivery / return tags (best-effort; the log is the audit trail).
     let tagged = false;
-    const tag =
-      parsed.eventType === 'postcard.delivered'
-        ? 'mail-delivered'
-        : parsed.eventType === 'postcard.returned_to_sender'
-          ? 'mail-returned'
-          : null;
+    const tag = parsed.delivered ? 'mail-delivered' : parsed.returned ? 'mail-returned' : null;
     if (tag && parsed.contactId && process.env.HL_API_TOKEN) {
       try {
         const res = await postJsonHttps(
@@ -264,7 +309,7 @@ exports.handler = async (event) => {
     }
 
     console.log(
-      `mail-webhook event=${parsed.eventType} lobId=${parsed.lobId || '-'} logUpdated=${logUpdated} tagged=${tagged}`,
+      `mail-webhook event=${parsed.eventType} postgridId=${parsed.postgridId || '-'} status=${parsed.status || '-'} logUpdated=${logUpdated} tagged=${tagged}`,
     );
     return json(200, { ok: true, event: parsed.eventType, logUpdated, tagged });
   } catch (e) {
@@ -274,4 +319,16 @@ exports.handler = async (event) => {
   }
 };
 
-exports._test = { verifySignature, parseLobEvent, parseLobSignature };
+exports._test = {
+  verifySignature,
+  parsePostGridEvent,
+  base64urlEncode,
+  base64urlDecode,
+  getLogStoreFor,
+  // Test seam: swap the Blobs client (returns the previous one).
+  _setBlobs: (b) => {
+    const prev = blobs;
+    blobs = b;
+    return prev;
+  },
+};

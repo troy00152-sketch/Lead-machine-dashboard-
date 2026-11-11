@@ -7,7 +7,7 @@
 // button. Nothing sends without Troy's confirm tap.
 //
 // The active template choice is stored SERVER-SIDE (mail-templates
-// function + Blobs), never in browser localStorage. No Lob keys ever
+// function + Blobs), never in browser localStorage. No PostGrid keys ever
 // reach this file — the browser only talks to the Netlify functions.
 'use strict';
 
@@ -41,21 +41,33 @@ function mailOpenSheet(id) {
   document.getElementById('mailBody').innerHTML =
     '<p style="color:var(--muted)">Loading designs + this month’s mail spend…</p>';
   document.getElementById('mailModal').classList.add('open');
-  Promise.all([
+  // Load the two reads independently (Nov 11 fix): a failed spend/status
+  // read must not blank the whole sheet the way Promise.all did — the
+  // picker + preview still render, with a warning, and the $100 cap is
+  // re-checked server-side before any send. A failed template list is
+  // still fatal (there is nothing to pick without it).
+  Promise.allSettled([
     mailFetch('/.netlify/functions/mail-templates?action=list'),
     mailFetch('/.netlify/functions/mail-send?action=status'),
-  ])
-    .then(([tpl, status]) => {
-      mailState.templates = tpl.templates || [];
-      mailState.activeId = tpl.activeId || 'cash-offer';
-      mailState.templateId = mailState.activeId;
-      mailState.status = status;
-      mailRenderSheet();
-    })
-    .catch((e) => {
+  ]).then(([tplRes, statusRes]) => {
+    if (tplRes.status !== 'fulfilled') {
       document.getElementById('mailBody').innerHTML =
-        '<p style="color:#ff8080">Could not load the mail sheet: ' + esc(String((e && e.message) || e)) + '</p>';
-    });
+        '<p style="color:#ff8080">Could not load the mail sheet: ' +
+        esc(String((tplRes.reason && tplRes.reason.message) || tplRes.reason)) + '</p>';
+      return;
+    }
+    const tpl = tplRes.value;
+    mailState.templates = tpl.templates || [];
+    mailState.activeId = tpl.activeId || 'cash-offer';
+    mailState.templateId = mailState.activeId;
+    mailState.status = statusRes.status === 'fulfilled'
+      ? statusRes.value
+      : {
+        testMode: true, capCents: 10000, spentCents: 0, count: 0,
+        prices: { '4x6': 90.2, '6x9': 102.3 }, statusUnavailable: true,
+      };
+    mailRenderSheet();
+  });
 }
 
 function closeMailSheet() {
@@ -73,7 +85,7 @@ function mailRenderSheet() {
   const st = mailState.status || {};
   const vars = mailLeadVars(l);
   const tpl = mailSelectedTemplate();
-  const price = (st.prices && st.prices[mailState.size]) || (mailState.size === '6x9' ? 92 : 90.5);
+  const price = (st.prices && st.prices[mailState.size]) || (mailState.size === '6x9' ? 102.3 : 90.2);
   const spent = st.spentCents || 0;
   const cap = st.capCents || 10000;
   const remaining = Math.max(0, cap - spent);
@@ -94,13 +106,14 @@ function mailRenderSheet() {
       <span class="badge ${st.testMode === false ? 'red' : 'gray'}" style="font-size:11px">${st.testMode === false ? '● LIVE MODE' : '● TEST MODE — nothing really mails'}</span>
       <span style="color:var(--muted);font-size:12px">Month spend ${mailMoney(spent)} of ${mailMoney(cap)} cap (${pct}%) · ${st.count || 0} sent</span>
     </div>
+    ${st.statusUnavailable ? '<p style="color:#ffc845;font-size:12px;margin:0 0 10px">Month spend could not be loaded — shown as $0. The $100 cap is still enforced when you send.</p>' : ''}
     <div style="background:var(--panel2);border:1px solid var(--line);border-radius:8px;height:10px;overflow:hidden;margin-bottom:14px"><div style="height:100%;width:${pct}%;background:${overCap ? '#ff4d4d' : 'var(--accent,#2f81f7)'}"></div></div>
     <div class="sec-title" style="font-size:14px;margin:0 0 8px">✉️ Pick a design</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">${cards}</div>
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
       <label style="font-size:13px">Size</label>
-      <button class="btn ${mailState.size === '4x6' ? 'primary' : ''}" onclick="mailPickSize('4x6')">4×6 — ${mailMoney((st.prices && st.prices['4x6']) || 90.5)}</button>
-      <button class="btn ${mailState.size === '6x9' ? 'primary' : ''}" onclick="mailPickSize('6x9')">6×9 — ${mailMoney((st.prices && st.prices['6x9']) || 92)}</button>
+      <button class="btn ${mailState.size === '4x6' ? 'primary' : ''}" onclick="mailPickSize('4x6')">4×6 — ${mailMoney((st.prices && st.prices['4x6']) || 90.2)}</button>
+      <button class="btn ${mailState.size === '6x9' ? 'primary' : ''}" onclick="mailPickSize('6x9')">6×9 — ${mailMoney((st.prices && st.prices['6x9']) || 102.3)}</button>
       <span style="color:var(--muted);font-size:12px">per postcard, print + postage</span>
     </div>
     <div class="sec-title" style="font-size:14px;margin:0 0 8px">👀 Preview — ${tpl ? esc(tpl.name) : ''}</div>
@@ -117,7 +130,7 @@ function mailRenderSheet() {
     </div>
     <div id="mailCustomBox" style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
       <div class="sec-title" style="font-size:14px;margin:0 0 8px">🎨 Add your own design</div>
-      <p style="color:var(--muted);font-size:12px;margin-bottom:8px">Paste a Lob template id (tpl_…), an https link to a PDF/PNG/JPG, or raw HTML for the front and back.</p>
+      <p style="color:var(--muted);font-size:12px;margin-bottom:8px">Paste a PostGrid template id (template_…), an https link to a 2-page PDF or image, or raw HTML for the front and back.</p>
       <div style="display:grid;gap:8px">
         <input class="field" id="mailCustomName" placeholder="Design name (e.g. My Christmas card)">
         <input class="field" id="mailCustomFront" placeholder="Front — tpl_… / https://…pdf / <html>…">
@@ -131,7 +144,7 @@ function mailRenderSheet() {
       <button class="btn ghost" onclick="closeMailSheet()">Cancel</button>
     </div>
     ${overCap ? '<p style="color:#ff8080;font-size:13px;margin-top:8px">This send would pass the $100 monthly cap. Raise the cap or wait until next month.</p>' : ''}
-    <p style="color:var(--muted);font-size:12px;margin-top:8px">The postcard is created at Lob the moment you confirm. ${st.testMode === false ? 'LIVE MODE — this mails a real postcard and charges your Lob account.' : 'Test mode — no real mail, no charge.'}</p>`;
+    <p style="color:var(--muted);font-size:12px;margin-top:8px">The postcard is created at PostGrid the moment you confirm. ${st.testMode === false ? 'LIVE MODE — this mails a real postcard and charges your PostGrid account.' : 'Test mode — no real mail, no charge.'}</p>`;
   mailLoadPreview();
 }
 
@@ -245,7 +258,7 @@ function mailConfirmSend() {
   })
     .then((r) => {
       mailShowMsg(
-        `Sent! Lob id ${r.lobId} · ${r.size} postcard · ${mailMoney(r.costCents)} · month spend now ${mailMoney(r.monthSpentCents)} of ${mailMoney(r.monthCapCents)}.${r.testMode ? ' (TEST — no real mail.)' : ''}${r.hlWarning ? ' ' + r.hlWarning : ''}`,
+        `Sent! PostGrid id ${r.postgridId} · ${r.size} postcard · ${mailMoney(r.costCents)} · month spend now ${mailMoney(r.monthSpentCents)} of ${mailMoney(r.monthCapCents)}.${r.testMode ? ' (TEST — no real mail.)' : ''}${r.hlWarning ? ' ' + r.hlWarning : ''}`,
       );
       if (btn) btn.disabled = false;
       // Refresh the spend bar without losing the sheet.

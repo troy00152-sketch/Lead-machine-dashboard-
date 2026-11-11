@@ -1,8 +1,8 @@
 // netlify/functions/mail-send.js
 // One-click postcard send from the Command Center dashboard (Troy-side only).
 //
-// POSTCARDS ONLY (Troy, Nov 11, 2026) via Lob, Developer plan ($0/mo).
-// Prices verified Nov 11, 2026: 4x6 First Class $0.905 · 6x9 ~$0.92.
+// POSTCARDS ONLY (Troy, Nov 11, 2026) via PostGrid, Starter plan ($0/mo).
+// Prices verified Nov 11, 2026: 4x6 First Class $0.902 · 6x9 First Class $1.023.
 // The dashboard NEVER sends silently: the lead modal shows a confirm sheet
 // (template preview + size + recipient address + live price + month spend
 // vs cap) and Troy confirms. The function also requires confirm:true.
@@ -10,35 +10,42 @@
 // SAFETY (hard, by design):
 //   1. MAIL_MODE comes ONLY from the Netlify env var (default 'test').
 //      The request body can NEVER flip test -> live.
-//   2. Test mode uses LOB_TEST_API_KEY only. No live key = no live send,
-//      full stop. Live sends also need MAIL_MODE=live + LOB_API_KEY.
+//   2. Test mode uses POSTGRID_TEST_API_KEY only. No live key = no live send,
+//      full stop. Live sends also need MAIL_MODE=live + POSTGRID_API_KEY.
 //   3. HARD $100/month cap (MAIL_MONTHLY_CAP_CENTS, default 10000) is
-//      enforced in code BEFORE any Lob call, from the Blobs send log.
+//      enforced in code BEFORE any PostGrid call, from the Blobs send log.
 //      A send that would take the month over the cap is refused (402).
 //   4. No DND / dnc-tagged contact is ever mailed (house rule).
-//   5. Address verification runs first; an undeliverable address aborts
-//      in live mode. (In test mode verification is advisory — Lob test
-//      keys return simulated verification data — and never blocks.)
-//   6. Idempotency-Key on the Lob create stops a double-click / retry
-//      from mailing twice within 24h (Lob dedupes identical keys).
-//   7. Keys live ONLY in Netlify env vars (LOB_API_KEY, LOB_TEST_API_KEY,
-//      HL_API_TOKEN). Credential values are NEVER logged or returned.
+//   5. No paid address-verification call is made: PostGrid verifies the
+//      inline recipient address itself when the postcard is created.
+//      This function only fails closed on a missing/incomplete mailing
+//      address (street/city/state/ZIP) before any PostGrid call.
+//   6. A same-day duplicate guard: the Blobs log is checked for a send
+//      with the same contact + size + template + date before creating;
+//      a double-click / retry is refused (409 duplicate_send) instead
+//      of mailing twice. (PostGrid has no documented idempotency key.)
+//   7. Keys live ONLY in Netlify env vars (POSTGRID_API_KEY,
+//      POSTGRID_TEST_API_KEY, HL_API_TOKEN). Credential values are NEVER
+//      logged or returned.
 //
-// Lob raw API (docs.lob.com v1.22.0, verified Nov 11, 2026):
-//   Auth: HTTP Basic, API key as username, blank password.
-//   POST /v1/us_verifications {primary_line, city, state, zip_code}
-//     -> { deliverability, components, ... } — deliverability is one of
-//        deliverable | deliverable_unnecessary_unit |
-//        deliverable_incorrect_unit | deliverable_missing_unit |
-//        undeliverable.
-//   POST /v1/postcards {to, from, front, back, size, mail_type,
-//     use_type, metadata} -> { id, ... }.
-//   NOTE: Lob's raw API has NO preview/confirmation-token step — the
-//   create call IS the send (the confirmation-token flow belongs to a
-//   third-party MCP harness, not the Lob API). The dashboard confirm
-//   sheet + MAIL_MODE + cap are the confirmation gates.
-//   Lob's create response carries no price field, so cap accounting uses
-//   the verified per-piece table (mail-templates-data.js).
+// PostGrid Print & Mail API (guides.postgrid.com, verified Nov 11, 2026):
+//   Auth: X-API-Key header. Keys are test_sk_... / live_sk_... from the
+//   PostGrid dashboard (Settings -> API Keys); test keys are free, no
+//   card required, and test creates are never printed/mailed/billed.
+//   POST /print-mail/v1/postcards {to, from, frontHTML, backHTML, size,
+//     mailingClass, description, metadata} -> { id, live, status, ... }.
+//   Size values are PostGrid's: '6x4' = 4x6 card, '9x6' = 6x9 card.
+//   A PostGrid template id can be used instead of HTML: frontTemplate /
+//   backTemplate + mergeVariables. A single 2-page PDF can be used
+//   instead: { pdf } (first page = front, second = back).
+//   PostGrid verifies the inline recipient address itself when the
+//   postcard is created — there is NO separate verification call, and
+//   the paid Address Verification API is NOT used here.
+//   NOTE: PostGrid's raw API has NO preview/confirmation-token step — the
+//   create call IS the send. The dashboard confirm sheet + MAIL_MODE +
+//   cap are the confirmation gates.
+//   PostGrid's create response carries no price field, so cap accounting
+//   uses the verified per-piece table (mail-templates-data.js).
 //
 // Flow:
 //   1. Admin auth (lm_auth cookie or Bearer dashboard password).
@@ -46,10 +53,9 @@
 //   3. If contactId: load the HL contact; skip on dnc tag or any DND.
 //      Use the HL name/address when present, else the supplied values.
 //   4. Cap check from the Blobs log (store 'direct-mail-log').
-//   5. Verify the address with Lob; standardize it when Lob returns
-//      components (live mode only blocks on undeliverable).
+//   5. Duplicate check against the Blobs log (same contact/size/template/date).
 //   6. Render the template (built-in HTML with merge vars, or the custom
-//      design's front/back) and create the postcard at Lob.
+//      design's front/back) and create the postcard at PostGrid.
 //   7. Log the send to Blobs + tag the HL contact (mailed, mail-postcard,
 //      mailed-YYYY-MM-DD) + optional Mail Sent Date custom field when
 //      MAIL_SENT_DATE_FIELD_ID is set. Tag failures never fail the send.
@@ -76,7 +82,7 @@ const COOKIE_NAME = 'lm_auth';
 const HL_API_BASE = 'https://services.leadconnectorhq.com';
 const HL_API_VERSION = '2021-07-28';
 const HL_LOCATION_ID = 'krKoHLudPnn7nT0DPtwa';
-const LOB_API_BASE = 'https://api.lob.com/v1';
+const POSTGRID_API_BASE = 'https://api.postgrid.com/print-mail/v1';
 const LOG_STORE = 'direct-mail-log';
 
 const JSON_HEADERS = {
@@ -142,19 +148,19 @@ function readEnv() {
   const mode = (process.env.MAIL_MODE || 'test').toLowerCase().trim();
   return {
     mode: mode === 'live' ? 'live' : 'test',
-    testKey: process.env.LOB_TEST_API_KEY || '',
-    liveKey: process.env.LOB_API_KEY || '',
+    testKey: process.env.POSTGRID_TEST_API_KEY || '',
+    liveKey: process.env.POSTGRID_API_KEY || '',
     capCents: parseCap(process.env.MAIL_MONTHLY_CAP_CENTS),
     hlToken: process.env.HL_API_TOKEN || '',
     mailSentDateFieldId: (process.env.MAIL_SENT_DATE_FIELD_ID || '').trim(),
     from: {
-      name: (process.env.MAIL_FROM_NAME || '').trim() || data.DEFAULT_FROM.name,
-      address_line1: (process.env.MAIL_FROM_LINE1 || '').trim() || data.DEFAULT_FROM.address_line1,
-      address_line2: (process.env.MAIL_FROM_LINE2 || '').trim() || data.DEFAULT_FROM.address_line2,
-      address_city: (process.env.MAIL_FROM_CITY || '').trim() || data.DEFAULT_FROM.address_city,
-      address_state: (process.env.MAIL_FROM_STATE || '').trim() || data.DEFAULT_FROM.address_state,
-      address_zip: (process.env.MAIL_FROM_ZIP || '').trim() || data.DEFAULT_FROM.address_zip,
-      address_country: 'US',
+      companyName: (process.env.MAIL_FROM_NAME || '').trim() || data.DEFAULT_FROM.companyName,
+      addressLine1: (process.env.MAIL_FROM_LINE1 || '').trim() || data.DEFAULT_FROM.addressLine1,
+      addressLine2: (process.env.MAIL_FROM_LINE2 || '').trim() || data.DEFAULT_FROM.addressLine2,
+      city: (process.env.MAIL_FROM_CITY || '').trim() || data.DEFAULT_FROM.city,
+      provinceOrState: (process.env.MAIL_FROM_STATE || '').trim() || data.DEFAULT_FROM.provinceOrState,
+      postalOrZip: (process.env.MAIL_FROM_ZIP || '').trim() || data.DEFAULT_FROM.postalOrZip,
+      countryCode: 'US',
     },
   };
 }
@@ -208,8 +214,12 @@ function getHttps(urlStr, { headers = {} }) {
     req.end();
   });
 }
-function lobAuth(key) {
-  return 'Basic ' + Buffer.from(`${key}:`, 'utf8').toString('base64');
+function postgridHeaders(key) {
+  return { 'X-API-Key': key };
+}
+// PostGrid size values: '6x4' is the 4x6 card, '9x6' is the 6x9 card.
+function postgridSize(size) {
+  return size === '6x9' ? '9x6' : '6x4';
 }
 function hlHeaders(token) {
   return {
@@ -234,35 +244,50 @@ function validAddress(a) {
   if (!/^\d{5}(-\d{4})?$/.test(a.zip || '')) return 'ZIP must be 5 digits (or ZIP+4).';
   return null;
 }
-// Deliverability values Lob returns. 'deliverable_missing_unit' is treated
-// as undeliverable — without the unit the piece cannot reach the door.
-const DELIVERABLE_OK = new Set([
-  'deliverable',
-  'deliverable_unnecessary_unit',
-  'deliverable_incorrect_unit',
-]);
-function deliverabilityOk(value) {
-  return DELIVERABLE_OK.has(String(value || '').toLowerCase());
+// PostGrid verifies the inline recipient address itself at create time;
+// there is no separate verification step and no deliverability gate
+// here. validAddress() above is the only address check (fail-closed
+// on missing/incomplete fields).
+function splitOwnerName(name) {
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return { firstName: 'Homeowner', lastName: '' };
+  if (parts.length === 1) return { firstName: parts[0], lastName: '' };
+  return { firstName: parts[0], lastName: parts.slice(1).join(' ') };
 }
-function buildLobAddress(name, a) {
-  return {
-    name: cleanStr(name, 40) || 'Homeowner',
-    address_line1: a.address1,
-    address_line2: a.address2 || '',
-    address_city: a.city,
-    address_state: a.state.toUpperCase(),
-    address_zip: a.zip,
-    address_country: 'US',
+function buildPostGridContact(name, a) {
+  const n = splitOwnerName(name);
+  const c = {
+    firstName: n.firstName,
+    addressLine1: a.address1,
+    addressLine2: a.address2 || '',
+    city: a.city,
+    provinceOrState: a.state.toUpperCase(),
+    postalOrZip: a.zip,
+    countryCode: 'US',
   };
+  if (n.lastName) c.lastName = n.lastName;
+  return c;
+}
+// Wrap an image URL in full-bleed HTML (PostGrid takes HTML, not a bare
+// image URL, for front/back art).
+function imageArtHtml(url) {
+  const safe = String(url).replace(/"/g, '%22');
+  return (
+    '<html><head><meta charset="utf-8"><style>' +
+    '*{margin:0;padding:0}body{width:100%;height:100%}' +
+    'img{width:100%;height:100%;object-fit:cover;display:block}' +
+    `</style></head><body><img src="${safe}"></body></html>`
+  );
 }
 function idempotencyKey({ contactId, size, templateId, dateStr }) {
   const base = `dpb-${contactId || 'no-contact'}-${dateStr}-${size}-${templateId}`;
   return base.replace(/[^A-Za-z0-9._-]/g, '-').slice(0, 200);
 }
-function lobErrorMessage(res, fallback) {
+function postgridErrorMessage(res, fallback) {
   try {
     const parsed = JSON.parse(res.text || '{}');
-    const msg = parsed && parsed.error && (parsed.error.message || parsed.error);
+    const err = parsed && parsed.error;
+    const msg = (err && (err.message || err)) || parsed.message;
     if (msg) return String(msg).slice(0, 300);
   } catch (e) {
     /* fall through */
@@ -271,14 +296,49 @@ function lobErrorMessage(res, fallback) {
 }
 
 // ---- Blobs send log ----
-function getLogStore() {
+// Same Blobs-context rule as mail-templates.js (Nov 11 fix): connectLambda
+// (event) must run before getStore(), or getStore() throws
+// MissingBlobsEnvironmentError in production and the status read 503s
+// ("Mail send failed. Nothing was sent."), which also killed the Send
+// Mail sheet (it loads templates + status together). Never throws: on
+// any Blobs failure returns null and monthSpend() treats it as zero
+// spend — the cap is re-checked from the real log at send time.
+function getLogStoreFor(event) {
   if (!blobs) return null;
-  return blobs.getStore(LOG_STORE);
+  try {
+    if (typeof blobs.connectLambda === 'function') blobs.connectLambda(event);
+  } catch (e) {
+    /* best-effort; getStore may still work with ambient context */
+  }
+  try {
+    return blobs.getStore(LOG_STORE);
+  } catch (e) {
+    return null;
+  }
+}
+
+function getLogStore() {
+  return getLogStoreFor(null);
+}
+
+// Same wiring for the template store (custom designs live there).
+function getStoreForTemplates(event) {
+  if (!blobs) return null;
+  try {
+    if (typeof blobs.connectLambda === 'function') blobs.connectLambda(event);
+  } catch (e) {
+    /* best-effort; getStore may still work with ambient context */
+  }
+  try {
+    return blobs.getStore('direct-mail-templates');
+  } catch (e) {
+    return null;
+  }
 }
 async function logSend(store, entry) {
   if (!store) return false;
   try {
-    await store.setJSON(`sends/${entry.month}/${entry.lobId}.json`, entry);
+    await store.setJSON(`sends/${entry.month}/${entry.postgridId}.json`, entry);
     return true;
   } catch (e) {
     return false;
@@ -376,47 +436,14 @@ function putHttps(urlStr, { headers = {}, body = '' }) {
   });
 }
 
-// ---- Lob ----
-async function lobVerifyAddress(key, address, postImpl) {
-  const res = await (postImpl || postJsonHttps)(`${LOB_API_BASE}/us_verifications`, {
-    headers: { Authorization: lobAuth(key) },
-    body: JSON.stringify({
-      primary_line: address.address1,
-      secondary_line: address.address2 || undefined,
-      city: address.city,
-      state: address.state,
-      zip_code: address.zip,
-    }),
-  });
-  if (res.status < 200 || res.status >= 300) {
-    throw new Error(lobErrorMessage(res, 'Address verification failed'));
-  }
-  let parsed = {};
-  try {
-    parsed = JSON.parse(res.text || '{}');
-  } catch (e) {
-    parsed = {};
-  }
-  return parsed;
-}
-function standardizedAddress(verified, fallback) {
-  const c = verified && verified.components;
-  if (!c || !c.primary_line || !c.city || !c.state || !c.zip_code) return fallback;
-  return {
-    address1: c.primary_line,
-    address2: c.secondary_line || fallback.address2 || '',
-    city: c.city,
-    state: c.state,
-    zip: c.zip_code,
-  };
-}
-async function lobCreatePostcard(key, payload, idemKey, postImpl) {
-  const res = await (postImpl || postJsonHttps)(`${LOB_API_BASE}/postcards`, {
-    headers: { Authorization: lobAuth(key), 'Idempotency-Key': idemKey },
+// ---- PostGrid ----
+async function postgridCreatePostcard(key, payload, postImpl) {
+  const res = await (postImpl || postJsonHttps)(`${POSTGRID_API_BASE}/postcards`, {
+    headers: postgridHeaders(key),
     body: JSON.stringify(payload),
   });
   if (res.status < 200 || res.status >= 300) {
-    throw new Error(lobErrorMessage(res, 'Lob could not create the postcard'));
+    throw new Error(postgridErrorMessage(res, 'PostGrid could not create the postcard'));
   }
   let parsed = {};
   try {
@@ -427,12 +454,31 @@ async function lobCreatePostcard(key, payload, idemKey, postImpl) {
   return parsed;
 }
 
+// Same-day duplicate guard: has this exact send already been logged?
+async function findDuplicate(store, month, idemKey) {
+  if (!store || !idemKey) return false;
+  try {
+    const res = await store.list({ prefix: `sends/${month}/` });
+    for (const b of res.blobs || []) {
+      try {
+        const entry = await store.get(b.key, { type: 'json' });
+        if (entry && entry.idemKey === idemKey) return true;
+      } catch (e) {
+        /* an unreadable entry is not a duplicate */
+      }
+    }
+  } catch (e) {
+    /* a list failure must not block the send */
+  }
+  return false;
+}
+
 // ---- send pipeline (pure-ish; I/O injected for fixtures) ----
 async function runSend({ env, body, deps }) {
   const post = (deps && deps.postJson) || postJsonHttps;
   const get = (deps && deps.get) || getHttps;
   const put = (deps && deps.put) || putHttps;
-  const store = deps && deps.store !== undefined ? deps.store : getLogStore();
+  const store = deps && deps.store !== undefined ? deps.store : getLogStoreFor(deps && deps.event);
   const now = (deps && deps.now) || new Date();
   const month = data.monthKey(now);
   const dateStr = now.toISOString().slice(0, 10);
@@ -496,37 +542,29 @@ async function runSend({ env, body, deps }) {
       body: {
         error:
           env.mode === 'live'
-            ? 'Lob live key is not set (LOB_API_KEY). Live sends are off until Troy pastes it into Netlify.'
-            : 'Lob test key is not set (LOB_TEST_API_KEY). Add the free test key in Netlify to try a test send.',
+            ? 'PostGrid live key is not set (POSTGRID_API_KEY). Live sends are off until Troy pastes it into Netlify.'
+            : 'PostGrid test key is not set (POSTGRID_TEST_API_KEY). Add the free test key in Netlify to try a test send.',
       },
     };
   }
 
-  // Hard monthly cap — checked BEFORE any Lob call.
+  // Hard monthly cap — checked BEFORE any PostGrid call.
   const spend = await monthSpend(store, month);
   if (spend.spentCents + priceCents > env.capCents) {
     return { status: 402, body: capHit(spend.spentCents, env.capCents, priceCents, month) };
   }
 
-  // Address verification (strict in live, advisory in test).
-  let verified = null;
-  let verificationWarning = null;
-  try {
-    verified = await lobVerifyAddress(key, address, post);
-    const deliv = verified && verified.deliverability;
-    if (!deliverabilityOk(deliv)) {
-      if (env.mode === 'live') {
-        return { status: 400, body: { error: `That address looks undeliverable (${deliv || 'unknown'}). Fix the address and try again — nothing was sent.` } };
-      }
-      verificationWarning = `Test mode: Lob reports this address as ${deliv || 'unknown'} — proceeding because test verification is simulated.`;
-    }
-  } catch (e) {
-    if (env.mode === 'live') {
-      return { status: 503, body: { error: String((e && e.message) || e) } };
-    }
-    verificationWarning = `Test mode: address verification failed (${String((e && e.message) || e).slice(0, 120)}) — proceeding because test verification is simulated.`;
+  // Same-day duplicate guard — checked BEFORE any PostGrid call.
+  const idemKey = idempotencyKey({ contactId, size, templateId, dateStr });
+  if (await findDuplicate(store, month, idemKey)) {
+    return {
+      status: 409,
+      body: {
+        error: 'That postcard was already sent today (same contact, size, and design). Nothing was mailed twice.',
+        code: 'duplicate_send',
+      },
+    };
   }
-  if (verified && env.mode === 'live') address = standardizedAddress(verified, address);
 
   // Render the artwork.
   const vars = {
@@ -538,7 +576,6 @@ async function runSend({ env, body, deps }) {
   };
   let front;
   let back;
-  let mergeVariables = null;
   if (builtin) {
     const rendered = data.renderBuiltin(templateId, size, vars, false);
     if (!rendered) return { status: 400, body: { error: 'That design does not support this size.' } };
@@ -547,21 +584,18 @@ async function runSend({ env, body, deps }) {
   } else {
     front = custom.front;
     back = custom.back;
-    // A Lob template id gets merge vars; a URL / raw HTML is static art.
-    if (/^tpl_[A-Za-z0-9]+$/.test(front) || /^tpl_[A-Za-z0-9]+$/.test(back)) {
-      mergeVariables = vars;
-    }
   }
 
-  const to = buildLobAddress(ownerName, address);
-  const payload = {
+  // PostGrid create payload. Front/back must be the same kind on both
+  // sides: both HTML, both PostGrid template ids, both image URLs, or
+  // one 2-page PDF used for both sides.
+  const to = buildPostGridContact(ownerName, address);
+  const basePayload = {
     to,
     from: env.from,
-    front,
-    back,
-    size,
-    mail_type: 'usps_first_class',
-    use_type: 'marketing',
+    size: postgridSize(size),
+    mailingClass: 'first_class',
+    description: `Command Center postcard ${templateId} ${size}`,
     metadata: {
       contactId: contactId || '',
       templateId,
@@ -570,25 +604,41 @@ async function runSend({ env, body, deps }) {
       month,
     },
   };
-  if (mergeVariables) payload.merge_variables = mergeVariables;
+  let payload;
+  if (builtin) {
+    payload = { ...basePayload, frontHTML: front, backHTML: back };
+  } else if (custom.kindFront === 'postgrid-template' && custom.kindBack === 'postgrid-template') {
+    payload = { ...basePayload, frontTemplate: front, backTemplate: back, mergeVariables: vars };
+  } else if (custom.kindFront === 'html' && custom.kindBack === 'html') {
+    payload = { ...basePayload, frontHTML: front, backHTML: back };
+  } else if (custom.kindFront === 'image-url' && custom.kindBack === 'image-url') {
+    payload = { ...basePayload, frontHTML: imageArtHtml(front), backHTML: imageArtHtml(back) };
+  } else if (custom.kindFront === 'pdf-url' && custom.kindBack === 'pdf-url') {
+    if (front !== back) {
+      return { status: 400, body: { error: 'PostGrid needs one 2-page PDF for both sides — paste the same PDF link for front and back.' } };
+    }
+    payload = { ...basePayload, pdf: front };
+  } else {
+    return { status: 400, body: { error: 'PostGrid needs matching front/back types (both templates, both HTML, both images, or one 2-page PDF).' } };
+  }
 
-  const idemKey = idempotencyKey({ contactId, size, templateId, dateStr });
   let created;
   try {
-    created = await lobCreatePostcard(key, payload, idemKey, post);
+    created = await postgridCreatePostcard(key, payload, post);
   } catch (e) {
     return { status: 503, body: { error: String((e && e.message) || e) } };
   }
-  const lobId = created && created.id;
-  if (!lobId) return { status: 503, body: { error: 'Lob did not return a postcard id. Nothing was logged — check the Lob dashboard.' } };
-  // Lob's create response carries no price field: cap accounting uses the
-  // verified per-piece table. Keep the exact table value (90.5c, not
-  // rounded to 91c) so the $100 cap really fits ~110 postcards:
-  // 110 x 90.5 = 9955 <= 10000; the 111th is refused.
-  const costCents = Number.isFinite(created.price) ? Math.round(created.price * 100) : priceCents;
+  const postgridId = created && created.id;
+  if (!postgridId) return { status: 503, body: { error: 'PostGrid did not return a postcard id. Nothing was logged — check the PostGrid dashboard.' } };
+  // PostGrid's create response carries no price field: cap accounting uses
+  // the verified per-piece table. Keep the exact table value (90.2c, not
+  // rounded) so the $100 cap really fits ~110 postcards:
+  // 110 x 90.2 = 9922 <= 10000; the 111th is refused.
+  const costCents = priceCents;
 
   const entry = {
-    lobId,
+    postgridId,
+    idemKey,
     contactId: contactId || null,
     ownerName,
     address: `${address.address1}, ${address.city}, ${address.state} ${address.zip}`,
@@ -627,7 +677,7 @@ async function runSend({ env, body, deps }) {
     status: 200,
     body: {
       ok: true,
-      lobId,
+      postgridId,
       size,
       costCents,
       monthSpentCents: spendAfter.spentCents,
@@ -639,7 +689,6 @@ async function runSend({ env, body, deps }) {
       hlTagged,
       hlSkipped: contactId ? null : 'no-contact-id',
       logged,
-      verificationWarning,
       hlWarning,
     },
   };
@@ -655,7 +704,7 @@ exports.handler = async (event) => {
       if ((params.action || 'status') !== 'status') return bad('Unknown action. Use action=status.');
       const env = readEnv();
       const month = data.monthKey(new Date());
-      const spend = await monthSpend(getLogStore(), month);
+      const spend = await monthSpend(getLogStoreFor(event), month);
       return ok({
         mode: env.mode,
         testMode: env.mode === 'test',
@@ -665,7 +714,7 @@ exports.handler = async (event) => {
         count: spend.count,
         month,
         prices: { '4x6': data.PRICES_CENTS['4x6'], '6x9': data.PRICES_CENTS['6x9'] },
-        lobConnected: env.mode === 'live' ? !!env.liveKey : !!env.testKey,
+        postgridConnected: env.mode === 'live' ? !!env.liveKey : !!env.testKey,
       });
     }
 
@@ -684,7 +733,7 @@ exports.handler = async (event) => {
     // Template state for resolving templateId (built-in or custom).
     let templatesState = { activeId: 'cash-offer', customs: [] };
     try {
-      const tstore = blobs ? blobs.getStore('direct-mail-templates') : null;
+      const tstore = getStoreForTemplates(event);
       if (tstore) {
         const raw = await tstore.get('templates.json', { type: 'json' });
         if (raw && typeof raw === 'object') {
@@ -698,7 +747,16 @@ exports.handler = async (event) => {
       /* templates fall back to built-ins only */
     }
 
-    const result = await runSend({ env, body, deps: { templatesState } });
+    // Send log store: fail CLOSED when Blobs is present but the store
+    // cannot be opened — a send with no log would be uncapped and
+    // untracked. (In the local/test env the Blobs module is absent and
+    // runSend's fixture store is used instead.)
+    const logStore = getLogStoreFor(event);
+    if (blobs && !logStore) {
+      return json(503, { error: 'Mail log is not available right now. Nothing was sent.' });
+    }
+
+    const result = await runSend({ env, body, deps: { templatesState, store: logStore, event } });
     return json(result.status, result.body);
   } catch (e) {
     return json(503, { error: 'Mail send failed. Nothing was sent.' });
@@ -710,14 +768,24 @@ exports._test = {
   parseCap,
   cleanStr,
   validAddress,
-  deliverabilityOk,
-  buildLobAddress,
+  splitOwnerName,
+  buildPostGridContact,
+  imageArtHtml,
+  postgridSize,
   idempotencyKey,
-  lobErrorMessage,
+  postgridErrorMessage,
   contactOptedOut,
-  standardizedAddress,
+  findDuplicate,
   monthSpend,
   logSend,
   runSend,
-  DELIVERABLE_OK: [...DELIVERABLE_OK],
+  getLogStoreFor,
+  getStoreForTemplates,
+  // Test seam: swap the Blobs client (returns the previous one). Lets the
+  // regression suite prove the Nov 11 fix with a throwing/fake client.
+  _setBlobs: (b) => {
+    const prev = blobs;
+    blobs = b;
+    return prev;
+  },
 };

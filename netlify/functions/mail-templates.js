@@ -25,13 +25,14 @@
 // <dashboard password>. Mutations without it fail closed (401).
 //
 // Custom design sources (see mail-templates-data.js validateCustomSource):
-//   - Lob template id (tpl_...) — merge vars passed at send time.
-//   - https URL to a PDF/PNG/JPG — sent to Lob as the artwork URL.
-//   - Raw HTML starting with '<' — sent to Lob as the artwork.
-// A custom design has the same front+back for every size (Lob renders the
-// artwork to the chosen size); the picker still lets Troy choose 4x6/6x9.
+//   - PostGrid template id (template_...) — merge vars passed at send time.
+//   - https URL to a 2-page PDF — sent to PostGrid as the order's pdf.
+//   - https URL to a PNG/JPG — wrapped in full-bleed HTML at send time.
+//   - Raw HTML starting with '<' — sent to PostGrid as the artwork.
+// A custom design has the same front+back for every size (PostGrid renders
+// the artwork to the chosen size); the picker still lets Troy choose 4x6/6x9.
 //
-// No Lob calls are made here. No money moves here. No keys in this file.
+// No PostGrid calls are made here. No money moves here. No keys in this file.
 'use strict';
 
 const crypto = require('crypto');
@@ -103,9 +104,31 @@ function isAdmin(event) {
 }
 
 // ---- stored state (Blobs) ----
-function getStore() {
+// Netlify Blobs needs connectLambda(event) before getStore() — without it
+// getStore() throws MissingBlobsEnvironmentError in production ("The
+// environment has not been configured to use Netlify Blobs..."). The
+// working functions (buyer-verify, deals-api) call connectLambda; the
+// mail functions did not, so the template list 503'd on every live call
+// (Nov 11: "Template request failed. Nothing was changed.") and the
+// Send Mail sheet never opened. getStoreFor() also never throws: on any
+// Blobs failure it returns null and callers fall back to the built-in
+// designs (the list is static data — it must not 503 when Blobs is down).
+function getStoreFor(event) {
   if (!blobs) return null;
-  return blobs.getStore(STORE_NAME);
+  try {
+    if (typeof blobs.connectLambda === 'function') blobs.connectLambda(event);
+  } catch (e) {
+    /* best-effort; getStore may still work with ambient context */
+  }
+  try {
+    return blobs.getStore(STORE_NAME);
+  } catch (e) {
+    return null;
+  }
+}
+
+function getStore() {
+  return getStoreFor(null);
 }
 
 async function readState(store) {
@@ -171,7 +194,7 @@ exports.handler = async (event) => {
 
     if (event.httpMethod === 'GET') {
       const action = params.action || 'list';
-      const store = getStore();
+      const store = getStoreFor(event);
       const state = await readState(store);
 
       if (action === 'list') {
@@ -212,7 +235,7 @@ exports.handler = async (event) => {
         return bad('Bad JSON body.');
       }
     }
-    const store = getStore();
+    const store = getStoreFor(event);
     if (!store) return unavailable();
     const state = await readState(store);
 
@@ -262,4 +285,18 @@ exports.handler = async (event) => {
   }
 };
 
-exports._test = { listTemplates, resolveTemplate, readState, DEFAULT_ACTIVE_ID };
+exports._test = {
+  listTemplates,
+  resolveTemplate,
+  readState,
+  getStoreFor,
+  DEFAULT_ACTIVE_ID,
+  // Test seam: swap the Blobs client (returns the previous one). Lets the
+  // regression suite prove the fix with a throwing/fake client, since the
+  // real @netlify/blobs package is not installed in the test env.
+  _setBlobs: (b) => {
+    const prev = blobs;
+    blobs = b;
+    return prev;
+  },
+};

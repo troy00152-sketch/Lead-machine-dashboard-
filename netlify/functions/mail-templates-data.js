@@ -3,25 +3,28 @@
 // (mail-send.js, mail-templates.js, and the mail regression suite).
 //
 // POSTCARDS ONLY (Troy, Nov 11, 2026). No letters.
-// Prices verified Nov 11, 2026 (Lob Developer, $0/mo):
-//   4x6 First Class $0.905 · 6x9 First Class ~$0.92 (Lob blog, Oct 26 2026).
-// USPS/Lob prices move — the confirm sheet shows these as the EXPECTED
+// Prices verified Nov 11, 2026 (PostGrid Starter, $0/mo):
+//   4x6 First Class $0.902 · 6x9 First Class $1.023 (PostGrid pricing page).
+// USPS/PostGrid prices move — the confirm sheet shows these as the EXPECTED
 // price and the send log records the table price; re-check at live time.
-// Lob's create-postcard response carries no price field, so cap accounting
-// uses this table (see mail-send.js).
+// PostGrid's create-postcard response carries no price field, so cap
+// accounting uses this table (see mail-send.js).
 //
-// Lob HTML postcard specs (docs.lob.com): the HTML is the full bleed page.
-//   4x6 -> 6.25in x 4.25in · 6x9 -> 9.25in x 6.25in (0.125in bleed each side).
-// The BACK must leave the right ~40% clear: Lob prints the recipient
+// PostGrid HTML postcard specs (guides.postgrid.com): the HTML is the full
+// bleed page. 4x6 -> 6.25in x 4.25in · 6x9 -> 9.25in x 6.25in (0.125in
+// bleed each side); PostGrid renders the HTML to the chosen card size.
+// The BACK must leave the right ~40% clear: PostGrid prints the recipient
 // address + postage there. renderTemplate(size, vars, {preview}) adds a
 // dashed "address goes here" placeholder ONLY in preview mode — the HTML
-// sent to Lob never contains it.
+// sent to PostGrid never contains it.
 //
-// Merge variables (server-side substitution before sending to Lob):
+// Merge variables (server-side substitution before sending to PostGrid):
 //   {{ownerName}} {{propertyAddress}} {{cityStateZip}} {{phone}} {{brand}}
-// Custom templates are NOT merged: a Lob template id (tpl_...) gets the
-// merge variables passed through Lob's merge_variables field; a remote
-// URL / raw HTML custom is static artwork, sent as-is.
+// Custom templates are NOT merged by default: a PostGrid template id
+// (template_...) gets the merge variables passed through PostGrid's
+// mergeVariables field; a remote URL / raw HTML custom is static art,
+// sent as-is (an image URL is wrapped in full-bleed HTML at send time;
+// a PDF URL is sent as the order's single 2-page PDF).
 //
 // No API keys, no secrets, no live calls in this module. Pure data + pure
 // functions, so the regression suite can require it with no I/O.
@@ -37,16 +40,16 @@ const LOGO_URL =
 // Default return address (Troy's mailing address, already on file).
 // Overridable with MAIL_FROM_* env vars in mail-send.js.
 const DEFAULT_FROM = {
-  name: 'Direct Property Buyers',
-  address_line1: '208 Burgundy Hill Ln',
-  address_line2: '',
-  address_city: 'Middletown',
-  address_state: 'CT',
-  address_zip: '06705',
-  address_country: 'US',
+  companyName: 'Direct Property Buyers',
+  addressLine1: '208 Burgundy Hill Ln',
+  addressLine2: '',
+  city: 'Middletown',
+  provinceOrState: 'CT',
+  postalOrZip: '06705',
+  countryCode: 'US',
 };
 
-const PRICES_CENTS = { '4x6': 90.5, '6x9': 92 }; // in cents; 4x6 = $0.905
+const PRICES_CENTS = { '4x6': 90.2, '6x9': 102.3 }; // in cents; 4x6 = $0.902
 const SIZES = ['4x6', '6x9'];
 const MONTHLY_CAP_CENTS = 10000; // $100/month hard cap (Troy, Nov 11 2026)
 
@@ -218,26 +221,29 @@ function renderBuiltin(id, size, vars, preview) {
 }
 
 // Validate a custom design's front/back source. Accepted forms:
-//   - Lob template id:  tpl_ + alphanumerics
-//   - Remote artwork URL: https://... ending .pdf / .png / .jpg / .jpeg
+//   - PostGrid template id:  template_ + alphanumerics
+//   - Remote artwork URL: https://... ending .pdf (one 2-page PDF) or
+//     .png / .jpg / .jpeg (wrapped in full-bleed HTML at send time)
 //   - Raw HTML: a string starting with '<' (an HTML document or fragment)
-// Anything else is rejected — a bare word is neither a template nor a file.
+// Anything else is rejected - a bare word is neither a template nor a file.
 function validateCustomSource(value) {
   const s = String(value == null ? '' : value).trim();
   if (!s) return { ok: false, error: 'Empty design source.' };
-  if (/^tpl_[A-Za-z0-9]+$/.test(s)) return { ok: true, kind: 'lob-template' };
-  if (/^https:\/\//.test(s) && /\.(pdf|png|jpg|jpeg)(\?.*)?$/i.test(s))
-    return { ok: true, kind: 'remote-url' };
+  if (/^template_[A-Za-z0-9]+$/.test(s)) return { ok: true, kind: 'postgrid-template' };
+  if (/^https:\/\//.test(s) && /\.pdf(\?.*)?$/i.test(s))
+    return { ok: true, kind: 'pdf-url' };
+  if (/^https:\/\//.test(s) && /\.(png|jpg|jpeg)(\?.*)?$/i.test(s))
+    return { ok: true, kind: 'image-url' };
   if (s.startsWith('<')) return { ok: true, kind: 'html' };
   return {
     ok: false,
     error:
-      'Design must be a Lob template id (tpl_...), an https link to a PDF/PNG/JPG, or raw HTML starting with "<".',
+      'Design must be a PostGrid template id (template_...), an https link to a 2-page PDF or a PNG/JPG image, or raw HTML starting with "<".',
   };
 }
 
 // 'YYYY-MM' month key for cap accounting (UTC, so a month boundary is the
-// same for the dashboard, the function, and the Lob bill).
+// same for the dashboard, the function, and the PostGrid bill).
 function monthKey(d) {
   const dt = d instanceof Date ? d : new Date(d || Date.now());
   return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}`;
