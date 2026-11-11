@@ -2087,6 +2087,7 @@ function addAllListResultsToLeads(){
    =========================================================================== */
 
 /* Single-address lookup via RentCast AVM + property records */
+const FILTER_WORDS = ['condo', 'unit', 'apt', 'apartment', 'townhouse', 'townhome', 'suite'];
 function shouldFilter(address, signal){
   const lower = (address+' '+(signal||'')).toLowerCase();
   return FILTER_WORDS.some(w => lower.includes(w));
