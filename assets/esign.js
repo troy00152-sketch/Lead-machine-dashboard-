@@ -24,7 +24,7 @@
     return '$' + n.toLocaleString('en-US', { maximumFractionDigits: 0 });
   }
   function findLead(id) {
-    var list = (window.leads || window.LEADS || (typeof leads !== 'undefined' ? leads : []) || []);
+    var list = (window.leads || window.LEADS || []);
     for (var i = 0; i < list.length; i++) if (String(list[i].id) === String(id)) return list[i];
     return null;
   }
@@ -64,6 +64,14 @@
     html += '<p style="background:#fff3cd;border:1px solid #e6c34d;border-radius:8px;padding:10px 12px;font-size:13px;margin:8px 0"><b>⚠️ A send is REAL.</b> HighLevel signing has no test mode. Preparing a draft sends nothing; sending emails a legally binding signing request to the seller and Troy.</p>';
     if (current.staleTemplates) {
       html += '<p style="color:#a60;font-size:13px">Live template list failed — showing the 9 templates verified Nov 11, 2026. Verify in HighLevel before sending.</p>';
+    }
+    // Unlinked lead — manual HighLevel contact link (Nov 11 fix: nothing
+    // in the repo ever set lead.ghlContactId, so the v1 sheet dead-ended
+    // here for every lead. The sheet opens; Troy pastes the id instead.)
+    if (!current.contactId) {
+      html += '<div class="sec-title" style="font-size:14px">🔗 HighLevel contact</div>';
+      html += '<p style="font-size:13px;color:var(--muted);margin:4px 0 6px">This lead has no HighLevel contact linked yet. Paste the contact ID — open the contact in HighLevel and copy the ID at the end of the page URL (after /contacts/).</p>';
+      html += '<input id="esignContactId" type="text" placeholder="HighLevel contact ID" value="' + esc(current.manualContactId || '') + '" style="width:100%;padding:10px;border:1px solid #ddd;border-radius:8px;font-size:14px" autocomplete="off" spellcheck="false">';
     }
     // Template picker
     html += '<div class="sec-title" style="font-size:14px">📄 Contract template</div>';
@@ -159,10 +167,10 @@
     if (modal) modal.classList.add('open');
     var b = document.getElementById('esignBody');
     if (b) b.innerHTML = '<p style="color:var(--muted)">Loading your HighLevel templates…</p>';
-    if (!contactId) {
-      renderError('This lead has no HighLevel contact linked yet — push it to GHL first, then send for signature.');
-      return;
-    }
+    // No linked contact is no longer a dead end (Nov 11 fix): the sheet
+    // opens with a manual contact-ID field instead. current.contactId
+    // stays null until a Prepare succeeds with an entered id.
+    current.manualContactId = '';
     try {
       var tpl = await callEsign('templates');
       current.templates = tpl.templates || [];
@@ -191,12 +199,20 @@
     var sel = document.getElementById('esignTemplate');
     var templateId = (sel && sel.value) || (current.envelope && current.envelope.templateId) || current.preferredTemplateId || '';
     if (!templateId) { alert('Pick a contract template first.'); return; }
+    // Manual link (Nov 11 fix): an unlinked lead uses the id typed into
+    // the sheet. Empty still blocks; an unknown id fails closed on
+    // prepare's own HighLevel lookup error — it can never send.
+    var idInput = document.getElementById('esignContactId');
+    var manualId = idInput ? String(idInput.value || '').trim() : (current.manualContactId || '');
+    var contactId = current.contactId || manualId;
+    if (!contactId) { alert('Enter the HighLevel contact ID first — open the contact in HighLevel and copy the ID at the end of the page URL.'); return; }
+    current.manualContactId = manualId;
     var b = document.getElementById('esignBody');
     if (b) b.innerHTML = '<p style="color:var(--muted)">Preparing the draft — validating contract fields and checking signature fields. Nothing is being sent…</p>';
     try {
       var res = await callEsign('prepare', {
         action: 'prepare',
-        contactId: current.contactId,
+        contactId: contactId,
         leadId: current.leadId,
         templateId: templateId,
         contractDate: new Date().toISOString().slice(0, 10),
@@ -206,6 +222,13 @@
       current.fieldsCheck = res.fieldsCheck || (res.envelope && res.envelope.fieldsCheck) || null;
       current.disclosureReminder = Boolean(res.disclosureReminder);
       current.missing = [];
+      // Link sticks: a successful prepare with a manually entered id
+      // persists it on the lead, so the next open is already linked.
+      if (!current.contactId) {
+        current.contactId = contactId;
+        if (current.lead) current.lead.ghlContactId = contactId;
+        try { if (typeof window.saveState === 'function') window.saveState(); } catch (e) {}
+      }
       renderSheet();
     } catch (e) {
       if (e && e.data && e.data.missing) { current.missing = e.data.missing; renderSheet(); return; }
