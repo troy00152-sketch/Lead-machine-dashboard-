@@ -921,7 +921,7 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
         
         <div class="card" style="margin-bottom:14px">
           <div class="sec-title" style="margin-bottom:8px">📵 DNC Check</div>
-          <p style="color:var(--muted);font-size:13px;margin-bottom:0">DNC screening runs in HighLevel before any texts go out. The dashboard no longer runs its own DNC check (DealMachine removed Nov 4).</p>
+          <p style="color:var(--muted);font-size:13px;margin-bottom:0">DNC screening runs in HighLevel before any texts go out. The dashboard no longer runs its own DNC check.</p>
         </div>
         <div class="sec-title">📜 Trace History</div>
         <div class="tbl-wrap"><table><thead><tr><th>Address</th><th>Hit</th><th>Mobiles</th><th>When</th></tr></thead><tbody id="traceHistoryBody"><tr><td colspan="4" style="text-align:center;color:var(--muted)">No traces yet</td></tr></tbody></table></div>
@@ -1006,7 +1006,7 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
           <div id="compSubjectCard" style="display:none;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:12px"></div>
           <div style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:12px">
             <div style="font-weight:800;font-size:13px;margin-bottom:4px">🚦 Listing Check — FIRST, before any comp math</div>
-            <p style="color:var(--muted);font-size:12px;margin:0 0 10px">If it's listed with a realtor, PASS immediately — no MAO, no LAO, no offer. Listing fields fill themselves in from RentCast (free tier) — anything it can't find, check (Zillow / DealMachine) and set by hand. The panel below shows the full picture: status, price + $/sqft, status-change date, above/below value, and the description.</p>
+            <p style="color:var(--muted);font-size:12px;margin:0 0 10px">If it's listed with a realtor, PASS immediately — no MAO, no LAO, no offer. Listing fields fill themselves in automatically — anything the feed can't find, check the listing by hand and set it here. The panel below shows the full picture: status, price + $/sqft, status-change date, above/below value, and the description.</p>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px">
               <div><label class="lbl">Property address (for listing links)</label><input class="field" id="compListAddr" placeholder="e.g. 123 Main St, Indianapolis, IN 46205" oninput="updateCompLinks()" onkeydown="if(event.key==='Enter'){event.preventDefault();loadCompsForAddress();}" /><button class="btn primary" style="margin-top:8px" onclick="loadCompsForAddress()" title="Load everything for this address — comps, map, mortgage, and offer math">🔍 Search</button></div>
               <div><label class="lbl">Listing status *</label><select class="field" id="compListStatus" onchange="calcComp()"><option value="">Not checked yet</option><option value="active">Active — listed with a realtor — PASS</option><option value="pending">Pending — under contract — PASS</option><option value="expired">Expired — no live listing</option><option value="withdrawn">Withdrawn — no live listing</option><option value="sold">Sold — PASS</option><option value="inactive">Inactive — reason unknown (confirm)</option><option value="not-listed">Not listed — clear to comp</option></select></div>
@@ -1021,7 +1021,7 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
               <div><label class="lbl">Agent email</label><input class="field" id="compListAgentEmail" placeholder="Agent email" oninput="calcComp()" /></div>
               <div><label class="lbl">Listing office</label><input class="field" id="compListOffice" placeholder="Brokerage / office" oninput="calcComp()" /></div>
               <div><label class="lbl">Home sq ft (optional — for $/sqft)</label><input class="field" id="compListSqft" type="number" placeholder="Auto-fills on load" oninput="calcComp()" /></div>
-              <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap"><a id="compZillowLink" class="btn" href="https://www.zillow.com/" target="_blank" rel="noopener" style="text-decoration:none" onclick="stampListingChecked()">🏠 Check on Zillow ↗</a><span id="compCheckedNote" style="font-size:12px;color:var(--muted)"></span></div>
+              <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap"><a id="compZillowLink" class="btn" href="https://www.zillow.com/" target="_blank" rel="noopener" style="text-decoration:none" onclick="stampListingChecked()">🏠 Check listing ↗</a><span id="compCheckedNote" style="font-size:12px;color:var(--muted)"></span></div>
             </div>
             <div style="margin-bottom:10px"><label class="lbl">Listing description</label><textarea class="field" id="compListDesc" rows="3" placeholder="Blank unless a listing feed returns one." oninput="calcComp()"></textarea></div>
             <div id="compGateMsg"></div>
@@ -1083,11 +1083,7 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
         </div>
         <div class="card">
           <div class="sec-title" style="font-size:14px">⚙️ Import Connection</div>
-          <p style="color:var(--muted);font-size:12px;margin-bottom:12px">The import function URL and its secret live only in this browser's localStorage — never in this page. Set them once; the deploy step gives you both values.</p>
-          <div style="margin-bottom:12px"><label class="lbl">Import function URL</label><input class="field" id="liFuncUrl" placeholder="https://command-center-dpb.netlify.app/.netlify/functions/list-import" /></div>
-          <div style="margin-bottom:12px"><label class="lbl">Function secret (x-cc-secret)</label><input class="field" id="liSecret" type="password" placeholder="Saved in this browser only" /></div>
-          <button class="btn" onclick="saveListImportConn()">Save Connection</button>
-          <span id="liConnMsg" style="font-size:12px;margin-left:8px"></span>
+          <p style="color:var(--muted);font-size:12px;margin-bottom:12px">Import runs through the dashboard's own server function — the secret lives in Netlify env (CC_IMPORT_SECRET) and never touches this browser. No key to paste here; if imports return Unauthorized, check that env var in Netlify, not this page.</p>
         </div>
       </div>
 
@@ -1365,7 +1361,6 @@ function showPage(name){
   const el = document.getElementById('page-'+name);
   if(el) el.classList.add('active');
   document.querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active', b.dataset.nav===name));
-  if(name === 'listimport') liLoadConn();
   if(name === 'dealrooms' && typeof drLoadDeals === 'function') drLoadDeals();
   if(name === 'comps'){ renderCompMap(); setTimeout(()=>{ if(compMap){ compMap.invalidateSize(); renderCompMap(); } }, 150); }
   if(name === 'masterbuyers' && typeof syncMbView === 'function'){ setTimeout(()=>{ if(mbMap){ mbMap.invalidateSize(); if(mbView === 'map') renderBuyerMap(); } }, 150); }
@@ -2234,7 +2229,7 @@ function updateStats(){
   document.getElementById('statLeads').textContent = leads.length;
   document.getElementById('leadCountNav').textContent = leads.length;
   document.getElementById('leadCountBadge').textContent = leads.length;
-  document.getElementById('statBuyers').textContent = '7,642';
+  document.getElementById('statBuyers').textContent = '28,670';
   document.getElementById('statHedge').textContent = (typeof HEDGE_FUNDS!=='undefined'?HEDGE_FUNDS.length:0);
   document.getElementById('statTraced').textContent = leads.filter(l=>l.traced).length;
   // Buyer counts now come live from the Buyer Match Ai database.
@@ -2314,7 +2309,7 @@ function renderImgFrame(l){
       +'<img src="'+tSat+'" class="'+(imgMode==='satellite'?'active':'')+'" onclick="setImgMode(\'satellite\')" title="Satellite view">'
       +'<img src="'+tMap+'" class="'+(imgMode==='map'?'active':'')+'" onclick="setImgMode(\'map\')" title="Map view">'
       +'</div>'
-      +'<a class="img-listing-link" href="'+zillowUrl(l)+'" target="_blank" rel="noopener">🏠 Listing photos — inside the house, when it was listed (Zillow) ↗</a>';
+      +'<a class="img-listing-link" href="'+zillowUrl(l)+'" target="_blank" rel="noopener">🏠 Listing photos — inside the house, when it was listed ↗</a>';
   }
 }
 function openLightbox(url){
@@ -2616,7 +2611,7 @@ function listingGateFields(l){
     + '</div>';
 }
 function listingGateHtml(l){
-  const links = '<div style="font-size:12px;color:var(--muted)">Photo above is the house. <a href="' + zillowUrl(l) + '" target="_blank" rel="noopener">Check listing on Zillow ↗</a></div>';
+  const links = '<div style="font-size:12px;color:var(--muted)">Photo above is the house. <a href="' + zillowUrl(l) + '" target="_blank" rel="noopener">Check listing ↗</a></div>';
   if(l.listingStatus === 'listed') return listingPassBanner(l) + links
     + '<div style="margin-top:8px"><button class="btn ghost" style="padding:4px 8px" onclick="setListingStatus(\'' + l.id + '\',\'\')">Clear status</button></div>'
     + listingGateFields(l);
@@ -2625,7 +2620,7 @@ function listingGateHtml(l){
     + '<div style="font-weight:800;margin-bottom:4px">🚦 Listing Check — FIRST, before any comp math</div>'
     + '<div style="color:var(--muted);margin-bottom:8px">⚠️ Listing status not checked. If it\'s listed with a realtor, PASS immediately.</div>'
     + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'
-    + '<a class="btn" href="' + zillowUrl(l) + '" target="_blank" rel="noopener" style="text-decoration:none">🏠 Check on Zillow ↗</a>'
+    + '<a class="btn" href="' + zillowUrl(l) + '" target="_blank" rel="noopener" style="text-decoration:none">🏠 Check listing ↗</a>'
     + '<button class="btn" onclick="setListingStatus(\'' + l.id + '\',\'not-listed\')">✓ Not listed</button>'
     + '<button class="btn" onclick="setListingStatus(\'' + l.id + '\',\'listed\')">⛔ Listed with realtor</button>'
     + '</div>'
@@ -3046,24 +3041,13 @@ function exportHitListCSV(){
 }
 
 /* ============ LIST IMPORT (screened CSV import, List Import slice) ============
-   Uploads a CSV to the list-import function, which screens every row
-   (duplicate guard → mobile-only → DNC → FTC → pass) and reports counts
-   + per-row outcomes. The function URL and secret live ONLY in this
-   browser's localStorage (cc_import_url / cc_import_secret) — never in
-   this file, never in a URL. Dry run is ON by default: screen and
+   Uploads a CSV to the dashboard's own list-import-proxy function, which
+   holds the import secret server-side (Netlify env CC_IMPORT_SECRET — same
+   value as the command-center site's CC_WEBHOOK_SECRET) and forwards the
+   request to the list-import function. The browser never sees the secret:
+   no key field, no localStorage. Dry run is ON by default: screen and
    report only, write nothing, until the operator unchecks it. */
-function liFuncUrl(){ try{ return (localStorage.getItem('cc_import_url') || '').trim() || 'https://command-center-dpb.netlify.app/.netlify/functions/list-import'; }catch(e){ return 'https://command-center-dpb.netlify.app/.netlify/functions/list-import'; } }
-function liSecret(){ try{ return (localStorage.getItem('cc_import_secret') || '').trim(); }catch(e){ return ''; } }
-function saveListImportConn(){
-  const u = document.getElementById('liFuncUrl').value.trim();
-  const s = document.getElementById('liSecret').value.trim();
-  try{ if(u) localStorage.setItem('cc_import_url', u); if(s) localStorage.setItem('cc_import_secret', s); }catch(e){}
-  document.getElementById('liConnMsg').innerHTML = '<span style="color:var(--green)">✓ Saved in this browser</span>';
-  toast('Import connection saved');
-}
-function liLoadConn(){
-  const u = document.getElementById('liFuncUrl'); if(u && !u.value) u.value = liFuncUrl();
-}
+function liFuncUrl(){ return '/.netlify/functions/list-import-proxy'; }
 async function runListImport(){
   const file = document.getElementById('liFile').files[0];
   const market = document.getElementById('liMarket').value;
@@ -3071,15 +3055,13 @@ async function runListImport(){
   const statusEl = document.getElementById('liStatus');
   const reportEl = document.getElementById('liReport');
   if(!file){ statusEl.innerHTML = '<span style="color:var(--red)">Choose a CSV file first.</span>'; return; }
-  const secret = liSecret();
-  if(!secret){ statusEl.innerHTML = '<span style="color:var(--red)">Save the import connection (function secret) first.</span>'; return; }
   statusEl.textContent = 'Uploading and screening…';
   reportEl.innerHTML = '';
   try{
     const csv = await file.text();
-    const resp = await fetch(liFuncUrl(), { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-cc-secret': secret }, body: JSON.stringify({ market, csv, dryRun }) });
+    const resp = await fetch(liFuncUrl(), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ market, csv, dryRun }) });
     const rep = await resp.json();
-    if(rep.outcome === 'unauthorized'){ statusEl.innerHTML = '<span style="color:var(--red)">Unauthorized — check the saved function secret.</span>'; return; }
+    if(rep.outcome === 'unauthorized'){ statusEl.innerHTML = '<span style="color:var(--red)">Unauthorized — the server secret (CC_IMPORT_SECRET in Netlify) does not match. No key is stored in this browser.</span>'; return; }
     if(rep.outcome === 'refused'){ statusEl.innerHTML = '<span style="color:var(--red)">Refused: ' + esc(rep.reason || 'unknown') + (rep.cap ? ' (cap ' + rep.cap + ')' : '') + '</span>'; return; }
     if(rep.outcome !== 'completed'){ statusEl.innerHTML = '<span style="color:var(--red)">Import failed: ' + esc(rep.outcome || 'unknown') + '</span>'; return; }
     const t = rep.totals;
@@ -3104,117 +3086,13 @@ function downloadListImportOutcome(){
   a.download = 'list-import-outcome.csv'; a.click();
 }
 
-/* ============ SKIP TRACE (Tracerfy) ============ */
-function getApiKey(){ return localStorage.getItem('acc_tracerfy_key') || ''; }
-/* ============ SKIP TRACE (Ava Data) ============ */
-function getAvaKey(){ return localStorage.getItem('acc_avadata_key') || ''; }
-function saveAvaKey(){
-  const k = document.getElementById('avaDataKey').value.trim();
-  if(!k){ toast('Enter a key first'); return; }
-  localStorage.setItem('acc_avadata_key', k);
-  document.getElementById('avaKeySavedMsg').innerHTML = '<span style="color:var(--green)">✓ Key saved in this browser</span>';
-  updateProviderStatus();
-  toast('Ava Data key saved');
-}
-function toggleAvaKeyVis(){
-  const i = document.getElementById('avaDataKey');
-  i.type = i.type==='password' ? 'text' : 'password';
-}
-async function getARV(id){
-  const l = leads.find(x=>x.id===id); if(!l) return;
-  // Use cached estimated value if already available
-  if(l.estimatedValue || l.arv){
-    const val = l.estimatedValue || l.arv;
-    toast('ARV: $'+Number(val).toLocaleString()+' (data estimate)');
-    return;
-  }
-  toast('Getting ARV for '+l.address+'...');
-  try{
-    const fullAddr = [l.address, l.city, l.state, l.zip].filter(Boolean).join(', ');
-    const resp = await fetch('/.netlify/functions/data-api?address=' + encodeURIComponent(fullAddr));
-    if(!resp.ok) throw new Error('HTTP '+resp.status);
-    const pj = await resp.json();
-    if(!pj.matched || !pj.property) throw new Error('No value found');
-    const p = pj.property;
-    const val = p.marketValue || p.estimatedValue;
-    if(!val) throw new Error('No value found');
-    l.arv = val;
-    l.estimatedValue = val;
-    // Store additional property details from data provider
-    if(p.beds) l.bedrooms = p.beds;
-    if(p.baths) l.bathrooms = p.baths;
-    if(p.sqft) l.sqft = p.sqft;
-    saveState(); renderLeads();
-    if(currentLeadId===id) openLead(id);
-    toast('ARV: $'+val.toLocaleString());
-  }catch(e){
-    toast('ARV lookup failed: '+e.message);
-  }
-}
-function getTraceProvider(){ return 'data-api'; }
+/* ============ SKIP TRACE ============
+   Live skip trace runs through the server-side data feed
+   (/.netlify/functions/data-skiptrace, key in Netlify env only).
+   No skip-trace key is ever stored in this browser. */
 function updateProviderStatus(){
   const el = document.getElementById('stKeyStatus');
   if(el) el.innerHTML = '<span class="badge green">Data feed active</span>';
-}
-async function callAvaData(first, last, address, city, state, zip){
-  const key = getAvaKey();
-  if(!key) throw new Error('NO_KEY');
-  const AVA_ENDPOINT = 'https://app.avadata.ai/api/v1/standard-search';
-  const resp = await fetch(AVA_ENDPOINT, {
-    method:'POST',
-    headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},
-    body: JSON.stringify({firstName:first||'', lastName:last||'', address, city, state, zip, dataTypes:['phone']})
-  });
-  if(!resp.ok) throw new Error('HTTP '+resp.status);
-  const json = await resp.json();
-  // Normalize Ava Data response to internal format
-  const d = json.data || {};
-  return {
-    hit: !!d.matchFound,
-    persons: d.matchFound ? [{full_name: d.name || ((first||'')+' '+(last||'')).trim(), phones: (d.phones||[]).map(p=>({number:p.number, type:(p.type||'').toLowerCase()==='mobile'?'Mobile':'Unknown', dnc:false, carrier:''}))}] : []
-  };
-}
-function saveApiKey(){
-  const k = document.getElementById('tracerfyKey').value.trim();
-  if(!k){ toast('Enter a key first'); return; }
-  localStorage.setItem('acc_tracerfy_key', k);
-  document.getElementById('keySavedMsg').innerHTML = '<span style="color:var(--green)">✓ Key saved in this browser</span>';
-  updateKeyStatus();
-  toast('API key saved');
-}
-function toggleKeyVis(){
-  const i = document.getElementById('tracerfyKey');
-  i.type = i.type==='password' ? 'text' : 'password';
-}
-function updateKeyStatus(){
-  const has = !!getApiKey();
-  document.getElementById('stKeyStatus').innerHTML = has
-    ? '<span class="badge green">API key set</span>'
-    : '<span class="badge red">No API key — add one in Settings</span>';
-}
-async function callTracerfy(first, last, address, city, state, zip){
-  const key = getApiKey();
-  if(!key) throw new Error('NO_KEY');
-  // NOTE: endpoint shape follows the Tracerfy connector helper (POST /v1/api/trace/lookup/).
-  // If Tracerfy's docs show a different path, update TRACERFY_ENDPOINT below.
-  const TRACERFY_ENDPOINT = 'https://tracerfy.com/v1/api/trace/lookup/';
-  const resp = await fetch(TRACERFY_ENDPOINT, {
-    method:'POST',
-    headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},
-    body: JSON.stringify({first_name:first||'',last_name:last||'',address,city,state,zip})
-  });
-  if(!resp.ok) throw new Error('HTTP '+resp.status);
-  return resp.json();
-}
-function extractPhones(traceResult){
-  const out = [];
-  if(!traceResult || !traceResult.hit) return out;
-  (traceResult.persons||[]).forEach(p=>{
-    (p.phones||[]).forEach(ph=>{
-      out.push({number:ph.number, type:ph.type||'Unknown', dnc:!!ph.dnc, carrier:ph.carrier||'', owner:p.full_name||''});
-    });
-  });
-  return out;
 }
 /* Map a property-lookup response onto the lead.
    Legacy: mapped dealmachine-lookup responses. DealMachine removed Nov 4. */
@@ -3723,7 +3601,7 @@ function renderBuyerMap(){
   if(note){
     note.textContent = results.length
       ? plotted.length + ' pins on this page' + (split.unplotted.length ? ' · ' + split.unplotted.length + ' unplotted (ZIP not geocoded yet — in list only)' : '') + ' · 📍 pins are ZIP centroids, not exact addresses' + (mbDrawFilter ? ' · ✏️ showing drawn area only' : '')
-      : 'Search buyers to plot them — the map starts empty, like XLeads.';
+      : 'Search buyers to plot them — the map starts empty.';
   }
   if(!mbMap){
     mbMap = L.map('mbMap', { scrollWheelZoom: false });
@@ -6117,11 +5995,7 @@ if(window.matchMedia){ try{ window.matchMedia('(prefers-color-scheme: light)').a
 document.addEventListener('DOMContentLoaded', function(){
   applyTheme(); // theme before anything renders
   loadState();
-  // Restore API key fields
-  const k = getApiKey();
-  if(k && document.getElementById('tracerfyKey')) document.getElementById('tracerfyKey').value = k;
   updateProviderStatus();
-  if(k && document.getElementById('keySavedMsg')) document.getElementById('keySavedMsg').innerHTML = '<span style="color:var(--green)">✓ Key saved in this browser</span>';
   document.querySelectorAll('.defview-btn').forEach(b=>b.classList.toggle('active', b.dataset.mode===getDefaultImgView()));
   buildSignalFilter(); renderSignalChips(); renderLeads(); renderRecentLeads(); renderRecentSearches(); renderTraceHistory(); updateStats();
 });
@@ -6618,52 +6492,39 @@ function renderExtras(){ renderHitList(); renderContracts(); renderPipelineStrip
 /* ---- Pipeline strip: today's LIVE action from the new HighLevel CRM ----
    Data comes from a function on the BOT site (profound-nasturtium-bdce9c),
    which already holds the HighLevel token — this dashboard holds NO token.
-   The strip key lives ONLY in this browser's localStorage (lm_pipeline_key):
-   it is never written into this file. No key / no function / wrong key all
-   degrade to a quiet note — the rest of the dashboard never breaks. */
-function pipelineStripUrl(){ return 'https://profound-nasturtium-bdce9c.netlify.app/.netlify/functions/pipeline-activity'; }
-function pipelineStripKey(){ try{ return (localStorage.getItem('lm_pipeline_key') || '').trim(); }catch(e){ return ''; } }
-function pipelineStripSaveKey(){
-  const inp = document.getElementById('psKeyInput'); if(!inp) return;
-  const k = inp.value.trim(); if(!k) return;
-  try{ localStorage.setItem('lm_pipeline_key', k); }catch(e){}
-  renderPipelineStrip();
-}
-function pipelineStripForgetKey(){ try{ localStorage.removeItem('lm_pipeline_key'); }catch(e){} renderPipelineStrip(); }
+   The strip key lives ONLY server-side: the dashboard's own
+   pipeline-activity-proxy function reads PIPELINE_STRIP_KEY from Netlify
+   env (same value as on the bot site) and forwards the request. The browser
+   never sees the key — no paste field, no localStorage. No key / wrong key
+   degrades to a quiet note — the rest of the dashboard never breaks. */
+function pipelineStripUrl(){ return '/.netlify/functions/pipeline-activity-proxy'; }
 function pipelineStripTime(iso){
   if(!iso) return '';
   const d = new Date(iso); if(isNaN(d.getTime())) return '';
   return d.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' });
 }
-function pipelineStripConnectNote(msg, showInput){
+function pipelineStripConnectNote(msg){
   const zone = ccEl('pipelineStripZone'); if(!zone) return;
   let h = '<div class="sec-title">📡 Today\'s Pipeline <span class="badge gray" style="font-size:10px">NOT CONNECTED</span></div>';
   h += '<div class="card" style="margin-bottom:8px"><div style="font-size:13px;color:var(--muted)">' + esc(msg) + '</div>';
-  if(showInput){
-    h += '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center">'
-      + '<input class="field" id="psKeyInput" type="password" placeholder="Paste the pipeline strip key" style="max-width:280px;flex:1" onkeypress="if(event.key===\'Enter\')pipelineStripSaveKey()" />'
-      + '<button class="btn primary" onclick="pipelineStripSaveKey()">Connect</button></div>'
-      + '<div style="font-size:11px;color:var(--muted2);margin-top:8px">The key is saved only in this browser. Troy adds it as PIPELINE_STRIP_KEY on the bot site first — then paste the same value here.</div>';
-  }
   h += '</div>';
   zone.innerHTML = h;
 }
 async function renderPipelineStrip(){
   const zone = ccEl('pipelineStripZone'); if(!zone) return;
-  const key = pipelineStripKey();
-  if(!key){ pipelineStripConnectNote('Live pipeline is not connected yet. Add PIPELINE_STRIP_KEY to the bot site, then paste it here to switch this strip on.', true); return; }
+  // No browser key: the proxy function holds PIPELINE_STRIP_KEY server-side.
   zone.innerHTML = '<div class="sec-title">📡 Today\'s Pipeline <span class="badge gray" style="font-size:10px">LOADING…</span></div>';
   let resp;
   try{
-    resp = await fetch(pipelineStripUrl(), { headers: { 'x-pipeline-key': key } });
+    resp = await fetch(pipelineStripUrl());
   }catch(e){
     zone.innerHTML = '<div class="sec-title">📡 Today\'s Pipeline <span class="badge gray" style="font-size:10px">UNAVAILABLE</span></div>'
       + '<div class="card" style="margin-bottom:8px"><div style="font-size:13px;color:var(--muted)">Live pipeline is unreachable right now — your saved leads below are unaffected.</div>'
       + '<div style="margin-top:10px"><button class="btn small" onclick="renderPipelineStrip()">🔄 Retry</button></div></div>';
     return;
   }
-  if(resp.status === 401){ pipelineStripForgetKey(); pipelineStripConnectNote('That strip key was rejected. Paste the current key to reconnect.', true); return; }
-  if(resp.status === 503){ pipelineStripConnectNote('The bot site does not have PIPELINE_STRIP_KEY set yet. Add it in Netlify, redeploy the bot site, then come back here.', false); return; }
+  if(resp.status === 401){ pipelineStripConnectNote('The strip key was rejected. Check PIPELINE_STRIP_KEY in Netlify on this site and the bot site — the values must match.'); return; }
+  if(resp.status === 503){ pipelineStripConnectNote('The pipeline proxy is not configured yet. Add PIPELINE_STRIP_KEY in Netlify on this site (same value as the bot site), redeploy, then come back here.'); return; }
   let d;
   try{ d = await resp.json(); }catch(e){ d = null; }
   if(!d || (d.outcome !== 'ok' && d.outcome !== 'partial')){
@@ -6697,7 +6558,7 @@ async function renderPipelineStrip(){
   if(d.notes && d.notes.length) foot += ' · ' + esc(d.notes.join(' · '));
   h += '<div style="display:flex;gap:10px;align-items:center;margin:-2px 0 8px;flex-wrap:wrap"><span style="font-size:11px;color:var(--muted2)">' + foot + '</span>'
     + '<button class="btn small ghost" onclick="renderPipelineStrip()">🔄 Refresh</button>'
-    + '<button class="btn small ghost" onclick="pipelineStripForgetKey()">Forget key</button></div>';
+    + '</div>';
   zone.innerHTML = h;
 }
 

@@ -175,7 +175,7 @@
       + '</div>';
     html += '<div style="margin-top:10px"><div style="font-size:12px;font-weight:800;color:var(--muted);margin-bottom:4px">Listing Description</div>'
       + '<div style="font-size:13px;line-height:1.5;white-space:pre-wrap">' + (d.description ? esc(d.description) : '—') + '</div></div>';
-    html += '<div style="font-size:11px;color:var(--muted);margin-top:8px">Source: hand-checked — Zillow · auto-fill on (RentCast free tier).</div>';
+    html += '<div style="font-size:11px;color:var(--muted);margin-top:8px">Source: hand-checked · auto-fill on.</div>';
     return html;
   }
 

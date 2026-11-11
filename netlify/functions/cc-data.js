@@ -1,7 +1,10 @@
 /* cc-data.js — Command Center data proxy for HighLevel.
    Provides live CRM data for command-center.html:
    GET /.netlify/functions/cc-data?action=overview
-   Returns: sellerReplies, bookedToday, underContract, newLeads, closedDeals
+   Returns: sellerReplies, bookedToday, underContract, newLeads (top 9,
+   hottest first), closedCount, closedVolume (GROSS closed volume — not
+   profit), closeRate + closeRateCapped (closed ÷ first-100 opps), and
+   per-source errors. Overview responses are cached in-memory for 30s.
    Uses HL_API_TOKEN env var (same as deals-api.js). Read-only. */
 'use strict';
 
@@ -67,25 +70,35 @@ async function getSellerReplies() {
     const convos = (data && data.conversations) || [];
     let inboundCount = 0;
     const recent = [];
-    for (const c of convos.slice(0, 30)) {
+    // Message fetches run in parallel (chunks of 8) — the old sequential
+    // loop took up to 30 round-trips per overview.
+    const fresh = convos.filter((c) => {
       const lastMs = c.lastMessageDate ? new Date(c.lastMessageDate).getTime() : 0;
-      if (!lastMs || lastMs < sinceMs) continue;
-      const msgs = await hlFetch(`/conversations/${c.id}/messages?limit=5`, 'GET', null, HL_VERSION_CONVERSATIONS).catch(() => null);
-      const list = (msgs && msgs.messages && msgs.messages.messages) || (msgs && msgs.messages) || [];
-      if (!Array.isArray(list) || !list.length) continue;
-      // HL returns newest first: the thread counts when its NEWEST
-      // message is an inbound within 24h (an unanswered seller reply).
-      const newest = list[0];
-      if (!newest || newest.direction !== 'inbound') continue;
-      const inboundMs = newest.dateAdded ? new Date(newest.dateAdded).getTime() : lastMs;
-      if (inboundMs < sinceMs) continue;
-      inboundCount++;
-      if (recent.length < 8) {
-        recent.push({
-          contactName: c.fullName || c.contactName || 'Unknown',
-          preview: String(newest.body || '').slice(0, 80),
-          date: newest.dateAdded || c.lastMessageDate,
-        });
+      return lastMs && lastMs >= sinceMs;
+    }).slice(0, 30);
+    for (let i = 0; i < fresh.length; i += 8) {
+      const chunk = fresh.slice(i, i + 8);
+      const results = await Promise.all(chunk.map(async (c) => {
+        const msgs = await hlFetch(`/conversations/${c.id}/messages?limit=5`, 'GET', null, HL_VERSION_CONVERSATIONS).catch(() => null);
+        return { c, msgs };
+      }));
+      for (const { c, msgs } of results) {
+        const list = (msgs && msgs.messages && msgs.messages.messages) || (msgs && msgs.messages) || [];
+        if (!Array.isArray(list) || !list.length) continue;
+        // HL returns newest first: the thread counts when its NEWEST
+        // message is an inbound within 24h (an unanswered seller reply).
+        const newest = list[0];
+        if (!newest || newest.direction !== 'inbound') continue;
+        const inboundMs = newest.dateAdded ? new Date(newest.dateAdded).getTime() : (c.lastMessageDate ? new Date(c.lastMessageDate).getTime() : 0);
+        if (!inboundMs || inboundMs < sinceMs) continue;
+        inboundCount++;
+        if (recent.length < 8) {
+          recent.push({
+            contactName: c.fullName || c.contactName || 'Unknown',
+            preview: String(newest.body || '').slice(0, 80),
+            date: newest.dateAdded || c.lastMessageDate,
+          });
+        }
       }
     }
     return { count: inboundCount, recent, error: null };
@@ -288,6 +301,52 @@ function scoreLabel(score) {
   return score >= 75 ? 'LAYUP' : score >= 55 ? 'HOT' : score >= 35 ? 'WARM' : score >= 15 ? 'COOL' : 'COLD';
 }
 
+// ---- Hot Leads ARV/MAO/LAO fallback (Nov 11) ----
+// The Nov 10 60K comp project wrote ARV/MAO/LAO to HL custom fields, but
+// getContactTags only ever returned tags + Stack Count, and renderHotLeads
+// in command-center.html only ever got ARV from a live data-api lookup
+// (1 PR credit per lead — fails at 0 credits). So even a fully comped lead
+// still rendered ARV/MAO/LAO as "—". These helpers read the written values
+// off the contact (by field ID first, by field name second) so the page can
+// fall back to them with zero credits spent. Never invented: a missing,
+// blank, zero, negative or non-numeric value resolves to null.
+const CF_ARV_ID = 'cOE6XmJNOdVKsDNpiGqR';
+const CF_MAO_ID = 'B8Mfg1TQfjjo4Dl214A2';
+const CF_LAO_ID = 'JUPzLFhe7VG0PCJqL0n8';
+
+function parseMoneyValue(v) {
+  if (v == null) return null;
+  const n = parseFloat(String(v).replace(/[$,\s]/g, ''));
+  return (Number.isFinite(n) && n > 0) ? Math.round(n) : null;
+}
+
+function valuesFromCustomFields(cfs) {
+  const list = Array.isArray(cfs) ? cfs : [];
+  const byId = {};
+  const byName = {};
+  for (const f of list) {
+    if (!f || typeof f !== 'object') continue;
+    const raw = (f.fieldValue != null ? f.fieldValue : (f.value != null ? f.value : f.field_value));
+    const id = String(f.id || f.customFieldId || f.fieldId || '');
+    if (id) byId[id] = raw;
+    const n = String(f.name || f.key || '').toLowerCase().trim();
+    if (n) byName[n] = raw;
+  }
+  // Field ID wins (names can be relabelled in HL); name is the fallback.
+  const pick = (id, names) => {
+    if (id && byId[id] != null) return parseMoneyValue(byId[id]);
+    for (const nm of names) {
+      if (byName[nm] != null) return parseMoneyValue(byName[nm]);
+    }
+    return null;
+  };
+  return {
+    arv: pick(CF_ARV_ID, ['arv']),
+    mao: pick(CF_MAO_ID, ['mao']),
+    lao: pick(CF_LAO_ID, ['lao']),
+  };
+}
+
 // Best-effort contact read for one lead. Never throws — returns null on
 // any failure so the lead still scores from stage + recency alone.
 async function getContactTags(contactId) {
@@ -305,7 +364,9 @@ async function getContactTags(contactId) {
       const n = String(f.name || f.key || '').toLowerCase();
       if (n) cfByName[n] = String(f.fieldValue != null ? f.fieldValue : (f.value || ''));
     }
-    return { tags, cfByName };
+    // ARV/MAO/LAO written by the comp project (by field ID, name fallback).
+    const vals = valuesFromCustomFields(cfs);
+    return { tags, cfByName, arv: vals.arv, mao: vals.mao, lao: vals.lao };
   } catch (e) {
     return null;
   }
@@ -369,21 +430,33 @@ function crmScoreFor(lead, contact) {
 }
 
 async function enrichHotLeads(newLeads) {
-  // Score the first 9 (what the grid shows) from CRM data, in parallel.
-  const targets = newLeads.slice(0, 9);
-  await Promise.all(targets.map(async (lead) => {
-    const contact = await getContactTags(lead.contactId);
-    const s = crmScoreFor(lead, contact);
-    lead.score = s.score;
-    lead.scoreLabel = s.label;
-    lead.scoreParts = s.parts;
-    lead.scoreSource = s.source;
-    lead.stackCount = s.stackCount;
-    lead.listSignals = s.listSignals;
-    lead.warnings = s.warnings;
-    lead.instantHot = s.instantHot;
-    lead.hotTrigger = s.hotTrigger;
-  }));
+  // Score EVERY new lead from CRM data (no credits spent), in parallel
+  // chunks of 10 — then sort hottest first so the grid shows the actual
+  // top 9. The old code scored only the first 9 in pipeline order and
+  // never sorted, so the "hottest sorts first" claim was false.
+  const targets = newLeads || [];
+  for (let i = 0; i < targets.length; i += 10) {
+    const chunk = targets.slice(i, i + 10);
+    await Promise.all(chunk.map(async (lead) => {
+      const contact = await getContactTags(lead.contactId);
+      const s = crmScoreFor(lead, contact);
+      lead.score = s.score;
+      lead.scoreLabel = s.label;
+      lead.scoreParts = s.parts;
+      lead.scoreSource = s.source;
+      // Written comp values from the contact (null when never comped).
+      // The page falls back to these when the live lookup returns nothing.
+      lead.arv = (contact && contact.arv) || null;
+      lead.mao = (contact && contact.mao) || null;
+      lead.lao = (contact && contact.lao) || null;
+      lead.stackCount = s.stackCount;
+      lead.listSignals = s.listSignals;
+      lead.warnings = s.warnings;
+      lead.instantHot = s.instantHot;
+      lead.hotTrigger = s.hotTrigger;
+    }));
+  }
+  targets.sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0));
   return newLeads;
 }
 
@@ -402,9 +475,18 @@ function extractAddress(opp) {
   return opp.name || '';
 }
 
-// Test-only export: lets node verify crmScoreFor directly without a live
-// HL call. Harmless in production — the Netlify handler is unchanged.
-exports._test = { crmScoreFor, scoreLabel, isHotTrigger };
+// Test-only export: lets node verify crmScoreFor / enrichHotLeads
+// directly without a live HL call. Harmless in production — the
+// Netlify handler is unchanged.
+exports._test = { crmScoreFor, scoreLabel, isHotTrigger, parseMoneyValue, valuesFromCustomFields, enrichHotLeads };
+
+// Short in-memory overview cache (30s): the page refreshes every 60s,
+// so a warm function serves the second refresh from cache instead of
+// re-hitting HL. The payload carries `cached` so the UI never mistakes
+// a cached read for a fresh one. Cold starts and >30s gaps re-fetch.
+let overviewCacheMem = null;
+let overviewCacheMemAt = 0;
+const OVERVIEW_CACHE_TTL_MS = 30000;
 
 exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers: corsHeaders, body: '' };
@@ -412,6 +494,9 @@ exports.handler = async (event) => {
 
   try {
     if (action === 'overview') {
+      if (overviewCacheMem && (Date.now() - overviewCacheMemAt) < OVERVIEW_CACHE_TTL_MS) {
+        return { statusCode: 200, headers: corsHeaders, body: JSON.stringify({ ...overviewCacheMem, cached: true }) };
+      }
       const [replies, booked, opps] = await Promise.all([
         getSellerReplies(),
         getBookedToday(),
@@ -421,32 +506,41 @@ exports.handler = async (event) => {
       // enrichHotLeads above. Best-effort: a failure here never breaks
       // the overview; leads just render without a score.
       try { await enrichHotLeads(opps.newLeads); } catch (e) { /* keep unscored */ }
-      // Net profit = sum of closed deal values
-      const netProfit = opps.closed.reduce((s, o) => s + (Number(o.monetaryValue) || 0), 0);
-      // Close rate = closed / total
+      // Closed Volume = sum of closed deal values (GROSS volume, not
+      // profit — no fee/cost data exists to compute real profit).
+      const closedVolume = opps.closed.reduce((s, o) => s + (Number(o.monetaryValue) || 0), 0);
+      // Close rate = closed / total — but /opportunities/search caps at
+      // 100 and HL offers no verified cursor to page past it, so the
+      // rate is labelled as capped whenever the feed hit 100.
       const closeRate = opps.total > 0 ? Math.round((opps.closed.length / opps.total) * 100) : 0;
+      const closeRateCapped = opps.total >= 100;
+      const body = {
+        ok: true,
+        sellerReplies: replies.count,
+        recentReplies: replies.recent,
+        bookedToday: booked.count,
+        todayAppointments: booked.appointments,
+        underContract: opps.underContract.length,
+        underContractDeals: opps.underContract.slice(0, 10),
+        newLeads: opps.newLeads.slice(0, 9),
+        newLeadsCount: opps.newLeads.length,
+        closedCount: opps.closed.length,
+        closedVolume,
+        closeRate,
+        closeRateCapped,
+        totalOpps: opps.total,
+        // Per-source errors (null when fine) so a silent zero is never
+        // mistaken for "nothing happening" again.
+        errors: { replies: replies.error || null, booked: booked.error || null, opps: opps.error || null },
+        fetchedAt: new Date().toISOString(),
+        cached: false,
+      };
+      overviewCacheMem = body;
+      overviewCacheMemAt = Date.now();
       return {
         statusCode: 200,
         headers: corsHeaders,
-        body: JSON.stringify({
-          ok: true,
-          sellerReplies: replies.count,
-          recentReplies: replies.recent,
-          bookedToday: booked.count,
-          todayAppointments: booked.appointments,
-          underContract: opps.underContract.length,
-          underContractDeals: opps.underContract.slice(0, 10),
-          newLeads: opps.newLeads.slice(0, 12),
-          newLeadsCount: opps.newLeads.length,
-          closedCount: opps.closed.length,
-          netProfit,
-          closeRate,
-          totalOpps: opps.total,
-          // Per-source errors (null when fine) so a silent zero is never
-          // mistaken for "nothing happening" again.
-          errors: { replies: replies.error || null, booked: booked.error || null, opps: opps.error || null },
-          fetchedAt: new Date().toISOString(),
-        }),
+        body: JSON.stringify(body),
       };
     }
     return { statusCode: 400, headers: corsHeaders, body: JSON.stringify({ error: 'Unknown action' }) };

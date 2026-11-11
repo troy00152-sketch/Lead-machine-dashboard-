@@ -39,6 +39,11 @@ a{color:var(--accent)}
 .cc-header .sub{color:var(--muted);font-size:13px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .live-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 10px var(--green);animation:pulse 2s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+/* ============ HUB NAV ============ */
+.cc-nav{display:flex;gap:8px;flex-wrap:wrap;padding:12px 28px 0}
+.cc-nav a{color:var(--muted);font-size:13px;text-decoration:none;padding:6px 12px;border:1px solid var(--line);border-radius:20px;background:rgba(0,212,255,.06)}
+.cc-nav a:hover{color:var(--accent);border-color:rgba(0,212,255,.5)}
+.repairs-select{background:rgba(8,16,34,.75);border:1px solid rgba(0,212,255,.3);border-radius:10px;padding:12px;color:var(--text);font-size:14px}
 /* ============ PIPELINE CARDS ============ */
 .pipe-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;padding:20px 28px}
 .pipe-card{
@@ -131,18 +136,63 @@ a{color:var(--accent)}
 .linked-prop{padding:10px 0;border-top:1px solid var(--line);font-size:13px}
 .linked-prop:first-of-type{border-top:none}
 </style>
+<script>
+/* White-label branding hook — additive, fails safe to Troy's defaults.
+   Same pattern as index.html: fetches public client config (companyName,
+   logo, primaryColor) from /.netlify/functions/client-config based on the
+   request subdomain, then applies branding. Secrets are never exposed by
+   that function. NOTE: unknown subdomains currently fall back to Troy's
+   config server-side (client-config.js) — a neutral default for unknown
+   subdomains is a follow-up, not changed here. */
+(function () {
+  var DEFAULTS = { companyName: 'Direct Property Buyers', logo: '/assets/dpb-logo.png', primaryColor: '#00d4ff' };
+  function applyBrand(cfg) {
+    try {
+      var name = cfg.companyName || DEFAULTS.companyName;
+      var color = cfg.primaryColor || DEFAULTS.primaryColor;
+      document.title = name + ' Command Center';
+      document.documentElement.style.setProperty('--brand', color);
+      document.documentElement.style.setProperty('--accent', color);
+      var sub = document.getElementById('ccBrandName');
+      if (sub) sub.textContent = name;
+      var logoImg = document.getElementById('ccBrandLogo');
+      if (logoImg && cfg.logo) logoImg.src = cfg.logo;
+    } catch (e) { /* branding must never break the page */ }
+  }
+  function fallback() { applyBrand(DEFAULTS); }
+  try {
+    fetch('/.netlify/functions/client-config', { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
+      .then(applyBrand)
+      .catch(fallback);
+    setTimeout(function () {
+      if (document.title === 'Acquisition Command Center') fallback();
+    }, 3000);
+  } catch (e) { fallback(); }
+})();
+</script>
 </head>
 <body>
 
 <div class="cc-header">
-  <img src="/assets/dpb-logo.png" alt="Direct Property Buyers" style="height:52px;width:auto;display:block;margin-bottom:8px">
+  <img id="ccBrandLogo" src="/assets/dpb-logo.png" alt="Direct Property Buyers" style="height:52px;width:auto;display:block;margin-bottom:8px">
   <h1>🎯 ACQUISITION <span>COMMAND CENTER</span></h1>
   <div class="sub">
-    <span class="live-dot"></span> LIVE
+    <span class="live-dot" id="liveDot"></span> <span id="liveLabel">LIVE</span>
+    <span id="ccBrandName">Direct Property Buyers</span>
     <span id="ccClock"></span>
     <span style="margin-left:auto"><a href="/index.html" style="color:var(--muted);font-size:13px">← Back to Dashboard</a></span>
   </div>
 </div>
+<nav class="cc-nav">
+  <a href="/index.html">🏠 Dashboard</a>
+  <a href="/closing-tracker.html">📝 Closing Tracker</a>
+  <a href="/live-call.html">📞 Live Call</a>
+  <a href="/index.html" title="Master Buyers lives on the dashboard">📋 Master Buyers</a>
+  <a href="/index.html" title="Deal Rooms live on the dashboard">🏘️ Deal Rooms</a>
+  <a href="/bread-hl.html">🍞 Bread HL</a>
+</nav>
+<div id="feedErrors" class="err" style="display:none;padding:12px 28px 0"></div>
 
 <div class="pipe-row" id="pipeRow">
   <div class="pipe-card"><div class="label">💬 Seller Replies (24h)</div><div class="num" id="pipeReplies">—</div><div class="hint" id="pipeRepliesHint">Loading…</div></div>
@@ -155,15 +205,17 @@ a{color:var(--accent)}
   <div class="cc-main">
     <!-- STATS -->
     <div class="stats-row">
-      <div class="stat"><div class="n" id="statProfit">$—</div><div class="l">Net Profit (Closed)</div></div>
-      <div class="stat"><div class="n" id="statCloseRate">—%</div><div class="l">Close Rate</div></div>
+      <div class="stat"><div class="n" id="statClosedVolume">$—</div><div class="l">Closed Volume</div></div>
+      <div class="stat"><div class="n" id="statCloseRate">—%</div><div class="l" id="statCloseRateLabel">Close Rate</div></div>
       <div class="stat"><div class="n" id="statClosed">—</div><div class="l">Deals Closed</div></div>
-      <div class="stat"><div class="n">7,642</div><div class="l">Active Buyers</div></div>
+      <div class="stat"><div class="n">28,670</div><div class="l">Active Buyers</div></div>
     </div>
 
     <!-- HOT LEADS -->
     <div class="panel">
       <h2>🔥 Hot Leads <span class="refresh" onclick="loadOverview()">↻</span></h2>
+      <div style="font-size:12px;color:var(--muted);margin:-8px 0 12px">Ranked hottest first from CRM signals — no property lookup runs on its own. Enrichment costs ~2 PropertyReach credits per lookup and only runs when you tap it. <span id="enrichCount">Enriched this session: 0</span></div>
+      <div style="margin-bottom:12px"><button class="btn" id="enrichAllBtn" onclick="enrichAllLeads()">🔍 Enrich all visible leads</button> <span style="font-size:12px;color:var(--muted)">≈ 2 credits × <span id="enrichAllCount">9</span> leads — asks first, never auto-runs.</span></div>
       <div class="leads-grid" id="leadsGrid"><div class="loading">Loading pipeline leads…</div></div>
     </div>
 
@@ -173,6 +225,11 @@ a{color:var(--accent)}
       <div class="subj-input-row" style="position:relative">
         <input type="text" id="subjAddr" placeholder="Enter property address…" autocomplete="off" onkeydown="if(event.key==='Enter')analyzeSubject()" oninput="ccSuggest(this.value)">
         <div id="ccSuggestBox" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:50;background:var(--card);border:1px solid var(--line);border-radius:8px;max-height:220px;overflow-y:auto"></div>
+        <select id="subjRepairs" class="repairs-select" title="Repairs level for MAO math — changing it re-renders the last analysis, no new lookup" onchange="if(window._ccLastAnalysis)renderSubjectAnalysis(window._ccLastAnalysis,window._ccLastAddr||document.getElementById('subjAddr').value.trim())">
+          <option value="15000">Light repairs · $15K</option>
+          <option value="30000" selected>Medium repairs · $30K</option>
+          <option value="50000">Heavy repairs · $50K</option>
+        </select>
         <button class="btn" id="analyzeBtn" onclick="analyzeSubject()">Analyze</button>
       </div>
       <div id="subjResult"><div class="empty">Enter an address above to pull live property data, comps, and owner portfolio.</div></div>
@@ -181,6 +238,7 @@ a{color:var(--accent)}
     <!-- MAP -->
     <div class="panel">
       <h2>🗺️ Lead Map</h2>
+      <div style="font-size:12px;color:var(--muted);margin:-8px 0 12px">Pins plot from lead addresses (free geocode) and properties you analyze — no hardcoded market center.</div>
       <div id="ccMap"></div>
     </div>
   </div>
@@ -207,6 +265,7 @@ a{color:var(--accent)}
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="assets/offer-math.js"></script>
 <script src="subject-lookup.js"></script>
 <script src="assets/sellability.js"></script>
 <script>
@@ -238,6 +297,50 @@ function calcMAO(arv, repairs){
   return{mao,lao:Math.round(mao*0.70),tier:Math.round(t*1000)/10};
 }
 
+/* ============ HOT LEAD VALUE FALLBACK (Nov 11) ============
+   A live property lookup wins when it succeeds. When it returns nothing
+   (PR credits at 0, lookup fails), fall back to the ARV/MAO/LAO the comp
+   project already wrote to the contact in HighLevel — carried on the feed
+   as lead.arv / lead.mao / lead.lao (cc-data.js). The written MAO/LAO win
+   over a re-derived MAO: they were computed with the calibrated
+   multiplier, not the plain tier table. Nothing is invented: no feed
+   values means ARV/MAO/LAO stay null and the card still shows "—". */
+function resolveLeadValues(lead, propArv){
+  const feedArv=Number(lead&&lead.arv);
+  const feedMao=Number(lead&&lead.mao);
+  const feedLao=Number(lead&&lead.lao);
+  if(propArv&&propArv>0)return{arv:propArv,mao:null,lao:null,valueSrc:'property'};
+  if(Number.isFinite(feedArv)&&feedArv>0){
+    if(Number.isFinite(feedMao)&&feedMao>0&&Number.isFinite(feedLao)&&feedLao>0)
+      return{arv:feedArv,mao:feedMao,lao:feedLao,valueSrc:'hl'};
+    const m=calcMAO(feedArv,30000);
+    return{arv:feedArv,mao:m.mao,lao:m.lao,valueSrc:'hl'};
+  }
+  return{arv:null,mao:null,lao:null,valueSrc:'none'};
+}
+
+/* ============ FEED HEALTH — the LIVE dot reflects the feeds ============
+   A feed that fails must never leave the dot green: any non-null entry
+   in d.errors turns the dot red, the label DEGRADED, and shows which
+   feed failed. A fetch failure at all turns it OFFLINE. */
+function setFeedHealth(errors){
+  const dot=document.getElementById('liveDot');
+  const label=document.getElementById('liveLabel');
+  const banner=document.getElementById('feedErrors');
+  if(!dot||!label||!banner)return;
+  const bad=errors?Object.keys(errors).filter(k=>errors[k]):[];
+  if(!bad.length){
+    dot.style.background='var(--green)';dot.style.boxShadow='0 0 10px var(--green)';
+    label.textContent='LIVE';
+    banner.style.display='none';banner.textContent='';
+    return;
+  }
+  dot.style.background='var(--red)';dot.style.boxShadow='0 0 10px var(--red)';
+  label.textContent='DEGRADED';
+  banner.style.display='block';
+  banner.textContent='⚠️ Feed issue ('+bad.join(', ')+') — numbers below may be stale. '+(errors[bad[0]]||'');
+}
+
 /* ============ OVERVIEW DATA ============ */
 let overviewCache=null;
 async function loadOverview(){
@@ -246,6 +349,7 @@ async function loadOverview(){
     const d=await r.json();
     if(!d.ok)throw new Error(d.error||'Failed');
     overviewCache=d;
+    setFeedHealth(d.errors||null);
     // Pipeline cards
     document.getElementById('pipeReplies').textContent=d.sellerReplies;
     document.getElementById('pipeRepliesHint').textContent=d.sellerReplies===1?'conversation':'conversations';
@@ -254,11 +358,17 @@ async function loadOverview(){
     document.getElementById('pipeContract').textContent=d.underContract;
     document.getElementById('pipeContractHint').textContent='active deals';
     document.getElementById('pipeLeads').textContent=d.newLeadsCount;
-    // Stats
-    document.getElementById('statProfit').textContent=fmtMoney(d.netProfit);
+    // Stats — "Closed Volume" is gross closed volume (sum of closed
+    // monetaryValue), NOT profit: no fee/cost data exists to compute
+    // real profit, so the label says what it is. Close Rate is closed ÷
+    // first-100 opps (the HL search caps at 100) — labelled as capped
+    // whenever the feed hit 100.
+    document.getElementById('statClosedVolume').textContent=fmtMoney(d.closedVolume);
     document.getElementById('statCloseRate').textContent=d.closeRate+'%';
+    document.getElementById('statCloseRateLabel').textContent=d.closeRateCapped?'Close Rate · first 100 opps':'Close Rate';
     document.getElementById('statClosed').textContent=d.closedCount;
-    // Hot leads
+    // Hot leads — renders from the feed + cached enrichment only. The
+    // 60s refresh NEVER triggers a property lookup.
     renderHotLeads(d.newLeads||[]);
     // Appointments
     renderAppointments(d.todayAppointments||[]);
@@ -267,17 +377,36 @@ async function loadOverview(){
     // Map pins
     updateMapPins(d.newLeads||[]);
   }catch(e){
+    setFeedHealth({overview:String(e.message||e).slice(0,100)});
     document.getElementById('leadsGrid').innerHTML='<div class="err">Could not load pipeline data: '+esc(e.message)+'</div>';
   }
 }
 
-async function renderHotLeads(leads){
+/* ============ HOT LEADS — NO AUTO-ENRICHMENT (Nov 11) ============
+   The old version fired a data-api lookup (~2 PR credits) per lead,
+   sequentially, on every load AND every 60s refresh. Now: cards render
+   immediately from the feed (CRM score + ARV/MAO/LAO already written to
+   the contact in HL). A live lookup runs ONLY when the user taps Enrich
+   on a card or "Enrich all" (confirm shows the cost first), and the
+   result is cached by address for the whole page session — the 60s
+   refresh re-renders from the cache and never re-spends. */
+function renderHotLeads(leads){
   const grid=document.getElementById('leadsGrid');
-  if(!leads.length){grid.innerHTML='<div class="empty">No new leads in the pipeline right now.</div>';return;}
-  grid.innerHTML='<div class="loading">Enriching '+leads.length+' leads with property data…</div>';
-  const cards=[];
-  for(const lead of leads.slice(0,9)){
+  // Cache lives on the function so it survives re-renders and the 60s
+  // refresh, and so the offline regression can still extract this
+  // function standalone (a top-level const would break the vm harness).
+  const cache=renderHotLeads._cache||(renderHotLeads._cache=new Map());
+  // Hottest first — by the feed's CRM score (cc-data.js sorts too; this
+  // is the client-side backstop so the claim holds whatever the feed
+  // order is).
+  const sorted=(leads||[]).slice().sort((a,b)=>(Number(b.score)||0)-(Number(a.score)||0));
+  window._ccLeadCards=sorted;
+  const allCount=document.getElementById('enrichAllCount');
+  if(allCount)allCount.textContent=String(Math.min(9,sorted.length));
+  if(!sorted.length){grid.innerHTML='<div class="empty">No new leads in the pipeline right now.</div>';return;}
+  grid.innerHTML=sorted.slice(0,9).map((lead,i)=>{
     const addr=lead.address||lead.name||'';
+    const cached=addr?cache.get(addr.trim().toLowerCase()):null;
     // Base score comes from the feed (CRM signals — stack, list types,
     // appointment booked). It is REAL: never 0 just because a property
     // lookup failed. A successful property lookup upgrades it to the
@@ -285,47 +414,82 @@ async function renderHotLeads(leads){
     // The feed's CRM score is 0-100 (Distress/45 + Equity/35 +
     // Ownership/20, cc-data.js); scale it x10 onto the 0-1000
     // Sellability scale so CRM and property cards rank together.
-    let ws = (lead.score != null) ? { score: Math.round(lead.score * 10), label: lead.scoreLabel || 'COLD', distress: Math.min(400, ((lead.scoreParts||{}).distress || 0) * 10), equity: Math.min(300, ((lead.scoreParts||{}).equity || 0) * 10), own: Math.min(150, ((lead.scoreParts||{}).own || 0) * 10) } : { score: 0, label: 'NO DATA', distress: 0, equity: 0, own: 0 };
-    let scoreSrc = lead.scoreSource || 'crm';
-    let prop=null, arv=null;
-    if(addr && addr.length>5){
-      try{
-        const r=await fetch('/.netlify/functions/data-api?address='+encodeURIComponent(addr));
-        const d=await r.json();
-        if(d.matched&&d.property){prop=d.property;arv=d.comps&&d.comps.indication?d.comps.indication:(prop.marketValue||null);}
-      }catch(e){}
-    }
-    if(prop){
-      ws=wholesaleScoreSimple(prop);
+    let ws=(lead.score!=null)?{score:Math.round(lead.score*10),label:lead.scoreLabel||'COLD',distress:Math.min(400,((lead.scoreParts||{}).distress||0)*10),equity:Math.min(300,((lead.scoreParts||{}).equity||0)*10),own:Math.min(150,((lead.scoreParts||{}).own||0)*10)}:{score:0,label:'NO DATA',distress:0,equity:0,own:0};
+    let scoreSrc=lead.scoreSource||'crm';
+    if(cached&&cached.prop){
+      ws=wholesaleScoreSimple(cached.prop);
       scoreSrc='property';
     }
-    const mao=calcMAO(arv,30000);
-    cards.push({lead,addr,prop,arv,ws,mao,scoreSrc});
-  }
-  // Sort by score desc
-  cards.sort((a,b)=>b.ws.score-a.ws.score);
-  grid.innerHTML=cards.map((c,i)=>{
-    const moneyOrDash = v => (v && v > 0) ? fmtMoney(v) : '—';
-    const breakdown = 'Distress '+c.ws.distress+'/400 · Equity '+c.ws.equity+'/300 · Ownership '+c.ws.own+'/150' + (c.scoreSrc==='crm' ? ' — equity unmeasured until a property lookup runs' : '');
-    return '<div class="lead-card" onclick="analyzeLeadAddress('+i+')" data-addr="'+esc(c.addr).replace(/"/g,'&quot;')+'">'
-      +'<div class="addr">'+esc(c.addr||c.lead.name)+'</div>'
-      +'<span class="score-badge '+scoreClass(c.ws.label)+'" title="'+esc(breakdown)+'">🎯 '+c.ws.score+' · '+c.ws.label+'</span>'
+    // Fall back to the values already written to the contact in HL when
+    // the live lookup returned nothing (0 PR credits). See resolveLeadValues.
+    // A cached live lookup wins over the feed values when it succeeded.
+    const resolved=resolveLeadValues(lead,cached?cached.arv:null);
+    const arv=resolved.arv;
+    const mao=(resolved.valueSrc==='hl'&&resolved.mao!=null)?{mao:resolved.mao,lao:resolved.lao}:calcMAO(arv,30000);
+    const moneyOrDash=v=>(v&&v>0)?fmtMoney(v):'—';
+    const breakdown='Distress '+ws.distress+'/400 · Equity '+ws.equity+'/300 · Ownership '+ws.own+'/150'+(scoreSrc==='crm'?' — equity unmeasured until a property lookup runs':'');
+    const enrichBtn=(!addr||addr.length<=5)?''
+      :cached?'<div style="font-size:11px;color:var(--green);margin-top:8px">✓ Enriched — property score</div>'
+      :'<button class="btn" style="padding:6px 12px;font-size:12px;margin-top:8px" onclick="event.stopPropagation();enrichLead('+i+')">🔍 Enrich · ~2 PR credits</button>';
+    return '<div class="lead-card" onclick="analyzeLeadAddress('+i+')" data-addr="'+esc(addr).replace(/"/g,'&quot;')+'">'
+      +'<div class="addr">'+esc(addr||lead.name)+'</div>'
+      +'<span class="score-badge '+scoreClass(ws.label)+'" title="'+esc(breakdown)+'">🎯 '+ws.score+' · '+ws.label+'</span>'
       +'<div class="nums">'
-      +'<div><div class="k">ARV</div><div class="v">'+moneyOrDash(c.arv)+'</div></div>'
-      +'<div><div class="k">MAO</div><div class="v">'+moneyOrDash(c.mao.mao)+'</div></div>'
-      +'<div><div class="k">LAO</div><div class="v">'+moneyOrDash(c.mao.lao)+'</div></div>'
+      +'<div><div class="k">ARV</div><div class="v">'+moneyOrDash(arv)+'</div></div>'
+      +'<div><div class="k">MAO</div><div class="v">'+moneyOrDash(mao.mao)+'</div></div>'
+      +'<div><div class="k">LAO</div><div class="v">'+moneyOrDash(mao.lao)+'</div></div>'
       +'</div>'
-      +'<div style="font-size:11px;color:var(--muted)">'+esc(c.lead.stage||'')+' · '+timeAgo(c.lead.createdAt)+(c.scoreSrc==='crm' ? ' · CRM score' : '')+' · tap to analyze ↓</div>'
+      +'<div style="font-size:11px;color:var(--muted)">'+esc(lead.stage||'')+' · '+timeAgo(lead.createdAt)+(scoreSrc==='crm'?' · CRM score':'')+(resolved.valueSrc==='hl'?' · HL values':'')+' · tap to analyze ↓</div>'
+      +enrichBtn
       +'</div>';
   }).join('');
-  // Store for click handler
-  window._ccLeadCards=cards;
+}
+
+let ccEnrichSessionCount=0;
+function bumpEnrichCount(){
+  const el=document.getElementById('enrichCount');
+  if(el)el.textContent='Enriched this session: '+ccEnrichSessionCount;
+}
+/* Explicit enrichment for ONE lead — runs only on a user tap. The
+   result is cached by address; a second tap never re-spends. A failed
+   lookup is NOT cached, so the user can retry it. */
+async function enrichLead(i){
+  const lead=(window._ccLeadCards||[])[i];
+  const addr=lead&&(lead.address||lead.name||'');
+  if(!addr||addr.length<=5)return;
+  const cache=renderHotLeads._cache||(renderHotLeads._cache=new Map());
+  const key=addr.trim().toLowerCase();
+  if(cache.has(key))return;
+  try{
+    const r=await fetch('/.netlify/functions/data-api?address='+encodeURIComponent(addr));
+    const d=await r.json();
+    if(d.matched&&d.property){
+      const arv=d.comps&&d.comps.indication?d.comps.indication:(d.property.marketValue||null);
+      cache.set(key,{prop:d.property,arv:arv});
+      ccEnrichSessionCount++;bumpEnrichCount();
+    }
+  }catch(e){/* lookup failed — card stays as-is, retry stays available */}
+  renderHotLeads(window._ccLeadCards||[]);
+}
+/* Explicit enrichment for all visible leads — asks first with the cost.
+   Already-enriched leads are skipped and never re-charged. */
+async function enrichAllLeads(){
+  const leads=(window._ccLeadCards||[]).slice(0,9);
+  const cache=renderHotLeads._cache||(renderHotLeads._cache=new Map());
+  const pending=leads.filter(l=>{const a=(l.address||l.name||'');return a.length>5&&!cache.has(a.trim().toLowerCase());});
+  if(!pending.length)return;
+  if(!confirm('Enrich '+pending.length+' lead'+(pending.length===1?'':'s')+' with live property lookups?\n\nCost: ~'+(pending.length*2)+' PropertyReach credits ('+pending.length+' × ~2). Already-enriched leads are skipped and never re-charged.'))return;
+  const btn=document.getElementById('enrichAllBtn');
+  if(btn)btn.disabled=true;
+  for(let i=0;i<leads.length;i++){await enrichLead(i);}
+  if(btn)btn.disabled=false;
 }
 
 function analyzeLeadAddress(i){
   const c=(window._ccLeadCards||[])[i];
-  if(!c||!c.addr)return;
-  document.getElementById('subjAddr').value=c.addr;
+  const addr=c&&(c.address||c.name||c.addr);
+  if(!c||!addr)return;
+  document.getElementById('subjAddr').value=addr;
   analyzeSubject();
   document.getElementById('subjAddr').scrollIntoView({behavior:'smooth',block:'center'});
 }
@@ -375,6 +539,41 @@ document.addEventListener('click',e=>{
   const box=document.getElementById('ccSuggestBox');
   if(box&&!e.target.closest('.subj-input-row')){box.style.display='none';}
 });
+/* ============ SUBJECT PROPERTY — LISTING-FIRST GATE ============
+   Same lock as the Comps page: listed with a realtor = PASS immediately
+   — no MAO, no LAO, no offer. The listing check reads the fields the
+   data provider returns (onMarket boolean + listingStatus string);
+   the backup source carries neither, so an unknown status is labelled
+   as unconfirmed rather than guessed. ARV is a 3-comp indication ONLY:
+   with fewer than 3 comps the market value is an AVM screen — never
+   presented as ARV, and no MAO/LAO is derived from it. */
+function isListedProperty(p){
+  if(!p)return false;
+  if(p.onMarket===true)return true;
+  const s=String(p.listingStatus||'').toLowerCase().trim();
+  // Explicit non-listed states first — 'not-listed' contains 'listed'.
+  if(!s||s==='not-listed'||s==='not listed'||s==='expired'||s==='withdrawn'||s==='inactive')return false;
+  return /^(active|listed|pending|for sale|for-sale|contingent|sold|under contract)/.test(s);
+}
+/* Market label for the Indianapolis calibration (assets/offer-math.js):
+   parsed from the address string — "4405 E Edgewood Ave, Indianapolis,
+   IN 46237" -> marketFor('Indianapolis','IN'). Unknown city/state ->
+   null, and the MAO falls back to the tier, labelled as uncalibrated. */
+function marketFromAddress(addr){
+  if(typeof OfferMath==='undefined'||!OfferMath.marketFor)return null;
+  const parts=String(addr||'').split(',').map(s=>s.trim()).filter(Boolean);
+  if(parts.length<2)return null;
+  const city=parts[parts.length-2];
+  const st=(parts[parts.length-1].split(/\s+/)[0]||'');
+  try{return OfferMath.marketFor(city,st);}catch(e){return null;}
+}
+function repairsLabel(rep){
+  const r=Number(rep);
+  if(r===15000)return'Light $15K';
+  if(r===30000)return'Medium $30K';
+  if(r===50000)return'Heavy $50K';
+  return'$'+Math.round(r||0).toLocaleString();
+}
 async function analyzeSubject(){
   const addr=document.getElementById('subjAddr').value.trim();
   const out=document.getElementById('subjResult');
@@ -387,6 +586,9 @@ async function analyzeSubject(){
     // hybrid): data provider first; when it fails or its quota is out, the
     // backup source supplies the property record, value estimate and comps.
     // No data-provider API call is made on the fallback path.
+    // This is an EXPLICIT user action (Analyze button / lead-card tap) —
+    // the only place on this page a lookup runs without a separate
+    // confirmation.
     let d;
     if(typeof lookupSubjectProperty==='function'){
       d=await lookupSubjectProperty(addr);
@@ -396,50 +598,94 @@ async function analyzeSubject(){
       d=await r.json();
     }
     if(!d.matched||!d.property){out.innerHTML='<div class="err">No property record found for this address.</div>';btn.disabled=false;btn.textContent='Analyze';return;}
-    const p=d.property;
-    const viaBackup=d.source==='backup';
-    const comps=(d.comps&&d.comps.best)||[];
-    const arv=(d.comps&&d.comps.indication)||p.marketValue||null;
-    const ws=wholesaleScoreSimple(p);
-    const mao=calcMAO(arv,30000);
-    const photo=p.photoUrl||('https://maps.googleapis.com/maps/api/streetview?size=800x400&location='+encodeURIComponent(addr));
-    let html='<img class="subj-photo" src="'+esc(photo)+'" onerror="this.style.display=\'none\'" alt="Property photo">';
-    html+='<div style="margin-bottom:12px"><strong style="font-size:16px">'+esc(p.address||addr)+'</strong> '
-      +' <span class="score-badge '+scoreClass(ws.label)+'">🎯 '+ws.score+' · '+ws.label+'</span>'
-      +(viaBackup?' <span style="font-size:11px;color:var(--muted)">· via backup source</span>':'')+'</div>';
-    html+='<div class="subj-details">'
-      +'<div><div class="k">Beds / Baths</div><strong>'+esc(p.beds??'—')+' / '+esc(p.baths??'—')+'</strong></div>'
-      +'<div><div class="k">Sq Ft</div><strong>'+(p.sqft?Number(p.sqft).toLocaleString():'—')+'</strong></div>'
-      +'<div><div class="k">Year Built</div><strong>'+esc(p.yearBuilt??'—')+'</strong></div>'
-      +'<div><div class="k">Owner</div><strong>'+esc(p.owner1||'—')+'</strong></div>'
-      +'<div><div class="k">Last Sale</div><strong>'+(p.lastSaleAmount?fmtMoney(p.lastSaleAmount):'—')+'</strong></div>'
-      +'<div><div class="k">Est. Equity</div><strong>'+(p.estimatedEquity!=null?fmtMoney(p.estimatedEquity):'—')+'</strong></div>'
-      +'</div>';
-    // ARV chart
-    html+='<div style="font-weight:700;margin:14px 0 8px">📊 Live ARV — Comp Sale Prices</div>';
-    html+='<canvas id="arvChart" width="600" height="220"></canvas>';
-    // MAO/LAO
-    html+='<div class="calc-row">'
-      +'<div class="calc-box"><div class="k">ARV</div><div class="v">'+fmtMoney(arv)+'</div></div>'
-      +'<div class="calc-box"><div class="k">MAO ('+mao.tier+'%)</div><div class="v">'+fmtMoney(mao.mao)+'</div></div>'
-      +'<div class="calc-box"><div class="k">LAO (70%)</div><div class="v">'+fmtMoney(mao.lao)+'</div></div>'
-      +'</div>';
-    // Linked properties
-    const linked=d.linkedProperties||[];
-    if(linked.length){
-      html+='<div style="font-weight:700;margin:16px 0 8px">🏘️ Owner also owns '+linked.length+' other propert'+(linked.length===1?'y':'ies')+'</div>';
-      html+=linked.slice(0,5).map(lp=>'<div class="linked-prop"><strong>'+esc(lp.address||'—')+'</strong><div style="color:var(--muted);font-size:12px">'
-        +esc([lp.beds!=null?lp.beds+'bd':null,lp.baths!=null?lp.baths+'ba':null,lp.sqft?Number(lp.sqft).toLocaleString()+' sqft':null].filter(Boolean).join(' · '))
-        +' · Est. '+fmtMoney(lp.estimatedValue)+'</div></div>').join('');
-    }
-    out.innerHTML=html;
-    drawArvChart(comps,arv);
-    // Drop a pin on the map
-    if(p.latitude&&p.longitude)addMapPin(p.latitude,p.longitude,p.address||addr);
+    window._ccLastAnalysis=d;
+    window._ccLastAddr=addr;
+    renderSubjectAnalysis(d,addr);
   }catch(e){
     out.innerHTML='<div class="err">Analysis failed: '+esc(e.message)+'</div>';
   }
   btn.disabled=false;btn.textContent='Analyze';
+}
+/* Pure render of a fetched analysis — no fetch here, so changing the
+   repairs level re-renders the SAME lookup instead of spending another
+   one. */
+function renderSubjectAnalysis(d,addr){
+  const out=document.getElementById('subjResult');
+  const p=d.property;
+  const viaBackup=d.source==='backup';
+  const comps=(d.comps&&d.comps.best)||[];
+  const compCount=comps.length;
+  const listed=isListedProperty(p);
+  const listingUnknown=p.onMarket===undefined&&!p.listingStatus;
+  // ARV = 3-comp indication only, and only when not listed.
+  const arv=(!listed&&compCount>=3)?((d.comps&&d.comps.indication)||null):null;
+  // Below 3 comps the market value is an AVM screen, not an ARV.
+  const avmVal=(!listed&&compCount<3)?(p.marketValue||null):null;
+  const ws=wholesaleScoreSimple(p);
+  const repairs=Number((document.getElementById('subjRepairs')||{}).value||30000);
+  const market=marketFromAddress(p.address||addr);
+  // Indianapolis calibration via the shared module (min(calibrated,
+  // tier) — calibration can only LOWER MAO). Falls back to the plain
+  // tier table when the module or the market is unknown.
+  const om=(typeof OfferMath!=='undefined'&&OfferMath.offerMath)?OfferMath.offerMath(arv,repairs,undefined,market):null;
+  const mao=(om&&om.mao!=null)?om:calcMAO(arv,repairs);
+  const maoLabel=mao.label||(mao.tier!=null?mao.tier+'% tier':'—');
+  const photo=p.photoUrl||('https://maps.googleapis.com/maps/api/streetview?size=800x400&location='+encodeURIComponent(addr));
+  let html='<img class="subj-photo" src="'+esc(photo)+'" onerror="this.style.display=\'none\'" alt="Property photo">';
+  html+='<div style="margin-bottom:12px"><strong style="font-size:16px">'+esc(p.address||addr)+'</strong> '
+    +' <span class="score-badge '+scoreClass(ws.label)+'">🎯 '+ws.score+' · '+ws.label+'</span>'
+    +(viaBackup?' <span style="font-size:11px;color:var(--muted)">· via backup source</span>':'')+'</div>';
+  if(listed){
+    html+='<div style="background:#3d0d0d;border:1px solid #ff4d4d;border-radius:10px;padding:12px;font-size:13px;font-weight:800;color:#ff8080;margin-bottom:12px">⛔ PASS — Listed with a realtor — no MAO, no LAO, no offer</div>';
+  }else if(listingUnknown){
+    html+='<div style="font-size:12px;color:var(--muted);margin-bottom:12px">⚠️ Listing status not confirmed by this source — verify on Zillow before offering.</div>';
+  }
+  html+='<div class="subj-details">'
+    +'<div><div class="k">Beds / Baths</div><strong>'+esc(p.beds??'—')+' / '+esc(p.baths??'—')+'</strong></div>'
+    +'<div><div class="k">Sq Ft</div><strong>'+(p.sqft?Number(p.sqft).toLocaleString():'—')+'</strong></div>'
+    +'<div><div class="k">Year Built</div><strong>'+esc(p.yearBuilt??'—')+'</strong></div>'
+    +'<div><div class="k">Owner</div><strong>'+esc(p.owner1||'—')+'</strong></div>'
+    +'<div><div class="k">Last Sale</div><strong>'+(p.lastSaleAmount?fmtMoney(p.lastSaleAmount):'—')+'</strong></div>'
+    +'<div><div class="k">Est. Equity</div><strong>'+(p.estimatedEquity!=null?fmtMoney(p.estimatedEquity):'—')+'</strong></div>'
+    +'</div>';
+  // ARV chart
+  html+='<div style="font-weight:700;margin:14px 0 8px">📊 '+(compCount>=3?'Live ARV — Comp Sale Prices':'Comp Sale Prices — only '+compCount+', ARV not verified')+'</div>';
+  html+='<canvas id="arvChart" width="600" height="220"></canvas>';
+  // Offer math — gated by listing status AND the 3-comp minimum.
+  if(listed){
+    const refArv=(d.comps&&d.comps.indication)||p.marketValue||null;
+    html+='<div class="calc-row">'
+      +'<div class="calc-box"><div class="k">ARV · reference only</div><div class="v">'+fmtMoney(refArv)+'</div></div>'
+      +'<div class="calc-box"><div class="k">MAO</div><div class="v">— PASS —</div></div>'
+      +'<div class="calc-box"><div class="k">LAO</div><div class="v">— PASS —</div></div>'
+      +'</div>';
+  }else if(compCount>=3){
+    html+='<div class="calc-row">'
+      +'<div class="calc-box"><div class="k">ARV</div><div class="v">'+fmtMoney(arv)+'</div></div>'
+      +'<div class="calc-box"><div class="k">MAO ('+esc(maoLabel)+')</div><div class="v">'+fmtMoney(mao.mao)+'</div></div>'
+      +'<div class="calc-box"><div class="k">LAO (70%)</div><div class="v">'+fmtMoney(mao.lao)+'</div></div>'
+      +'</div>'
+      +'<div style="font-size:12px;color:var(--muted);margin-top:8px">Repairs: '+esc(repairsLabel(repairs))+' · MAO multiplier '+esc(maoLabel)+(market?' · '+esc(market)+' calibration':' · not calibrated for this market')+'.</div>';
+  }else{
+    html+='<div class="calc-row">'
+      +'<div class="calc-box"><div class="k">AVM screen — not airtight</div><div class="v">'+fmtMoney(avmVal)+'</div></div>'
+      +'<div class="calc-box"><div class="k">MAO</div><div class="v">—</div></div>'
+      +'<div class="calc-box"><div class="k">LAO</div><div class="v">—</div></div>'
+      +'</div>'
+      +'<div style="font-size:12px;color:var(--muted);margin-top:8px">Only '+compCount+' comp'+(compCount===1?'':'s')+' returned — ARV needs 3 verified comps. MAO/LAO withheld; the value above is an AVM screen, not an airtight ARV.</div>';
+  }
+  // Linked properties
+  const linked=d.linkedProperties||[];
+  if(linked.length){
+    html+='<div style="font-weight:700;margin:16px 0 8px">🏘️ Owner also owns '+linked.length+' other propert'+(linked.length===1?'y':'ies')+'</div>';
+    html+=linked.slice(0,5).map(lp=>'<div class="linked-prop"><strong>'+esc(lp.address||'—')+'</strong><div style="color:var(--muted);font-size:12px">'
+      +esc([lp.beds!=null?lp.beds+'bd':null,lp.baths!=null?lp.baths+'ba':null,lp.sqft?Number(lp.sqft).toLocaleString()+' sqft':null].filter(Boolean).join(' · '))
+      +' · Est. '+fmtMoney(lp.estimatedValue)+'</div></div>').join('');
+  }
+  out.innerHTML=html;
+  drawArvChart(comps,arv);
+  // Drop a pin on the map
+  if(p.latitude&&p.longitude)addMapPin(p.latitude,p.longitude,p.address||addr);
 }
 
 function drawArvChart(comps,arv){
@@ -485,14 +731,38 @@ function drawArvChart(comps,arv){
 /* ============ MAP ============ */
 let ccMap=null,ccMarkers=[];
 function initMap(){
-  ccMap=L.map('ccMap').setView([39.7684,-86.1581],10); // Indianapolis
+  // Neutral US center — no hardcoded market. Pins (lead addresses +
+  // analyzed properties) re-center the map via fitBounds when they land.
+  ccMap=L.map('ccMap').setView([39.8283,-98.5795],4);
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'©OpenStreetMap',maxZoom:19}).addTo(ccMap);
 }
-function updateMapPins(leads){
+/* Lead pins via free Nominatim geocode (no credits, no key). Throttled
+   to ~1 req/sec per Nominatim policy, max 9 leads, results cached for
+   the page session so the 60s refresh never re-geocodes. If geocoding
+   fails the map simply stays on its neutral US center — never a fake
+   pin, never a hardcoded market. */
+const _geoCache=new Map();
+async function updateMapPins(leads){
   if(!ccMap)return;
-  ccMarkers.forEach(m=>ccMap.removeLayer(m));ccMarkers=[];
-  // Geocode via Nominatim would be slow for many; use PR data if available
-  // For now, pins are added when subject analysis runs with lat/lng
+  const todo=(leads||[]).slice(0,9).filter(l=>{const a=(l.address||l.name||'');return a.length>5&&!_geoCache.has(a.trim().toLowerCase());});
+  for(const lead of todo){
+    const addr=(lead.address||lead.name||'').trim();
+    const key=addr.toLowerCase();
+    try{
+      const r=await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(addr),{headers:{'Accept':'application/json'}});
+      const j=await r.json();
+      if(j&&j[0]&&j[0].lat&&j[0].lon){
+        const lat=parseFloat(j[0].lat),lon=parseFloat(j[0].lon);
+        _geoCache.set(key,{lat:lat,lon:lon});
+        const m=L.marker([lat,lon]).addTo(ccMap).bindPopup(esc(lead.address||lead.name)+' — score '+(lead.score!=null?Math.round(lead.score*10):'—'));
+        ccMarkers.push(m);
+      }else{_geoCache.set(key,null);}
+    }catch(e){_geoCache.set(key,null);}
+    await new Promise(res=>setTimeout(res,1100));
+  }
+  if(ccMarkers.length){
+    try{ccMap.fitBounds(L.latLngBounds(ccMarkers.map(m=>m.getLatLng())).pad(0.2));}catch(e){}
+  }
 }
 function addMapPin(lat,lng,label){
   if(!ccMap||!lat||!lng)return;

@@ -102,7 +102,7 @@ export default async function handler(req: Request, context: any) {
     return "";
   };
   const password = getEnv("DASHBOARD_PASSWORD");
-  const secret = getEnv("GATE_SECRET") || password || "fallback-dev-secret";
+  const secret = getEnv("GATE_SECRET") || password; // No fallback: with no env vars set the gate fails closed (503) below — never a publicly-known secret.
 
   const url = new URL(req.url);
 
