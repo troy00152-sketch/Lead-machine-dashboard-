@@ -232,5 +232,130 @@ t('templates: ids unique', new Set(esign.KNOWN_TEMPLATES.map((x) => x.id)).size 
   t('free: UI names no paid vendor either', !banned.test(ui));
 })();
 
-console.log(`\nesign-regression: ${pass} passed, ${fail} failed.`);
-if (fail) { console.error('Failures:\n- ' + failures.join('\n- ')); process.exit(1); }
+// ---- 13. UI: manual HighLevel contact link (Nov 11 v1 bug) ----
+// The v1 sheet dead-ended on EVERY unlinked lead: openEsignSheet blocked
+// when lead.ghlContactId was empty, and nothing in the repo ever set
+// that field (pushLeadToGHL ignores the HL response). These fixture
+// tests drive assets/esign.js in a minimal DOM/fetch stub — no browser,
+// no live calls, no sends.
+(async function () {
+  const vm = require('vm');
+  const uiSrc = fs.readFileSync(path.join(__dirname, 'assets/esign.js'), 'utf8');
+
+  function makeEnv() {
+    const calls = []; // { action, body }
+    const alerts = [];
+    let saveStateCalls = 0;
+    let sendCalls = 0;
+    const els = {};
+    function el(id) {
+      if (!els[id]) els[id] = { id: id, innerHTML: '', value: '', classList: { add: function () {}, remove: function () {} } };
+      return els[id];
+    }
+    const leads = [];
+    const sandbox = {
+      console: console,
+      leads: leads,
+      document: { getElementById: function (id) { return el(id); } },
+      fetch: async function (url, opts) {
+        const m = /[?&]action=([^&]+)/.exec(url);
+        const action = m ? decodeURIComponent(m[1]) : '';
+        const body = opts && opts.body ? JSON.parse(opts.body) : null;
+        calls.push({ action: action, body: body });
+        if (action === 'send') sendCalls++;
+        if (action === 'templates') {
+          return { ok: true, status: 200, json: async function () { return { templates: esign.KNOWN_TEMPLATES, stale: false }; } };
+        }
+        if (action === 'prepare') {
+          if (body.contactId === 'C-bad') {
+            // Server shape (esign.js prepare): unknown id -> HL lookup error.
+            return { ok: false, status: 404, json: async function () { return { error: 'HighLevel contact not found.' }; } };
+          }
+          if (body.contactId === 'C-nofields') {
+            return { ok: false, status: 400, json: async function () { return { error: 'Contract is not ready to prepare.', missing: ['contract_price', 'emd_deposit', 'APN', 'legal_description', 'county'] }; } };
+          }
+          return { ok: true, status: 200, json: async function () { return { envelope: { id: 'es_test1', templateId: body.templateId, state: 'draft', contract: { price: '60000', emd: '100', apn: '008539', legal: '008539 (X)', county: 'Pitt County', contractDate: '2026-11-07', closingDate: '2026-12-07' }, signers: [{ name: 'Willard Gatlin', role: 'seller', email: 'wgatlin2@cox.net' }] }, fieldsCheck: { ready: true }, disclosureReminder: false }; } };
+        }
+        return { ok: false, status: 400, json: async function () { return { error: 'unknown action' }; } };
+      },
+      alert: function (msg) { alerts.push(String(msg)); },
+      confirm: function () { return true; },
+      saveState: function () { saveStateCalls++; },
+    };
+    sandbox.window = sandbox;
+    vm.createContext(sandbox);
+    vm.runInContext(uiSrc, sandbox);
+    return {
+      sandbox: sandbox, leads: leads, calls: calls, alerts: alerts,
+      body: function () { return el('esignBody').innerHTML; },
+      input: function (id) { return el(id); },
+      prepareCalls: function () { return calls.filter((c) => c.action === 'prepare'); },
+      get saveStateCalls() { return saveStateCalls; },
+      get sendCalls() { return sendCalls; },
+    };
+  }
+
+  // (a) unlinked lead opens the sheet with the manual-id field
+  const envA = makeEnv();
+  envA.leads.push({ id: 'L1', state: 'IN', address1: '1 Test St' });
+  await envA.sandbox.esignOpenSheet('L1');
+  t('ui-link: unlinked lead opens sheet with manual contact-id field', /id="esignContactId"/.test(envA.body()));
+  t('ui-link: dead-end message is gone', !/push it to GHL first/.test(envA.body()));
+  t('ui-link: hint says where the id lives (HL contact page URL)', /page URL/.test(envA.body()));
+  t('ui-link: templates still load for an unlinked lead', envA.calls.some((c) => c.action === 'templates'));
+
+  // (b) prepare uses the entered id and links the lead
+  envA.input('esignContactId').value = 'C-manual';
+  envA.input('esignTemplate').value = '6ad186514bf151249d4f7ab6';
+  await envA.sandbox.esignPrepare();
+  t('ui-link: prepare sends the manually entered contact id', envA.prepareCalls().length === 1 && envA.prepareCalls()[0].body.contactId === 'C-manual');
+  t('ui-link: successful prepare persists the id on the lead', envA.leads[0].ghlContactId === 'C-manual');
+  t('ui-link: successful prepare saves state so the link sticks', envA.saveStateCalls === 1);
+  t('ui-link: after linking, the manual field is gone', !/id="esignContactId"/.test(envA.body()));
+  t('ui-link: no send happened during prepare', envA.sendCalls === 0);
+
+  // (c) linked lead still uses its stored id (unchanged path)
+  const envC = makeEnv();
+  envC.leads.push({ id: 'L2', state: 'NC', ghlContactId: 'C-linked' });
+  await envC.sandbox.esignOpenSheet('L2');
+  t('ui-link: linked lead shows NO manual-id field (unchanged path)', !/id="esignContactId"/.test(envC.body()));
+  await envC.sandbox.esignPrepare();
+  t('ui-link: linked lead prepare uses its stored id', envC.prepareCalls().length === 1 && envC.prepareCalls()[0].body.contactId === 'C-linked');
+  t('ui-link: linked lead id is unchanged', envC.leads[0].ghlContactId === 'C-linked');
+  t('ui-link: linked lead prepare does not re-save state', envC.saveStateCalls === 0);
+
+  // (d) empty id is still blocked
+  const envD = makeEnv();
+  envD.leads.push({ id: 'L3', state: 'IN' });
+  await envD.sandbox.esignOpenSheet('L3');
+  envD.input('esignContactId').value = '   ';
+  await envD.sandbox.esignPrepare();
+  t('ui-link: empty id blocks prepare (no fetch)', envD.prepareCalls().length === 0);
+  t('ui-link: empty id alerts with a clear message', envD.alerts.some((a) => /HighLevel contact ID/i.test(a)));
+  t('ui-link: empty id sends nothing', envD.sendCalls === 0);
+
+  // (e) invalid id fails closed without sending
+  const envE = makeEnv();
+  envE.leads.push({ id: 'L4', state: 'IN' });
+  await envE.sandbox.esignOpenSheet('L4');
+  envE.input('esignContactId').value = 'C-bad';
+  await envE.sandbox.esignPrepare();
+  t('ui-link: invalid id surfaces the HL lookup error', /HighLevel contact not found/.test(envE.body()));
+  t('ui-link: invalid id does not link the lead', envE.leads[0].ghlContactId === undefined);
+  t('ui-link: invalid id does not save state', envE.saveStateCalls === 0);
+  t('ui-link: invalid id sends nothing', envE.sendCalls === 0);
+
+  // (f) missing contract fields still surface, typed id survives re-render
+  const envF = makeEnv();
+  envF.leads.push({ id: 'L5', state: 'IN' });
+  await envF.sandbox.esignOpenSheet('L5');
+  envF.input('esignContactId').value = 'C-nofields';
+  await envF.sandbox.esignPrepare();
+  t('ui-link: missing contract fields still surface (not masked by link flow)', /contract_price/.test(envF.body()));
+  t('ui-link: typed id survives a failed prepare (re-render keeps it)', /value="C-nofields"/.test(envF.body()));
+  t('ui-link: failed prepare does not link the lead', envF.leads[0].ghlContactId === undefined);
+  t('ui-link: failed prepare sends nothing', envF.sendCalls === 0);
+
+  console.log(`\nesign-regression: ${pass} passed, ${fail} failed.`);
+  if (fail) { console.error('Failures:\n- ' + failures.join('\n- ')); process.exit(1); }
+})();
