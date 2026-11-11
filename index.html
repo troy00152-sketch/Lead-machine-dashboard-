@@ -25,7 +25,12 @@
 /* White-label branding hook — additive, fails safe to Troy's defaults.
    Fetches public client config (companyName, logo, primaryColor) from
    /.netlify/functions/client-config based on the request subdomain,
-   then applies branding. Secrets are never exposed by that function. */
+   then applies branding. Secrets are never exposed by that function.
+   Unknown subdomains get the NEUTRAL default server-side
+   (clients/_default.json: "Command Center", no logo) — never Troy's
+   config. An empty logo hides the logo img so Troy's logo never shows
+   on a neutral subdomain. The DEFAULTS below apply ONLY when the
+   config fetch itself fails entirely. */
 (function () {
   var DEFAULTS = { companyName: 'Direct Property Buyers', logo: '/assets/dpb-logo.png', primaryColor: '#00d4ff' };
   function applyBrand(cfg) {
@@ -37,7 +42,13 @@
       var sub = document.querySelector('.brand small');
       if (sub) sub.textContent = name;
       var logoImg = document.querySelector('.brand img.brand-logo');
-      if (logoImg && cfg.logo) logoImg.src = cfg.logo;
+      if (logoImg) {
+        // Empty logo = neutral client: hide instead of leaving Troy's
+        // hardcoded logo src visible on a stranger's subdomain.
+        if (cfg.logo) { logoImg.src = cfg.logo; logoImg.style.display = ''; }
+        else { logoImg.style.display = 'none'; }
+        logoImg.alt = name;
+      }
     } catch (e) { /* branding must never break the dashboard */ }
   }
   function fallback() { applyBrand(DEFAULTS); }

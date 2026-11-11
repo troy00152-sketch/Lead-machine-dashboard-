@@ -3,10 +3,23 @@
    GET /.netlify/functions/cc-data?action=overview
    Returns: sellerReplies, bookedToday, underContract, newLeads (top 9,
    hottest first), closedCount, closedVolume (GROSS closed volume — not
-   profit), closeRate + closeRateCapped (closed ÷ first-100 opps), and
-   per-source errors. Overview responses are cached in-memory for 30s.
-   Uses HL_API_TOKEN env var (same as deals-api.js). Read-only. */
+   profit), closeRate + closeRateCapped (closed ÷ fetched opps), and
+   per-source errors. Overview responses are cached in-memory for 30s
+   (keyed per client). Read-only.
+   PER-CLIENT (Nov 11): location/calendar/token resolve per request
+   from the client config (lib-client.js) — Troy's ids are the fallback
+   ONLY for Troy's own domains. Unknown subdomains get NO data (honest
+   400), never Troy's feed.
+   PAGINATION (Nov 11): /opportunities/search is paged with the
+   documented `page` param (0-indexed, 100/call, up to 10 pages =
+   1,000 opps). closeRateCapped is true whenever HL's `total` exceeds
+   what was fetched; the page labels the fetched count.
+   SPEED (Nov 11): stage map fetched in parallel with page 0 and
+   cached 10 min; contact enrichment capped at 100 leads with 20 in
+   flight (was: every lead, sequential chunks of 10). */
 'use strict';
+
+const { resolveClientData, LEGACY_TROY_LOCATION_ID, LEGACY_TROY_CALENDAR_ID } = require('./lib-client');
 
 const HL_API_BASE = 'https://services.leadconnectorhq.com';
 // Per-endpoint API versions, matching the working bot code (src/config.js).
@@ -17,9 +30,22 @@ const HL_API_BASE = 'https://services.leadconnectorhq.com';
 const HL_VERSION_CONVERSATIONS = '2021-04-15';
 const HL_VERSION_CALENDARS = '2021-04-15';
 const HL_VERSION_OPPORTUNITIES = '2021-07-28';
-const HL_LOCATION_ID = 'krKoHLudPnn7nT0DPtwa';
-const HL_CALENDAR_ID = 'aG6lop6FROsWlIrB0Y0H'; // Seller Calls - Paula
+// Legacy Troy identifiers — used ONLY when the troy client file itself
+// has no location/calendar (lib-client.js applies the same rule).
+// Never applied to any other client.
+const HL_LOCATION_ID = LEGACY_TROY_LOCATION_ID;
+const HL_CALENDAR_ID = LEGACY_TROY_CALENDAR_ID; // Seller Calls - Paula
 const TIMEOUT_MS = 20000;
+// Opportunities paging: HL caps /opportunities/search at 100 per call.
+const OPP_PAGE_SIZE = 100;
+const MAX_OPP_PAGES = 10; // hard cap: 1,000 opps per overview, honestly labelled
+// Hot-lead enrichment bounds (see enrichHotLeads).
+const ENRICH_LEADS_MAX = 100;
+const ENRICH_CONCURRENCY = 20;
+// Stage-map cache: pipelines change rarely; a 10-min in-memory cache
+// (per location) saves one HL round-trip on every overview after the
+// first. No credit-spending lookup is ever cached here — HL reads only.
+const STAGE_MAP_TTL_MS = 600000;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -28,9 +54,12 @@ const corsHeaders = {
   'Content-Type': 'application/json',
 };
 
-async function hlFetch(path, method, body, version) {
-  const token = process.env.HL_API_TOKEN;
-  if (!token) throw new Error('HL_API_TOKEN not set');
+async function hlFetch(path, method, body, version, token) {
+  // Per-client token when the caller has one; HL_API_TOKEN is the
+  // live var the other functions already use (keeps old callers and
+  // the offline regression working when no ctx is passed).
+  const t = token || process.env.HL_API_TOKEN;
+  if (!t) throw new Error('HL_API_TOKEN not set');
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
@@ -38,7 +67,7 @@ async function hlFetch(path, method, body, version) {
       method,
       signal: controller.signal,
       headers: {
-        'Authorization': 'Bearer ' + token,
+        'Authorization': 'Bearer ' + t,
         'Version': version || HL_VERSION_OPPORTUNITIES,
         'Content-Type': 'application/json',
         'Accept': 'application/json',
@@ -60,12 +89,14 @@ async function hlFetch(path, method, body, version) {
 // Mirrors the working pipeline-activity.js pattern: GET conversations
 // search under 2021-04-15, then per-thread messages (newest first).
 // A thread counts when its newest inbound has no outbound after it.
-async function getSellerReplies() {
+// ctx = { locationId, calendarId, token } from resolveClientData().
+// Every getter below takes ctx — no hardcoded location/calendar.
+async function getSellerReplies(ctx) {
   try {
     const sinceMs = Date.now() - 24 * 3600 * 1000;
     const data = await hlFetch(
-      `/conversations/search?locationId=${HL_LOCATION_ID}&limit=100`,
-      'GET', null, HL_VERSION_CONVERSATIONS
+      `/conversations/search?locationId=${ctx.locationId}&limit=100`,
+      'GET', null, HL_VERSION_CONVERSATIONS, ctx && ctx.token
     ).catch(() => null);
     const convos = (data && data.conversations) || [];
     let inboundCount = 0;
@@ -79,7 +110,7 @@ async function getSellerReplies() {
     for (let i = 0; i < fresh.length; i += 8) {
       const chunk = fresh.slice(i, i + 8);
       const results = await Promise.all(chunk.map(async (c) => {
-        const msgs = await hlFetch(`/conversations/${c.id}/messages?limit=5`, 'GET', null, HL_VERSION_CONVERSATIONS).catch(() => null);
+        const msgs = await hlFetch(`/conversations/${c.id}/messages?limit=5`, 'GET', null, HL_VERSION_CONVERSATIONS, ctx && ctx.token).catch(() => null);
         return { c, msgs };
       }));
       for (const { c, msgs } of results) {
@@ -117,28 +148,75 @@ function etDateStr(ms) {
 // under 2021-04-15 with startTime/endTime as EPOCH MILLISECONDS
 // (the old code sent ISO strings, which the endpoint rejects), wide
 // window, then client-side filter on the event's ET day.
-async function getBookedToday() {
+//
+// Nov 11, 2026 — Itzhak Bokobzha miss: the bot-booked 8:00 AM Nov 11
+// appointment did not show in Booked Today. ROOT CAUSE: the query
+// window was anchored to NOW (startMs = now - 12h), not to the start
+// of today — so every morning appointment slid OUT of the window once
+// the day was more than 12h old (an 8:00 AM appointment is invisible
+// to any read after 8:00 PM the same day), and the ET-day filter
+// downstream could never rescue an event HL never returned. The
+// window now starts at ET midnight today (bookedTodayWindowMs) — the
+// ET-day filter is still the exact classifier, so the count stays
+// exactly today's appointments on this calendar, no wider.
+// Second defect in the same function, fixed with it: the HL fetch
+// carried `.catch(() => null)`, so a failed events call returned
+// count 0 with error null — a silent zero with the LIVE dot still
+// green. The failure now surfaces in errors.booked instead.
+function bookedTodayWindowMs(nowMs) {
+  const todayEt = etDateStr(nowMs);
+  // ET midnight, same pattern as pipeline-activity.js: the -04:00
+  // offset is exact in EDT and 1h early in EST (23:00 ET the prior
+  // day) — harmless, because filterBookedTodayEvents below is the
+  // exact classifier and drops anything not on today's ET day.
+  const startMs = new Date(`${todayEt}T00:00:00-04:00`).getTime();
+  const endMs = nowMs + 48 * 3600 * 1000;
+  return { startMs, endMs };
+}
+
+// Pure filter over one /calendars/events page: exactly the live,
+// same-calendar appointments HAPPENING today (ET day of startTime).
+// Created date is irrelevant — an appointment booked yesterday for
+// today counts (that is the Itzhak case: created Nov 10, 8:00 AM
+// Nov 11). An event carrying another calendar's ID never counts;
+// an event carrying NO calendarId passes (HL does not always echo
+// it — same lenient rule as the bot's getCalendarEvents).
+function filterBookedTodayEvents(raw, nowMs, calendarId) {
+  const todayEt = etDateStr(nowMs);
+  const list = Array.isArray(raw) ? raw : [];
+  const live = list.filter((e) => {
+    if (!e || !e.id) return false;
+    const cal = e.calendarId || e.calendar_id;
+    if (cal && calendarId && String(cal) !== String(calendarId)) return false;
+    const st = String(e.appointmentStatus || e.status || '').toLowerCase();
+    if (st === 'cancelled' || st === 'invalid') return false;
+    const sMs = e.startTime ? new Date(e.startTime).getTime() : (e.start_time ? new Date(e.start_time).getTime() : 0);
+    if (!sMs) return false;
+    return etDateStr(sMs) === todayEt;
+  });
+  live.sort((a, b) => new Date(a.startTime || a.start_time) - new Date(b.startTime || b.start_time));
+  return live;
+}
+
+async function getBookedToday(ctx) {
   try {
     const nowMs = Date.now();
-    const startMs = nowMs - 12 * 3600 * 1000;
-    const endMs = nowMs + 48 * 3600 * 1000;
-    const todayEt = etDateStr(nowMs);
+    const { startMs, endMs } = bookedTodayWindowMs(nowMs);
     const data = await hlFetch(
-      `/calendars/events?locationId=${HL_LOCATION_ID}&calendarId=${HL_CALENDAR_ID}&startTime=${startMs}&endTime=${endMs}`,
-      'GET', null, HL_VERSION_CALENDARS
-    ).catch(() => null);
+      `/calendars/events?locationId=${ctx.locationId}&calendarId=${ctx.calendarId}&startTime=${startMs}&endTime=${endMs}`,
+      'GET', null, HL_VERSION_CALENDARS, ctx && ctx.token
+    );
     const raw = (data && (data.events || data.appointments)) || (Array.isArray(data) ? data : []);
-    const live = raw.filter((e) => {
-      if (!e || !e.id) return false;
-      const st = String(e.appointmentStatus || e.status || '').toLowerCase();
-      if (st === 'cancelled' || st === 'invalid') return false;
-      const sMs = e.startTime ? new Date(e.startTime).getTime() : (e.start_time ? new Date(e.start_time).getTime() : 0);
-      if (!sMs) return false;
-      return etDateStr(sMs) === todayEt;
-    });
-    live.sort((a, b) => new Date(a.startTime || a.start_time) - new Date(b.startTime || b.start_time));
+    const live = filterBookedTodayEvents(raw, nowMs, ctx && ctx.calendarId);
     return {
       count: live.length,
+      // rawCount is the monitoring hook (reliability workstream, Nov 11):
+      // events HL returned BEFORE the today/cancelled/calendar filter.
+      // When rawCount > 0 but count is 0, appointments exist that the
+      // filter dropped — the silent-wrongness class behind the Itzhak
+      // 8:00 AM miss. health-check.js flags rawCount > 0 && count === 0
+      // as SUSPECT instead of silently showing 0.
+      rawCount: raw.length,
       appointments: live.slice(0, 10).map(e => ({
         title: e.title || 'Appointment',
         startTime: e.startTime || e.start_time || null,
@@ -155,10 +233,18 @@ async function getBookedToday() {
 // The opportunities/search response carries ONLY pipelineStageId — no
 // stage name — so classifying on o.pipelineStageName always yields ''.
 // Without this map every panel classified to zero.
-async function getStageMap() {
+// Cached 10 min per location (STAGE_MAP_TTL_MS): pipelines change
+// rarely, and the old code paid one sequential round-trip for this on
+// every overview. Cache holds HL reads only — never a credit lookup.
+let stageMapCache = null; // { locationId, map, at }
+async function getStageMap(ctx) {
+  const loc = (ctx && ctx.locationId) || HL_LOCATION_ID;
+  if (stageMapCache && stageMapCache.locationId === loc && (Date.now() - stageMapCache.at) < STAGE_MAP_TTL_MS) {
+    return stageMapCache.map;
+  }
   const data = await hlFetch(
-    `/opportunities/pipelines?locationId=${HL_LOCATION_ID}`,
-    'GET', null, HL_VERSION_OPPORTUNITIES
+    `/opportunities/pipelines?locationId=${loc}`,
+    'GET', null, HL_VERSION_OPPORTUNITIES, ctx && ctx.token
   );
   const pipes = (data && (data.pipelines || data.data)) || [];
   const map = new Map();
@@ -168,22 +254,79 @@ async function getStageMap() {
       if (s && s.id) map.set(String(s.id), String(s.name || ''));
     }
   }
+  stageMapCache = { locationId: loc, map, at: Date.now() };
   return map;
 }
 
-// Get opportunities grouped by stage
-async function getOpportunities() {
+// One page of /opportunities/search. `page` is 0-indexed (HL schema
+// `search-opportunities-advanced`); `limit` caps at 100 per call.
+async function searchOppsPage(ctx, page) {
+  const data = await hlFetch('/opportunities/search', 'POST', {
+    locationId: ctx.locationId,
+    limit: OPP_PAGE_SIZE,
+    page,
+  }, HL_VERSION_OPPORTUNITIES, ctx && ctx.token).catch(() => null);
+  return data;
+}
+
+// Get opportunities grouped by stage — PAGINATED past the 100 cap.
+// PAGINATION VERDICT (Nov 11, from HL's live operation schema for
+// POST /opportunities/search, `search-opportunities-advanced`, read
+// via describe_operation — no live data was fetched to decide this):
+//   * `page` (0-indexed) + `limit` ARE documented body fields and the
+//     response carries `total` — real paging exists. Page 0 is fetched
+//     first; once `total` is known the remaining pages go out IN
+//     PARALLEL (page numbers are known up front, unlike a cursor).
+//   * `searchAfter` (cursor array, e.g. [epochMs, id]) is ALSO a
+//     documented body field — but the response schema documents NO
+//     returned cursor field, so there is nothing safe to echo without
+//     a live test. Page-based paging is used instead. FOLLOW-UP: once
+//     a live read confirms what the response returns as the cursor,
+//     searchAfter can replace `page` (it is the cursor-correct form
+//     when the pipeline moves mid-fetch).
+//   * Hard cap MAX_OPP_PAGES (10 x 100 = 1,000 opps). When HL's total
+//     exceeds what was fetched the result is labelled capped
+//     (closeRateCapped + oppsFetched/oppsTotal) — never silently
+//     presented as the whole pipeline.
+async function getOpportunities(ctx) {
   try {
-    const data = await hlFetch('/opportunities/search', 'POST', {
-      locationId: HL_LOCATION_ID,
-      limit: 100,
-    }).catch(() => null);
-    const opps = (data && (data.opportunities || data.data)) || [];
+    // Page 0 + stage map IN PARALLEL (independent calls — the old code
+    // ran the stage lookup AFTER the search, one wasted round-trip).
+    const [first, stageRes] = await Promise.all([
+      searchOppsPage(ctx, 0),
+      getStageMap(ctx).then((m) => ({ map: m, error: null })).catch((e) => ({ map: null, error: String(e).slice(0, 100) })),
+    ]);
+    let opps = (first && (first.opportunities || first.data)) || [];
+    const total = Number(first && first.total) || 0;
+    // Remaining pages in parallel, up to the hard cap.
+    const pageCount = total > opps.length
+      ? Math.min(Math.ceil(total / OPP_PAGE_SIZE), MAX_OPP_PAGES)
+      : 1;
+    if (pageCount > 1) {
+      const rest = await Promise.all(
+        Array.from({ length: pageCount - 1 }, (_, i) => searchOppsPage(ctx, i + 1))
+      );
+      for (const pg of rest) {
+        const rows = (pg && (pg.opportunities || pg.data)) || [];
+        opps = opps.concat(rows);
+      }
+    }
+    // Dedupe by id (page boundaries can shift if the pipeline moves
+    // mid-fetch) and enforce the hard cap.
+    const seen = new Set();
+    opps = opps.filter((o) => {
+      if (!o || !o.id || seen.has(o.id)) return false;
+      seen.add(o.id);
+      return true;
+    }).slice(0, OPP_PAGE_SIZE * MAX_OPP_PAGES);
+    const oppsTotal = total || opps.length;
+    // Capped whenever HL says more exist than we hold; when HL omits
+    // `total`, fall back to the old rule (a full first page may hide more).
+    const capped = total ? total > opps.length : opps.length >= OPP_PAGE_SIZE;
     // Resolve stage names via the pipelines endpoint (search gives IDs
     // only). If that lookup fails, fall back to status + recency.
-    let stageMap = null;
-    let stageError = null;
-    try { stageMap = await getStageMap(); } catch (e) { stageError = String(e).slice(0, 100); }
+    const stageMap = stageRes.map;
+    const stageError = stageRes.error;
     const underContract = [];
     const newLeads = [];
     const closed = [];
@@ -213,9 +356,9 @@ async function getOpportunities() {
         if (createdMs >= recentMs) newLeads.push(item);
       }
     }
-    return { underContract, newLeads, closed, total: opps.length, error: stageError };
+    return { underContract, newLeads, closed, total: oppsTotal, fetched: opps.length, capped, error: stageError };
   } catch (e) {
-    return { underContract: [], newLeads: [], closed: [], total: 0, error: String(e).slice(0, 100) };
+    return { underContract: [], newLeads: [], closed: [], total: 0, fetched: 0, capped: false, error: String(e).slice(0, 100) };
   }
 }
 
@@ -349,10 +492,10 @@ function valuesFromCustomFields(cfs) {
 
 // Best-effort contact read for one lead. Never throws — returns null on
 // any failure so the lead still scores from stage + recency alone.
-async function getContactTags(contactId) {
+async function getContactTags(contactId, token) {
   if (!contactId) return null;
   try {
-    const data = await hlFetch(`/contacts/${contactId}`, 'GET', null, HL_VERSION_OPPORTUNITIES).catch(() => null);
+    const data = await hlFetch(`/contacts/${contactId}`, 'GET', null, HL_VERSION_OPPORTUNITIES, token).catch(() => null);
     const c = (data && (data.contact || data)) || null;
     if (!c) return null;
     const tags = Array.isArray(c.tags) ? c.tags.map((t) => String(t)) : [];
@@ -429,32 +572,89 @@ function crmScoreFor(lead, contact) {
   };
 }
 
-async function enrichHotLeads(newLeads) {
-  // Score EVERY new lead from CRM data (no credits spent), in parallel
-  // chunks of 10 — then sort hottest first so the grid shows the actual
-  // top 9. The old code scored only the first 9 in pipeline order and
-  // never sorted, so the "hottest sorts first" claim was false.
+// Cheap score from stage + recency alone — no contact fetch. Used to
+// rank leads BEFORE the contact reads so enrichment can be bounded.
+// Mirrors exactly the stage/recency lines of crmScoreFor (appointment
+// +10, contacted/qualified +5, created within 48h +5).
+function cheapScoreFor(lead) {
+  let distress = 0;
+  const stage = String(lead.stage || '').toLowerCase();
+  if (stage.includes('appointment')) distress += 10;
+  else if (stage.includes('contacted') || stage.includes('qualified')) distress += 5;
+  const createdMs = lead.createdAt ? new Date(lead.createdAt).getTime() : 0;
+  if (createdMs && Date.now() - createdMs <= 48 * 3600 * 1000) distress += 5;
+  distress = Math.min(45, distress);
+  return { score: distress, label: scoreLabel(distress), parts: { distress, equity: 0, own: 0 }, source: 'crm-cheap' };
+}
+
+// Run fn over items with at most `limit` in flight at once. The old
+// chunked loop (10 at a time, each chunk awaited) made the round count
+// linear in the lead count; a pool keeps the same HL politeness bound
+// per instant while cutting the sequential rounds ~in half at limit 20.
+async function mapWithConcurrency(items, limit, fn) {
+  const results = new Array(items.length);
+  let next = 0;
+  async function worker() {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i], i);
+    }
+  }
+  const workers = Math.max(1, Math.min(limit, items.length));
+  await Promise.all(Array.from({ length: workers }, () => worker()));
+  return results;
+}
+
+function applyCrmScore(lead, contact, s) {
+  lead.score = s.score;
+  lead.scoreLabel = s.label;
+  lead.scoreParts = s.parts;
+  lead.scoreSource = s.source;
+  // Written comp values from the contact (null when never comped).
+  // The page falls back to these when the live lookup returns nothing.
+  lead.arv = (contact && contact.arv) || null;
+  lead.mao = (contact && contact.mao) || null;
+  lead.lao = (contact && contact.lao) || null;
+  lead.stackCount = s.stackCount;
+  lead.listSignals = s.listSignals;
+  lead.warnings = s.warnings;
+  lead.instantHot = s.instantHot;
+  lead.hotTrigger = s.hotTrigger;
+}
+
+async function enrichHotLeads(newLeads, ctx) {
+  // TWO-PHASE, BOUNDED (Nov 11 speed fix). The old code contact-fetched
+  // EVERY new lead in sequential chunks of 10 — 10 rounds at 100 leads,
+  // and unbounded once pagination can return up to 1,000 opps, which
+  // would push the overview past its 20s timeout.
+  //   Phase 1: cheap-score ALL leads (stage + recency, no fetch),
+  //     sort, keep the top ENRICH_LEADS_MAX (100 — exactly the old
+  //     code's ceiling: it could only ever see 100 opps, so it never
+  //     enriched more than ~100 leads).
+  //   Phase 2: contact-fetch those 100 with ENRICH_CONCURRENCY (20)
+  //     in flight — 5 rounds instead of 10 — then re-sort hottest
+  //     first so the grid shows the actual top 9.
+  // Honest limit: past 100 new leads, ranking below the cut is by
+  // cheap signals only (scoreSource 'crm-cheap'); a tag-heavy lead
+  // ranked 101st cheap cannot jump in via tags. The grid shows the
+  // top 9, so the cut sits far above what renders.
   const targets = newLeads || [];
-  for (let i = 0; i < targets.length; i += 10) {
-    const chunk = targets.slice(i, i + 10);
-    await Promise.all(chunk.map(async (lead) => {
-      const contact = await getContactTags(lead.contactId);
-      const s = crmScoreFor(lead, contact);
-      lead.score = s.score;
-      lead.scoreLabel = s.label;
-      lead.scoreParts = s.parts;
-      lead.scoreSource = s.source;
-      // Written comp values from the contact (null when never comped).
-      // The page falls back to these when the live lookup returns nothing.
-      lead.arv = (contact && contact.arv) || null;
-      lead.mao = (contact && contact.mao) || null;
-      lead.lao = (contact && contact.lao) || null;
-      lead.stackCount = s.stackCount;
-      lead.listSignals = s.listSignals;
-      lead.warnings = s.warnings;
-      lead.instantHot = s.instantHot;
-      lead.hotTrigger = s.hotTrigger;
-    }));
+  const token = ctx && ctx.token;
+  const ranked = targets.map((lead) => ({ lead, cheap: cheapScoreFor(lead) }));
+  ranked.sort((a, b) => (b.cheap.score || 0) - (a.cheap.score || 0));
+  const toEnrich = ranked.slice(0, ENRICH_LEADS_MAX);
+  await mapWithConcurrency(toEnrich, ENRICH_CONCURRENCY, async ({ lead }) => {
+    const contact = await getContactTags(lead.contactId, token);
+    applyCrmScore(lead, contact, crmScoreFor(lead, contact));
+  });
+  for (const { lead, cheap } of ranked.slice(ENRICH_LEADS_MAX)) {
+    lead.score = cheap.score;
+    lead.scoreLabel = cheap.label;
+    lead.scoreParts = cheap.parts;
+    lead.scoreSource = cheap.source;
+    lead.arv = null; lead.mao = null; lead.lao = null;
+    lead.stackCount = 0; lead.listSignals = []; lead.warnings = [];
+    lead.instantHot = false; lead.hotTrigger = null;
   }
   targets.sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0));
   return newLeads;
@@ -478,14 +678,23 @@ function extractAddress(opp) {
 // Test-only export: lets node verify crmScoreFor / enrichHotLeads
 // directly without a live HL call. Harmless in production — the
 // Netlify handler is unchanged.
-exports._test = { crmScoreFor, scoreLabel, isHotTrigger, parseMoneyValue, valuesFromCustomFields, enrichHotLeads };
+exports._test = {
+  crmScoreFor, scoreLabel, isHotTrigger, parseMoneyValue, valuesFromCustomFields,
+  enrichHotLeads, cheapScoreFor, mapWithConcurrency,
+  bookedTodayWindowMs, filterBookedTodayEvents,
+  getStageMap, searchOppsPage, getOpportunities,
+  ENRICH_LEADS_MAX, ENRICH_CONCURRENCY, OPP_PAGE_SIZE, MAX_OPP_PAGES,
+  clearOverviewCache: () => { overviewCacheMem = null; },
+  clearStageMapCache: () => { stageMapCache = null; },
+};
 
 // Short in-memory overview cache (30s): the page refreshes every 60s,
 // so a warm function serves the second refresh from cache instead of
 // re-hitting HL. The payload carries `cached` so the UI never mistakes
 // a cached read for a fresh one. Cold starts and >30s gaps re-fetch.
-let overviewCacheMem = null;
-let overviewCacheMemAt = 0;
+// KEYED PER CLIENT (locationId): without the key, Troy's cached
+// overview could be served to another client's request.
+let overviewCacheMem = null; // { key, body, at }
 const OVERVIEW_CACHE_TTL_MS = 30000;
 
 exports.handler = async (event) => {
@@ -494,31 +703,41 @@ exports.handler = async (event) => {
 
   try {
     if (action === 'overview') {
-      if (overviewCacheMem && (Date.now() - overviewCacheMemAt) < OVERVIEW_CACHE_TTL_MS) {
-        return { statusCode: 200, headers: corsHeaders, body: JSON.stringify({ ...overviewCacheMem, cached: true }) };
+      // Per-client: location/calendar/token resolve from the request
+      // (lib-client.js). Unknown subdomain -> null -> honest 400.
+      // NEVER Troy's feed: serving his live CRM data to a stranger's
+      // subdomain would be a data leak, not a fallback.
+      const ctx = resolveClientData(event);
+      if (!ctx) {
+        return { statusCode: 400, headers: corsHeaders, body: JSON.stringify({ ok: false, error: 'unknown client — no HighLevel location configured for this subdomain' }) };
+      }
+      if (overviewCacheMem && overviewCacheMem.key === ctx.locationId && (Date.now() - overviewCacheMem.at) < OVERVIEW_CACHE_TTL_MS) {
+        return { statusCode: 200, headers: corsHeaders, body: JSON.stringify({ ...overviewCacheMem.body, cached: true }) };
       }
       const [replies, booked, opps] = await Promise.all([
-        getSellerReplies(),
-        getBookedToday(),
-        getOpportunities(),
+        getSellerReplies(ctx),
+        getBookedToday(ctx),
+        getOpportunities(ctx),
       ]);
       // Hot Leads scores come from CRM signals (no credits spent) — see
       // enrichHotLeads above. Best-effort: a failure here never breaks
       // the overview; leads just render without a score.
-      try { await enrichHotLeads(opps.newLeads); } catch (e) { /* keep unscored */ }
+      try { await enrichHotLeads(opps.newLeads, ctx); } catch (e) { /* keep unscored */ }
       // Closed Volume = sum of closed deal values (GROSS volume, not
       // profit — no fee/cost data exists to compute real profit).
       const closedVolume = opps.closed.reduce((s, o) => s + (Number(o.monetaryValue) || 0), 0);
-      // Close rate = closed / total — but /opportunities/search caps at
-      // 100 and HL offers no verified cursor to page past it, so the
-      // rate is labelled as capped whenever the feed hit 100.
-      const closeRate = opps.total > 0 ? Math.round((opps.closed.length / opps.total) * 100) : 0;
-      const closeRateCapped = opps.total >= 100;
+      // Close rate = closed ÷ fetched opps. Pagination (up to 1,000)
+      // means the denominator is now the fetched count, not the old
+      // first-100; closeRateCapped is true whenever HL's total exceeds
+      // what was fetched, and the page labels the fetched count.
+      const closeRate = opps.fetched > 0 ? Math.round((opps.closed.length / opps.fetched) * 100) : 0;
+      const closeRateCapped = !!opps.capped;
       const body = {
         ok: true,
         sellerReplies: replies.count,
         recentReplies: replies.recent,
         bookedToday: booked.count,
+        bookedRawCount: booked.rawCount || 0,
         todayAppointments: booked.appointments,
         underContract: opps.underContract.length,
         underContractDeals: opps.underContract.slice(0, 10),
@@ -529,14 +748,19 @@ exports.handler = async (event) => {
         closeRate,
         closeRateCapped,
         totalOpps: opps.total,
+        oppsFetched: opps.fetched,
+        oppsTotal: opps.total,
         // Per-source errors (null when fine) so a silent zero is never
         // mistaken for "nothing happening" again.
         errors: { replies: replies.error || null, booked: booked.error || null, opps: opps.error || null },
-        fetchedAt: new Date().toISOString(),
+        // fetchedAt is built from Date.now() (not `new Date()`) so a
+        // mocked clock moves it too — the health-check suite simulates
+        // 9:30 PM by stubbing Date.now, and `new Date()` ignores that
+        // stub, which made a fresh read look 576 min stale.
+        fetchedAt: new Date(Date.now()).toISOString(),
         cached: false,
       };
-      overviewCacheMem = body;
-      overviewCacheMemAt = Date.now();
+      overviewCacheMem = { key: ctx.locationId, body, at: Date.now() };
       return {
         statusCode: 200,
         headers: corsHeaders,

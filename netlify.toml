@@ -1,0 +1,15 @@
+# Netlify config for lead-machine-dashboard (troy00152-sketch/Lead-machine-dashboard-).
+#
+# ONLY scheduled-function bindings live here. Build settings stay in the
+# Netlify UI — do NOT add a [build] section to this file without Troy's
+# word: adding one would override the UI-configured build. After the deploy
+# that first adds this file, verify in the Netlify UI that the build
+# settings are unchanged and that gmail-token-watch shows the "Scheduled"
+# badge with its next run.
+#
+# Schedules are UTC. 14:00 UTC = 09:00 EST / 10:00 EDT (Troy's morning,
+# before the 11 AM send window — a dead Gmail token is caught before any
+# title-order send is attempted that day).
+
+[functions."gmail-token-watch"]
+  schedule = "0 14 * * *"

@@ -135,15 +135,114 @@ a{color:var(--accent)}
 .calc-box .v{font-size:20px;font-weight:800;color:var(--green)}
 .linked-prop{padding:10px 0;border-top:1px solid var(--line);font-size:13px}
 .linked-prop:first-of-type{border-top:none}
+/* ============ KPI DASHBOARD (Nov 11) ============ */
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px}
+.kpi-card{
+  background:rgba(8,16,34,.6);border:1px solid var(--line);border-radius:12px;
+  padding:14px;min-height:96px;
+}
+.kpi-card .k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px}
+.kpi-card .v{font-size:26px;font-weight:800;color:var(--accent);margin:6px 0 2px;text-shadow:0 0 16px rgba(0,212,255,.45)}
+.kpi-card .v.na{color:var(--muted);text-shadow:none}
+.kpi-card .needs{font-size:11px;color:var(--muted2);line-height:1.45}
+.kpi-card .sub{font-size:11px;color:var(--muted)}
+.stage-bars{display:flex;flex-direction:column;gap:8px;margin-top:4px}
+.stage-bar{display:grid;grid-template-columns:110px 1fr 44px;gap:8px;align-items:center;font-size:12px}
+.stage-bar .track{height:10px;background:rgba(0,212,255,.08);border-radius:6px;overflow:hidden}
+.stage-bar .fill{height:100%;background:linear-gradient(90deg,#00d4ff,#0090ff);border-radius:6px}
+.stage-bar .cnt{text-align:right;font-weight:700}
+.kpi-table{width:100%;border-collapse:collapse;font-size:12px;margin-top:4px}
+.kpi-table th{text-align:left;color:var(--muted);font-weight:600;padding:6px 8px;border-bottom:1px solid var(--line)}
+.kpi-table td{padding:6px 8px;border-bottom:1px solid rgba(0,212,255,.08)}
+.kpi-table td.na{color:var(--muted)}
+/* ============ UNDER CONTRACT STRIP (Nov 11) ============ */
+.uc-strip{display:flex;gap:12px;overflow-x:auto;padding:4px 2px 8px}
+.uc-chip{
+  flex:0 0 auto;min-width:230px;max-width:280px;background:rgba(8,16,34,.6);
+  border:1px solid rgba(0,255,170,.35);border-radius:12px;padding:12px;cursor:pointer;
+}
+.uc-chip:hover{border-color:var(--green);box-shadow:0 0 18px rgba(0,255,170,.15)}
+.uc-chip .addr{font-weight:700;font-size:13px;margin-bottom:6px}
+.uc-chip .meta{font-size:12px;color:var(--muted)}
+/* ============ HIT LIST (Nov 11) ============ */
+.hit-row{
+  display:grid;grid-template-columns:28px 1fr auto auto auto auto;gap:12px;align-items:center;
+  padding:10px 4px;border-bottom:1px solid rgba(0,212,255,.08);font-size:13px;cursor:pointer;
+}
+.hit-row:hover{background:rgba(0,212,255,.05)}
+.hit-row .rank{font-size:18px;font-weight:800;color:var(--accent);text-align:center}
+.hit-row .addr{font-weight:700}
+.hit-row .sub{font-size:11px;color:var(--muted);margin-top:2px}
+.hit-row .amt{text-align:right}
+.hit-row .amt .k{font-size:10px;color:var(--muted);text-transform:uppercase}
+.hit-row .amt .v{font-weight:700}
+.mini-btn{
+  background:rgba(0,212,255,.12);border:1px solid rgba(0,212,255,.35);color:var(--accent);
+  border-radius:8px;padding:6px 10px;cursor:pointer;font-size:12px;font-weight:700;white-space:nowrap;
+}
+.mini-btn:hover{background:rgba(0,212,255,.22)}
+/* ============ MODALS: OFFER MODE + DEAL SHEET (Nov 11) ============ */
+.cc-modal{
+  display:none;position:fixed;inset:0;z-index:200;background:rgba(2,6,16,.82);
+  backdrop-filter:blur(4px);overflow-y:auto;padding:40px 16px;
+}
+.cc-modal.open{display:block}
+.cc-modal-box{
+  max-width:680px;margin:0 auto;background:linear-gradient(160deg, rgba(13,25,48,.97), rgba(8,16,34,.97));
+  border:1px solid var(--line);border-radius:16px;padding:24px;
+  box-shadow:0 0 40px rgba(0,212,255,.2);
+}
+.cc-modal-box h3{font-size:18px;margin-bottom:4px}
+.cc-modal-box .close-x{float:right;cursor:pointer;color:var(--muted);font-size:20px;line-height:1}
+.cc-modal-box .close-x:hover{color:var(--accent)}
+.offer-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin:14px 0}
+.ds-table{width:100%;border-collapse:collapse;font-size:13px;margin:10px 0}
+.ds-table td{padding:7px 4px;border-bottom:1px solid rgba(0,212,255,.1)}
+.ds-table td:first-child{color:var(--muted);width:38%}
+.ds-table td:last-child{font-weight:700;text-align:right}
+/* ============ ⌘K SEARCH (Nov 11) ============ */
+#cmdkOverlay{display:none;position:fixed;inset:0;z-index:300;background:rgba(2,6,16,.8);backdrop-filter:blur(4px);padding:12vh 16px 16px}
+#cmdkOverlay.open{display:block}
+#cmdkBox{
+  max-width:620px;margin:0 auto;background:linear-gradient(160deg, rgba(13,25,48,.97), rgba(8,16,34,.97));
+  border:1px solid var(--line);border-radius:16px;overflow:hidden;
+  box-shadow:0 0 40px rgba(0,212,255,.25);
+}
+#cmdkInput{
+  width:100%;background:transparent;border:none;border-bottom:1px solid var(--line);
+  padding:16px 18px;color:var(--text);font-size:16px;outline:none;
+}
+#cmdkResults{max-height:52vh;overflow-y:auto;padding:8px}
+.cmdk-group{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;padding:10px 10px 4px}
+.cmdk-item{padding:9px 10px;border-radius:8px;cursor:pointer;font-size:13px}
+.cmdk-item:hover,.cmdk-item.sel{background:rgba(0,212,255,.12)}
+.cmdk-item .sub{font-size:11px;color:var(--muted);margin-top:2px}
+/* ============ PRINT: DEAL SHEET ONLY (Nov 11) ============ */
+#dealSheetPrint{display:none}
+@media print{
+  body{background:#fff!important;color:#000!important}
+  body *{visibility:hidden}
+  #dealSheetPrint,#dealSheetPrint *{visibility:visible}
+  #dealSheetPrint{
+    display:block!important;position:absolute;inset:0;padding:24px;
+    color:#000;background:#fff;font-family:Arial,Helvetica,sans-serif;
+  }
+  #dealSheetPrint h1{font-size:20px;margin-bottom:4px}
+  #dealSheetPrint table{width:100%;border-collapse:collapse;font-size:13px;margin:12px 0}
+  #dealSheetPrint td,#dealSheetPrint th{border-bottom:1px solid #ccc;padding:6px 4px;text-align:left}
+  #dealSheetPrint td:last-child,#dealSheetPrint th:last-child{text-align:right}
+}
 </style>
 <script>
 /* White-label branding hook — additive, fails safe to Troy's defaults.
    Same pattern as index.html: fetches public client config (companyName,
    logo, primaryColor) from /.netlify/functions/client-config based on the
    request subdomain, then applies branding. Secrets are never exposed by
-   that function. NOTE: unknown subdomains currently fall back to Troy's
-   config server-side (client-config.js) — a neutral default for unknown
-   subdomains is a follow-up, not changed here. */
+   that function. Unknown subdomains get the NEUTRAL default
+   server-side (clients/_default.json: "Command Center", no logo) —
+   never Troy's config. An empty logo hides the logo img so Troy's logo
+   never shows on a neutral subdomain. The DEFAULTS below apply ONLY
+   when the config fetch itself fails entirely. */
 (function () {
   var DEFAULTS = { companyName: 'Direct Property Buyers', logo: '/assets/dpb-logo.png', primaryColor: '#00d4ff' };
   function applyBrand(cfg) {
@@ -156,7 +255,13 @@ a{color:var(--accent)}
       var sub = document.getElementById('ccBrandName');
       if (sub) sub.textContent = name;
       var logoImg = document.getElementById('ccBrandLogo');
-      if (logoImg && cfg.logo) logoImg.src = cfg.logo;
+      if (logoImg) {
+        // Empty logo = neutral client: hide the img instead of leaving
+        // Troy's hardcoded logo src visible on a stranger's subdomain.
+        if (cfg.logo) { logoImg.src = cfg.logo; logoImg.style.display = ''; }
+        else { logoImg.style.display = 'none'; }
+        logoImg.alt = name;
+      }
     } catch (e) { /* branding must never break the page */ }
   }
   function fallback() { applyBrand(DEFAULTS); }
@@ -191,6 +296,7 @@ a{color:var(--accent)}
   <a href="/index.html" title="Master Buyers lives on the dashboard">📋 Master Buyers</a>
   <a href="/index.html" title="Deal Rooms live on the dashboard">🏘️ Deal Rooms</a>
   <a href="/bread-hl.html">🍞 Bread HL</a>
+  <button class="mini-btn" onclick="cmdkOpen()" title="Quick search — leads, deals, buyers (Cmd/Ctrl+K)">⌘K Search</button>
 </nav>
 <div id="feedErrors" class="err" style="display:none;padding:12px 28px 0"></div>
 
@@ -201,8 +307,38 @@ a{color:var(--accent)}
   <div class="pipe-card"><div class="label">🔥 New Leads</div><div class="num" id="pipeLeads">—</div><div class="hint">In pipeline</div></div>
 </div>
 
+<!-- UNDER CONTRACT STRIP (Nov 11) — deals in contract stages, from the
+     overview feed (stage names resolved server-side via the pipelines
+     endpoint). Click a deal for its Deal Sheet. -->
+<div style="padding:0 28px 20px">
+  <div class="panel" style="padding:16px 20px">
+    <h2 style="margin-bottom:10px">🤝 Under Contract <span style="font-size:12px;color:var(--muted);font-weight:400" id="ucStripCount"></span></h2>
+    <div class="uc-strip" id="ucStrip"><div class="loading" style="padding:10px">Loading contracts…</div></div>
+    <div style="font-size:11px;color:var(--muted2)" id="ucStripNote"></div>
+  </div>
+</div>
+
 <div class="cc-grid">
   <div class="cc-main">
+    <!-- KPI DASHBOARD (Nov 11) — every KPI the feed can compute is
+         computed; anything the data does not exist for shows "—" with
+         the missing source named. Nothing here is invented: no spend
+         feed exists, so cost-per-lead/deal cannot be computed; no
+         per-rep field exists in the CRM, so no per-rep scorecard. -->
+    <div class="panel" id="kpiPanel">
+      <h2>📊 KPI Dashboard <span class="refresh" onclick="loadOverview()">↻</span></h2>
+      <div class="kpi-grid" id="kpiGrid"><div class="loading">Loading KPIs…</div></div>
+      <div style="margin-top:16px">
+        <div style="font-weight:700;font-size:13px;margin-bottom:6px">Deals by stage <span style="font-weight:400;color:var(--muted);font-size:12px" id="stageCapLabel"></span></div>
+        <div class="stage-bars" id="stageBars"><div class="loading">Loading…</div></div>
+      </div>
+      <div style="margin-top:16px">
+        <div style="font-weight:700;font-size:13px;margin-bottom:6px">Leads by source signal <span style="font-weight:400;color:var(--muted);font-size:12px">(top 9 loaded leads only — no spend per source exists, so ROI cannot be computed)</span></div>
+        <table class="kpi-table"><thead><tr><th>Source signal</th><th>Leads</th><th>Spend</th><th>ROI</th></tr></thead><tbody id="sourceRows"><tr><td colspan="4" class="na">Loading…</td></tr></tbody></table>
+      </div>
+      <div style="font-size:11px;color:var(--muted2);margin-top:14px;line-height:1.5" id="kpiFootnotes"></div>
+    </div>
+
     <!-- STATS -->
     <div class="stats-row">
       <div class="stat"><div class="n" id="statClosedVolume">$—</div><div class="l">Closed Volume</div></div>
@@ -219,6 +355,16 @@ a{color:var(--accent)}
       <div class="leads-grid" id="leadsGrid"><div class="loading">Loading pipeline leads…</div></div>
     </div>
 
+    <!-- HIT LIST (Nov 11) — the 5 hottest leads, ranked, one line each.
+         Same scored leads as Hot Leads, but compact: rank, score, ARV /
+         MAO / LAO where present, and one-tap Offer Mode / Deal Sheet.
+         No new lookup runs here — values come from the feed + cache. -->
+    <div class="panel">
+      <h2>🎯 Hit List — Top 5 <span class="refresh" onclick="loadOverview()">↻</span></h2>
+      <div style="font-size:12px;color:var(--muted);margin:-8px 0 12px">Hottest first by score. Offer opens Offer Mode; Sheet opens the printable Deal Sheet. Both use values already on file — no new lookup.</div>
+      <div id="hitListBody"><div class="loading">Loading hit list…</div></div>
+    </div>
+
     <!-- SUBJECT PROPERTY -->
     <div class="panel">
       <h2>🏠 Subject Property Analysis</h2>
@@ -231,6 +377,7 @@ a{color:var(--accent)}
           <option value="50000">Heavy repairs · $50K</option>
         </select>
         <button class="btn" id="analyzeBtn" onclick="analyzeSubject()">Analyze</button>
+        <button class="btn" id="offerModeBtn" onclick="openOfferModeSubject()" title="Focused offer view for the analyzed property — MAO/LAO, repairs tier, ARV source">💰 Offer</button>
       </div>
       <div id="subjResult"><div class="empty">Enter an address above to pull live property data, comps, and owner portfolio.</div></div>
     </div>
@@ -264,8 +411,47 @@ a{color:var(--accent)}
   </div>
 </div>
 
+<!-- OFFER MODE (Nov 11) — focused offer view for one lead/deal -->
+<div class="cc-modal" id="offerModal">
+  <div class="cc-modal-box">
+    <span class="close-x" onclick="closeOfferMode()">✕</span>
+    <h3>💰 Offer Mode</h3>
+    <div style="font-size:12px;color:var(--muted)" id="offerAddrLine"></div>
+    <div id="offerBody"></div>
+    <div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap">
+      <button class="btn" id="offerSheetBtn" onclick="offerModeToDealSheet()">🖨️ Deal Sheet</button>
+      <button class="mini-btn" onclick="closeOfferMode()">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- DEAL SHEET (Nov 11) — one-deal summary, printable -->
+<div class="cc-modal" id="dealSheetModal">
+  <div class="cc-modal-box">
+    <span class="close-x" onclick="closeDealSheet()">✕</span>
+    <h3>📄 Deal Sheet</h3>
+    <div id="dealSheetBody"><div class="loading">Loading…</div></div>
+    <div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap">
+      <button class="btn" onclick="window.print()">🖨️ Print</button>
+      <button class="mini-btn" onclick="closeDealSheet()">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Print-only Deal Sheet: window.print() renders ONLY this section -->
+<div id="dealSheetPrint"></div>
+
+<!-- ⌘K SEARCH (Nov 11) — quick search over loaded leads, deals, buyers -->
+<div id="cmdkOverlay" onclick="if(event.target===this)cmdkClose()">
+  <div id="cmdkBox">
+    <input id="cmdkInput" type="text" placeholder="Search leads, deals, buyers…  (Esc to close)" autocomplete="off" oninput="cmdkOnInput()">
+    <div id="cmdkResults"><div class="cmdk-group">Type to search — leads &amp; deals from this page, buyers from the 28,670-buyer index (loads once, on first search).</div></div>
+  </div>
+</div>
+
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="assets/offer-math.js"></script>
+<script src="assets/buyer-match-score.js"></script>
 <script src="subject-lookup.js"></script>
 <script src="assets/sellability.js"></script>
 <script>
@@ -361,15 +547,20 @@ async function loadOverview(){
     // Stats — "Closed Volume" is gross closed volume (sum of closed
     // monetaryValue), NOT profit: no fee/cost data exists to compute
     // real profit, so the label says what it is. Close Rate is closed ÷
-    // first-100 opps (the HL search caps at 100) — labelled as capped
-    // whenever the feed hit 100.
+    // fetched opps (cc-data.js pages up to 1,000 now) — labelled with
+    // the fetched count whenever HL's total exceeds what was fetched.
     document.getElementById('statClosedVolume').textContent=fmtMoney(d.closedVolume);
     document.getElementById('statCloseRate').textContent=d.closeRate+'%';
-    document.getElementById('statCloseRateLabel').textContent=d.closeRateCapped?'Close Rate · first 100 opps':'Close Rate';
+    document.getElementById('statCloseRateLabel').textContent=d.closeRateCapped?('Close Rate · first '+(d.oppsFetched||d.totalOpps||100)+' opps'):'Close Rate';
     document.getElementById('statClosed').textContent=d.closedCount;
     // Hot leads — renders from the feed + cached enrichment only. The
     // 60s refresh NEVER triggers a property lookup.
     renderHotLeads(d.newLeads||[]);
+    // KPI dashboard, Under Contract strip, Hit List — all from the same
+    // feed payload, no extra calls.
+    renderKpis(d);
+    renderContractStrip(d.underContractDeals||[], (d.errors||{}).opps);
+    renderHitList(window._ccLeadCards||[]);
     // Appointments
     renderAppointments(d.todayAppointments||[]);
     // Recent replies
@@ -379,8 +570,575 @@ async function loadOverview(){
   }catch(e){
     setFeedHealth({overview:String(e.message||e).slice(0,100)});
     document.getElementById('leadsGrid').innerHTML='<div class="err">Could not load pipeline data: '+esc(e.message)+'</div>';
+    renderKpis(null);
+    renderContractStrip([], 'overview failed: '+String(e.message||e).slice(0,80));
+    renderHitList([]);
   }
 }
+
+/* ============ KPI DASHBOARD (Nov 11) ============
+   Pure computation from the overview feed. Anything the feed cannot
+   support shows value:null and a `needs` note naming the missing
+   source — never $0, never an invented number.
+   - Cost per lead / cost per deal: need a marketing spend feed (HL
+     wallet transactions + SMS volume for the same period). No spend
+     data reaches this page, so both are "—".
+   - Per-rep scorecard: no owner/rep field exists on opportunities or
+     contacts in the CRM, and the dashboard has no roles/permissions,
+     so there is nothing to attribute. "—".
+   - Per-source ROI: leads carry distress-signal tags but no spend per
+     source exists, so ROI is "—"; lead counts by signal ARE computable
+     from the loaded leads (labelled top-9-only).
+   - Close rate / deals by stage: computable from the feed, labelled
+     "first 100 opps" whenever the feed hit its 100-opportunity cap. */
+function computeKpis(feed){
+  const hasFeed=!!feed;
+  const f=feed||{};
+  const totalOpps=Number(f.totalOpps)||0;
+  const capped=!!f.closeRateCapped;
+  const closed=Number(f.closedCount)||0;
+  const under=Number(f.underContract)||0;
+  const leads=Number(f.newLeadsCount)||0;
+  const closeRate=(hasFeed&&totalOpps>0)?Math.round(closed/totalOpps*100):null;
+  const closedVolume=hasFeed?Number(f.closedVolume)||0:null;
+  // Leads by distress-signal tag, from the loaded leads only.
+  const sigCounts={};
+  (f.newLeads||[]).forEach(function(l){
+    (l.listSignals||[]).forEach(function(s){
+      const k=String(s||'').trim();
+      if(k)sigCounts[k]=(sigCounts[k]||0)+1;
+    });
+  });
+  const perSource=Object.keys(sigCounts).sort(function(a,b){return sigCounts[b]-sigCounts[a];}).map(function(k){
+    return {signal:k,leads:sigCounts[k],spend:null,roi:null};
+  });
+  return {
+    costPerLead:{value:null,needs:'Needs a marketing spend feed — HL wallet transactions + SMS volume for the same period. No spend data reaches this page today.'},
+    costPerDeal:{value:null,needs:'Needs a marketing spend feed + closed deals over the same period. Neither exists on this page yet.'},
+    closeRate:{value:closeRate,capped:capped,label:capped?'Close Rate · first 100 opps':'Close Rate',needs:(!hasFeed?'Opportunity feed did not load.':(totalOpps===0?'Opportunity feed returned no deals.':null))},
+    closedVolume:{value:closedVolume,needs:!hasFeed?'Opportunity feed did not load.':null},
+    closedCount:{value:hasFeed?closed:null,needs:!hasFeed?'Opportunity feed did not load.':null},
+    dealsByStage:{isNew:leads,underContract:under,closed:closed,total:totalOpps,capped:capped},
+    perSource:perSource,
+    perRep:{value:null,needs:'Needs per-rep attribution — no owner/rep field exists on opportunities or contacts in the CRM, and the dashboard has no roles/permissions.'},
+    knownCosts:'Known fixed costs (billing facts, not a live feed): PropertyReach Core + API $129/mo. SMS ≈ $0.021/msg. Cost per lead/deal still needs actual spend over a period.'
+  };
+}
+function renderKpis(feed){
+  const k=computeKpis(feed);
+  const grid=document.getElementById('kpiGrid');
+  if(!grid)return;
+  function card(label,valHtml,note){
+    return '<div class="kpi-card"><div class="k">'+esc(label)+'</div><div class="v'+(valHtml==='—'?' na':'')+'">'+valHtml+'</div>'
+      +(note?'<div class="needs">'+esc(note)+'</div>':'')+'</div>';
+  }
+  grid.innerHTML=
+    card('Cost per Lead','—',k.costPerLead.needs)
+    +card('Cost per Deal','—',k.costPerDeal.needs)
+    +card(k.closeRate.label,k.closeRate.value==null?'—':k.closeRate.value+'%',k.closeRate.needs)
+    +card('Closed Volume',k.closedVolume.value==null?'—':fmtMoney(k.closedVolume.value),k.closedVolume.needs)
+    +card('Deals Closed',k.closedCount.value==null?'—':String(k.closedCount.value),k.closedCount.needs)
+    +card('Per-Rep Scorecard','—',k.perRep.needs);
+  // Deals by stage
+  const bars=document.getElementById('stageBars');
+  const cap=document.getElementById('stageCapLabel');
+  if(bars){
+    const s=k.dealsByStage;
+    const max=Math.max(1,s.isNew,s.underContract,s.closed);
+    function row(label,n){
+      const w=Math.round(n/max*100);
+      return '<div class="stage-bar"><span>'+esc(label)+'</span><span class="track"><span class="fill" style="display:block;width:'+w+'%"></span></span><span class="cnt">'+n+'</span></div>';
+    }
+    bars.innerHTML=row('New Leads',s.isNew)+row('Under Contract',s.underContract)+row('Closed',s.closed);
+  }
+  if(cap)cap.textContent=k.dealsByStage.capped?'· first 100 opps':(k.dealsByStage.total?'· '+k.dealsByStage.total+' opps':'');
+  // Per-source table
+  const tbody=document.getElementById('sourceRows');
+  if(tbody){
+    if(!k.perSource.length){
+      tbody.innerHTML='<tr><td colspan="4" class="na">No distress-signal tags on the loaded leads — per-source counts need tagged leads in the feed.</td></tr>';
+    }else{
+      tbody.innerHTML=k.perSource.map(function(r){
+        return '<tr><td>'+esc(r.signal)+'</td><td>'+r.leads+'</td><td class="na">— no spend feed</td><td class="na">—</td></tr>';
+      }).join('');
+    }
+  }
+  const foot=document.getElementById('kpiFootnotes');
+  if(foot)foot.textContent=k.knownCosts+(k.dealsByStage.capped?' Close rate and stage counts cover only the first 100 opportunities the feed returns — HL offers no verified way to page past 100.':'');
+}
+
+/* ============ UNDER CONTRACT STRIP (Nov 11) ============
+   Deals in contract stages, from the feed (stage names resolved
+   server-side). The feed CAN distinguish them when the pipelines
+   lookup succeeds; when it fails, the strip says so instead of
+   silently showing nothing. */
+function renderContractStrip(deals, oppsError){
+  const strip=document.getElementById('ucStrip');
+  const note=document.getElementById('ucStripNote');
+  const count=document.getElementById('ucStripCount');
+  if(!strip)return;
+  const list=deals||[];
+  window._ccContracts=list;
+  if(count)count.textContent=list.length?('· '+list.length+' deal'+(list.length===1?'':'s')):'';
+  if(oppsError){
+    strip.innerHTML='<div class="empty" style="padding:10px">— Stage names unavailable: the pipeline lookup failed ('+esc(String(oppsError).slice(0,80))+'). Under-contract deals cannot be distinguished until it recovers.</div>';
+    if(note)note.textContent='';
+    return;
+  }
+  if(!list.length){
+    strip.innerHTML='<div class="empty" style="padding:10px">No deals under contract in the first 100 opportunities.</div>';
+    if(note)note.textContent='Under-contract = opportunities in a stage whose name contains "under contract".';
+    return;
+  }
+  strip.innerHTML=list.map(function(d,i){
+    return '<div class="uc-chip" onclick="openDealSheetContract('+i+')">'
+      +'<div class="addr">'+esc(d.address||d.name||'—')+'</div>'
+      +'<div class="meta">'+esc(d.stage||'Under Contract')+' · '+(d.monetaryValue?fmtMoney(d.monetaryValue):'—')+(d.createdAt?' · '+timeAgo(d.createdAt):'')+'</div>'
+      +'<div class="meta" style="margin-top:4px;color:var(--accent)">Deal Sheet →</div>'
+      +'</div>';
+  }).join('');
+  if(note)note.textContent='Click a deal for its printable Deal Sheet. Stage names come from the pipelines endpoint.';
+}
+
+/* ============ HIT LIST (Nov 11) ============
+   Top 5 hottest leads, one line each — same scored leads as Hot
+   Leads, ranked hottest first. Values come from the feed + the
+   enrichment cache only; no lookup runs here. */
+function renderHitList(leads){
+  const body=document.getElementById('hitListBody');
+  if(!body)return;
+  const sorted=(leads||[]).slice().sort(function(a,b){return (Number(b.score)||0)-(Number(a.score)||0);});
+  window._ccHitList=sorted.slice(0,5);
+  if(!sorted.length){body.innerHTML='<div class="empty">No leads to rank right now.</div>';return;}
+  const cache=renderHotLeads._cache||(renderHotLeads._cache=new Map());
+  body.innerHTML=window._ccHitList.map(function(lead,i){
+    const addr=lead.address||lead.name||'';
+    const cached=addr?cache.get(addr.trim().toLowerCase()):null;
+    const resolved=resolveLeadValues(lead,cached?cached.arv:null);
+    const mao=(resolved.valueSrc==='hl'&&resolved.mao!=null)?{mao:resolved.mao,lao:resolved.lao}:calcMAO(resolved.arv,30000);
+    const moneyOrDash=function(v){return (v&&v>0)?fmtMoney(v):'—';};
+    const sigs=(lead.listSignals||[]).join(', ');
+    const warns=(lead.warnings||[]).join(', ');
+    return '<div class="hit-row" onclick="analyzeLeadAddress('+i+')" title="Tap to analyze">'
+      +'<div class="rank">#'+(i+1)+'</div>'
+      +'<div><div class="addr">'+esc(addr||lead.name||'—')+'</div>'
+      +'<div class="sub">'+esc(lead.stage||'')+(sigs?' · '+esc(sigs):'')+(warns?' · ⚠️ '+esc(warns):'')+'</div></div>'
+      +'<span class="score-badge '+scoreClass(lead.scoreLabel||'COLD')+'">'+Math.round((lead.score||0)*10)+' · '+esc(lead.scoreLabel||'COLD')+'</span>'
+      +'<div class="amt"><div class="k">ARV</div><div class="v">'+moneyOrDash(resolved.arv)+'</div></div>'
+      +'<div class="amt"><div class="k">MAO / LAO</div><div class="v">'+moneyOrDash(mao.mao)+' / '+moneyOrDash(mao.lao)+'</div></div>'
+      +'<div style="display:flex;gap:6px"><button class="mini-btn" onclick="event.stopPropagation();openOfferModeLead('+i+')">💰 Offer</button>'
+      +'<button class="mini-btn" onclick="event.stopPropagation();openDealSheetLead('+i+')">🖨️ Sheet</button></div>'
+      +'</div>';
+  }).join('');
+}
+
+/* ============ OFFER MODE (Nov 11) ============
+   Focused offer view for one lead / deal / analyzed property.
+   MAO/LAO via offerCalc (tier table, Indianapolis calibration when
+   the market matches — calibration can only LOWER MAO). AVM is never
+   presented as ARV: with no verified ARV the MAO/LAO stay "—". A
+   listed property shows PASS, never an offer. */
+function offerCalc(arv, repairs, market){
+  const a=Number(arv);
+  if(!isFinite(a)||a<=0)return{mao:null,lao:null,label:'—',source:'none'};
+  if(typeof OfferMath!=='undefined'&&OfferMath.offerMath){
+    const om=OfferMath.offerMath(a,repairs,undefined,market);
+    if(om&&om.mao!=null)return{mao:om.mao,lao:om.lao,label:om.label||'—',source:om.source||'—'};
+  }
+  const m=calcMAO(a,repairs);
+  return{mao:m.mao,lao:m.lao,label:(m.tier!=null?m.tier+'% tier':'—'),source:'tier'};
+}
+function offerCtxForLead(i){
+  const lead=(window._ccHitList||[])[i]||(window._ccLeadCards||[])[i];
+  if(!lead)return null;
+  const addr=lead.address||lead.name||'';
+  const cache=renderHotLeads._cache||(renderHotLeads._cache=new Map());
+  const cached=addr?cache.get(addr.trim().toLowerCase()):null;
+  const resolved=resolveLeadValues(lead,cached?cached.arv:null);
+  return {
+    kind:'lead',index:i,address:addr,stage:lead.stage||'',
+    score:lead.score!=null?Math.round(lead.score*10):null,scoreLabel:lead.scoreLabel||'',
+    arv:resolved.arv,
+    arvSource:resolved.valueSrc==='hl'?'Written in HighLevel (comp project)':resolved.valueSrc==='property'?'Live property lookup (enriched)':'No ARV on file',
+    listed:null,comps:null
+  };
+}
+function offerCtxForSubject(){
+  const d=window._ccLastAnalysis;
+  if(!d||!d.property)return null;
+  const p=d.property;
+  const comps=(d.comps&&d.comps.best)||[];
+  const arv=(comps.length>=3)?((d.comps&&d.comps.indication)||null):null;
+  return {
+    kind:'subject',address:p.address||window._ccLastAddr||'',stage:'',
+    score:null,scoreLabel:'',
+    arv:arv,
+    arvSource:comps.length>=3?'3 verified comps':('AVM screen only — '+comps.length+' comp'+(comps.length===1?'':'s')+', not airtight'),
+    listed:isListedProperty(p),comps:comps
+  };
+}
+function renderOfferMode(){
+  const ctx=window._ccOfferCtx;
+  const body=document.getElementById('offerBody');
+  const line=document.getElementById('offerAddrLine');
+  if(!ctx||!body)return;
+  const repairs=Number(window._ccOfferRepairs||30000);
+  const market=marketFromAddress(ctx.address);
+  const calc=offerCalc(ctx.arv,repairs,market);
+  if(line)line.textContent=ctx.address+(ctx.stage?' · '+ctx.stage:'')+(ctx.score!=null?' · Score '+ctx.score+' '+ctx.scoreLabel:'');
+  let html='';
+  if(ctx.listed===true){
+    html+='<div style="background:#3d0d0d;border:1px solid #ff4d4d;border-radius:10px;padding:12px;font-size:13px;font-weight:800;color:#ff8080;margin:12px 0">⛔ PASS — Listed with a realtor — no MAO, no LAO, no offer</div>';
+  }else if(ctx.listed===null&&ctx.kind==='lead'){
+    html+='<div style="font-size:12px;color:var(--muted);margin:12px 0">⚠️ Listing status not confirmed for this lead — verify on Zillow before offering.</div>';
+  }
+  html+='<div style="margin:12px 0"><label style="font-size:12px;color:var(--muted)">Repairs tier</label><br>'
+    +'<select id="offerRepairs" class="repairs-select" style="margin-top:6px" onchange="window._ccOfferRepairs=this.value;renderOfferMode()">'
+    +'<option value="15000"'+(repairs===15000?' selected':'')+'>Light repairs · $15K</option>'
+    +'<option value="30000"'+(repairs===30000?' selected':'')+'>Medium repairs · $30K</option>'
+    +'<option value="50000"'+(repairs===50000?' selected':'')+'>Heavy repairs · $50K</option>'
+    +'</select></div>';
+  const moneyOrDash=function(v){return (v&&v>0)?fmtMoney(v):'—';};
+  html+='<div class="offer-grid">'
+    +'<div class="calc-box"><div class="k">ARV</div><div class="v">'+moneyOrDash(ctx.arv)+'</div><div style="font-size:11px;color:var(--muted);margin-top:4px">'+esc(ctx.arvSource)+'</div></div>'
+    +'<div class="calc-box"><div class="k">MAO ('+esc(calc.label)+')</div><div class="v">'+(ctx.listed===true?'— PASS —':moneyOrDash(calc.mao))+'</div></div>'
+    +'<div class="calc-box"><div class="k">LAO (70%)</div><div class="v">'+(ctx.listed===true?'— PASS —':moneyOrDash(calc.lao))+'</div></div>'
+    +'</div>';
+  if(!ctx.arv){
+    html+='<div style="font-size:12px;color:var(--muted)">No verified ARV on file for this lead — MAO/LAO are withheld. Run Analyze on the address (or Enrich the card) to get a 3-comp ARV first.</div>';
+  }else if(ctx.arvSource.indexOf('AVM')===0){
+    html+='<div style="font-size:12px;color:var(--muted)">The value above is an AVM screen, not an airtight ARV — MAO/LAO are withheld until 3 verified comps exist.</div>';
+  }else{
+    html+='<div style="font-size:12px;color:var(--muted)">Repairs: '+esc(repairsLabel(repairs))+(market?' · '+esc(market)+' calibration':' · not calibrated for this market')+'. MAO = (ARV − repairs) × '+esc(calc.label)+'; LAO = MAO × 70%.</div>';
+  }
+  body.innerHTML=html;
+}
+function openOfferModeLead(i){
+  const ctx=offerCtxForLead(i);
+  if(!ctx)return;
+  window._ccOfferCtx=ctx;
+  window._ccOfferRepairs=30000;
+  renderOfferMode();
+  document.getElementById('offerModal').classList.add('open');
+}
+function openOfferModeSubject(){
+  const ctx=offerCtxForSubject();
+  if(!ctx){
+    const out=document.getElementById('subjResult');
+    if(out)out.innerHTML='<div class="err">Analyze an address first — Offer Mode needs a property analysis to work from.</div>';
+    return;
+  }
+  window._ccOfferCtx=ctx;
+  window._ccOfferRepairs=Number((document.getElementById('subjRepairs')||{}).value||30000);
+  renderOfferMode();
+  document.getElementById('offerModal').classList.add('open');
+}
+function closeOfferMode(){
+  const m=document.getElementById('offerModal');
+  if(m)m.classList.remove('open');
+}
+function offerModeToDealSheet(){
+  const ctx=window._ccOfferCtx;
+  closeOfferMode();
+  if(!ctx)return;
+  if(ctx.kind==='lead')openDealSheetLead(ctx.index);
+  else if(ctx.kind==='subject')openDealSheetSubject();
+}
+
+/* ============ PRINTABLE DEAL SHEET (Nov 11) ============
+   One-deal summary: address, ARV (+source), MAO/LAO, comps, buyer
+   matches. Comps come from the last Analyze on the same address —
+   otherwise "—". Buyer matches are scored client-side from the
+   28,670-buyer index (assets/master-buyers.js, lazy-loaded once)
+   with the dashboard's own buyer-match-score.js — $0, no credits,
+   no live lookups. Verified status is NOT passed (no verified map
+   is loaded on this page), so the Verified bucket scores 0 and the
+   sheet says so. */
+function parseAddressParts(addr){
+  const parts=String(addr||'').split(',').map(function(s){return s.trim();}).filter(Boolean);
+  if(parts.length<2)return{city:null,state:null,zip:null};
+  const city=parts[parts.length-2];
+  const stZip=parts[parts.length-1].split(/\s+/);
+  return{city:city,state:stZip[0]||null,zip:stZip[1]||null};
+}
+let _ccBuyers=null,_ccBuyersPromise=null;
+function loadMasterBuyersCc(){
+  if(_ccBuyers)return Promise.resolve(_ccBuyers);
+  if(_ccBuyersPromise)return _ccBuyersPromise;
+  _ccBuyersPromise=new Promise(function(resolve){
+    if(typeof window!=='undefined'&&window.MASTER_BUYERS){_ccBuyers=window.MASTER_BUYERS;resolve(_ccBuyers);return;}
+    try{
+      const s=document.createElement('script');
+      s.src='assets/master-buyers.js';
+      s.onload=function(){_ccBuyers=(typeof window!=='undefined'&&window.MASTER_BUYERS)||[];resolve(_ccBuyers);};
+      s.onerror=function(){resolve([]);};
+      document.head.appendChild(s);
+    }catch(e){resolve([]);}
+  });
+  return _ccBuyersPromise;
+}
+async function matchBuyersForSheet(deal){
+  try{
+    const buyers=await loadMasterBuyersCc();
+    if(!buyers||!buyers.length)return null;
+    if(typeof BuyerMatchScore==='undefined'||!BuyerMatchScore.rankBuyers)return null;
+    const ranked=BuyerMatchScore.rankBuyers(deal,buyers);
+    return ranked.slice(0,5).map(function(r){
+      const b=r.buyer||{};
+      const m=r.match||{};
+      return{
+        name:b.n||b.name||'—',
+        city:b.c||b.city||'',state:b.s||b.state||'',
+        phone:b.p||((b.ph||[])[0]?((Array.isArray((b.ph||[])[0])?(b.ph||[])[0][0]:(b.ph||[])[0].phone)||''):''), 
+        avgPurchase:b.ap||b.avgPurchase||null,
+        score:m.score!=null?m.score:0,label:m.label||'',
+        reasons:(m.topReasons||[]).slice(0,3)
+      };
+    });
+  }catch(e){return null;}
+}
+function buildDealSheetData(input){
+  const inp=input||{};
+  const comps=Array.isArray(inp.comps)?inp.comps:[];
+  return {
+    address:inp.address||'—',
+    stage:inp.stage||'',
+    score:inp.score!=null?inp.score:null,
+    scoreLabel:inp.scoreLabel||'',
+    arv:inp.arv!=null?Number(inp.arv):null,
+    arvSource:inp.arvSource||'No ARV on file',
+    mao:inp.mao!=null?Number(inp.mao):null,
+    lao:inp.lao!=null?Number(inp.lao):null,
+    maoLabel:inp.maoLabel||'',
+    repairsLabel:inp.repairsLabel||'',
+    listed:inp.listed===true,
+    contractValue:inp.contractValue!=null?Number(inp.contractValue):null,
+    comps:comps.map(function(c){return{address:c.address||'—',amount:Number(c.amount)||null,date:c.date||''};}),
+    buyerMatches:inp.buyerMatches||null,
+    buyerMatchesNote:inp.buyerMatchesNote||'',
+    generatedAt:new Date().toISOString()
+  };
+}
+function renderDealSheet(sheet){
+  const moneyOrDash=function(v){return (v&&v>0)?fmtMoney(v):'—';};
+  const compRows=sheet.comps.length
+    ?sheet.comps.map(function(c){return '<tr><td>'+esc(c.address)+'</td><td>'+esc(c.date||'')+'</td><td>'+moneyOrDash(c.amount)+'</td></tr>';}).join('')
+    :'<tr><td colspan="3" style="color:var(--muted)">— No comps loaded for this address. Run Analyze on it first for a 3-comp ARV.</td></tr>';
+  const buyerRows=(sheet.buyerMatches&&sheet.buyerMatches.length)
+    ?sheet.buyerMatches.map(function(b){
+        return '<tr><td>'+esc(b.name)+'<div style="font-weight:400;color:var(--muted);font-size:11px">'+esc([b.city,b.state].filter(Boolean).join(', '))+(b.phone?' · '+esc(b.phone):'')+'</div></td>'
+          +'<td>'+esc(b.label||'')+' '+b.score+'</td><td>'+moneyOrDash(b.avgPurchase)+'</td></tr>'
+          +'<tr><td colspan="3" style="font-weight:400;color:var(--muted);font-size:11px;border-bottom:1px solid rgba(0,212,255,.1)">'+esc((b.reasons||[]).join(' · '))+'</td></tr>';
+      }).join('')
+    :'<tr><td colspan="3" style="color:var(--muted)">— '+(esc(sheet.buyerMatchesNote||'Buyer matches unavailable.'))+'</td></tr>';
+  const bodyHtml=
+    '<table class="ds-table">'
+    +'<tr><td>Address</td><td>'+esc(sheet.address)+'</td></tr>'
+    +(sheet.stage?'<tr><td>Stage</td><td>'+esc(sheet.stage)+'</td></tr>':'')
+    +(sheet.score!=null?'<tr><td>Score</td><td>'+sheet.score+' · '+esc(sheet.scoreLabel)+'</td></tr>':'')
+    +'<tr><td>ARV</td><td>'+moneyOrDash(sheet.arv)+' <span style="font-weight:400;color:var(--muted);font-size:11px">('+esc(sheet.arvSource)+')</span></td></tr>'
+    +'<tr><td>MAO'+(sheet.maoLabel?' ('+esc(sheet.maoLabel)+')':'')+'</td><td>'+(sheet.listed?'— PASS —':moneyOrDash(sheet.mao))+'</td></tr>'
+    +'<tr><td>LAO (70%)</td><td>'+(sheet.listed?'— PASS —':moneyOrDash(sheet.lao))+'</td></tr>'
+    +(sheet.repairsLabel?'<tr><td>Repairs</td><td>'+esc(sheet.repairsLabel)+'</td></tr>':'')
+    +(sheet.contractValue?'<tr><td>Contract value</td><td>'+fmtMoney(sheet.contractValue)+'</td></tr>':'')
+    +'</table>'
+    +(sheet.listed?'<div style="background:#3d0d0d;border:1px solid #ff4d4d;border-radius:10px;padding:12px;font-size:13px;font-weight:800;color:#ff8080;margin:10px 0">⛔ PASS — Listed with a realtor — no offer</div>':'')
+    +'<div style="font-weight:700;margin:14px 0 6px">📊 Comps ('+sheet.comps.length+')</div>'
+    +'<table class="ds-table"><tr><td style="color:var(--muted)">Address</td><td style="color:var(--muted)">Date</td><td style="color:var(--muted)">Sale price</td></tr>'+compRows+'</table>'
+    +'<div style="font-weight:700;margin:14px 0 6px">🏘️ Top buyer matches</div>'
+    +'<table class="ds-table"><tr><td style="color:var(--muted)">Buyer</td><td style="color:var(--muted)">Match</td><td style="color:var(--muted)">Avg purchase</td></tr>'+buyerRows+'</table>'
+    +'<div style="font-size:11px;color:var(--muted);margin-top:10px">Generated '+esc(new Date(sheet.generatedAt).toLocaleString())+' · Direct Property Buyers Command Center · ARV is a 3-comp indication only; an AVM screen is never an airtight ARV.</div>';
+  const modal=document.getElementById('dealSheetBody');
+  if(modal)modal.innerHTML=bodyHtml;
+  // Print-only copy: same facts, plain black-on-white.
+  const printEl=document.getElementById('dealSheetPrint');
+  if(printEl){
+    printEl.innerHTML='<h1>Deal Sheet — '+esc(sheet.address)+'</h1>'
+      +'<div style="font-size:12px;color:#555">Generated '+esc(new Date(sheet.generatedAt).toLocaleString())+' · Direct Property Buyers</div>'
+      +'<table><tr><td>Stage</td><td>'+esc(sheet.stage||'—')+'</td></tr>'
+      +'<tr><td>Score</td><td>'+(sheet.score!=null?sheet.score+' · '+esc(sheet.scoreLabel):'—')+'</td></tr>'
+      +'<tr><td>ARV</td><td>'+moneyOrDash(sheet.arv)+' ('+esc(sheet.arvSource)+')</td></tr>'
+      +'<tr><td>MAO'+(sheet.maoLabel?' ('+esc(sheet.maoLabel)+')':'')+'</td><td>'+(sheet.listed?'— PASS —':moneyOrDash(sheet.mao))+'</td></tr>'
+      +'<tr><td>LAO (70%)</td><td>'+(sheet.listed?'— PASS —':moneyOrDash(sheet.lao))+'</td></tr>'
+      +(sheet.repairsLabel?'<tr><td>Repairs</td><td>'+esc(sheet.repairsLabel)+'</td></tr>':'')
+      +(sheet.contractValue?'<tr><td>Contract value</td><td>'+fmtMoney(sheet.contractValue)+'</td></tr>':'')
+      +'</table>'
+      +(sheet.listed?'<p><strong>⛔ PASS — Listed with a realtor — no offer</strong></p>':'')
+      +'<h3>Comps ('+sheet.comps.length+')</h3><table><tr><th>Address</th><th>Date</th><th>Sale price</th></tr>'
+      +(sheet.comps.length?sheet.comps.map(function(c){return '<tr><td>'+esc(c.address)+'</td><td>'+esc(c.date||'')+'</td><td>'+moneyOrDash(c.amount)+'</td></tr>';}).join(''):'<tr><td colspan="3">— No comps loaded for this address.</td></tr>')
+      +'</table>'
+      +'<h3>Top buyer matches</h3><table><tr><th>Buyer</th><th>Match</th><th>Avg purchase</th></tr>'
+      +((sheet.buyerMatches&&sheet.buyerMatches.length)?sheet.buyerMatches.map(function(b){return '<tr><td>'+esc(b.name)+' — '+esc([b.city,b.state].filter(Boolean).join(', '))+(b.phone?' · '+esc(b.phone):'')+'<br><span style="font-size:11px;color:#555">'+esc((b.reasons||[]).join(' · '))+'</span></td><td>'+esc(b.label||'')+' '+b.score+'</td><td>'+moneyOrDash(b.avgPurchase)+'</td></tr>';}).join(''):'<tr><td colspan="3">— '+(esc(sheet.buyerMatchesNote||'Buyer matches unavailable.'))+'</td></tr>')
+      +'</table>';
+  }
+}
+function dealSheetCompsFor(address){
+  const d=window._ccLastAnalysis;
+  if(!d||!d.property)return null;
+  const a=String(address||'').trim().toLowerCase();
+  const b=String(d.property.address||window._ccLastAddr||'').trim().toLowerCase();
+  if(!a||!b||a!==b)return null;
+  return (d.comps&&d.comps.best)||[];
+}
+async function openDealSheetFor(input){
+  const modal=document.getElementById('dealSheetModal');
+  if(modal)modal.classList.add('open');
+  // Render immediately with buyer matches pending, then fill them in.
+  let sheet=buildDealSheetData(Object.assign({},input,{buyerMatches:null,buyerMatchesNote:'Loading buyer matches…'}));
+  renderDealSheet(sheet);
+  const parts=parseAddressParts(input.address);
+  const deal={city:parts.city,state:parts.state,zip:parts.zip,price:input.mao||input.arv||null,propertyType:''};
+  const matches=await matchBuyersForSheet(deal);
+  sheet=buildDealSheetData(Object.assign({},input,{
+    buyerMatches:matches,
+    buyerMatchesNote:matches?'':'Buyer matches unavailable — the buyer index or match module did not load. Verified status is not passed on this page, so the Verified bucket scores 0.'
+  }));
+  renderDealSheet(sheet);
+}
+function openDealSheetLead(i){
+  const lead=(window._ccHitList||[])[i]||(window._ccLeadCards||[])[i];
+  if(!lead)return;
+  const addr=lead.address||lead.name||'';
+  const cache=renderHotLeads._cache||(renderHotLeads._cache=new Map());
+  const cached=addr?cache.get(addr.trim().toLowerCase()):null;
+  const resolved=resolveLeadValues(lead,cached?cached.arv:null);
+  const mao=(resolved.valueSrc==='hl'&&resolved.mao!=null)?{mao:resolved.mao,lao:resolved.lao,label:'HL values'}:calcMAO(resolved.arv,30000);
+  const comps=dealSheetCompsFor(addr);
+  openDealSheetFor({
+    address:addr,stage:lead.stage||'',
+    score:lead.score!=null?Math.round(lead.score*10):null,scoreLabel:lead.scoreLabel||'',
+    arv:resolved.arv,
+    arvSource:resolved.valueSrc==='hl'?'Written in HighLevel (comp project)':resolved.valueSrc==='property'?'Live property lookup (enriched)':'No ARV on file',
+    mao:mao.mao,lao:mao.lao,maoLabel:mao.label||'',
+    repairsLabel:'Medium $30K',
+    listed:null,comps:comps||[]
+  });
+}
+function openDealSheetContract(i){
+  const d=(window._ccContracts||[])[i];
+  if(!d)return;
+  const addr=d.address||d.name||'';
+  const comps=dealSheetCompsFor(addr);
+  openDealSheetFor({
+    address:addr,stage:d.stage||'Under Contract',
+    score:null,scoreLabel:'',
+    arv:null,arvSource:'No ARV on the opportunity — run Analyze on the address',
+    mao:null,lao:null,maoLabel:'',repairsLabel:'Medium $30K',
+    listed:null,contractValue:d.monetaryValue||null,comps:comps||[]
+  });
+}
+function openDealSheetSubject(){
+  const d=window._ccLastAnalysis;
+  if(!d||!d.property)return;
+  const p=d.property;
+  const comps=(d.comps&&d.comps.best)||[];
+  const arv=(comps.length>=3)?((d.comps&&d.comps.indication)||null):null;
+  const market=marketFromAddress(p.address||window._ccLastAddr||'');
+  const repairs=Number((document.getElementById('subjRepairs')||{}).value||30000);
+  const om=(typeof OfferMath!=='undefined'&&OfferMath.offerMath)?OfferMath.offerMath(arv,repairs,undefined,market):null;
+  const mao=(om&&om.mao!=null)?om:calcMAO(arv,repairs);
+  openDealSheetFor({
+    address:p.address||window._ccLastAddr||'',stage:'',
+    score:null,scoreLabel:'',
+    arv:arv,
+    arvSource:comps.length>=3?'3 verified comps':('AVM screen only — '+comps.length+' comp'+(comps.length===1?'':'s')+', not airtight'),
+    mao:mao.mao,lao:mao.lao,maoLabel:mao.label||'',
+    repairsLabel:repairsLabel(repairs),
+    listed:isListedProperty(p),comps:comps
+  });
+}
+function closeDealSheet(){
+  const m=document.getElementById('dealSheetModal');
+  if(m)m.classList.remove('open');
+}
+
+/* ============ ⌘K SEARCH (Nov 11) ============
+   Quick search over data already on the page — leads, under-contract
+   deals — plus buyers from the 28,670-buyer index, which loads once
+   (assets/master-buyers.js, ~4.7MB) on first use. Client-side only:
+   no new live lookups, no credits. Cmd/Ctrl+K opens, Esc closes. */
+function cmdkSearch(query, idx){
+  const q=String(query||'').trim().toLowerCase();
+  const out={leads:[],deals:[],buyers:[]};
+  if(!q||q.length<2)return out;
+  const hay=function(parts){return parts.filter(Boolean).join(' ').toLowerCase();};
+  (idx.leads||[]).forEach(function(l){
+    if(hay([l.address,l.name,l.stage]).indexOf(q)>-1&&out.leads.length<8)out.leads.push(l);
+  });
+  (idx.deals||[]).forEach(function(d){
+    if(hay([d.address,d.name,d.stage]).indexOf(q)>-1&&out.deals.length<8)out.deals.push(d);
+  });
+  (idx.buyers||[]).forEach(function(b){
+    if(out.buyers.length>=8)return;
+    if(hay([b.n||b.name,b.c||b.city,b.s||b.state,b.z||b.zip,b.p||b.phone]).indexOf(q)>-1)out.buyers.push(b);
+  });
+  return out;
+}
+function cmdkOpen(){
+  const ov=document.getElementById('cmdkOverlay');
+  if(!ov)return;
+  ov.classList.add('open');
+  const inp=document.getElementById('cmdkInput');
+  if(inp){inp.value='';inp.focus();}
+  renderCmdk({leads:[],deals:[],buyers:[]},'');
+  // Buyer index loads once, in the background — the palette works on
+  // leads/deals immediately and buyers join when the index lands.
+  if(!window._ccCmdkBuyers){
+    loadMasterBuyersCc().then(function(list){
+      window._ccCmdkBuyers=list||[];
+      const cur=document.getElementById('cmdkInput');
+      if(cur&&cur.value.trim().length>=2)cmdkOnInput();
+    });
+  }
+}
+function cmdkClose(){
+  const ov=document.getElementById('cmdkOverlay');
+  if(ov)ov.classList.remove('open');
+}
+function cmdkOnInput(){
+  const inp=document.getElementById('cmdkInput');
+  const q=inp?inp.value:'';
+  const idx={leads:window._ccLeadCards||[],deals:window._ccContracts||[],buyers:window._ccCmdkBuyers||[]};
+  const res=cmdkSearch(q,idx);
+  window._ccCmdkResults=res;
+  renderCmdk(res,q);
+}
+function renderCmdk(res,q){
+  const box=document.getElementById('cmdkResults');
+  if(!box)return;
+  const hasQ=String(q||'').trim().length>=2;
+  if(!hasQ){
+    box.innerHTML='<div class="cmdk-group">Type to search — leads &amp; deals from this page, buyers from the 28,670-buyer index'+(window._ccCmdkBuyers?' (loaded).': ' (loading in the background…).')+'</div>';
+    return;
+  }
+  const total=(res.leads.length+res.deals.length+res.buyers.length);
+  let html='';
+  if(res.leads.length){
+    html+='<div class="cmdk-group">Leads</div>'+res.leads.map(function(l){
+      const i=(window._ccLeadCards||[]).indexOf(l);
+      return '<div class="cmdk-item" onclick="cmdkClose();analyzeLeadAddress('+i+')"><strong>'+esc(l.address||l.name||'—')+'</strong><div class="sub">'+esc(l.stage||'')+(l.score!=null?' · Score '+Math.round(l.score*10)+' '+esc(l.scoreLabel||''):'')+'</div></div>';
+    }).join('');
+  }
+  if(res.deals.length){
+    html+='<div class="cmdk-group">Under Contract</div>'+res.deals.map(function(d){
+      const i=(window._ccContracts||[]).indexOf(d);
+      return '<div class="cmdk-item" onclick="cmdkClose();openDealSheetContract('+i+')"><strong>'+esc(d.address||d.name||'—')+'</strong><div class="sub">'+esc(d.stage||'Under Contract')+(d.monetaryValue?' · '+fmtMoney(d.monetaryValue):'')+' · Deal Sheet →</div></div>';
+    }).join('');
+  }
+  if(res.buyers.length){
+    html+='<div class="cmdk-group">Buyers</div>'+res.buyers.map(function(b){
+      const name=b.n||b.name||'—';
+      const city=b.c||b.city||'',state=b.s||b.state||'',phone=b.p||b.phone||'';
+      const avg=b.ap||b.avgPurchase||null;
+      return '<a class="cmdk-item" href="/index.html" target="_blank" style="display:block;color:var(--text);text-decoration:none" title="Open Master Buyers on the dashboard"><strong>'+esc(name)+'</strong><div class="sub">'+esc([city,state].filter(Boolean).join(', '))+(phone?' · '+esc(phone):'')+(avg?' · Avg '+fmtMoney(avg):'')+'</div></a>';
+    }).join('');
+  }
+  if(!total){
+    html='<div class="empty" style="padding:16px">No matches for "'+esc(q)+'" in loaded leads, deals'+(window._ccCmdkBuyers?' or buyers':' (buyer index '+(window._ccCmdkBuyers===undefined?'still loading':'— try again in a moment')+')')+'.</div>';
+  }
+  box.innerHTML=html;
+}
+
 
 /* ============ HOT LEADS — NO AUTO-ENRICHMENT (Nov 11) ============
    The old version fired a data-api lookup (~2 PR credits) per lead,
@@ -634,7 +1392,8 @@ function renderSubjectAnalysis(d,addr){
   let html='<img class="subj-photo" src="'+esc(photo)+'" onerror="this.style.display=\'none\'" alt="Property photo">';
   html+='<div style="margin-bottom:12px"><strong style="font-size:16px">'+esc(p.address||addr)+'</strong> '
     +' <span class="score-badge '+scoreClass(ws.label)+'">🎯 '+ws.score+' · '+ws.label+'</span>'
-    +(viaBackup?' <span style="font-size:11px;color:var(--muted)">· via backup source</span>':'')+'</div>';
+    +(viaBackup?' <span style="font-size:11px;color:var(--muted)">· via backup source</span>':'')
+    +'<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap"><button class="mini-btn" onclick="openOfferModeSubject()">💰 Offer Mode</button><button class="mini-btn" onclick="openDealSheetSubject()">🖨️ Deal Sheet</button></div></div>';
   if(listed){
     html+='<div style="background:#3d0d0d;border:1px solid #ff4d4d;border-radius:10px;padding:12px;font-size:13px;font-weight:800;color:#ff8080;margin-bottom:12px">⛔ PASS — Listed with a realtor — no MAO, no LAO, no offer</div>';
   }else if(listingUnknown){
@@ -810,6 +1569,22 @@ document.addEventListener('DOMContentLoaded',()=>{
   loadAlerts();
   // Refresh every 60s
   setInterval(()=>{loadOverview();loadAlerts();},60000);
+  // ⌘K / Ctrl+K opens quick search; Esc closes overlays.
+  document.addEventListener('keydown',function(e){
+    if((e.metaKey||e.ctrlKey)&&String(e.key||'').toLowerCase()==='k'){
+      e.preventDefault();cmdkOpen();return;
+    }
+    if(e.key==='Escape'){
+      cmdkClose();closeOfferMode();closeDealSheet();
+    }
+  });
+  // Enter in the ⌘K box opens the first result.
+  const cmdkInp=document.getElementById('cmdkInput');
+  if(cmdkInp)cmdkInp.addEventListener('keydown',function(e){
+    if(e.key!=='Enter')return;
+    const first=document.querySelector('#cmdkResults .cmdk-item');
+    if(first)first.click();
+  });
 });
 </script>
 </body>

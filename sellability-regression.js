@@ -201,8 +201,8 @@ check('index.html has no stale / 100 chip', indexHtml.includes("' / 100 · '"), 
 check('index.html breakdown shows /1000 scale', indexHtml.includes("' / 1000 · '"), true);
 check('command-center.html loads sellability.js', ccHtml.includes('<script src="assets/sellability.js"></script>'), true);
 check('command-center.html has no old simple scorer', ccHtml.includes('distress+=16'), false);
-check('command-center.html breakdown shows /400', ccHtml.includes("Distress '+c.ws.distress+'/400"), true);
-check('command-center.html CRM fallback scales x10', ccHtml.includes('lead.score * 10'), true);
+check('command-center.html breakdown shows /400', ccHtml.includes("'Distress '+ws.distress+'/400"), true);
+check('command-center.html CRM fallback scales x10', ccHtml.includes('lead.score*10'), true);
 
 // ---- 13. Inline-script syntax check (parse only, never executes) ----
 console.log('Inline script syntax:');

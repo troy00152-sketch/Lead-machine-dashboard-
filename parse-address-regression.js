@@ -19,6 +19,8 @@ const cases = [
   ['1108 E 111Th St Cleveland 44108', { street: '1108 E 111Th St', city: 'Cleveland', state: '', zip: '44108' }],
   ['123 Main St, Austin, TX 78701', { street: '123 Main St', city: 'Austin', state: 'TX', zip: '78701' }],
   ['4405 E Edgewood Ave, Indianapolis, IN 46237-1234', { street: '4405 E Edgewood Ave', city: 'Indianapolis', state: 'IN', zip: '46237' }],
+  ['3928 Millersville Dr, Indianapolis, IN, 46205', { street: '3928 Millersville Dr', city: 'Indianapolis', state: 'IN', zip: '46205' }],
+  ['3928 Millersville Dr, Indianapolis, IN 46205', { street: '3928 Millersville Dr', city: 'Indianapolis', state: 'IN', zip: '46205' }],
   ['4405 E Edgewood Ave', { street: '4405 E Edgewood Ave', city: '', state: '', zip: '' }],
   ['', { street: '', city: '', state: '', zip: '' }],
 ];

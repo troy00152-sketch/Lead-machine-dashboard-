@@ -22,12 +22,20 @@
 // authorization, this returns 503 "Gmail not connected yet" and sends
 // nothing. No other email provider (no SendGrid, no SMTP password).
 //
+// The refresh-token exchange lives in ./gmail-token.js (shared with the
+// daily gmail-token-watch): one module, so the send path and the watcher
+// can never disagree about what "refresh failed" means. The watcher also
+// tracks the refresh token's expiry date — Testing-mode tokens die after
+// 7 days (~Nov 14, 2026 for the current one) — see
+// ~/workspace/playbook-system/reliability/gmail-token-runbook.md.
+//
 // Gmail API calls use Node's built-in https only — no new dependency.
 // Credential values are NEVER logged or returned in any response.
 'use strict';
 
 const crypto = require('crypto');
 const https = require('https');
+const { refreshAccessToken } = require('./gmail-token.js');
 
 const COOKIE_NAME = 'lm_auth';
 
@@ -139,36 +147,20 @@ function base64url(str) {
 }
 
 async function gmailAccessToken() {
-  const clientId = process.env.GMAIL_CLIENT_ID;
-  const clientSecret = process.env.GMAIL_CLIENT_SECRET;
-  const refreshToken = process.env.GMAIL_REFRESH_TOKEN;
-  if (!clientId || !clientSecret || !refreshToken) return null;
-  const form = new URLSearchParams({
-    grant_type: 'refresh_token',
-    client_id: clientId,
-    client_secret: clientSecret,
-    refresh_token: refreshToken,
-  }).toString();
-  const res = await postJson('https://oauth2.googleapis.com/token', {
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: form,
+  // Shared exchange (./gmail-token.js): returns null when any credential
+  // env var is missing (caller maps that to 503 "not connected"), throws
+  // a classified Error otherwise. The messages are the same user-facing
+  // strings this function used to throw inline, except a non-200 that is
+  // NOT an invalid_grant now says what actually happened (bad client
+  // credentials vs. Google unavailable) instead of always blaming the
+  // refresh token. The handler's catch passes any "Gmail ..." message
+  // through unchanged, so Troy still sees the reconnect instruction.
+  return refreshAccessToken({
+    clientId: process.env.GMAIL_CLIENT_ID,
+    clientSecret: process.env.GMAIL_CLIENT_SECRET,
+    refreshToken: process.env.GMAIL_REFRESH_TOKEN,
+    postJsonImpl: (url, opts) => postJson(url, opts),
   });
-  if (res.status !== 200) {
-    // Do not include the upstream body: it can carry token error detail.
-    throw new Error(
-      'Gmail authorization failed (refresh token rejected). Reconnect Google to restore sending.',
-    );
-  }
-  let parsed;
-  try {
-    parsed = JSON.parse(res.text);
-  } catch (e) {
-    throw new Error('Gmail authorization failed (unexpected token response).');
-  }
-  if (!parsed.access_token) {
-    throw new Error('Gmail authorization failed (no access token returned).');
-  }
-  return parsed.access_token;
 }
 
 async function gmailSend({ to, subject, body }) {
