@@ -21,6 +21,7 @@
 <script src="assets/buyer-portfolio-data.js"></script>
 <script src="assets/buyer-portfolio.js"></script>
 <script src="assets/mail.js"></script>
+<script src="assets/esign.js"></script>
 <title>Acquisition Command Center</title>
 <script>
 /* White-label branding hook — additive, fails safe to Troy's defaults.
@@ -1200,6 +1201,17 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
   <div class="modal" style="max-width:680px">
     <div class="modal-head"><h3 id="mailTitle">✉️ Send Mail</h3><button class="modal-x" onclick="closeMailSheet()">✕</button></div>
     <div class="modal-body" id="mailBody"></div>
+  </div>
+</div>
+<!-- ESIGN MODAL — in-dashboard e-sign (Nov 11). HighLevel signing surfaced
+     in the dashboard: FREE, no paid vendor, no per-signature fee. Rendered
+     by assets/esign.js: template picker + contract summary + signers +
+     fields check + send confirm. Nothing sends without Troy's confirm tap,
+     and there is no test mode for HL signing — a send is a real contract. -->
+<div class="modal-overlay" id="esignModal">
+  <div class="modal" style="max-width:680px">
+    <div class="modal-head"><h3 id="esignTitle">✍️ Send for Signature</h3><button class="modal-x" onclick="esignCloseSheet()">✕</button></div>
+    <div class="modal-body" id="esignBody"></div>
   </div>
 </div>
 <div class="modal-overlay" id="mbDetailModal">
@@ -2604,6 +2616,7 @@ function openLead(id){
       <button class="btn" onclick="matchLeadToBuyers('${l.id}')">🤝 Buyer Match Ai</button>
       <button class="btn" onclick="blastLeadToBuyers('${l.id}')">📣 Blast</button>
       <button class="btn" onclick="mailOpenSheet('${l.id}')">✉️ Send Mail</button>
+      <button class="btn" onclick="esignOpenSheet('${l.id}')">✍️ Send for Signature</button>
       <button class="btn ghost" onclick="pushToGHL('${l.id}')">📤 Send to GHL</button>
     </div>
     <div id="analysisBox"></div>`;
