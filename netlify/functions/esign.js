@@ -476,7 +476,7 @@ async function hlSendSms(token, contactId, message, impl) {
 }
 
 // ---- handler ----
-exports.handler = async (event) => {
+const handler = async (event) => {
   if ((event.httpMethod || 'GET') === 'OPTIONS') return ok({ ok: true });
   if (!isAdmin(event)) return unauth();
   const method = event.httpMethod || 'GET';
@@ -694,6 +694,7 @@ exports.handler = async (event) => {
 };
 
 module.exports = {
+  handler,
   closingDatePlus30,
   buildLegalDescription,
   customField,
