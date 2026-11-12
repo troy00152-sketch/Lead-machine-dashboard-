@@ -163,8 +163,16 @@ t('state: accepted maps at completed level', esign.nextEnvelopeState('sent', 'ac
 (function () {
   const draft = esign.buildSendTemplateBody({ templateId: 'T1', userId: 'U1', contactId: 'C1', sendDocument: false });
   t('api: draft body has sendDocument:false', draft.sendDocument === false && draft.templateId === 'T1' && draft.userId === 'U1' && draft.contactId === 'C1');
+  // Nov 11 ~7:52 PM live 422: POST /proposals/templates/send failed with
+  // "locationId should not be empty; locationId must be a string" — the
+  // body carried no locationId at all. It must be present, a string, and
+  // the new CRM location (krKoHLudPnn7nT0DPtwa), never the old XLeads one.
+  t('api: template-send body carries locationId as a string', typeof draft.locationId === 'string' && draft.locationId.length > 0);
+  t('api: template-send locationId is the new CRM location', draft.locationId === 'krKoHLudPnn7nT0DPtwa' && draft.locationId === esign.HL_LOCATION_ID);
+  t('api: template-send locationId is not the old XLeads location', draft.locationId !== 'A4u3hypJbinp3GL9qhgd');
   const live = esign.buildSendTemplateBody({ templateId: 'T1', userId: 'U1', contactId: 'C1' });
   t('api: send body defaults sendDocument:true', live.sendDocument === true);
+  t('api: live send body also carries locationId as a string', typeof live.locationId === 'string' && live.locationId === 'krKoHLudPnn7nT0DPtwa');
   const opp = esign.buildSendTemplateBody({ templateId: 'T1', userId: 'U1', contactId: 'C1', opportunityId: 'O1', sendDocument: false });
   t('api: opportunityId passes through when given', opp.opportunityId === 'O1');
   const doc = esign.buildSendDocumentBody({ documentId: 'D1', sentBy: 'U1', medium: 'email', ccRecipients: [{ id: 'T', email: 'troy00152@gmail.com' }] });
