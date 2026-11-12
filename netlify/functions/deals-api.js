@@ -472,7 +472,10 @@ async function adminSetCover(s, body) {
 // View alerts are throttled to 1 per deal per 15 min to avoid buzz-storms
 // when a link goes to many buyers at once; offers always alert immediately.
 // All failures are silent — notifications never break the buyer flow.
-const TROY_PHONE_DIGITS = '12035657810';
+// Operator phone via the shared config point (lib-client.js):
+// clients/troy.json "operator".phoneDigits, legacy literal as fallback
+// — identical for Troy until a tenant edits its own client file.
+const TROY_PHONE_DIGITS = require('./lib-client').defaultOperator().phoneDigits;
 // Location via the shared config point (lib-client.js): HL_LOCATION_ID
 // env var when set, else Troy's id — identical until the env var is set.
 const HL_LOCATION_ID_NOTIFY = require('./lib-client').defaultLocationId();
@@ -518,7 +521,7 @@ async function getTroyContactId() {
     const contacts = (data && data.contacts) || [];
     for (const c of contacts) {
       const digits = String(c.phone || '').replace(/\D/g, '');
-      if (digits.endsWith(TROY_PHONE_DIGITS) || digits.endsWith('2035657810')) {
+      if (digits.endsWith(TROY_PHONE_DIGITS) || digits.endsWith(TROY_PHONE_DIGITS.slice(-10))) {
         troyContactIdCache = c.id;
         return c.id;
       }

@@ -57,6 +57,46 @@ function defaultCalendarId() {
   return process.env[HL_CALENDAR_ID_ENV] || LEGACY_TROY_CALENDAR_ID;
 }
 
+// OPERATOR / BRAND DEFAULTS (multi-tenant pass, Nov 11): the
+// single-tenant functions (esign, deals-api, title-order-email) also
+// need the tenant operator's identity — the person who receives the
+// copy of every contract send, the deal-room view/offer text alerts,
+// and the title-order test sends. That identity is per-tenant CONFIG
+// DATA: it lives in the default tenant's client file
+// (clients/troy.json -> "operator" / "buyerSignerName" /
+// "companyName"). The legacy literals below are ONLY a fallback when
+// the client file or the field is missing, so behavior for Troy is
+// byte-identical either way. A future tenant's fork edits its own
+// client file (see TENANT_SETUP.md), never this code.
+const LEGACY_OPERATOR = {
+  name: 'Troy Thomas',
+  firstName: 'Troy',
+  lastName: 'Thomas',
+  email: 'troy00152@gmail.com',
+  phone: '+1 203-565-7810',
+  phoneDigits: '12035657810',
+};
+const LEGACY_BUYER_SIGNER_NAME = 'Paula Thomas';
+const LEGACY_COMPANY_NAME = 'Direct Property Buyers';
+
+function defaultOperator() {
+  const cfg = loadClient(TROY_SUBDOMAIN) || {};
+  const op = cfg.operator || {};
+  const merged = {};
+  for (const k of Object.keys(LEGACY_OPERATOR)) {
+    merged[k] = op[k] || LEGACY_OPERATOR[k];
+  }
+  return merged;
+}
+function defaultBuyerSignerName() {
+  const cfg = loadClient(TROY_SUBDOMAIN) || {};
+  return cfg.buyerSignerName || LEGACY_BUYER_SIGNER_NAME;
+}
+function defaultCompanyName() {
+  const cfg = loadClient(TROY_SUBDOMAIN) || {};
+  return cfg.companyName || (cfg.bot && cfg.bot.businessName) || LEGACY_COMPANY_NAME;
+}
+
 // Parsed client files, cached for the life of the function instance.
 // Config files change only on deploy, which restarts the function.
 const clientCache = new Map();
@@ -167,17 +207,28 @@ function resolveClientData(event) {
   };
 }
 
-// Public branding fields only — safe to send to the browser.
+// Public fields only — safe to send to the browser.
 // Generic fallbacks, NOT Troy's: a client file without branding gets
 // the neutral name and NO logo (the page hides the logo img when the
 // logo is empty) — never Troy's name or logo.
+// crmUrl + ghlWebhookUrl (multi-tenant pass, Nov 11): the browser
+// needs the tenant's "Back to CRM" target and lead-push webhook.
+// Both are derived from the client's own config (highLevel.locationId
+// / highLevel.webhookUrl) — for Troy they resolve to EXACTLY the URLs
+// index.html used to hardcode; for the neutral client both are empty
+// (the page hides the CRM buttons and refuses the push). Neither is a
+// secret: both URLs already shipped in the page source before this
+// pass; tokens still never leave the server.
 function publicConfig(cfg) {
   const c = cfg || {};
+  const hl = c.highLevel || {};
   return {
     companyName: c.companyName || 'Command Center',
     logo: c.logo || '',
     primaryColor: c.primaryColor || '#00d4ff',
     subdomain: c.subdomain || NEUTRAL_SUBDOMAIN,
+    crmUrl: hl.locationId ? 'https://app.gohighlevel.com/v2/location/' + hl.locationId + '/' : '',
+    ghlWebhookUrl: hl.webhookUrl || '',
   };
 }
 
@@ -191,6 +242,12 @@ module.exports = {
   HL_CALENDAR_ID_ENV,
   defaultLocationId,
   defaultCalendarId,
+  LEGACY_OPERATOR,
+  LEGACY_BUYER_SIGNER_NAME,
+  LEGACY_COMPANY_NAME,
+  defaultOperator,
+  defaultBuyerSignerName,
+  defaultCompanyName,
   sanitizeSubdomain,
   loadClient,
   loadNeutral,

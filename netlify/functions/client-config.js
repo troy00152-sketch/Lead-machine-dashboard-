@@ -1,10 +1,11 @@
 // netlify/functions/client-config.js
 // White-label multi-tenant client config.
 // Reads the request (Host subdomain, or `x-client-subdomain` header)
-// and returns the matching client's PUBLIC branding fields
-// (companyName, logo, primaryColor, subdomain). Resolution lives in
-// lib-client.js, shared with cc-data.js so both functions agree on
-// which client a request belongs to.
+// and returns the matching client's PUBLIC config fields
+// (companyName, logo, primaryColor, subdomain, crmUrl,
+// ghlWebhookUrl). Resolution lives in lib-client.js, shared with
+// cc-data.js so both functions agree on which client a request
+// belongs to.
 //
 // SECURITY: secrets (HighLevel tokens, data provider keys) are NEVER in
 // the client JSON files and NEVER returned by this function. They live

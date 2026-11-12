@@ -36,6 +36,13 @@
 const crypto = require('crypto');
 const https = require('https');
 const { refreshAccessToken } = require('./gmail-token.js');
+// Operator identity via the shared config point (lib-client.js):
+// clients/troy.json "operator" — the title-order test recipient and
+// the Gmail sender name shown in messages. For Troy this is
+// troy00152@gmail.com, byte-identical to the previous literals; a
+// tenant fork sets its own operator (whose email must match the
+// Gmail account connected via the GMAIL_* env vars — TENANT_SETUP.md).
+const OPERATOR_EMAIL = require('./lib-client').defaultOperator().email;
 
 const COOKIE_NAME = 'lm_auth';
 
@@ -50,7 +57,7 @@ const ALLOWED_RECIPIENTS = new Set([
   'order@closedtitle.com',            // Dayton — CLOSED Title
   'orders@innovativeclosingsolutions.com', // Greenville — Innovative Closing Solutions
   'closings@harrymarshlaw.com',       // Charlotte — Harry Marsh Law
-  'troy00152@gmail.com',              // test recipient ONLY — never a title company
+  OPERATOR_EMAIL,                     // test recipient ONLY — never a title company
 ]);
 
 const JSON_HEADERS = {
@@ -70,7 +77,7 @@ const gmailNotConnected = () =>
   json(503, {
     error: 'Gmail not connected yet',
     detail:
-      'One-time setup needed: connect Google in Netlify (GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN) so the dashboard can send as troy00152@gmail.com. Nothing was sent.',
+      'One-time setup needed: connect Google in Netlify (GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN) so the dashboard can send as ' + OPERATOR_EMAIL + '. Nothing was sent.',
   });
 
 // ---- admin auth: lm_auth cookie (same HMAC as gate.ts) or Bearer dashboard password ----
@@ -167,7 +174,7 @@ async function gmailSend({ to, subject, body }) {
   const accessToken = await gmailAccessToken();
   if (accessToken === null) return { notConnected: true };
   const raw = [
-    'From: troy00152@gmail.com',
+    'From: ' + OPERATOR_EMAIL,
     `To: ${to}`,
     `Subject: ${subject}`,
     'Content-Type: text/plain; charset="UTF-8"',
@@ -228,7 +235,7 @@ exports.handler = async (event) => {
     }
     if (!ALLOWED_RECIPIENTS.has(to)) {
       return bad(
-        'That recipient is not a default title company. Title orders only go to the market default — or to troy00152@gmail.com for a test.',
+        'That recipient is not a default title company. Title orders only go to the market default — or to ' + OPERATOR_EMAIL + ' for a test.',
       );
     }
     if (!subject) return bad('Subject is required.');

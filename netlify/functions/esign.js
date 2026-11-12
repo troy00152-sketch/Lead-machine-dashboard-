@@ -101,7 +101,15 @@ const HL_API_BASE = 'https://services.leadconnectorhq.com';
 const HL_API_VERSION = '2021-07-28'; // same as Contacts; verify at deploy
 // Location via the shared config point (lib-client.js): HL_LOCATION_ID
 // env var when set, else Troy's id — identical until the env var is set.
-const HL_LOCATION_ID = require('./lib-client').defaultLocationId();
+// Operator identity (contract-copy recipient), buyer signer name and
+// brand name come from the same config point (clients/troy.json via
+// lib-client) — per-tenant config data, legacy-literal fallback, so
+// Troy's values are byte-identical until a tenant edits its file.
+const _libClient = require('./lib-client');
+const HL_LOCATION_ID = _libClient.defaultLocationId();
+const OPERATOR = _libClient.defaultOperator();
+const BUYER_SIGNER_NAME = _libClient.defaultBuyerSignerName();
+const BRAND_NAME = _libClient.defaultCompanyName();
 const LOG_STORE = 'esign-log';
 const HL_TIMEOUT_MS = 20000;
 
@@ -370,8 +378,8 @@ function buildSigners(contact) {
   const s = contactSummary(contact);
   const signers = [];
   if (s) signers.push({ role: 'seller', kind: 'contact', id: s.id, name: s.name, email: s.email, phone: s.phone });
-  signers.push({ role: 'buyer', kind: 'hl-user', id: '', name: 'Paula Thomas', email: '', phone: '', note: 'Buyer signer — seat lives in the HL template, not added by the dashboard.' });
-  signers.push({ role: 'copy', kind: 'troy', id: '', name: 'Troy Thomas', email: 'troy00152@gmail.com', phone: '+1 203-565-7810', note: 'Receives the send at the same time as the seller (dual-signer rule).' });
+  signers.push({ role: 'buyer', kind: 'hl-user', id: '', name: BUYER_SIGNER_NAME, email: '', phone: '', note: 'Buyer signer — seat lives in the HL template, not added by the dashboard.' });
+  signers.push({ role: 'copy', kind: 'troy', id: '', name: OPERATOR.name, email: OPERATOR.email, phone: OPERATOR.phone, note: 'Receives the send at the same time as the seller (dual-signer rule).' });
   return signers;
 }
 function isSmsDnd(contact) {
@@ -1007,7 +1015,7 @@ exports.handler = async (event) => {
     if (!envelope.documentId) return bad('The prepared draft has no HighLevel document id — re-prepare before sending.');
     if (!senderUserId) return unavailable('ESIGN_SENDER_USER_ID is not set.');
     const ccRecipients = [];
-    if (troyContactId) ccRecipients.push({ id: troyContactId, email: 'troy00152@gmail.com', imageUrl: '', contactName: 'Troy Thomas', firstName: 'Troy', lastName: 'Thomas' });
+    if (troyContactId) ccRecipients.push({ id: troyContactId, email: OPERATOR.email, imageUrl: '', contactName: OPERATOR.name, firstName: OPERATOR.firstName, lastName: OPERATOR.lastName });
     let sent;
     try {
       sent = await hlJson(token, 'POST', '/proposals/document/send', buildSendDocumentBody({ documentId: envelope.documentId, sentBy: senderUserId, medium: 'email', ccRecipients }));
@@ -1030,7 +1038,7 @@ exports.handler = async (event) => {
       else if (!linkUrl) { sms.reason = 'HighLevel did not return a signing link to text.'; }
       else {
         sms.attempted = true;
-        await hlSendSms(token, envelope.contactId, `Hi ${contactSummary(contact).firstName || 'there'} — your purchase contract for ${envelope.contract.apn || ''} is ready to sign: ${linkUrl} — Direct Property Buyers`);
+        await hlSendSms(token, envelope.contactId, `Hi ${contactSummary(contact).firstName || 'there'} — your purchase contract for ${envelope.contract.apn || ''} is ready to sign: ${linkUrl} — ${BRAND_NAME}`);
         sms.sent = true;
         appendEvent(envelope, 'sms-link-sent', 'Signing link texted to the seller.', 'dashboard');
       }

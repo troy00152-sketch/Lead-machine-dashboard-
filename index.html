@@ -25,17 +25,18 @@
 <title>Acquisition Command Center</title>
 <script>
 /* White-label branding hook — additive, fails safe to Troy's defaults.
-   Fetches public client config (companyName, logo, primaryColor) from
-   /.netlify/functions/client-config based on the request subdomain,
-   then applies branding. Secrets are never exposed by that function.
-   Unknown subdomains get the NEUTRAL default server-side
+   Fetches public client config (companyName, logo, primaryColor,
+   crmUrl, ghlWebhookUrl) from /.netlify/functions/client-config
+   based on the request subdomain, then applies branding and the
+   tenant's CRM/webhook links. Secrets are never exposed by that
+   function. Unknown subdomains get the NEUTRAL default server-side
    (clients/_default.json: "Command Center", no logo) — never Troy's
    config. An empty logo hides the logo img so Troy's logo never shows
    on a neutral subdomain. The DEFAULTS below apply ONLY when the
    config fetch itself fails entirely. */
 (function () {
-  var DEFAULTS = { companyName: 'Direct Property Buyers', logo: '/assets/dpb-logo.png', primaryColor: '#00d4ff' };
-  function applyBrand(cfg) {
+  var DEFAULTS = { companyName: 'Direct Property Buyers', logo: '/assets/dpb-logo.png', primaryColor: '#00d4ff', crmUrl: 'https://app.gohighlevel.com/v2/location/krKoHLudPnn7nT0DPtwa/', ghlWebhookUrl: 'https://services.leadconnectorhq.com/hooks/krKoHLudPnn7nT0DPtwa/webhook-trigger/97d51ffc-5f51-485d-b1bf-11e747e155ba' };
+  function applyBrand(cfg, isDefault) {
     try {
       var name = cfg.companyName || DEFAULTS.companyName;
       var color = cfg.primaryColor || DEFAULTS.primaryColor;
@@ -51,13 +52,32 @@
         else { logoImg.style.display = 'none'; }
         logoImg.alt = name;
       }
+      // Tenant links (multi-tenant pass): the "Back to CRM" buttons
+      // and the lead-push webhook resolve from the SAME client
+      // config. For Troy they are exactly the URLs this page used to
+      // hardcode (and the DEFAULTS above remain the fetch-failure
+      // fail-safe). A resolved-but-empty crmUrl (neutral client)
+      // hides the CRM buttons; an empty webhook makes the push fail
+      // with an honest "not configured" error instead of sending a
+      // stranger's leads into Troy's workflow.
+      var crmUrl = isDefault ? DEFAULTS.crmUrl : (cfg.crmUrl || '');
+      var hookUrl = isDefault ? DEFAULTS.ghlWebhookUrl : (cfg.ghlWebhookUrl || '');
+      window.LM_CRM_URL = crmUrl;
+      window.GHL_WEBHOOK_URL = hookUrl;
+      var crmBtns = document.querySelectorAll('[data-crm-btn]');
+      for (var bi = 0; bi < crmBtns.length; bi++) {
+        (function (btn) {
+          btn.style.display = crmUrl ? '' : 'none';
+          btn.onclick = crmUrl ? function () { window.open(crmUrl, '_blank'); } : null;
+        })(crmBtns[bi]);
+      }
     } catch (e) { /* branding must never break the dashboard */ }
   }
-  function fallback() { applyBrand(DEFAULTS); }
+  function fallback() { applyBrand(DEFAULTS, true); }
   try {
-    fetch('/.netlify/functions/client-config', { cache: 'no-store' })
+    window.LM_CFG_PROMISE = fetch('/.netlify/functions/client-config', { cache: 'no-store' })
       .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
-      .then(applyBrand)
+      .then(function (cfg) { applyBrand(cfg, false); })
       .catch(fallback);
     // Safety net: if the fetch hangs, apply defaults after 3s.
     setTimeout(function () {
@@ -507,14 +527,14 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
       <span class="lbl" id="themeLabelSide">Dark mode</span>
     </div>
     <div class="sidebar-foot" style="border-top:none;padding-top:0">
-      <button class="crm-btn crm-btn-sm" onclick="window.open('https://app.gohighlevel.com/v2/location/krKoHLudPnn7nT0DPtwa/','_blank')" title="Open HighLevel CRM">← Back to CRM</button>
+      <button class="crm-btn crm-btn-sm" data-crm-btn title="Open HighLevel CRM">← Back to CRM</button>
     </div>
   </aside>
   <div class="main">
     <div class="topbar">
       <div style="display:flex;align-items:center;gap:12px;position:relative">
         <h2 style="margin-bottom:0;flex:1">Where would you like to invest?</h2>
-        <button class="crm-btn" onclick="window.open('https://app.gohighlevel.com/v2/location/krKoHLudPnn7nT0DPtwa/','_blank')" title="Open HighLevel CRM">← Back to CRM</button>
+        <button class="crm-btn" data-crm-btn title="Open HighLevel CRM">← Back to CRM</button>
         <button class="theme-toggle" id="themeToggleTop" onclick="cycleTheme()" title="Toggle dark/light mode">🌙</button>
       </div>
       <div class="search-row">
@@ -2877,7 +2897,13 @@ function deleteLead(id){
   toast('Lead deleted');
 }
 /* ============ HIGHLEVEL WEBHOOK PUSH ============ */
-const GHL_WEBHOOK_URL = 'https://services.leadconnectorhq.com/hooks/krKoHLudPnn7nT0DPtwa/webhook-trigger/97d51ffc-5f51-485d-b1bf-11e747e155ba';
+/* The webhook URL is per-tenant config data (clients/<tenant>.json ->
+   highLevel.webhookUrl), served by /.netlify/functions/client-config
+   and applied to window.GHL_WEBHOOK_URL by the branding hook in the
+   <head> — declared with var so the hook's assignment updates this
+   binding. For Troy it resolves to exactly the URL this page used to
+   hardcode (also the hook's fetch-failure fail-safe default). */
+var GHL_WEBHOOK_URL = '';
 function marketToTag(market){
   const m = (market||'').toLowerCase();
   if(m.includes('indianapolis')) return 'indianapolis sms';
@@ -2948,6 +2974,10 @@ function leadToPayload(l){
   };
 }
 async function pushLeadToGHL(l){
+  // Wait for the client-config resolution (branding hook) so the push
+  // uses THIS tenant's webhook — never an unresolved or empty one.
+  if (window.LM_CFG_PROMISE) { try { await window.LM_CFG_PROMISE; } catch (e) { /* the hook already applied its fail-safe */ } }
+  if (!GHL_WEBHOOK_URL) throw new Error('CRM webhook is not configured for this workspace');
   const resp = await fetch(GHL_WEBHOOK_URL, {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
