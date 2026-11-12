@@ -80,6 +80,14 @@
 //     placed in the template editor are simply not projected by the
 //     API, so fieldsReadyCheck treats the API view as advisory only.
 //   - The templates list returns id/name/type/totals only — no fields.
+//   - Draft documents carry NO links (links are minted at send), and
+//     draft grandTotal is 0.00 (no price on the document). Document-id
+//     capture therefore cannot rely on the create response's links or
+//     on price matching — see the document-id capture block below
+//     (extractCreatedDocumentId / matchDraftInList /
+//     resolveDraftDocument), built after the $100,003 prepare stored
+//     an envelope with an empty documentId while its draft
+//     (6af5283b7d64ba6637bb5979) sat at the top of the list.
 'use strict';
 
 const crypto = require('crypto');
@@ -521,6 +529,127 @@ function signingLinkFor(recipientId, doc) {
   return l ? (l.url || l.link || l.href || '') : '';
 }
 
+// ---- document-id capture (Nov 11 late — the empty-documentId bug) ----
+// Live evidence (ghl CLI reads, Nov 11 ~9:47 PM): a DRAFT document
+// carries NO links — links are minted at send time (both unsent drafts
+// read live show links: []; the sent test document's links were created
+// the second it was sent). The old prepare derived the id ONLY from
+// created.links[0].documentId || created.documentId, and then searched
+// the document list BY that id — so any create response without those
+// two fields produced documentId '' and a list search that could never
+// match, even though the draft itself was sitting in the list
+// (verified: draft 6af5283b7d64ba6637bb5979, created
+// 2026-11-12T02:45:15Z for the $100,003 prepare, is list position 1,
+// newest-first). The list also does not carry the price (grandTotal is
+// 0.00 on drafts), so matching keys are: document name (the template
+// name), a recipient whose id IS the seller contact id, status draft,
+// and a createdAt window anchored on the prepare. Capture is now
+// three-layered: extract from every plausible create-response field ->
+// poll the list briefly and match -> re-resolve later (duplicate-guard
+// reopen, and again at send) from the stored envelope. The send
+// refusal on an unresolved id is unchanged — no id, no send.
+function docIdOf(doc) {
+  return (doc && (doc.documentId || doc._id || doc.id)) || '';
+}
+function extractCreatedDocumentId(created) {
+  if (!created || typeof created !== 'object') return '';
+  const pools = [created, created.data, created.document, created.data && created.data.document];
+  for (const p of pools) {
+    const id = docIdOf(p);
+    if (id) return id;
+  }
+  const linkPools = [created.links, created.data && created.data.links, created.document && created.document.links];
+  for (const links of linkPools) {
+    if (!Array.isArray(links)) continue;
+    for (const l of links) {
+      if (l && l.documentId) return l.documentId;
+    }
+  }
+  return '';
+}
+function matchDraftInList(docs, hints) {
+  const h = hints || {};
+  const list = Array.isArray(docs) ? docs : [];
+  if (h.documentId) {
+    const byId = list.find((d) => d && docIdOf(d) === h.documentId);
+    if (byId) return byId;
+  }
+  const name = String(h.name || '').trim();
+  const contactId = h.contactId || '';
+  const notBefore = h.notBeforeMs || 0;
+  const notAfter = h.notAfterMs != null ? h.notAfterMs : Infinity;
+  const exclude = new Set(h.excludeIds || []);
+  const candidates = list.filter((d) => {
+    if (!d || d.deleted === true) return false;
+    const id = docIdOf(d);
+    if (!id || exclude.has(id)) return false;
+    if (String(d.status || '').toLowerCase() !== 'draft') return false;
+    if (name && String(d.name || '').trim() !== name) return false;
+    if (contactId) {
+      const recips = Array.isArray(d.recipients) ? d.recipients : [];
+      if (!recips.some((r) => r && r.id === contactId)) return false;
+    }
+    if (notBefore || notAfter !== Infinity) {
+      const createdMs = new Date(d.createdAt || 0).getTime();
+      if (!Number.isFinite(createdMs)) return false;
+      if (createdMs < notBefore || createdMs > notAfter) return false;
+    }
+    return true;
+  });
+  candidates.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  return candidates[0] || null;
+}
+async function resolveDraftDocument(token, hints, opts) {
+  const o = opts || {};
+  const delays = Array.isArray(o.delaysMs) ? o.delaysMs : [1200, 2500];
+  const sleep = o.sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
+  for (let attempt = 0; attempt <= delays.length; attempt++) {
+    if (attempt > 0) await sleep(delays[attempt - 1]);
+    let docs = [];
+    try { docs = await hlListDocuments(token, undefined, o.impl); } catch (e) { docs = []; }
+    const draft = matchDraftInList(docs, hints);
+    if (draft) return { documentId: docIdOf(draft), draft };
+  }
+  return { documentId: '', draft: null };
+}
+// Envelope store scan + the ids already claimed by stored envelopes
+// (a resolver must never hand one envelope another envelope's draft).
+async function scanEnvelopes(store) {
+  const out = [];
+  try {
+    const keys = await store.list({ prefix: 'envelope-' });
+    for (const k of (keys && keys.blobs ? keys.blobs : keys || [])) {
+      const key = typeof k === 'string' ? k : k.key;
+      if (!key) continue;
+      const raw = await store.get(key, { type: 'text' });
+      if (!raw) continue;
+      try { out.push(JSON.parse(raw)); } catch (e) { /* skip unreadable */ }
+    }
+  } catch (e) { /* scan failure -> empty; resolution still tries by window */ }
+  return out;
+}
+function usedDocumentIds(envelopes, exceptEnvelopeId) {
+  return (envelopes || [])
+    .filter((e) => e && e.id !== exceptEnvelopeId && e.documentId)
+    .map((e) => e.documentId);
+}
+// Re-resolve a stored envelope's document id from the document list,
+// matching on template name + seller recipient + a createdAt window
+// anchored on the envelope's own creation (prepare time). Used by the
+// duplicate-guard reopen path and by send.
+async function resolveEnvelopeDocumentId(token, store, envelope, opts) {
+  const o = opts || {};
+  const all = await scanEnvelopes(store);
+  const createdMs = new Date(envelope.createdAt || 0).getTime() || Date.now();
+  return resolveDraftDocument(token, {
+    name: (KNOWN_TEMPLATES.find((t) => t.id === envelope.templateId) || {}).name || '',
+    contactId: envelope.contactId,
+    notBeforeMs: createdMs - 5 * 60 * 1000,
+    notAfterMs: createdMs + 15 * 60 * 1000,
+    excludeIds: usedDocumentIds(all, envelope.id),
+  }, { delaysMs: o.delaysMs, impl: o.impl, sleep: o.sleep });
+}
+
 // ---- HL wrappers (thin; injectable impls exist so tests never hit live HL) ----
 async function hlListTemplates(token, impl) {
   const parsed = await hlJson(token, 'GET', `/proposals/templates?locationId=${encodeURIComponent(HL_LOCATION_ID)}&limit=20`, null, impl);
@@ -638,36 +767,68 @@ exports.handler = async (event) => {
     }
     // Duplicate guard (same seller + template + price within 24h).
     const dupKey = { contactId, templateId, price: check.contract.price };
-    let existing = null;
-    try {
-      const keys = await store.list({ prefix: 'envelope-' });
-      for (const k of (keys && keys.blobs ? keys.blobs : keys || [])) {
-        const key = typeof k === 'string' ? k : k.key;
-        if (!key) continue;
-        const raw = await store.get(key, { type: 'text' });
-        if (!raw) continue;
-        const e = JSON.parse(raw);
-        if (isDuplicate(e, dupKey)) { existing = e; break; }
+    const allEnvelopes = await scanEnvelopes(store);
+    const existing = allEnvelopes.find((e) => isDuplicate(e, dupKey)) || null;
+    if (existing && !body.forceNew) {
+      // Reopen path: a repeat Prepare is how a reopened sheet reaches
+      // its already-prepared draft, so the 409 carries the EXISTING
+      // envelope (the sheet adopts it and Send becomes reachable). If
+      // that envelope never captured its document id, try to resolve
+      // it from the document list first (single read — by reopen time
+      // the draft is old enough to be listed; send re-resolves too).
+      if (!existing.documentId) {
+        try {
+          const res = await resolveEnvelopeDocumentId(token, store, existing, { delaysMs: [] });
+          if (res.documentId) {
+            existing.documentId = res.documentId;
+            existing.draftResolution = { via: 'list-match-on-reopen', at: new Date().toISOString() };
+            if (res.draft && !(existing.draftRecipients || []).length) existing.draftRecipients = res.draft.recipients || [];
+            appendEvent(existing, 'document-id-resolved', `Draft document id ${res.documentId} recovered from the HighLevel document list on a reopened prepare.`, 'dashboard');
+            await writeEnvelope(store, existing);
+          }
+        } catch (e) { /* best-effort — the 409 still returns the envelope */ }
       }
-    } catch (e) { /* a failed duplicate scan fails closed below on send; prepare continues */ }
-    if (existing && !body.forceNew) return json(409, { error: 'A contract for this seller, template and price was already prepared in the last 24 hours.', code: 'duplicate_envelope', envelopeId: existing.id });
+      return json(409, { error: 'A contract for this seller, template and price was already prepared in the last 24 hours.', code: 'duplicate_envelope', envelopeId: existing.id, envelope: existing, disclosureReminder: needsDisclosureReminder(contactSummary(contact).state) });
+    }
     // Create the draft (sendDocument:false). UNVERIFIED at build time:
     // if HL ignores the flag and sends, the deploy check must catch it.
+    const templateName = (KNOWN_TEMPLATES.find((t) => t.id === templateId) || {}).name || '';
+    const prepareStartedAt = Date.now();
     let created;
     try {
       created = await hlJson(token, 'POST', '/proposals/templates/send', buildSendTemplateBody({ templateId, userId: senderUserId, contactId, opportunityId: body.opportunityId || '', sendDocument: false }));
     } catch (e) { return json(503, { error: 'HighLevel could not create the contract draft: ' + (e.message || 'unknown error'), hlStatus: e.status || null, hlError: e.body || null }); }
-    const links = created.links || [];
-    const documentId = (links[0] && links[0].documentId) || created.documentId || '';
-    // Read the draft back and verify its fields. No `query` here: HL's
-    // `query` is a document-NAME search — passing the APN returned 0
-    // docs live (Nov 11), so the draft was unfindable. Find by
-    // documentId in the unfiltered list instead (6 docs total live).
+    const links = (created && (created.links || (created.data && created.data.links))) || [];
+    // Document-id capture (see the capture block above): the create
+    // response is only the FIRST source. Drafts carry no links, so an
+    // id-less response falls through to a list match (template name +
+    // seller recipient + the prepare-time window), polled briefly in
+    // case the new draft is not listed yet. No `query` on the list:
+    // HL's `query` is a document-NAME search (an APN query returned 0
+    // docs live, Nov 11).
+    let documentId = extractCreatedDocumentId(created);
+    let resolvedVia = documentId ? 'create-response' : '';
     let draft = null;
-    try {
-      const docs = await hlListDocuments(token);
-      draft = docs.find((d) => (d.documentId || d._id) === documentId) || null;
-    } catch (e) { draft = null; }
+    if (documentId) {
+      try {
+        const docs = await hlListDocuments(token);
+        draft = matchDraftInList(docs, { documentId }) || null;
+      } catch (e) { draft = null; }
+    }
+    if (!draft) {
+      const res = await resolveDraftDocument(token, {
+        documentId,
+        name: templateName,
+        contactId,
+        notBeforeMs: prepareStartedAt - 5 * 60 * 1000,
+        notAfterMs: prepareStartedAt + 15 * 60 * 1000,
+        excludeIds: usedDocumentIds(allEnvelopes, null),
+      }, {});
+      if (res.draft) {
+        draft = res.draft;
+        if (!documentId) { documentId = res.documentId; resolvedVia = 'list-match'; }
+      }
+    }
     const fields = draft ? fieldsReadyCheck(draft) : advisoryFieldsCheck(['Could not read the draft back from HighLevel — its fields could not be checked at all.'], [], 'Draft created, but HighLevel did not return it in the document list, so no field view exists at all. The send stays locked until Troy confirms in the sheet that he checked the Signature fields on this draft in HighLevel.');
     const envelope = {
       id: newEnvelopeId(),
@@ -675,7 +836,8 @@ exports.handler = async (event) => {
       contactId,
       templateId,
       templateName: (KNOWN_TEMPLATES.find((t) => t.id === templateId) || {}).name || templateId,
-      documentId: documentId || (draft && (draft.documentId || draft._id)) || '',
+      documentId: documentId || (draft && docIdOf(draft)) || '',
+      draftResolution: { via: resolvedVia || (draft ? 'list-match' : 'unresolved'), at: new Date().toISOString() },
       state: (fields.ready || fields.advisory) ? 'draft' : 'fields-blocked',
       contract: check.contract,
       signers: buildSigners(contact),
@@ -687,7 +849,7 @@ exports.handler = async (event) => {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    appendEvent(envelope, 'prepared', `Draft created from template ${envelope.templateName}; fields check ${fields.ready ? 'passed (signatures verified via the API)' : (fields.advisory ? 'ADVISORY — the API cannot see signature fields; send unlocks only on Troy\'s in-sheet confirmation that he checked them in HighLevel' : 'FAILED — send blocked')}.`, 'dashboard');
+    appendEvent(envelope, 'prepared', `Draft created from template ${envelope.templateName}; document id ${envelope.documentId || 'UNRESOLVED — send will re-resolve from the document list before it can send'} (via ${envelope.draftResolution.via}); fields check ${fields.ready ? 'passed (signatures verified via the API)' : (fields.advisory ? 'ADVISORY — the API cannot see signature fields; send unlocks only on Troy\'s in-sheet confirmation that he checked them in HighLevel' : 'FAILED — send blocked')}.`, 'dashboard');
     await writeEnvelope(store, envelope);
     return ok({ envelope, fieldsCheck: fields, disclosureReminder: needsDisclosureReminder(contactSummary(contact).state) });
   }
@@ -713,6 +875,24 @@ exports.handler = async (event) => {
       return bad(gate.error, { missing: gate.missing || (envelope.fieldsCheck && envelope.fieldsCheck.missing) || [] });
     }
     envelope.fieldsGateMode = gate.mode;
+    // Document-id recovery: if prepare could not capture the draft's
+    // id (the create response carried none and the draft was not yet
+    // visible in the list), resolve it NOW from the document list,
+    // matched on template name + seller recipient + the prepare-time
+    // window. By send time the draft exists in the list (verified live
+    // Nov 11 late), so this closes the empty-id dead end. The refusal
+    // below stays exactly as it was — no resolved id, no send.
+    if (!envelope.documentId) {
+      try {
+        const res = await resolveEnvelopeDocumentId(token, store, envelope, {});
+        if (res.documentId) {
+          envelope.documentId = res.documentId;
+          envelope.draftResolution = { via: 'list-match-at-send', at: new Date().toISOString() };
+          appendEvent(envelope, 'document-id-resolved', `Draft document id ${res.documentId} recovered from the HighLevel document list at send time.`, 'dashboard');
+          await writeEnvelope(store, envelope);
+        }
+      } catch (e) { /* fall through to the refusal — fail closed */ }
+    }
     if (!envelope.documentId) return bad('The prepared draft has no HighLevel document id — re-prepare before sending.');
     if (!senderUserId) return unavailable('ESIGN_SENDER_USER_ID is not set.');
     const ccRecipients = [];
@@ -805,6 +985,13 @@ module.exports = {
   buildSendTemplateBody,
   buildSendDocumentBody,
   signingLinkFor,
+  docIdOf,
+  extractCreatedDocumentId,
+  matchDraftInList,
+  resolveDraftDocument,
+  scanEnvelopes,
+  usedDocumentIds,
+  resolveEnvelopeDocumentId,
   hlErrorText,
   hlListDocuments,
   FIELD_IDS,

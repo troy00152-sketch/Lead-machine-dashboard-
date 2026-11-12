@@ -252,6 +252,19 @@
       renderSheet();
     } catch (e) {
       if (e && e.data && e.data.missing) { current.missing = e.data.missing; renderSheet(); return; }
+      // Duplicate-guard reopen (Nov 11 late): a repeat Prepare inside
+      // 24h gets a 409 that carries the EXISTING envelope. Adopt it —
+      // the sheet reopens on the already-prepared draft and Send is
+      // reachable again, instead of dead-ending on the error text.
+      // Nothing new is created and nothing is sent by adopting it.
+      if (e && e.data && e.data.code === 'duplicate_envelope' && e.data.envelope) {
+        current.envelope = e.data.envelope;
+        current.fieldsCheck = e.data.envelope.fieldsCheck || null;
+        current.disclosureReminder = Boolean(e.data.disclosureReminder);
+        current.missing = [];
+        renderSheet();
+        return;
+      }
       renderError(e.message || 'Prepare failed.');
     }
   };

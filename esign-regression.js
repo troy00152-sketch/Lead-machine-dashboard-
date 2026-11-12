@@ -339,6 +339,12 @@ t('templates: ids unique', new Set(esign.KNOWN_TEMPLATES.map((x) => x.id)).size 
             // a sendable draft — NOT a fields-blocked envelope.
             return { ok: true, status: 200, json: async function () { return { envelope: { id: 'es_adv1', templateId: body.templateId, state: 'draft', contract: { price: '100001', emd: '100', apn: 'TEST-000001', legal: 'TEST-000001 (TEST SUBDIVISION)', county: 'Marion County', contractDate: '2026-11-11', closingDate: '2026-12-11' }, signers: [{ name: 'TEST E-Sign Do Not Use', role: 'seller', email: 'troy00152+esigntest@gmail.com' }] }, fieldsCheck: { ready: false, verified: false, advisory: true, requiresConfirmation: true, missing: ['TEST E-Sign Do Not Use: Signature field not visible via the HighLevel API'], unverified: ['TEST E-Sign Do Not Use: Signature field not visible via the HighLevel API'], unrecognized: [], reason: 'HighLevel\'s API does not expose signature fields.' }, disclosureReminder: false }; } };
           }
+          if (body.contactId === 'C-dup') {
+            // Duplicate-guard shape (Nov 11 late): a repeat Prepare
+            // inside 24h returns 409 carrying the EXISTING envelope —
+            // the sheet must adopt it (Send reachable), not dead-end.
+            return { ok: false, status: 409, json: async function () { return { error: 'A contract for this seller, template and price was already prepared in the last 24 hours.', code: 'duplicate_envelope', envelopeId: 'es_dup1', envelope: { id: 'es_dup1', templateId: body.templateId, state: 'draft', documentId: '6af5283b7d64ba6637bb5979', contract: { price: '100003', emd: '100', apn: 'TEST-000000', legal: 'TEST-000000 (TEST SUBDIVISION)', county: 'Marion County', contractDate: '2026-11-11', closingDate: '2026-12-11' }, signers: [{ name: 'TEST E-Sign Do Not Use', role: 'seller', email: 'troy00152+esigntest@gmail.com' }], fieldsCheck: { ready: false, verified: false, advisory: true, requiresConfirmation: true, unverified: ['TEST E-Sign Do Not Use: Signature field not visible via the HighLevel API'], unrecognized: [], reason: 'HighLevel\'s API does not expose signature fields.' }, events: [] }, disclosureReminder: false }; } };
+          }
           if (body.contactId === 'C-nofields') {
             return { ok: false, status: 400, json: async function () { return { error: 'Contract is not ready to prepare.', missing: ['contract_price', 'emd_deposit', 'APN', 'legal_description', 'county'] }; } };
           }
@@ -526,6 +532,88 @@ t('templates: ids unique', new Set(esign.KNOWN_TEMPLATES.map((x) => x.id)).size 
   t('ui-noconfirm: esignSend source contains no native confirm call', sendFnSrc.length > 0 && !/confirm\s*\(/.test(sendFnSrc));
   t('ui-noconfirm: stub env exposes no confirm function', typeof envI.sandbox.confirm === 'undefined');
   t('ui-noconfirm: sheet Send completed without a confirm stub (advisory confirmations posted)', Boolean(sendCallI) && sendCallI.body.fieldsConfirmed === true && sendCallI.body.fieldsAdvisoryAccepted === true);
+
+  // (k) duplicate-guard reopen (Nov 11 late): the sheet used to
+  // dead-end on the 409 error text ("Could not load the signature
+  // sheet: A contract for this seller, template and price was already
+  // prepared..."), so a reopened sheet could NEVER reach Send for an
+  // already-prepared draft. The 409 now carries the existing envelope
+  // and the sheet adopts it.
+  const envK = makeEnv();
+  envK.leads.push({ id: 'L7', state: 'IN', ghlContactId: 'C-dup' });
+  await envK.sandbox.esignOpenSheet('L7');
+  await envK.sandbox.esignPrepare();
+  t('ui-reopen: duplicate 409 does NOT render the dead-end error', !/Could not load the signature sheet/.test(envK.body()));
+  t('ui-reopen: reopened sheet shows the existing draft status', /Draft ready — not sent/.test(envK.body()));
+  t('ui-reopen: Send button is reachable on the reopened draft', /Send for signature — real contract/.test(envK.body()));
+  t('ui-reopen: reopened sheet shows the existing $100,003 contract', /\$100,003/.test(envK.body()));
+  t('ui-reopen: reopening sends nothing', envK.sendCalls === 0);
+
+  // (l) document-id capture (Nov 11 late — the ONLY blocker to the
+  // sheet proof): the $100,003 Prepare created draft
+  // 6af5283b7d64ba6637bb5979 in HL but the envelope stored NO
+  // documentId, so Send refused ("The prepared draft has no HighLevel
+  // document id"). Root causes, all verified live via the ghl CLI:
+  // drafts carry NO links (links are minted at send — both live
+  // drafts show links: []), so an id-less create response gives the
+  // old links[0]/created.documentId capture nothing; the old
+  // read-back then searched the list BY that empty id and could never
+  // match; and the draft's grandTotal is 0.00, so price cannot match
+  // either. The draft WAS in the list, newest-first, the whole time.
+  // Fixtures below are the LIVE document shapes (ids/dates real).
+  const DOC_100003 = { documentId: '6af5283b7d64ba6637bb5979', _id: '6af5283b7d64ba6637bb5979', name: 'AGREEMENT TO PURCHASE REAL ESTATE IN', status: 'draft', deleted: false, createdAt: '2026-11-12T02:45:15.969Z', updatedAt: '2026-11-12T02:45:16.692Z', links: [], fillableFields: [], recipients: [{ id: '6ZTlI8jcjEdRsO5UrBHX', contactName: 'TEST E-Sign Do Not Use', role: 'signer' }, { id: 'a4vyLnhwrRQn75dqek7k', contactName: 'Paula Thomas', role: 'signer' }] };
+  const DOC_100002 = { documentId: '6af51ffd6edc2082d016e4d1', _id: '6af51ffd6edc2082d016e4d1', name: 'AGREEMENT TO PURCHASE REAL ESTATE IN', status: 'draft', deleted: false, createdAt: '2026-11-12T02:10:05.968Z', links: [], fillableFields: [], recipients: [{ id: '6ZTlI8jcjEdRsO5UrBHX', contactName: 'TEST E-Sign Do Not Use', role: 'signer' }, { id: 'a4vyLnhwrRQn75dqek7k', contactName: 'Paula Thomas', role: 'signer' }] };
+  const DOC_SENT = { documentId: '6af51659e94c61f78742d9cb', _id: '6af51659e94c61f78742d9cb', name: 'AGREEMENT TO PURCHASE REAL ESTATE IN', status: 'viewed', deleted: false, createdAt: '2026-11-12T01:28:57.702Z', links: [{ documentId: '6af51659e94c61f78742d9cb', recipientId: 'qFBg9HS2LtXQg8mWjQuA' }], fillableFields: [], recipients: [{ id: 'qFBg9HS2LtXQg8mWjQuA', contactName: 'TEST E-Sign Do Not Use', role: 'signer' }] };
+  const T_100003 = new Date('2026-11-12T02:45:16Z').getTime();
+  // extraction: every plausible create-response field
+  t('docid: top-level documentId extracted', esign.extractCreatedDocumentId({ documentId: 'D1', links: [] }) === 'D1');
+  t('docid: _id fallback extracted', esign.extractCreatedDocumentId({ _id: 'D2', links: [] }) === 'D2');
+  t('docid: nested data.documentId extracted', esign.extractCreatedDocumentId({ data: { documentId: 'D3' } }) === 'D3');
+  t('docid: nested data._id extracted', esign.extractCreatedDocumentId({ data: { _id: 'D4' } }) === 'D4');
+  t('docid: link documentId extracted (the old working path)', esign.extractCreatedDocumentId({ links: [{ recipientId: 'C1', documentId: 'D5' }] }) === 'D5');
+  t('docid: data.links documentId extracted', esign.extractCreatedDocumentId({ data: { links: [{ documentId: 'D6' }] } }) === 'D6');
+  t('docid: draft-shaped response (links: [], no id fields) -> empty, never invented', esign.extractCreatedDocumentId({ links: [], success: true }) === '');
+  t('docid: null/garbage -> empty', esign.extractCreatedDocumentId(null) === '' && esign.extractCreatedDocumentId('x') === '');
+  // list matching: name + seller recipient + window, newest first
+  const hints100003 = { name: 'AGREEMENT TO PURCHASE REAL ESTATE IN', contactId: '6ZTlI8jcjEdRsO5UrBHX', notBeforeMs: T_100003 - 5 * 60 * 1000, notAfterMs: T_100003 + 15 * 60 * 1000 };
+  t('docid: list match finds the $100,003 draft (live shape)', (esign.matchDraftInList([DOC_100003, DOC_100002, DOC_SENT], hints100003) || {}).documentId === '6af5283b7d64ba6637bb5979');
+  t('docid: the $100,002 draft (35 min older) is outside the prepare window', (esign.matchDraftInList([DOC_100002], hints100003) || null) === null);
+  t('docid: a sent/viewed document never matches (drafts only)', (esign.matchDraftInList([DOC_SENT], { name: hints100003.name, contactId: 'qFBg9HS2LtXQg8mWjQuA', notBeforeMs: 0 }) || null) === null);
+  t('docid: a different seller contact never matches', (esign.matchDraftInList([DOC_100003], Object.assign({}, hints100003, { contactId: 'C-other' })) || null) === null);
+  t('docid: an id claimed by another envelope is excluded', (esign.matchDraftInList([DOC_100003], Object.assign({}, hints100003, { excludeIds: ['6af5283b7d64ba6637bb5979'] })) || null) === null);
+  t('docid: direct id match wins when the create response carried an id', (esign.matchDraftInList([DOC_100002, DOC_100003], { documentId: '6af51ffd6edc2082d016e4d1' }) || {}).documentId === '6af51ffd6edc2082d016e4d1');
+  t('docid: a deleted draft never matches', (esign.matchDraftInList([Object.assign({}, DOC_100003, { deleted: true })], hints100003) || null) === null);
+  // resolver: polls until the draft appears (eventual consistency)
+  function listImplSequence(payloads) {
+    let i = 0;
+    return async function () {
+      const p = payloads[Math.min(i, payloads.length - 1)]; i++;
+      return { status: 200, text: JSON.stringify({ data: { documents: p } }) };
+    };
+  }
+  const sleeps = [];
+  const resPoll = await esign.resolveDraftDocument('T', hints100003, { impl: listImplSequence([[], [DOC_100002], [DOC_100003, DOC_100002]]), sleep: async function (ms) { sleeps.push(ms); }, delaysMs: [10, 10] });
+  t('docid: resolver polls until the draft appears in the list', resPoll.documentId === '6af5283b7d64ba6637bb5979' && resPoll.draft && resPoll.draft.documentId === '6af5283b7d64ba6637bb5979');
+  t('docid: resolver actually waited between reads', sleeps.length === 2);
+  const resNone = await esign.resolveDraftDocument('T', hints100003, { impl: listImplSequence([[]]), sleep: async function () {}, delaysMs: [1, 1] });
+  t('docid: resolver gives up empty (never invents an id)', resNone.documentId === '' && resNone.draft === null);
+  const resThrow = await esign.resolveDraftDocument('T', hints100003, { impl: async function () { throw new Error('network down'); }, sleep: async function () {}, delaysMs: [] });
+  t('docid: a failing list read resolves empty, does not throw', resThrow.documentId === '');
+  // envelope store scan + claimed ids
+  const fakeStore = {
+    list: async function () { return { blobs: [{ key: 'envelope-a.json' }, { key: 'envelope-b.json' }, { key: 'envelope-c.json' }] }; },
+    get: async function (k) {
+      const all = {
+        'envelope-a.json': JSON.stringify({ id: 'es_a', documentId: 'DOC-A' }),
+        'envelope-b.json': JSON.stringify({ id: 'es_b', documentId: '' }),
+        'envelope-c.json': 'not json',
+      };
+      return all[k] || null;
+    },
+  };
+  const scanned = await esign.scanEnvelopes(fakeStore);
+  t('docid: store scan reads envelopes and skips unreadable ones', scanned.length === 2 && scanned.some((e) => e.id === 'es_a'));
+  t('docid: usedDocumentIds lists claimed ids, excluding self', JSON.stringify(esign.usedDocumentIds(scanned, 'es_x')) === JSON.stringify(['DOC-A']) && JSON.stringify(esign.usedDocumentIds(scanned, 'es_a')) === JSON.stringify([]));
 
   // handler export (Nov 11 live 502): module.exports overwrote exports.handler,
   // so Netlify reported "esign.handler is undefined or not exported".
