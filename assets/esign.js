@@ -263,7 +263,10 @@
       alert('Confirm you checked the Signature fields in HighLevel first — that checkbox is the guard that stops a field-less contract going out. (Dates are already set on the contract.)');
       return;
     }
-    if (!confirm('This sends a REAL contract for signature by email to the seller and Troy. Send it?')) return;
+    // No native confirm dialog here (removed Nov 11): the in-sheet
+    // checkbox above IS the send confirmation. A native popup is
+    // auto-dismissed as Cancel in automated browsers, which blocked
+    // the sheet send entirely; the checkbox guard remains in place.
     var b = document.getElementById('esignBody');
     if (b) b.innerHTML = '<p style="color:var(--muted)">Sending the contract…</p>';
     try {

@@ -347,7 +347,9 @@ t('templates: ids unique', new Set(esign.KNOWN_TEMPLATES.map((x) => x.id)).size 
         return { ok: false, status: 400, json: async function () { return { error: 'unknown action' }; } };
       },
       alert: function (msg) { alerts.push(String(msg)); },
-      confirm: function () { return true; },
+      // NOTE: no `confirm` stub on purpose (Nov 11) — the sheet must
+      // never call the native confirm dialog; if any code path does,
+      // the vm throws and the UI tests fail.
       saveState: function () { saveStateCalls++; },
     };
     // Live shape: index.html declares `let leads = []` at top level, and a
@@ -513,6 +515,17 @@ t('templates: ids unique', new Set(esign.KNOWN_TEMPLATES.map((x) => x.id)).size 
   t('ui-advisory: sheet Send posts fieldsConfirmed:true', Boolean(sendCallI) && sendCallI.body.fieldsConfirmed === true);
   t('ui-advisory: sheet Send posts fieldsAdvisoryAccepted:true on an advisory envelope', Boolean(sendCallI) && sendCallI.body.fieldsAdvisoryAccepted === true);
   t('ui-advisory: sheet Send targets the prepared envelope', Boolean(sendCallI) && sendCallI.body.envelopeId === 'es_adv1');
+
+  // (j) no native confirm (Nov 11): the native dialog is auto-dismissed
+  // as Cancel in automated browsers, so esignSend must not call it —
+  // the in-sheet checkbox is the send confirmation. Verified two ways:
+  // statically (no confirm call in the esignSend source) and live (the
+  // stub env above has NO confirm stub at all, yet the advisory Send
+  // in (i) still posted its confirmations and completed).
+  const sendFnSrc = uiSrc.slice(uiSrc.indexOf('window.esignSend'), uiSrc.indexOf('window.esignRefresh'));
+  t('ui-noconfirm: esignSend source contains no native confirm call', sendFnSrc.length > 0 && !/confirm\s*\(/.test(sendFnSrc));
+  t('ui-noconfirm: stub env exposes no confirm function', typeof envI.sandbox.confirm === 'undefined');
+  t('ui-noconfirm: sheet Send completed without a confirm stub (advisory confirmations posted)', Boolean(sendCallI) && sendCallI.body.fieldsConfirmed === true && sendCallI.body.fieldsAdvisoryAccepted === true);
 
   // handler export (Nov 11 live 502): module.exports overwrote exports.handler,
   // so Netlify reported "esign.handler is undefined or not exported".
