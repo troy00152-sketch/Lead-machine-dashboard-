@@ -1,9 +1,11 @@
 // esign-regression.js — fixture tests for the in-dashboard e-sign build.
 // Run: node esign-regression.js
 // FIXTURE-ONLY: no live HighLevel calls, no live sends, no money, no Blobs.
-// Covers the contract math, the Oct 9 fields guard, the state machine,
-// the duplicate guard, DND handling, and the FREE-only constraint
-// (no paid vendor may appear anywhere in the function code).
+// Covers the contract math, the fields check (signatures required,
+// dates NOT required; advisory model since Nov 11 evening — the HL API
+// provably does not expose signature fields), the send gate, the state
+// machine, the duplicate guard, DND handling, and the FREE-only
+// constraint (no paid vendor may appear anywhere in the function code).
 'use strict';
 
 const fs = require('fs');
@@ -92,8 +94,14 @@ t('legal: missing legal text -> empty', esign.buildLegalDescription('008539', ''
   t('signers: exactly 3 seats', s.length === 3);
 })();
 
-// ---- 5. fields-ready check — the Oct 9 guard ----
-// Live Gatlin document shape (Nov 11 read): fillableFields [].
+// ---- 5. fields check — signatures required, dates NOT required ----
+// Model (Nov 11 evening): the HL API provably does NOT project signature
+// fields (7 live documents read, incl. one already signed — Text/Date
+// only; the sent test document 6af51659e94c61f78742d9cb projects an
+// EMPTY list). So the check is VERIFIED only when the API shows a
+// Signature field for every signer, and ADVISORY otherwise — never a
+// hard block on API evidence, and the send gate (section 5b) requires
+// Troy's explicit confirmation + advisory acceptance instead.
 (function () {
   const gatlinDoc = {
     documentId: '6aefcfc12c8f6fac64629f96', status: 'viewed',
@@ -104,9 +112,23 @@ t('legal: missing legal text -> empty', esign.buildLegalDescription('008539', ''
     ],
   };
   const g = esign.fieldsReadyCheck(gatlinDoc);
-  t('fields-guard: empty fillableFields BLOCKS (Gatlin shape)', g.ready === false, JSON.stringify(g));
-  t('fields-guard: empty-fields reason names the problem', /no fillable fields/i.test(g.reason || ''));
-  // Live IN agreement shape: TextField + DateField, both recipients covered.
+  t('fields: empty fillableFields is ADVISORY, not a hard block (Gatlin shape)', g.ready === false && g.advisory === true && g.requiresConfirmation === true, JSON.stringify(g));
+  t('fields: advisory reason states the API cannot expose signature fields', /does not expose signature fields/i.test(g.reason || ''));
+  t('fields: advisory lists both signers as unverified for Signature', g.unverified.length === 2 && g.unverified.every((m) => /Signature/.test(m)));
+  t('fields: advisory NEVER lists a missing Date (dates are set on the contracts)', !g.unverified.some((m) => /no Date|missing.*Date/i.test(m)) && !/Date field/.test(g.unverified.join(' ')));
+  // The sent test document itself: HL accepted + sent it with an empty
+  // projected field list — the exact shape that hard-blocked forever.
+  const sentTestDoc = {
+    documentId: '6af51659e94c61f78742d9cb', status: 'viewed',
+    fillableFields: [],
+    recipients: [
+      { id: 'qFBg9HS2LtXQg8mWjQuA', contactName: 'TEST E-Sign Do Not Use', role: 'signer' },
+      { id: 'a4vyLnhwrRQn75dqek7k', contactName: 'Paula Thomas', role: 'signer' },
+    ],
+  };
+  const st = esign.fieldsReadyCheck(sentTestDoc);
+  t('fields: the successfully sent test doc is advisory (not verified, not blocked)', st.advisory === true && st.ready === false);
+  // IN agreement shape WITH signature fields projected for both signers.
   const inDoc = {
     documentId: '6ad7f0f89fba0130bbbe29f6', status: 'sent',
     fillableFields: [
@@ -123,21 +145,38 @@ t('legal: missing legal text -> empty', esign.buildLegalDescription('008539', ''
     ],
   };
   const okDoc = esign.fieldsReadyCheck(inDoc);
-  t('fields-guard: all signers with Signature+Date passes', okDoc.ready === true, JSON.stringify(okDoc));
+  t('fields: all signers with a Signature field passes VERIFIED', okDoc.ready === true && okDoc.verified === true && okDoc.advisory === false, JSON.stringify(okDoc));
   const missingDate = JSON.parse(JSON.stringify(inDoc));
   missingDate.fillableFields = missingDate.fillableFields.filter((f) => f.id !== 'f5');
   const md = esign.fieldsReadyCheck(missingDate);
-  t('fields-guard: one signer missing Date blocks and names them', md.ready === false && md.missing.some((m) => /Seller/.test(m) && /Date/.test(m)), JSON.stringify(md.missing));
+  t('fields: a signer with Signature but NO Date still passes (dates not required)', md.ready === true, JSON.stringify(md));
+  const noDatesAtAll = JSON.parse(JSON.stringify(inDoc));
+  noDatesAtAll.fillableFields = noDatesAtAll.fillableFields.filter((f) => f.type !== 'DateField');
+  t('fields: signatures only, zero Date fields anywhere, still passes', esign.fieldsReadyCheck(noDatesAtAll).ready === true);
   const missingSig = JSON.parse(JSON.stringify(inDoc));
   missingSig.fillableFields = missingSig.fillableFields.filter((f) => f.id !== 'f3');
   const ms = esign.fieldsReadyCheck(missingSig);
-  t('fields-guard: one signer missing Signature blocks and names them', ms.ready === false && ms.missing.some((m) => /Troy Thomas/.test(m) && /Signature/.test(m)), JSON.stringify(ms.missing));
+  t('fields: one signer without a visible Signature is advisory and names them', ms.ready === false && ms.advisory === true && ms.unverified.some((m) => /Troy Thomas/.test(m) && /Signature/.test(m)), JSON.stringify(ms.unverified));
   const weird = JSON.parse(JSON.stringify(inDoc));
   weird.fillableFields.push({ id: 'f9', fieldId: 'mystery_field_9', type: 'QuantumField', recipient: 'a4vyLnhwrRQn75dqek7k' });
   const w = esign.fieldsReadyCheck(weird);
-  t('fields-guard: unrecognized field type blocks, never passes on a guess', w.ready === false && w.unrecognized.includes('QuantumField'));
+  t('fields: unrecognized field type is reported, not a block, when signatures verify', w.ready === true && w.unrecognized.includes('QuantumField'));
   const noRecipients = { fillableFields: inDoc.fillableFields, recipients: [] };
-  t('fields-guard: no recipients + fields present passes (nothing to sign)', esign.fieldsReadyCheck(noRecipients).ready === true);
+  t('fields: no recipients + fields present passes (nothing to sign)', esign.fieldsReadyCheck(noRecipients).ready === true);
+})();
+
+// ---- 5b. send gate (fieldsGateDecision) ----
+(function () {
+  const verified = { ready: true, verified: true, advisory: false };
+  const advisory = { ready: false, verified: false, advisory: true, requiresConfirmation: true, missing: ['Seller: Signature field not visible via the HighLevel API'] };
+  t('gate: verified + Troy confirmation allows (mode verified)', (() => { const d = esign.fieldsGateDecision(verified, { fieldsConfirmed: true }); return d.allowed === true && d.mode === 'verified'; })());
+  t('gate: verified without confirmation blocks', esign.fieldsGateDecision(verified, {}).allowed === false);
+  t('gate: advisory + confirmation + acceptance allows (mode advisory-confirmed)', (() => { const d = esign.fieldsGateDecision(advisory, { fieldsConfirmed: true, fieldsAdvisoryAccepted: true }); return d.allowed === true && d.mode === 'advisory-confirmed'; })());
+  t('gate: advisory + confirmation but NO acceptance blocks', esign.fieldsGateDecision(advisory, { fieldsConfirmed: true }).allowed === false);
+  t('gate: advisory + acceptance but NO confirmation blocks', esign.fieldsGateDecision(advisory, { fieldsAdvisoryAccepted: true }).allowed === false);
+  t('gate: advisory block names the advisory acceptance it needs', /fieldsAdvisoryAccepted/.test(esign.fieldsGateDecision(advisory, { fieldsConfirmed: true }).error || ''));
+  t('gate: no fields check at all blocks (re-prepare)', esign.fieldsGateDecision(null, { fieldsConfirmed: true, fieldsAdvisoryAccepted: true }).allowed === false);
+  t('gate: a non-advisory failed check still blocks even with both confirmations', esign.fieldsGateDecision({ ready: false, advisory: false, missing: ['x'] }, { fieldsConfirmed: true, fieldsAdvisoryAccepted: true }).allowed === false);
 })();
 
 // ---- 6. state machine ----
@@ -294,6 +333,12 @@ t('templates: ids unique', new Set(esign.KNOWN_TEMPLATES.map((x) => x.id)).size 
             // Server shape (esign.js prepare): unknown id -> HL lookup error.
             return { ok: false, status: 404, json: async function () { return { error: 'HighLevel contact not found.' }; } };
           }
+          if (body.contactId === 'C-advisory') {
+            // Advisory shape (Nov 11 evening): the API cannot see the
+            // signature fields, so prepare returns an advisory check on
+            // a sendable draft — NOT a fields-blocked envelope.
+            return { ok: true, status: 200, json: async function () { return { envelope: { id: 'es_adv1', templateId: body.templateId, state: 'draft', contract: { price: '100001', emd: '100', apn: 'TEST-000001', legal: 'TEST-000001 (TEST SUBDIVISION)', county: 'Marion County', contractDate: '2026-11-11', closingDate: '2026-12-11' }, signers: [{ name: 'TEST E-Sign Do Not Use', role: 'seller', email: 'troy00152+esigntest@gmail.com' }] }, fieldsCheck: { ready: false, verified: false, advisory: true, requiresConfirmation: true, missing: ['TEST E-Sign Do Not Use: Signature field not visible via the HighLevel API'], unverified: ['TEST E-Sign Do Not Use: Signature field not visible via the HighLevel API'], unrecognized: [], reason: 'HighLevel\'s API does not expose signature fields.' }, disclosureReminder: false }; } };
+          }
           if (body.contactId === 'C-nofields') {
             return { ok: false, status: 400, json: async function () { return { error: 'Contract is not ready to prepare.', missing: ['contract_price', 'emd_deposit', 'APN', 'legal_description', 'county'] }; } };
           }
@@ -438,12 +483,36 @@ t('templates: ids unique', new Set(esign.KNOWN_TEMPLATES.map((x) => x.id)).size 
   const f5 = fakeListImpl({ data: { documents: [liveDoc] } });
   await esign.hlListDocuments('T', 'AGREEMENT TO PURCHASE REAL ESTATE IN', f5.impl);
   t('readback: a name query still passes through (documents action)', f5.seen[0].includes('query=AGREEMENT'));
-  // The live draft itself: once the read-back is fixed, the guard must
-  // STILL block — it has TextField + DateField only, zero Signature
-  // fields for either signer. Fixing the read-back must not bypass this.
+  // The live draft itself: it has TextField + DateField only — the API
+  // projects no Signature fields for either signer (that is an API
+  // limitation, proven across all 7 live documents, not proof the
+  // template lacks signatures). The check must be ADVISORY for it, and
+  // must NOT demand Date fields (dates are set on the contracts).
   const liveCheck = esign.fieldsReadyCheck(liveDoc);
-  t('readback: live draft 6af5112d has no Signature field for either signer', liveCheck.ready === false && liveCheck.missing.some((m) => /TEST E-Sign/.test(m) && /Signature/.test(m)) && liveCheck.missing.some((m) => /Paula Thomas/.test(m) && /Signature/.test(m)), JSON.stringify(liveCheck.missing));
-  t('readback: live draft Paula is also missing a Date field', liveCheck.missing.some((m) => /Paula Thomas/.test(m) && /Date/.test(m)));
+  t('readback: live draft 6af5112d is advisory — no Signature visible via API for either signer', liveCheck.ready === false && liveCheck.advisory === true && liveCheck.unverified.some((m) => /TEST E-Sign/.test(m) && /Signature/.test(m)) && liveCheck.unverified.some((m) => /Paula Thomas/.test(m) && /Signature/.test(m)), JSON.stringify(liveCheck.unverified));
+  t('readback: live draft demands NO Date field for Paula (dates already set on the contract)', !liveCheck.unverified.some((m) => /Date/.test(m)), JSON.stringify(liveCheck.unverified));
+
+  // (i) advisory flow — the sheet must be SENDABLE on an advisory check:
+  // Prepare returns state 'draft' + advisory fieldsCheck; the sheet
+  // shows the advisory (amber, not a red block), offers the Send button
+  // behind the confirmation checkbox, and esignSend posts
+  // fieldsConfirmed:true + fieldsAdvisoryAccepted:true. This is the
+  // exact flow the successful HL test send proved the contract needs.
+  const envI = makeEnv();
+  envI.leads.push({ id: 'L6', state: 'IN', ghlContactId: 'C-advisory' });
+  await envI.sandbox.esignOpenSheet('L6');
+  await envI.sandbox.esignPrepare();
+  t('ui-advisory: advisory prepare renders the ADVISORY notice', /ADVISORY/.test(envI.body()));
+  t('ui-advisory: advisory is not rendered as a hard FAILED block', !/Fields check FAILED/.test(envI.body()));
+  t('ui-advisory: Send button is offered on an advisory draft', /Send for signature/.test(envI.body()));
+  t('ui-advisory: confirmation checkbox asks about Signature fields', /Signature field for every signer is placed/.test(envI.body()));
+  t('ui-advisory: checkbox does NOT demand a Date field', !/Signature and a Date field/.test(envI.body()));
+  envI.input('esignFieldsConfirmed').checked = true;
+  await envI.sandbox.esignSend();
+  const sendCallI = envI.calls.find((c) => c.action === 'send');
+  t('ui-advisory: sheet Send posts fieldsConfirmed:true', Boolean(sendCallI) && sendCallI.body.fieldsConfirmed === true);
+  t('ui-advisory: sheet Send posts fieldsAdvisoryAccepted:true on an advisory envelope', Boolean(sendCallI) && sendCallI.body.fieldsAdvisoryAccepted === true);
+  t('ui-advisory: sheet Send targets the prepared envelope', Boolean(sendCallI) && sendCallI.body.envelopeId === 'es_adv1');
 
   // handler export (Nov 11 live 502): module.exports overwrote exports.handler,
   // so Netlify reported "esign.handler is undefined or not exported".

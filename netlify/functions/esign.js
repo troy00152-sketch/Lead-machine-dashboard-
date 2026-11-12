@@ -6,15 +6,34 @@
 // templates already live there, and the signing itself happens on HL's
 // signing page via HL's own links. The dashboard is the cockpit:
 // pick template -> validate contract fields -> create a DRAFT first ->
-// code-enforced Signature+Date fields check -> send -> text the seller
-// their HL signing link -> poll status -> tag + audit trail on completion.
+// signature fields check -> send -> text the seller their HL signing
+// link -> poll status -> tag + audit trail on completion.
 //
 // HARD RULES (do not weaken them):
 //  1. The dashboard NEVER auto-places signature/date fields. Troy places
-//     fields himself in HL (standing preference). The code only VERIFIES
-//     them on the draft (fillableFields) and BLOCKS the send when any
-//     signer is missing Signature or Date — the Oct 9, 2026 Jacksonville
-//     failure (a sent document with no fields to sign) must never repeat.
+//     fields himself in HL (standing preference). SIGNATURES are the
+//     requirement; a per-signer DATE field is NOT required — Troy
+//     (Nov 11, 2026): all his contracts already carry right-now dates,
+//     "the dates are all set on the contracts."
+//     FIELDS-CHECK MODEL (changed Nov 11 evening, with the trade-off
+//     stated plainly): the original design VERIFIED signature fields on
+//     the draft via the HL API and hard-blocked the send — that was the
+//     Oct 9, 2026 Jacksonville guard (a sent document with no fields to
+//     sign must never repeat). Live proof Nov 11 killed the API half of
+//     that design: across all 7 live documents — including document
+//     6ad7f0f89fba0130bbbe29f6, whose signer had already signed — the HL
+//     API projected ONLY Text/Date fillableFields and ZERO signature
+//     fields, and document 6af51659e94c61f78742d9cb, which HL accepted,
+//     sent, and Troy received + opened, projects an EMPTY field list.
+//     The templates list exposes no field data either. There is NO
+//     reliable API source for signature placement, so an API hard block
+//     blocks every legitimate send forever while proving nothing. The
+//     guard therefore moved, it was not dropped: when the API cannot
+//     verify signatures, the check is ADVISORY and the send unlocks
+//     only on Troy's explicit in-sheet confirmation (fieldsConfirmed +
+//     fieldsAdvisoryAccepted) that he checked the Signature fields in
+//     HighLevel himself. If the API ever does project signature fields
+//     for every signer, the check passes as verified with no advisory.
 //  2. Contract text comes ONLY from the HL template. The dashboard never
 //     invents, edits or paraphrases contract terms. It only fills the
 //     contact's own custom fields (price / EMD / APN / legal / county /
@@ -51,11 +70,16 @@
 // UNVERIFIED at build time (deploy-time checks, see ESIGN_DEPLOY.md):
 //   - sendDocument:false actually creates a draft without sending.
 //   - Proposals Version header (v1 uses 2021-07-28, same as Contacts).
-//   - The exact `type` string HL uses for signature fields in
-//     fillableFields (TextField/DateField are confirmed by a live doc;
-//     the signature type is matched case-insensitively on "sign").
 //   - Whether HL exposes a signed-PDF download endpoint (none is in the
 //     catalog read Nov 11 — the signed PDF lives in HL until confirmed).
+// VERIFIED live Nov 11, 2026 (ghl CLI reads, 7 documents + 9 templates):
+//   - fillableFields NEVER contains a signature-typed field — not on
+//     drafts, not on sent/viewed documents, not even on a document a
+//     signer already signed (signing shows on the RECIPIENT record:
+//     hasCompleted / signedDate / signature image). Signature elements
+//     placed in the template editor are simply not projected by the
+//     API, so fieldsReadyCheck treats the API view as advisory only.
+//   - The templates list returns id/name/type/totals only — no fields.
 'use strict';
 
 const crypto = require('crypto');
@@ -375,48 +399,80 @@ function templateForState(templates, state) {
   // — the disclosure is a companion document, never the contract itself.
   return matches.find((t) => /AGREEMENT TO PURCHASE/.test(String(t.name || '').toUpperCase())) || matches[0] || null;
 }
-// --- fields-ready check: the Oct 9 guard, enforced in code. ---
-// A draft document's fillableFields + recipients decide. Every signer
-// recipient must have BOTH a Signature field and a Date field. Field type
-// strings: TextField/DateField are confirmed by a live HL document; the
-// signature type is matched case-insensitively on "sign" in the type or
-// fieldId, because HL does not publish the exact string. An empty field
-// list, an unrecognized type, or a signer with no fields at all BLOCKS
-// the send — it never passes on a guess.
+// --- fields check: signatures required, dates NOT required. ---
+// What the HL API can and cannot say (all verified live Nov 11, 2026):
+// the document's fillableFields projection contains Text/Date fields
+// only — signature elements are never projected, on any of the 7 live
+// documents, including one already signed. The templates list exposes
+// no fields at all. So this check has exactly two outcomes:
+//   VERIFIED — the API projects a Signature field for EVERY signer
+//     (kept for the day HL projects them; the signature type is matched
+//     case-insensitively on "sign" in the type or fieldId).
+//   ADVISORY — anything else. NOT a hard block and NOT a pass: the API
+//     view cannot tell the truth about signature placement, so the
+//     send gate (fieldsGateDecision) requires Troy's explicit in-sheet
+//     confirmation that he checked the Signature fields in HighLevel.
+// Date fields are never required and never listed as missing: Troy's
+// contracts already carry right-now dates (Troy, Nov 11, 2026).
+const FIELDS_ADVISORY_REASON = 'HighLevel\'s API does not expose signature fields — across all 7 live documents (Nov 11, 2026), including one a signer had already signed, the API projected only Text/Date fields and zero signature fields, and the document HighLevel accepted and sent projects an empty field list. The templates list exposes no field data either, so signature placement cannot be verified from the API. Signatures are still required: this send unlocks only when Troy confirms in the sheet that he checked the Signature field for every signer in HighLevel. Date fields are not required — the contracts already carry right-now dates.';
+function advisoryFieldsCheck(unverified, unrecognized, reason) {
+  return {
+    ready: false,
+    verified: false,
+    advisory: true,
+    requiresConfirmation: true,
+    missing: unverified,
+    unverified,
+    unrecognized: [...new Set(unrecognized || [])],
+    reason: reason || FIELDS_ADVISORY_REASON,
+  };
+}
 function fieldsReadyCheck(doc) {
   const fields = (doc && Array.isArray(doc.fillableFields)) ? doc.fillableFields : [];
   const recipients = (doc && Array.isArray(doc.recipients)) ? doc.recipients : [];
   const signers = recipients.filter((r) => r && (r.role === 'signer' || !r.role));
-  const missing = [];
   const unrecognized = [];
-  if (fields.length === 0) {
-    return {
-      ready: false,
-      missing: signers.map((r) => `${r.contactName || r.id || 'signer'}: no fields placed on the document`),
-      unrecognized,
-      reason: 'The document has no fillable fields at all — no Signature or Date field is placed for any signer. Check it in HighLevel before sending.',
-    };
-  }
-  const fieldTypes = new Set();
   for (const f of fields) {
     const t = String((f && f.type) || '');
     const fid = String((f && f.fieldId) || '');
-    fieldTypes.add(t);
     if (!/text|date|sign/i.test(t) && !/sign|date/i.test(fid)) unrecognized.push(t || fid || 'unknown-field');
   }
+  const unverified = [];
   for (const r of signers) {
     const mine = fields.filter((f) => f && (f.recipient === r.id || f.recipient === r.contactName));
     const hasSig = mine.some((f) => /sign/i.test(String(f.type || '')) || /sign/i.test(String(f.fieldId || '')));
-    const hasDate = mine.some((f) => /date/i.test(String(f.type || '')) || /date/i.test(String(f.fieldId || '')));
-    const label = r.contactName || r.id || 'signer';
-    if (!hasSig) missing.push(`${label}: no Signature field`);
-    if (!hasDate) missing.push(`${label}: no Date field`);
+    if (!hasSig) unverified.push(`${r.contactName || r.id || 'signer'}: Signature field not visible via the HighLevel API`);
   }
-  if (unrecognized.length > 0) {
-    return { ready: false, missing, unrecognized: [...new Set(unrecognized)], reason: 'The document uses field types the dashboard does not recognize — verify the fields in HighLevel before sending.' };
+  if (signers.length > 0 && unverified.length === 0) {
+    return { ready: true, verified: true, advisory: false, requiresConfirmation: false, missing: [], unverified: [], unrecognized: [...new Set(unrecognized)], reason: '' };
   }
-  if (missing.length > 0) return { ready: false, missing, unrecognized, reason: 'One or more signers are missing a Signature or Date field.' };
-  return { ready: true, missing: [], unrecognized: [], reason: '' };
+  if (signers.length === 0 && fields.length > 0) {
+    // No signer recipients on the draft — nothing for anyone to sign,
+    // so there is no signature placement to verify. (Pre-Nov-11
+    // behavior, kept: recipients are listed in the sheet for Troy.)
+    return { ready: true, verified: true, advisory: false, requiresConfirmation: false, missing: [], unverified: [], unrecognized: [...new Set(unrecognized)], reason: '' };
+  }
+  return advisoryFieldsCheck(unverified, unrecognized);
+}
+// --- send gate for the fields check (pure; the handler enforces it). ---
+// verified check  -> Troy's fieldsConfirmed alone unlocks the send.
+// advisory check  -> fieldsConfirmed AND fieldsAdvisoryAccepted: Troy
+//   confirms he personally checked the Signature fields in HighLevel
+//   and accepts that the API could not verify them.
+// anything else (no check, or a non-advisory failure) -> blocked.
+function fieldsGateDecision(fieldsCheck, confirmations) {
+  const c = confirmations || {};
+  if (!fieldsCheck) return { allowed: false, error: 'No fields check is recorded for this contract — prepare it again before sending.' };
+  if (fieldsCheck.ready) {
+    if (c.fieldsConfirmed !== true) return { allowed: false, error: 'Troy must confirm the signature fields are placed in HighLevel before sending (fieldsConfirmed:true).' };
+    return { allowed: true, mode: 'verified' };
+  }
+  if (fieldsCheck.advisory) {
+    if (c.fieldsConfirmed !== true) return { allowed: false, error: 'Troy must confirm he checked the Signature field for every signer in HighLevel before sending (fieldsConfirmed:true).' };
+    if (c.fieldsAdvisoryAccepted !== true) return { allowed: false, error: 'This contract\'s signature fields cannot be verified through the HighLevel API (the API does not expose them). Troy must also accept the fields advisory (fieldsAdvisoryAccepted:true) — confirming he checked the Signature fields in HighLevel himself.' };
+    return { allowed: true, mode: 'advisory-confirmed' };
+  }
+  return { allowed: false, error: 'Fields check did not pass — this contract cannot be sent.', missing: fieldsCheck.missing || [] };
 }
 // Envelope state machine: HL statuses only ever move the envelope forward.
 // A stale/older poll never rewinds a completed envelope.
@@ -612,7 +668,7 @@ exports.handler = async (event) => {
       const docs = await hlListDocuments(token);
       draft = docs.find((d) => (d.documentId || d._id) === documentId) || null;
     } catch (e) { draft = null; }
-    const fields = draft ? fieldsReadyCheck(draft) : { ready: false, missing: ['Could not read the draft back from HighLevel to verify its fields.'], unrecognized: [], reason: 'Draft created, but the fields check could not run — verify the fields in HighLevel before sending.' };
+    const fields = draft ? fieldsReadyCheck(draft) : advisoryFieldsCheck(['Could not read the draft back from HighLevel — its fields could not be checked at all.'], [], 'Draft created, but HighLevel did not return it in the document list, so no field view exists at all. The send stays locked until Troy confirms in the sheet that he checked the Signature fields on this draft in HighLevel.');
     const envelope = {
       id: newEnvelopeId(),
       leadId: body.leadId || '',
@@ -620,7 +676,7 @@ exports.handler = async (event) => {
       templateId,
       templateName: (KNOWN_TEMPLATES.find((t) => t.id === templateId) || {}).name || templateId,
       documentId: documentId || (draft && (draft.documentId || draft._id)) || '',
-      state: fields.ready ? 'draft' : 'fields-blocked',
+      state: (fields.ready || fields.advisory) ? 'draft' : 'fields-blocked',
       contract: check.contract,
       signers: buildSigners(contact),
       draftRecipients: draft ? (draft.recipients || []) : [],
@@ -631,7 +687,7 @@ exports.handler = async (event) => {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    appendEvent(envelope, 'prepared', `Draft created from template ${envelope.templateName}; fields check ${fields.ready ? 'passed' : 'FAILED — send blocked'}.`, 'dashboard');
+    appendEvent(envelope, 'prepared', `Draft created from template ${envelope.templateName}; fields check ${fields.ready ? 'passed (signatures verified via the API)' : (fields.advisory ? 'ADVISORY — the API cannot see signature fields; send unlocks only on Troy\'s in-sheet confirmation that he checked them in HighLevel' : 'FAILED — send blocked')}.`, 'dashboard');
     await writeEnvelope(store, envelope);
     return ok({ envelope, fieldsCheck: fields, disclosureReminder: needsDisclosureReminder(contactSummary(contact).state) });
   }
@@ -640,7 +696,6 @@ exports.handler = async (event) => {
   if (action === 'send' || body.action === 'send') {
     const envelopeId = body.envelopeId || '';
     if (!envelopeId) return bad('An envelope id from prepare is required — send never starts from scratch.');
-    if (body.fieldsConfirmed !== true) return bad('Troy must confirm the Signature and Date fields are placed in HighLevel before sending (fieldsConfirmed:true).');
     const store = getLogStore(event);
     if (!store) return unavailable('Signature log is unavailable — cannot send without an audit trail.');
     const envelope = await readEnvelope(store, envelopeId);
@@ -648,9 +703,16 @@ exports.handler = async (event) => {
     if (envelope.state === 'sent' || envelope.state === 'viewed' || envelope.state === 'completed' || envelope.state === 'accepted') {
       return json(409, { error: 'This contract was already sent.', code: 'already_sent', state: envelope.state });
     }
-    if (!envelope.fieldsCheck || !envelope.fieldsCheck.ready) {
-      return bad('Fields check did not pass — this contract cannot be sent until every signer has a Signature and a Date field.', { missing: (envelope.fieldsCheck && envelope.fieldsCheck.missing) || [] });
+    // Fields gate: signatures are the requirement, dates are not (the
+    // contracts carry right-now dates). A verified check needs Troy's
+    // confirmation; an advisory check (the HL API cannot expose
+    // signature fields — see fieldsReadyCheck) needs his confirmation
+    // PLUS explicit acceptance of the advisory.
+    const gate = fieldsGateDecision(envelope.fieldsCheck, body);
+    if (!gate.allowed) {
+      return bad(gate.error, { missing: gate.missing || (envelope.fieldsCheck && envelope.fieldsCheck.missing) || [] });
     }
+    envelope.fieldsGateMode = gate.mode;
     if (!envelope.documentId) return bad('The prepared draft has no HighLevel document id — re-prepare before sending.');
     if (!senderUserId) return unavailable('ESIGN_SENDER_USER_ID is not set.');
     const ccRecipients = [];
@@ -663,7 +725,7 @@ exports.handler = async (event) => {
     envelope.fieldsConfirmedByTroy = true;
     envelope.sentAt = new Date().toISOString();
     envelope.sendResponse = { links: sent.links || [] };
-    appendEvent(envelope, 'sent', 'Contract sent by email to the seller, Troy CC’d. Signing link available in the envelope.', 'dashboard');
+    appendEvent(envelope, 'sent', `Contract sent by email to the seller, Troy CC’d. Signing link available in the envelope. Fields gate: ${gate.mode === 'advisory-confirmed' ? 'advisory — Troy confirmed he checked the Signature fields in HighLevel (the API cannot expose them)' : 'signatures verified via the API'}.`, 'dashboard');
     // Text the seller their HL signing link — email is the delivery
     // channel, SMS is a nudge. Never text a DND/dnc contact.
     let sms = { attempted: false, sent: false, reason: '' };
@@ -734,6 +796,8 @@ module.exports = {
   needsDisclosureReminder,
   templateForState,
   fieldsReadyCheck,
+  advisoryFieldsCheck,
+  fieldsGateDecision,
   nextEnvelopeState,
   appendEvent,
   newEnvelopeId,

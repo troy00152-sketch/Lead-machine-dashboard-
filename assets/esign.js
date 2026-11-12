@@ -2,8 +2,8 @@
 // HighLevel signing surfaced in the dashboard. FREE — no paid vendor, no
 // per-envelope fee. The sheet: pick one of Troy's 9 HL templates -> the
 // dashboard validates the contract fields on the HL contact -> creates a
-// DRAFT first -> checks every signer has Signature + Date fields -> only
-// then, on Troy's confirm tap, sends by email (seller + Troy CC'd) and
+// DRAFT first -> checks the draft's signature fields -> only then, on
+// Troy's confirm tap, sends by email (seller + Troy CC'd) and
 // texts the seller their HL signing link. Nothing sends without the
 // confirm tap, and there is NO test mode for HL signing — a send is a
 // real, legally binding signing request. "Prepare" is the safe dry-run.
@@ -111,10 +111,27 @@
         html += '<p style="font-size:13px;color:var(--muted)">Recipients on the HighLevel draft: ' + esc(env.draftRecipients.map(function (r) { return r.contactName || r.id; }).join(', ')) + '. Check co-sellers are listed.</p>';
       }
     }
-    // Fields check
+    // Fields check — signatures are the requirement; dates are NOT
+    // required (the contracts already carry right-now dates). The
+    // HighLevel API does not expose signature fields at all (verified
+    // live Nov 11, 2026 — it projects only Text/Date fields, even on a
+    // document a signer already signed), so an unverifiable check is
+    // ADVISORY: amber, not a block. The send then unlocks only on the
+    // confirmation checkbox below, where Troy confirms he checked the
+    // Signature fields in HighLevel himself.
     if (fc) {
       if (fc.ready) {
-        html += '<p style="color:#1a7f37;font-weight:600;margin:12px 0 4px">✅ Fields check passed — every signer has a Signature and a Date field on the draft.</p>';
+        html += '<p style="color:#1a7f37;font-weight:600;margin:12px 0 4px">✅ Fields check passed — a Signature field for every signer is visible on the draft. (Dates are already set on the contract — not checked.)</p>';
+      } else if (fc.advisory) {
+        html += '<p style="color:#a60;font-weight:600;margin:12px 0 4px">⚠️ Fields check — ADVISORY: HighLevel\'s API cannot see this contract\'s signature fields, so the dashboard cannot verify them.</p>';
+        if (fc.reason) html += '<p style="font-size:13px;color:var(--muted)">' + esc(fc.reason) + '</p>';
+        if ((fc.unverified || fc.missing || []).length) {
+          html += '<p style="font-size:13px;margin:4px 0 2px">Not visible via the API:</p>';
+          html += '<ul style="margin:0 0 8px;padding-left:18px;font-size:13px">';
+          (fc.unverified || fc.missing).forEach(function (m) { html += '<li>' + esc(m) + '</li>'; });
+          html += '</ul>';
+        }
+        html += '<p style="font-size:13px">Open the draft in HighLevel and confirm the Signature field for every signer is placed — then tick the confirmation below to unlock Send.</p>';
       } else {
         html += '<p style="color:#d33;font-weight:600;margin:12px 0 4px">⛔ Fields check FAILED — this contract cannot be sent.</p>';
         html += '<ul style="margin:0 0 8px;padding-left:18px;font-size:13px;color:#d33">';
@@ -144,10 +161,10 @@
     html += '<div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap">';
     if (!env) {
       html += '<button class="btn primary" onclick="esignPrepare()">1️⃣ Prepare draft — sends nothing</button>';
-    } else if (env.state === 'fields-blocked') {
+    } else if (env.state === 'fields-blocked' && !(fc && fc.advisory)) {
       html += '<button class="btn primary" onclick="esignPrepare(true)">↻ Prepare again after fixing fields in HighLevel</button>';
-    } else if (env.state === 'draft') {
-      html += '<label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;width:100%"><input type="checkbox" id="esignFieldsConfirmed" style="margin-top:3px"> I checked in HighLevel — every signer has a Signature and a Date field placed on this contract.</label>';
+    } else if (env.state === 'draft' || env.state === 'fields-blocked') {
+      html += '<label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;width:100%"><input type="checkbox" id="esignFieldsConfirmed" style="margin-top:3px"> I checked in HighLevel — the Signature field for every signer is placed on this contract.' + ((fc && fc.advisory) ? ' I understand HighLevel\'s API cannot show signature fields, so this confirmation is the check.' : '') + ' (Dates are already set on the contract.)</label>';
       html += '<button class="btn primary" onclick="esignSend()">✍️ 2️⃣ Send for signature — real contract</button>';
       html += '<button class="btn" onclick="esignCloseSheet()">Close</button>';
     } else {
@@ -155,7 +172,7 @@
       html += '<button class="btn" onclick="esignCloseSheet()">Close</button>';
     }
     html += '</div>';
-    if (env && env.state === 'draft') {
+    if (env && (env.state === 'draft' || env.state === 'fields-blocked')) {
       html += '<p style="font-size:12px;color:var(--muted)">Sending emails the contract to the seller and Troy at the same time, and texts the seller their signing link (unless they are DND).</p>';
     }
     b.innerHTML = html;
@@ -243,14 +260,17 @@
     if (!current || !current.envelope) return;
     var box = document.getElementById('esignFieldsConfirmed');
     if (!box || !box.checked) {
-      alert('Confirm the Signature and Date fields are placed in HighLevel first — that checkbox is the guard that stops a field-less contract going out.');
+      alert('Confirm you checked the Signature fields in HighLevel first — that checkbox is the guard that stops a field-less contract going out. (Dates are already set on the contract.)');
       return;
     }
     if (!confirm('This sends a REAL contract for signature by email to the seller and Troy. Send it?')) return;
     var b = document.getElementById('esignBody');
     if (b) b.innerHTML = '<p style="color:var(--muted)">Sending the contract…</p>';
     try {
-      var res = await callEsign('send', { action: 'send', envelopeId: current.envelope.id, fieldsConfirmed: true });
+      // Advisory check (the API cannot see signature fields): the
+      // checkbox doubles as Troy's explicit acceptance of the advisory.
+      var advisory = Boolean(current.fieldsCheck && current.fieldsCheck.advisory);
+      var res = await callEsign('send', { action: 'send', envelopeId: current.envelope.id, fieldsConfirmed: true, fieldsAdvisoryAccepted: advisory });
       current.envelope = res.envelope;
       renderSheet();
     } catch (e) {
