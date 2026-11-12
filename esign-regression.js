@@ -263,6 +263,11 @@ t('templates: ids unique', new Set(esign.KNOWN_TEMPLATES.map((x) => x.id)).size 
   const doc = { links: [{ recipientId: 'C1', url: 'https://sign.example/C1' }, { recipientId: 'C2', url: 'https://sign.example/C2' }] };
   t('links: signing link found by recipient', esign.signingLinkFor('C2', doc) === 'https://sign.example/C2');
   t('links: unknown recipient -> empty string', esign.signingLinkFor('C9', doc) === '');
+  // One-tap preview link (Nov 12): built from the shared location
+  // config, targeting the location's Documents & Contracts list —
+  // drafts carry no API links, so this is the deepest honest target.
+  t('hl-link: documents URL is built from the configured location id', esign.hlDocumentsUrl() === 'https://app.gohighlevel.com/v2/location/' + esign.HL_LOCATION_ID + '/payments/documents');
+  t('hl-link: documents URL names the HL documents list path', /\/payments\/documents$/.test(esign.hlDocumentsUrl()));
 })();
 
 // ---- 12. FREE-only guard: no paid vendor anywhere in the function code ----
@@ -278,7 +283,13 @@ t('templates: ids unique', new Set(esign.KNOWN_TEMPLATES.map((x) => x.id)).size 
   const codeOnly = src.replace(/\/\/[^\n]*/g, '');
   t('free: no per-envelope / per-document pricing in esign.js', !/per[- ]envelope|per[- ]document|\$1\/doc/i.test(codeOnly));
   const hosts = [...src.matchAll(/https:\/\/([a-z0-9.-]+)/gi)].map((m) => m[1]);
-  t('free: function only calls HighLevel (services.leadconnectorhq.com)', hosts.every((h) => h === 'services.leadconnectorhq.com'), hosts.join(', '));
+  // Nov 12: app.gohighlevel.com is HighLevel's OWN web UI host. It is
+  // never fetched by this function — it appears once, in hlDocumentsUrl,
+  // as the browser link for the one-tap "Open draft in HighLevel"
+  // preview. The guard's intent stands: the only host this function
+  // CALLS is the HL API, and no third-party host of any kind is named.
+  t('free: function only calls HighLevel (services.leadconnectorhq.com)', hosts.every((h) => h === 'services.leadconnectorhq.com' || h === 'app.gohighlevel.com'), hosts.join(', '));
+  t('free: app.gohighlevel.com appears only as the documents preview link', (src.match(/app\.gohighlevel\.com/g) || []).length === 1 && src.includes("'/payments/documents'"));
   t('free: Blobs store is esign-log (connectLambda rule in file)', src.includes("'esign-log'") && src.includes('connectLambda'));
   const ui = fs.readFileSync(path.join(__dirname, 'assets/esign.js'), 'utf8');
   t('free: UI names no paid vendor either', !banned.test(ui));
@@ -342,7 +353,7 @@ t('templates: ids unique', new Set(esign.KNOWN_TEMPLATES.map((x) => x.id)).size 
             // Advisory shape (Nov 11 evening): the API cannot see the
             // signature fields, so prepare returns an advisory check on
             // a sendable draft — NOT a fields-blocked envelope.
-            return { ok: true, status: 200, json: async function () { return { envelope: { id: 'es_adv1', templateId: body.templateId, state: 'draft', contract: { price: '100001', emd: '100', apn: 'TEST-000001', legal: 'TEST-000001 (TEST SUBDIVISION)', county: 'Marion County', contractDate: '2026-11-11', closingDate: '2026-12-11' }, signers: [{ name: 'TEST E-Sign Do Not Use', role: 'seller', email: 'troy00152+esigntest@gmail.com' }] }, fieldsCheck: { ready: false, verified: false, advisory: true, requiresConfirmation: true, missing: ['TEST E-Sign Do Not Use: Signature field not visible via the HighLevel API'], unverified: ['TEST E-Sign Do Not Use: Signature field not visible via the HighLevel API'], unrecognized: [], reason: 'HighLevel\'s API does not expose signature fields.' }, disclosureReminder: false }; } };
+            return { ok: true, status: 200, json: async function () { return { envelope: { id: 'es_adv1', templateId: body.templateId, state: 'draft', contract: { price: '100001', emd: '100', apn: 'TEST-000001', legal: 'TEST-000001 (TEST SUBDIVISION)', county: 'Marion County', contractDate: '2026-11-11', closingDate: '2026-12-11' }, signers: [{ name: 'TEST E-Sign Do Not Use', role: 'seller', email: 'troy00152+esigntest@gmail.com' }] }, fieldsCheck: { ready: false, verified: false, advisory: true, requiresConfirmation: true, missing: ['TEST E-Sign Do Not Use: Signature field not visible via the HighLevel API'], unverified: ['TEST E-Sign Do Not Use: Signature field not visible via the HighLevel API'], unrecognized: [], reason: 'HighLevel\'s API does not expose signature fields.' }, hlDocumentsUrl: 'https://app.gohighlevel.com/v2/location/krKoHLudPnn7nT0DPtwa/payments/documents', disclosureReminder: false }; } };
           }
           if (body.contactId === 'C-dup') {
             // Duplicate-guard shape (Nov 11 late): a repeat Prepare
@@ -519,6 +530,9 @@ t('templates: ids unique', new Set(esign.KNOWN_TEMPLATES.map((x) => x.id)).size 
   t('ui-advisory: advisory is not rendered as a hard FAILED block', !/Fields check FAILED/.test(envI.body()));
   t('ui-advisory: Send button is offered on an advisory draft', /Send for signature/.test(envI.body()));
   t('ui-advisory: confirmation checkbox asks about Signature fields', /Signature field for every signer is placed/.test(envI.body()));
+  t('ui-advisory: sheet shows the one-tap Open draft in HighLevel link', /Open draft in HighLevel/.test(envI.body()));
+  t('ui-advisory: the link targets the location Documents & Contracts list', envI.body().indexOf('https://app.gohighlevel.com/v2/location/krKoHLudPnn7nT0DPtwa/payments/documents') !== -1);
+  t('ui-advisory: the link opens in a new tab', /target="_blank"/.test(envI.body()));
   t('ui-advisory: checkbox does NOT demand a Date field', !/Signature and a Date field/.test(envI.body()));
   envI.input('esignFieldsConfirmed').checked = true;
   await envI.sandbox.esignSend();
