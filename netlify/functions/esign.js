@@ -445,9 +445,12 @@ function isDuplicate(existing, key, nowMs) {
     && String(existing.contract && existing.contract.price) === String(key.price)
     && (now - new Date(existing.createdAt).getTime()) < 24 * 60 * 60 * 1000;
 }
-// Request builders (pure — the regression suite asserts their exact shape).
+// HighLevel POST /proposals/templates/send rejects the call with HTTP 422
+// ("locationId should not be empty; locationId must be a string") when
+// locationId is absent — seen live Nov 11 ~7:52 PM on the 1 TEST ST lead.
+// HL_LOCATION_ID is the new CRM location (krKoHLudPnn7nT0DPtwa).
 function buildSendTemplateBody({ templateId, userId, contactId, opportunityId, sendDocument }) {
-  const body = { templateId, userId, contactId, sendDocument: sendDocument !== false };
+  const body = { templateId, userId, contactId, locationId: HL_LOCATION_ID, sendDocument: sendDocument !== false };
   if (opportunityId) body.opportunityId = opportunityId;
   return body;
 }
