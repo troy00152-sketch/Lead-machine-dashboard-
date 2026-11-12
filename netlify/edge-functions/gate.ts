@@ -136,6 +136,17 @@ export default async function handler(req: Request, context: any) {
     return res;
   }
 
+  // Irish's Live Coach — suggestion service only (added Nov 12, Troy's call:
+  // her coach page is unlisted + no-login by design and is hosted off-site,
+  // so it can never carry the dashboard cookie). coach-suggest is stateless
+  // text-in/text-out: no CRM access, no stored data, nothing behind it but
+  // AI reply suggestions. Everything else on this site stays gated.
+  if (url.pathname === "/.netlify/functions/coach-suggest") {
+    const res = await context.next();
+    res.headers.set("x-robots-tag", "noindex, nofollow");
+    return res;
+  }
+
   // Not configured yet — fail closed with a clear message, not an open door.
   if (!password) {
     return new Response(
