@@ -71,3 +71,10 @@ No new money. No new vendor account. No keys to paste from a new service.
 - No native canvas signature capture — rejected (weakest legal footing, no certificate/audit trail, highest build effort; see the vetting note).
 - No DocuSign / PandaDoc / Dropbox Sign / any paid vendor — rejected under Troy's FREE constraint.
 - No live contract send, no test contract to a real seller, no deploy in this task.
+
+## Nov 11 evening — test-send investigation (verified live, ~6:33–6:40 PM EST)
+
+- **FILTER_WORDS bug (real, fixed):** `FILTER_WORDS` referenced at index.html:2092, defined nowhere — Paste Leads ingested NOTHING for any valid row. Fixed (const restored from the pre-DM-removal backup) + verified in node. Deploy with COMMIT.txt (tmp-esign-fix).
+- **HL 422 — could NOT be reproduced on the OAuth channel:** POST /proposals/templates/send (IN template 6ad186514bf151249d4f7ab6, userId BsoCeQWYI6BRct8hBKdz, test contact, sendDocument:false) returned **201** and created **DRAFT 6af4fb897d64ba6637b4bbd7, status draft, NOTHING emailed**. The 422 must come from the Netlify function's Kai-token path (scope / sender-id / Version header differ). **Prime suspect: ESIGN_SENDER_USER_ID in Netlify set to Paula's CONTACT id a4vyLnhwrRQn75dqek7k instead of her USER id BsoCeQWYI6BRct8hBKdz** — verify at deploy. Fix shipped: hlErrorText() surfaces HL's exact `message`/`error` in the thrown error + structured { hlStatus, hlError } on the prepare/send 503s, so the next live failure names itself. Suite now 103/0.
+- **BLOCKER — IN template has NO Signature fields (verified, not a code bug):** across ALL 5 HL documents, zero Signature fields exist (IN drafts: TextField + DateField only; Gatlin NC doc: none). The fields guard will correctly BLOCK the send until Signature + Date fields are placed on the IN template in HL (Troy's control, template editor). Test email CANNOT arrive before that.
+- **Test contact verified live:** qFBg9HS2LtXQg8mWjQuA, troy00152+esigntest@gmail.com, tags dnc + test-esign, all dummy fields present. Gmail checked 18:08 + 18:30 EST: no e-sign email — correct, nothing sent. Delete the test contact after the test proves out.
