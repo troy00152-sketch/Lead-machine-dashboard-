@@ -140,7 +140,7 @@
           (fc.unverified || fc.missing).forEach(function (m) { html += '<li>' + esc(m) + '</li>'; });
           html += '</ul>';
         }
-        html += '<p style="font-size:13px">Open the draft in HighLevel and confirm the Signature field for every signer is placed — then tick the confirmation below to unlock Send.</p>';
+        html += '<p style="font-size:13px">Open the draft in HighLevel and confirm the Signature field for every signer is placed — then tick the confirmation below to unlock Send.' + (current.hlDocumentsUrl ? ' <a href="' + esc(current.hlDocumentsUrl) + '" target="_blank" rel="noopener">📄 Open draft in HighLevel ↗</a>' : '') + '</p>';
       } else {
         html += '<p style="color:#d33;font-weight:600;margin:12px 0 4px">⛔ Fields check FAILED — this contract cannot be sent.</p>';
         html += '<ul style="margin:0 0 8px;padding-left:18px;font-size:13px;color:#d33">';
@@ -180,6 +180,12 @@
       html += '<button class="btn" onclick="esignRefresh()">↻ Check signing status</button>';
       html += '<button class="btn" onclick="esignCloseSheet()">Close</button>';
     }
+    // One-tap preview (Nov 12): drafts carry no link from the HL API,
+    // so this opens the location's Documents & Contracts list in
+    // HighLevel, where the prepared draft is the newest row.
+    if (env && current.hlDocumentsUrl) {
+      html += '<a class="btn" href="' + esc(current.hlDocumentsUrl) + '" target="_blank" rel="noopener">📄 Open draft in HighLevel ↗</a>';
+    }
     html += '</div>';
     if (env && (env.state === 'draft' || env.state === 'fields-blocked')) {
       html += '<p style="font-size:12px;color:var(--muted)">Sending emails the contract to the seller and Troy at the same time, and texts the seller their signing link (unless they are DND).</p>';
@@ -191,7 +197,7 @@
     var lead = findLead(leadId);
     if (!lead) { alert('Lead not found.'); return; }
     var contactId = lead.ghlContactId || lead.hlContactId || null;
-    current = { leadId: leadId, lead: lead, contactId: contactId, templates: [], envelope: null, fieldsCheck: null, missing: [], staleTemplates: false, disclosureReminder: false, disclosure: null };
+    current = { leadId: leadId, lead: lead, contactId: contactId, templates: [], envelope: null, fieldsCheck: null, missing: [], staleTemplates: false, disclosureReminder: false, disclosure: null, hlDocumentsUrl: '' };
     var modal = document.getElementById('esignModal');
     if (modal) modal.classList.add('open');
     var b = document.getElementById('esignBody');
@@ -248,6 +254,7 @@
         forceNew: Boolean(retry),
       });
       current.envelope = res.envelope;
+      if (res.hlDocumentsUrl) current.hlDocumentsUrl = res.hlDocumentsUrl;
       current.fieldsCheck = res.fieldsCheck || (res.envelope && res.envelope.fieldsCheck) || null;
       current.disclosureReminder = Boolean(res.disclosureReminder);
       current.disclosure = res.disclosure || (res.envelope && res.envelope.disclosure) || null;
@@ -269,6 +276,7 @@
       // Nothing new is created and nothing is sent by adopting it.
       if (e && e.data && e.data.code === 'duplicate_envelope' && e.data.envelope) {
         current.envelope = e.data.envelope;
+        if (e.data.hlDocumentsUrl) current.hlDocumentsUrl = e.data.hlDocumentsUrl;
         current.fieldsCheck = e.data.envelope.fieldsCheck || null;
         current.disclosureReminder = Boolean(e.data.disclosureReminder);
         current.disclosure = e.data.disclosure || e.data.envelope.disclosure || null;
@@ -299,6 +307,7 @@
       var advisory = Boolean(current.fieldsCheck && current.fieldsCheck.advisory);
       var res = await callEsign('send', { action: 'send', envelopeId: current.envelope.id, fieldsConfirmed: true, fieldsAdvisoryAccepted: advisory });
       current.envelope = res.envelope;
+      if (res.hlDocumentsUrl) current.hlDocumentsUrl = res.hlDocumentsUrl;
       renderSheet();
     } catch (e) {
       renderError(e.message || 'Send failed. Nothing was changed on the seller side if the error came before the send.');
@@ -310,6 +319,7 @@
     try {
       var res = await callEsign('refresh', { action: 'refresh', envelopeId: current.envelope.id });
       current.envelope = res.envelope;
+      if (res.hlDocumentsUrl) current.hlDocumentsUrl = res.hlDocumentsUrl;
       renderSheet();
     } catch (e) {
       renderError(e.message || 'Status check failed.');
