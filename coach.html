@@ -20,22 +20,32 @@ body{
     radial-gradient(ellipse 80% 50% at 15% 0%, rgba(0,212,255,.09), transparent 60%),
     radial-gradient(ellipse 70% 55% at 85% 100%, rgba(0,102,255,.11), transparent 60%);
 }
-.wrap{max-width:880px;margin:0 auto;padding:18px 16px 60px}
-header{margin-bottom:14px}
-h1{font-size:28px;font-weight:800}
-h1 span{color:var(--accent);text-shadow:0 0 18px rgba(0,212,255,.8)}
-.sub{color:var(--muted);font-size:15px;margin-top:4px}
-.panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px;margin-bottom:14px;backdrop-filter:blur(8px)}
+.wrap{max-width:1180px;margin:0 auto;padding:0 14px 48px}
+.sub{color:var(--muted);font-size:14.5px;margin:0 2px 12px}
+/* ---- slim call bar (sticky) ---- */
+.callbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+  padding:10px 14px;margin:0 -14px 14px;background:rgba(5,10,20,.94);
+  border-bottom:1px solid var(--line);backdrop-filter:blur(10px)}
+.callbar .brand{font-size:20px;font-weight:800;white-space:nowrap}
+.callbar .brand span{color:var(--accent);text-shadow:0 0 14px rgba(0,212,255,.8)}
+.callbar .live-dot{width:11px;height:11px;border-radius:50%;background:var(--muted2);flex:none}
+.callbar.on .live-dot{background:var(--green);box-shadow:0 0 12px rgba(0,255,170,.9)}
+.callbar .btn{min-height:44px;padding:10px 18px}
+.callbar .cb-status{color:var(--muted);font-size:13.5px;flex:1;min-width:140px}
+.callbar .cb-timer{font-size:23px;font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap}
+.callbar .cb-lat{color:var(--muted);font-size:12.5px;white-space:nowrap;min-width:86px;text-align:right}
+/* ---- stage: talk-track rail + main column ---- */
+.stage{display:grid;grid-template-columns:252px minmax(0,1fr);gap:14px;align-items:start}
+.main-col{display:flex;flex-direction:column;gap:14px;min-width:0}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px;backdrop-filter:blur(8px)}
 .panel h2{font-size:19px;margin-bottom:4px}
 .panel h2 .n{color:var(--accent)}
-.panel .hint{color:var(--muted);font-size:14.5px;margin-bottom:12px;line-height:1.5}
 .lbl{font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
 input{
   background:rgba(10,18,38,.7);color:var(--text);border:1px solid var(--line);
   border-radius:8px;padding:11px 12px;font-size:16px;font-family:inherit;width:100%;
 }
 input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 18px rgba(0,212,255,.2)}
-input[type=checkbox]{width:auto;padding:0;accent-color:var(--accent)}
 .btn{
   display:inline-block;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#001220;
   border:none;border-radius:8px;padding:13px 22px;font-size:16px;font-weight:800;cursor:pointer;min-height:48px;
@@ -51,56 +61,59 @@ input[type=checkbox]{width:auto;padding:0;accent-color:var(--accent)}
 .obj-r{color:var(--text);font-size:17.5px;margin-top:4px;line-height:1.5}
 .note{padding:6px 2px;border-bottom:1px solid var(--line);font-size:16px;line-height:1.5}
 .note:last-child{border-bottom:none}
-.tag{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;padding:3px 8px;border-radius:4px;background:var(--chip);color:var(--accent);border:1px solid var(--line)}
-details.tt summary{cursor:pointer;font-size:19px;font-weight:800;list-style:none}
+/* ---- SAY THIS hero ---- */
+.hero{border:1px solid rgba(0,255,170,.4);background:linear-gradient(180deg,rgba(0,255,170,.08),rgba(13,25,48,.55))}
+.hero .lbl{color:var(--green);font-size:13px}
+.hero .obj.hero{background:linear-gradient(135deg,rgba(0,212,255,.16),rgba(0,255,170,.10));
+  border:1px solid rgba(0,255,170,.6);box-shadow:0 0 28px rgba(0,255,170,.20);padding:18px}
+.hero .obj.hero .obj-t{color:var(--green);font-size:13px;letter-spacing:.1em;text-transform:uppercase}
+.hero .obj.hero .obj-r{font-size:27px;font-weight:700;line-height:1.4}
+.hero .muted{margin-top:8px}
+/* ---- THEY SAID strip (secondary) ---- */
+.heard-box{min-height:56px;max-height:150px;overflow-y:auto}
+/* ---- talk-track rail (compact) ---- */
+.rail{padding:14px}
+details.tt summary{cursor:pointer;font-size:16px;font-weight:800;list-style:none}
 details.tt summary::-webkit-details-marker{display:none}
 details.tt summary .n{color:var(--accent)}
-.tt-step{margin-top:14px}
-.tt-step h3{font-size:16px;color:var(--accent);margin-bottom:6px}
-.tt-step ul{margin:0 0 0 20px}
-.tt-step li{font-size:15.5px;line-height:1.55;margin-bottom:4px}
+.tt-step{margin-top:12px}
+.tt-step h3{font-size:14.5px;color:var(--accent);margin-bottom:5px}
+.tt-step ul{margin:0 0 0 18px}
+.tt-step li{font-size:14px;line-height:1.5;margin-bottom:4px}
 .tt-step li.say{color:var(--text)}
 .outcome{font-size:19px;font-weight:800;color:var(--accent);text-shadow:0 0 14px rgba(0,212,255,.4)}
-footer{color:var(--muted);font-size:13px;line-height:1.6;margin-top:8px}
+footer{color:var(--muted);font-size:13px;line-height:1.6;margin-top:14px}
 footer b{color:var(--text)}
-@media(max-width:640px){h1{font-size:24px}.obj-r{font-size:16.5px}}
+@media(max-width:820px){
+  .stage{display:flex;flex-direction:column}
+  .main-col{order:1;width:100%}
+  .rail{order:2;width:100%}
+  .hero .obj.hero .obj-r{font-size:23px}
+  .callbar .cb-timer{font-size:19px}
+  .callbar .brand{font-size:18px}
+}
 </style>
 </head>
 <body>
 <div class="wrap">
-<header>
-  <h1>🎙 Live <span>Coach</span></h1>
-  <div class="sub">For Irish — cold calls. It listens, shows what they said, and flashes what to say.</div>
-</header>
 
-<!-- ============ LIVE COACH ============ -->
-<section class="panel">
-  <h2><span class="n">●</span> Live Coach — listens and suggests</h2>
-  <div class="hint">Start the coach when the call starts. It listens on this device's mic (put the call on speaker), shows what the seller just said, and flashes 1–3 replies in about 2 seconds. Tap a reply to use it. When a vetted objection line matches, it comes first — the AI suggestions are the backup.</div>
-  <div class="row" style="margin-top:0">
-    <button type="button" class="btn" id="coachToggle">🎙 Start listening</button>
-    <span class="muted" id="coachStatus">Coach off. The mic is never on unless you start it.</span>
-    <span class="muted" id="coachLatency"></span>
-  </div>
-  <label style="display:flex;gap:8px;align-items:center;font-size:15px;margin-top:12px">
-    <input type="checkbox" id="coachConsent"> Seller knows I'm taking notes on this call
-  </label>
-  <div class="muted" style="margin-top:4px">Florida and 10+ other states are all-party consent — tell the seller first: “I take notes on my calls — is that alright with you?”</div>
-  <div class="lbl" style="margin-top:16px">They said</div>
-  <div id="coachTranscript" class="obj" style="min-height:72px;max-height:220px;overflow-y:auto"><p class="muted">Nothing heard yet.</p></div>
-  <div class="lbl" style="margin-top:16px">Say this</div>
-  <div id="coachSuggestions"><p class="muted">Suggestions appear here while the seller is talking.</p></div>
-  <div class="row">
-    <input id="coachSimInput" placeholder="Test: type what the seller just said, e.g. That's too low." style="flex:1;min-width:220px">
-    <button type="button" class="btn ghost" id="coachSimBtn">Test suggestion</button>
-  </div>
-  <div class="muted" style="margin-top:8px">Listens with your browser's free speech recognition (Chrome on desktop or Android).</div>
-</section>
+<!-- ============ CALL BAR ============ -->
+<div class="callbar" id="callBar">
+  <span class="live-dot" id="liveDot"></span>
+  <span class="brand">🎙 Live <span>Coach</span> — Irish</span>
+  <button type="button" class="btn" id="coachToggle">🎙 Start listening</button>
+  <span class="cb-status" id="coachStatus">Coach off. The mic is never on unless you start it.</span>
+  <span class="cb-lat" id="coachLatency"></span>
+  <span class="cb-timer" id="coachTimer">0:00</span>
+</div>
+<div class="sub">Cold calls. Put the call on speaker — it listens, shows what they said, and flashes what to say.</div>
 
-<!-- ============ TALK TRACK ============ -->
-<section class="panel">
+<div class="stage">
+
+<!-- ============ TALK TRACK (rail) ============ -->
+<aside class="panel rail">
   <details class="tt" open>
-    <summary><span class="n">●</span> Talk track — the framework for every call</summary>
+    <summary><span class="n">●</span> Talk track</summary>
     <div class="tt-step">
       <h3>1 · Opener</h3>
       <ul>
@@ -129,6 +142,25 @@ footer b{color:var(--text)}
       </ul>
     </div>
   </details>
+</aside>
+
+<div class="main-col">
+
+<!-- ============ SAY THIS (hero) ============ -->
+<section class="panel hero">
+  <div class="lbl">Say this</div>
+  <div id="coachSuggestions"><p class="muted">Suggestions appear here while the seller is talking. When a vetted objection line matches, it lands here first — big. The AI suggestions are the backup.</p></div>
+</section>
+
+<!-- ============ THEY SAID ============ -->
+<section class="panel">
+  <div class="lbl">They said</div>
+  <div id="coachTranscript" class="obj heard-box"><p class="muted">Nothing heard yet.</p></div>
+  <div class="row">
+    <input id="coachSimInput" placeholder="Test: type what the seller just said, e.g. That's too low." style="flex:1;min-width:220px">
+    <button type="button" class="btn ghost" id="coachSimBtn">Test suggestion</button>
+  </div>
+  <div class="muted" style="margin-top:8px">Listens with your browser's free speech recognition (Chrome on desktop or Android).</div>
 </section>
 
 <!-- ============ END OF CALL ============ -->
@@ -143,11 +175,12 @@ footer b{color:var(--text)}
   <div id="callTranscriptFull" class="obj" style="max-height:320px;overflow-y:auto"><p class="muted">No transcript yet.</p></div>
 </section>
 
+</div><!-- /.main-col -->
+</div><!-- /.stage -->
+
 <footer>
   <b>Listening:</b> the coach listens only while you have it on, on this device only — nothing is
   recorded or stored, and only the words it needs to suggest a reply leave the device.
-  If you record a call yourself, get consent first: Florida and 10+ other states are all-party consent.
-  When in doubt, say: “Just so you know, I record my calls for quality — is that alright with you?”
 </footer>
 </div>
 
@@ -314,13 +347,27 @@ footer b{color:var(--text)}
     return out.slice(0, 5);
   }
 
+  // Suggestion endpoint — host-aware. On leadmachineapp.com the
+  // same-origin relative path works; on any other host (this page's
+  // permanent home on GitHub Pages) that path does not exist, so call
+  // the function's absolute URL — it sends CORS
+  // Access-Control-Allow-Origin: *, so the cross-origin call works.
+  // EVERY coach-suggest call routes through COACH_SUGGEST_URL.
+  function coachSuggestUrl(hostname) {
+    return hostname === 'leadmachineapp.com'
+      ? '/.netlify/functions/coach-suggest'
+      : 'https://leadmachineapp.com/.netlify/functions/coach-suggest';
+  }
+  var COACH_SUGGEST_URL = coachSuggestUrl(typeof location !== 'undefined' ? location.hostname : '');
+
   var api = {
     matchObjection: matchObjection, extractDollarAmounts: extractDollarAmounts,
     coachSuggestionGuard: coachSuggestionGuard, coachDealContext: coachDealContext,
     buildCoachPrompt: buildCoachPrompt, parseCoachResponse: parseCoachResponse,
     shouldSuggestCoach: shouldSuggestCoach, COACH_SUGGEST_COOLDOWN_MS: COACH_SUGGEST_COOLDOWN_MS,
     buildSummaryPrompt: buildSummaryPrompt, parseSummaryResponse: parseSummaryResponse,
-    renderReply: renderReply
+    renderReply: renderReply,
+    coachSuggestUrl: coachSuggestUrl, COACH_SUGGEST_URL: COACH_SUGGEST_URL
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.CoachOnly = api;
@@ -348,7 +395,8 @@ footer b{color:var(--text)}
   // the 4s cooldown in shouldSuggestCoach). Same engine as the console.
   var coach = {
     listening: false, recog: null, transcript: [], lastSuggestedAt: null,
-    suggestTimer: null, interimText: '', ended: false
+    suggestTimer: null, interimText: '', ended: false,
+    timerInt: null, startedAt: null
   };
   var callSummary = { state: 'idle', items: [] }; // idle | pending | done | failed
 
@@ -360,6 +408,30 @@ footer b{color:var(--text)}
 
   function coachSetStatus(text) { var el = $('coachStatus'); if (el) el.textContent = text; }
   function coachSetLatency(ms) { var el = $('coachLatency'); if (el) el.textContent = ms != null ? ('suggested in ' + (ms / 1000).toFixed(1) + 's') : ''; }
+
+  // Call timer in the call bar: runs while the coach is listening, keeps
+  // its final value on Stop, resets to 0:00 on the next Start.
+  function callTimerRender() {
+    var el = $('coachTimer');
+    if (!el) return;
+    if (!coach.startedAt) { el.textContent = '0:00'; return; }
+    var s = Math.max(0, Math.floor((Date.now() - coach.startedAt) / 1000));
+    var h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = s % 60;
+    el.textContent = (h > 0 ? h + ':' + String(m).padStart(2, '0') : String(m)) + ':' + String(ss).padStart(2, '0');
+  }
+  function callTimerStart() {
+    coach.startedAt = Date.now();
+    callTimerRender();
+    if (coach.timerInt) clearInterval(coach.timerInt);
+    coach.timerInt = setInterval(callTimerRender, 1000);
+    var bar = $('callBar');
+    if (bar && bar.classList) bar.classList.add('on');
+  }
+  function callTimerStop() {
+    if (coach.timerInt) { clearInterval(coach.timerInt); coach.timerInt = null; }
+    var bar = $('callBar');
+    if (bar && bar.classList) bar.classList.remove('on');
+  }
 
   function renderCoachTranscript() {
     var box = $('coachTranscript');
@@ -378,11 +450,11 @@ footer b{color:var(--text)}
     if (matched) cards.push({ text: renderReply(matched.reply, callerName(), cityOf()), vetted: true });
     (suggestions || []).forEach(function (s) { cards.push({ text: s, vetted: false }); });
     if (!cards.length) {
-      box.innerHTML = '<p class="muted">No line matched — glance at the talk track below and keep them talking.</p>';
+      box.innerHTML = '<p class="muted">No line matched — glance at the talk track and keep them talking.</p>';
       return;
     }
     box.innerHTML = cards.slice(0, 3).map(function (c, i) {
-      return '<div class="obj coach-sug" data-i="' + i + '"><div class="obj-t">' +
+      return '<div class="obj coach-sug' + (i === 0 ? ' hero' : '') + '" data-i="' + i + '"><div class="obj-t">' +
         (c.vetted ? 'Vetted line' : 'Coach suggestion') + '</div><div class="obj-r">' + esc(c.text) + '</div></div>';
     }).join('') + '<div class="muted">Tap a reply to mark it used.' + (source ? ' · ' + esc(source) : '') + '</div>';
     coachSetLatency(latencyMs);
@@ -410,7 +482,7 @@ footer b{color:var(--text)}
     try {
       var controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
       var timer = controller ? setTimeout(function () { controller.abort(); }, 10000) : null;
-      var res = await fetch('/.netlify/functions/coach-suggest', {
+      var res = await fetch(COACH_SUGGEST_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ system: prompt.system, user: prompt.user }),
@@ -447,11 +519,6 @@ footer b{color:var(--text)}
   }
 
   function coachStart() {
-    var consent = $('coachConsent');
-    if (consent && !consent.checked) {
-      coachSetStatus('Tell the seller first — check the box above, then start.');
-      return;
-    }
     var SR = (typeof window !== 'undefined') ? (window.SpeechRecognition || window.webkitSpeechRecognition) : null;
     if (!SR) {
       coachSetStatus('Live listening is not supported in this browser — use Chrome on desktop or Android. The test box below still works.');
@@ -476,7 +543,7 @@ footer b{color:var(--text)}
     }
     var toggle = $('coachToggle');
     if (toggle) toggle.textContent = '⏹ Stop listening';
-    coachSetStatus('Listening… put the call on speaker. Suggestions appear below.');
+    coachSetStatus('Listening… put the call on speaker. Watch SAY THIS.');
     recog.onresult = function (ev) {
       var interim = '', finals = [];
       for (var i = ev.resultIndex; i < ev.results.length; i++) {
@@ -501,10 +568,12 @@ footer b{color:var(--text)}
       try { coach.recog.start(); } catch (e) { /* next onend retries */ }
     };
     try { recog.start(); } catch (e) { coachSetStatus('Could not start the mic: ' + (e && e.message ? e.message : e)); coach.listening = false; }
+    if (coach.listening) callTimerStart();
   }
 
   function coachStop() {
     coach.listening = false;
+    callTimerStop();
     clearTimeout(coach.suggestTimer);
     if (coach.recog) { try { coach.recog.stop(); } catch (e) {} coach.recog = null; }
     var toggle = $('coachToggle');
@@ -553,7 +622,7 @@ footer b{color:var(--text)}
     try {
       var controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
       var timer = controller ? setTimeout(function () { controller.abort(); }, 10000) : null;
-      var res = await fetch('/.netlify/functions/coach-suggest', {
+      var res = await fetch(COACH_SUGGEST_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ system: prompt.system, user: prompt.user }),
