@@ -620,6 +620,52 @@ t('templates: ids unique', new Set(esign.KNOWN_TEMPLATES.map((x) => x.id)).size 
   t('docid: store scan reads envelopes and skips unreadable ones', scanned.length === 2 && scanned.some((e) => e.id === 'es_a'));
   t('docid: usedDocumentIds lists claimed ids, excluding self', JSON.stringify(esign.usedDocumentIds(scanned, 'es_x')) === JSON.stringify(['DOC-A']) && JSON.stringify(esign.usedDocumentIds(scanned, 'es_a')) === JSON.stringify([]));
 
+  // ---- Ohio SB 155 disclosure-first ENFORCEMENT (Nov 11 cleanup) ----
+  // v1 only reminded; now a purchase-contract send for an Ohio seller
+  // is blocked until the seller's disclosure shows signed/completed
+  // in HighLevel. Pure gate: disclosureStatus + findSignedDisclosure.
+  {
+    const OH_CONTRACT = 'AGREEMENT TO PURCHASE REAL ESTATE OH';
+    const OH_DISCLOSURE = esign.DISCLOSURE_TEMPLATE_NAME;
+    const SELLER = 'contact-ohio-1';
+    const signedDoc = { documentId: 'doc-disc-1', name: OH_DISCLOSURE, status: 'completed', recipients: [{ id: SELLER, contactName: 'Ohio Seller' }] };
+    const viewedDoc = { documentId: 'doc-disc-2', name: OH_DISCLOSURE, status: 'viewed', recipients: [{ id: SELLER, contactName: 'Ohio Seller', hasCompleted: false }] };
+    const recipientSignedDoc = { documentId: 'doc-disc-3', name: OH_DISCLOSURE, status: 'sent', recipients: [{ id: SELLER, contactName: 'Ohio Seller', hasCompleted: true, signedDate: '2026-11-11T15:00:00Z' }] };
+    const otherSellerDoc = { documentId: 'doc-disc-4', name: OH_DISCLOSURE, status: 'completed', recipients: [{ id: 'someone-else', contactName: 'Not The Seller' }] };
+
+    const nonOh = esign.disclosureStatus({ state: 'IN', templateName: 'AGREEMENT TO PURCHASE REAL ESTATE IN', documents: [], contactId: SELLER });
+    t('ohio: non-Ohio send has no disclosure check', nonOh.required === false && nonOh.allowed === true);
+
+    const discSend = esign.disclosureStatus({ state: 'OH', templateName: OH_DISCLOSURE, documents: [], contactId: SELLER });
+    t('ohio: the disclosure document itself is never blocked', discSend.required === false && discSend.allowed === true && discSend.isDisclosureSend === true);
+
+    const blocked = esign.disclosureStatus({ state: 'OH', templateName: OH_CONTRACT, documents: [viewedDoc], contactId: SELLER });
+    t('ohio: unsigned (viewed-only) disclosure BLOCKS the contract send',
+      blocked.required === true && blocked.allowed === false && blocked.code === 'ohio_disclosure_unsigned' && /SB 155/.test(blocked.error) && /SIGNED/.test(blocked.error),
+      JSON.stringify(blocked));
+
+    const allowed = esign.disclosureStatus({ state: 'OH', templateName: OH_CONTRACT, documents: [signedDoc], contactId: SELLER });
+    t('ohio: completed disclosure allows the contract send', allowed.required === true && allowed.allowed === true && allowed.signed === true && allowed.documentId === 'doc-disc-1', JSON.stringify(allowed));
+
+    const allowedRecipient = esign.disclosureStatus({ state: 'OH', templateName: OH_CONTRACT, documents: [recipientSignedDoc], contactId: SELLER });
+    t('ohio: seller recipient signature (hasCompleted) also satisfies the gate', allowedRecipient.allowed === true && allowedRecipient.documentId === 'doc-disc-3');
+
+    const wrongSeller = esign.disclosureStatus({ state: 'OH', templateName: OH_CONTRACT, documents: [otherSellerDoc], contactId: SELLER });
+    t('ohio: a disclosure signed for a DIFFERENT contact does not count', wrongSeller.allowed === false && wrongSeller.code === 'ohio_disclosure_unsigned');
+
+    const noDocs = esign.disclosureStatus({ state: 'OH', templateName: OH_CONTRACT, documents: [], contactId: SELLER });
+    t('ohio: no disclosure document at all blocks', noDocs.allowed === false && noDocs.code === 'ohio_disclosure_unsigned');
+
+    const failed = esign.disclosureStatus({ state: 'OH', templateName: OH_CONTRACT, documents: [], contactId: SELLER, lookupFailed: true });
+    t('ohio: document-list read failure fails CLOSED', failed.allowed === false && failed.code === 'ohio_disclosure_check_failed');
+
+    t('ohio: findSignedDisclosure picks the signed one, skips unsigned/other-seller',
+      esign.findSignedDisclosure([viewedDoc, otherSellerDoc, signedDoc], SELLER) === signedDoc
+      && esign.findSignedDisclosure([viewedDoc], SELLER) === null
+      && esign.findSignedDisclosure([], SELLER) === null);
+    t('ohio: disclosure name detection', esign.isDisclosureDocName(OH_DISCLOSURE) === true && esign.isDisclosureDocName(OH_CONTRACT) === false);
+  }
+
   // handler export (Nov 11 live 502): module.exports overwrote exports.handler,
   // so Netlify reported "esign.handler is undefined or not exported".
   t('exports: handler is exported (Netlify runtime needs esign.handler)', typeof esign.handler === 'function');

@@ -40,6 +40,23 @@ const NEUTRAL_SUBDOMAIN = '_default';
 const LEGACY_TROY_LOCATION_ID = 'krKoHLudPnn7nT0DPtwa';
 const LEGACY_TROY_CALENDAR_ID = 'aG6lop6FROsWlIrB0Y0H'; // Seller Calls - Paula
 
+// MULTI-TENANT CONFIG POINT (Nov 11 cleanup): the single-tenant
+// functions that cannot resolve a per-client file (esign, mail-send,
+// bread-hl, deals-api notifications) take Troy's location/calendar
+// from HERE instead of hardcoding the literals. Precedence: the
+// HL_LOCATION_ID / HL_CALENDAR_ID Netlify env vars when set, else the
+// legacy Troy ids above — so production behavior is IDENTICAL until
+// someone deliberately sets the env vars for another tenant. (New env
+// var names; no existing env var was renamed.)
+const HL_LOCATION_ID_ENV = 'HL_LOCATION_ID';
+const HL_CALENDAR_ID_ENV = 'HL_CALENDAR_ID';
+function defaultLocationId() {
+  return process.env[HL_LOCATION_ID_ENV] || LEGACY_TROY_LOCATION_ID;
+}
+function defaultCalendarId() {
+  return process.env[HL_CALENDAR_ID_ENV] || LEGACY_TROY_CALENDAR_ID;
+}
+
 // Parsed client files, cached for the life of the function instance.
 // Config files change only on deploy, which restarts the function.
 const clientCache = new Map();
@@ -130,8 +147,8 @@ function resolveClientData(event) {
   const cfg = resolved.cfg || {};
   const hl = cfg.highLevel || {};
   const isTroy = resolved.isTroy;
-  const locationId = hl.locationId || (isTroy ? LEGACY_TROY_LOCATION_ID : null);
-  const calendarId = hl.calendarId || (isTroy ? LEGACY_TROY_CALENDAR_ID : null);
+  const locationId = hl.locationId || (isTroy ? defaultLocationId() : null);
+  const calendarId = hl.calendarId || (isTroy ? defaultCalendarId() : null);
   if (!locationId || !calendarId) return null;
   // Named token env var wins when set; HL_API_TOKEN is the live var
   // already in use by cc-data/deals-api/bread-hl — the fallback that
@@ -170,6 +187,10 @@ module.exports = {
   NEUTRAL_SUBDOMAIN,
   LEGACY_TROY_LOCATION_ID,
   LEGACY_TROY_CALENDAR_ID,
+  HL_LOCATION_ID_ENV,
+  HL_CALENDAR_ID_ENV,
+  defaultLocationId,
+  defaultCalendarId,
   sanitizeSubdomain,
   loadClient,
   loadNeutral,

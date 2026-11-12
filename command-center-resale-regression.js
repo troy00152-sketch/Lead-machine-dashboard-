@@ -343,7 +343,7 @@ function makeSandbox(extra) {
         { address: '222 Hot St, Indianapolis, IN 46201', name: '222 Hot St', stage: 'Appointment Booked', createdAt: new Date().toISOString(), score: 60, scoreLabel: 'HOT', scoreParts: { distress: 45, equity: 0, own: 8 }, scoreSource: 'crm', arv: 167876, mao: 117513, lao: 82259, listSignals: ['pre-foreclosure', 'tax delinquent'], warnings: ['solar loan'] },
         { address: '333 Mid St, Indianapolis, IN 46201', name: '333 Mid St', stage: 'New Lead', createdAt: new Date().toISOString(), score: 40, scoreLabel: 'WARM', scoreParts: { distress: 40, equity: 0, own: 0 }, scoreSource: 'crm', arv: null, mao: null, lao: null, listSignals: ['probate'], warnings: [] },
       ],
-      closedCount: 4, closedVolume: 612000, closeRate: 4, closeRateCapped: true, totalOpps: 100,
+      closedCount: 4, closedVolume: 612000, closeRate: 4, closeRateCapped: true, totalOpps: 100, oppsFetched: 100,
       errors: { replies: null, booked: null, opps: null },
     };
 
@@ -357,6 +357,13 @@ function makeSandbox(extra) {
       check('8a cost per deal is null + names the missing feed', k.costPerDeal.value === null && /spend feed/i.test(k.costPerDeal.needs));
       check('8a per-rep is null + names the missing rep field', k.perRep.value === null && /rep/i.test(k.perRep.needs) && /no owner\/rep field/i.test(k.perRep.needs), JSON.stringify(k.perRep));
       check('8a close rate computed + capped', k.closeRate.value === 4 && k.closeRate.capped === true && /first 100 opps/.test(k.closeRate.label));
+      // Label cleanup (Nov 11 late): the capped label basis is the
+      // feed's FETCHED count, never a hardcoded 100 — a 900-fetched
+      // feed must label "first 900 opps".
+      const k900 = sb.computeKpis(Object.assign({}, kpiFeed, { oppsFetched: 900, totalOpps: 1250 }));
+      check('8a capped label uses the real fetched count (900, not hardcoded 100)',
+        k900.closeRate.label === 'Close Rate · first 900 opps' && k900.dealsByStage.fetched === 900 && k900.dealsByStage.total === 1250,
+        k900.closeRate.label);
       check('8a deals by stage from feed counts', k.dealsByStage.isNew === 3 && k.dealsByStage.underContract === 2 && k.dealsByStage.closed === 4 && k.dealsByStage.total === 100);
       check('8a per-source counts by signal (no ROI invented)', k.perSource.length === 3 && k.perSource[0].signal === 'pre-foreclosure' && k.perSource[0].leads === 2 && k.perSource.every((r) => r.spend === null && r.roi === null), JSON.stringify(k.perSource));
       check('8a known fixed costs stated, not computed as KPI', /129\/mo/.test(k.knownCosts) && /0\.021/.test(k.knownCosts));
@@ -380,6 +387,11 @@ function makeSandbox(extra) {
       check('8b live feed still dashes cost per lead/deal', (html2.match(/Cost per Lead[\s\S]{0,200}?—/) || []).length === 1 && (html2.match(/Cost per Deal[\s\S]{0,200}?—/) || []).length === 1);
       check('8b stage bars show counts', sb._elCache.stageBars.innerHTML.includes('>3<') && sb._elCache.stageBars.innerHTML.includes('>2<') && sb._elCache.stageBars.innerHTML.includes('>4<'));
       check('8b stage cap labelled first 100 opps', String(sb._elCache.stageCapLabel.textContent).includes('first 100 opps'));
+      sb.renderKpis(Object.assign({}, kpiFeed, { oppsFetched: 900, totalOpps: 1250 }));
+      check('8b stage cap label follows the fetched count (900)',
+        String(sb._elCache.stageCapLabel.textContent).includes('first 900 opps')
+        && String(sb._elCache.kpiFootnotes.textContent).includes('first 900 of 1250 opportunities'),
+        String(sb._elCache.stageCapLabel.textContent) + ' | ' + String(sb._elCache.kpiFootnotes.textContent));
       check('8b source rows list signals, spend/ROI dashed', sb._elCache.sourceRows.innerHTML.includes('pre-foreclosure') && sb._elCache.sourceRows.innerHTML.includes('no spend feed'));
     }
 

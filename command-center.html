@@ -599,12 +599,18 @@ async function loadOverview(){
      source exists, so ROI is "—"; lead counts by signal ARE computable
      from the loaded leads (labelled top-9-only).
    - Close rate / deals by stage: computable from the feed, labelled
-     "first 100 opps" whenever the feed hit its 100-opportunity cap. */
+     "first N opps" (N = the feed's fetched count) whenever the feed
+     hit its fetch cap. The feed pages opportunities (100/call, up to
+     1,000), so N is the real fetched basis — never a hardcoded 100. */
 function computeKpis(feed){
   const hasFeed=!!feed;
   const f=feed||{};
   const totalOpps=Number(f.totalOpps)||0;
   const capped=!!f.closeRateCapped;
+  // Fetched basis for the capped labels: how many opportunities the
+  // feed actually read (it pages past 100 now). Older feeds without
+  // oppsFetched fall back to the total they reported.
+  const fetched=Number(f.oppsFetched)||totalOpps;
   const closed=Number(f.closedCount)||0;
   const under=Number(f.underContract)||0;
   const leads=Number(f.newLeadsCount)||0;
@@ -624,10 +630,10 @@ function computeKpis(feed){
   return {
     costPerLead:{value:null,needs:'Needs a marketing spend feed — HL wallet transactions + SMS volume for the same period. No spend data reaches this page today.'},
     costPerDeal:{value:null,needs:'Needs a marketing spend feed + closed deals over the same period. Neither exists on this page yet.'},
-    closeRate:{value:closeRate,capped:capped,label:capped?'Close Rate · first 100 opps':'Close Rate',needs:(!hasFeed?'Opportunity feed did not load.':(totalOpps===0?'Opportunity feed returned no deals.':null))},
+    closeRate:{value:closeRate,capped:capped,fetched:fetched,label:capped?('Close Rate · first '+fetched+' opps'):'Close Rate',needs:(!hasFeed?'Opportunity feed did not load.':(totalOpps===0?'Opportunity feed returned no deals.':null))},
     closedVolume:{value:closedVolume,needs:!hasFeed?'Opportunity feed did not load.':null},
     closedCount:{value:hasFeed?closed:null,needs:!hasFeed?'Opportunity feed did not load.':null},
-    dealsByStage:{isNew:leads,underContract:under,closed:closed,total:totalOpps,capped:capped},
+    dealsByStage:{isNew:leads,underContract:under,closed:closed,total:totalOpps,fetched:fetched,capped:capped},
     perSource:perSource,
     perRep:{value:null,needs:'Needs per-rep attribution — no owner/rep field exists on opportunities or contacts in the CRM, and the dashboard has no roles/permissions.'},
     knownCosts:'Known fixed costs (billing facts, not a live feed): PropertyReach Core + API $129/mo. SMS ≈ $0.021/msg. Cost per lead/deal still needs actual spend over a period.'
@@ -660,7 +666,7 @@ function renderKpis(feed){
     }
     bars.innerHTML=row('New Leads',s.isNew)+row('Under Contract',s.underContract)+row('Closed',s.closed);
   }
-  if(cap)cap.textContent=k.dealsByStage.capped?'· first 100 opps':(k.dealsByStage.total?'· '+k.dealsByStage.total+' opps':'');
+  if(cap)cap.textContent=k.dealsByStage.capped?('· first '+k.dealsByStage.fetched+' opps'):(k.dealsByStage.total?'· '+k.dealsByStage.total+' opps':'');
   // Per-source table
   const tbody=document.getElementById('sourceRows');
   if(tbody){
@@ -673,7 +679,7 @@ function renderKpis(feed){
     }
   }
   const foot=document.getElementById('kpiFootnotes');
-  if(foot)foot.textContent=k.knownCosts+(k.dealsByStage.capped?' Close rate and stage counts cover only the first 100 opportunities the feed returns — HL offers no verified way to page past 100.':'');
+  if(foot)foot.textContent=k.knownCosts+(k.dealsByStage.capped?(' Close rate and stage counts cover the first '+k.dealsByStage.fetched+' of '+k.dealsByStage.total+' opportunities — the feed pages 100 at a time up to 1,000, and this pipeline is larger than what was fetched.'):'');
 }
 
 /* ============ UNDER CONTRACT STRIP (Nov 11) ============
@@ -695,7 +701,7 @@ function renderContractStrip(deals, oppsError){
     return;
   }
   if(!list.length){
-    strip.innerHTML='<div class="empty" style="padding:10px">No deals under contract in the first 100 opportunities.</div>';
+    strip.innerHTML='<div class="empty" style="padding:10px">No deals under contract in the loaded opportunities.</div>';
     if(note)note.textContent='Under-contract = opportunities in a stage whose name contains "under contract".';
     return;
   }

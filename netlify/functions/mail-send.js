@@ -81,7 +81,9 @@ try {
 const COOKIE_NAME = 'lm_auth';
 const HL_API_BASE = 'https://services.leadconnectorhq.com';
 const HL_API_VERSION = '2021-07-28';
-const HL_LOCATION_ID = 'krKoHLudPnn7nT0DPtwa';
+// Location via the shared config point (lib-client.js): HL_LOCATION_ID
+// env var when set, else Troy's id — identical until the env var is set.
+const HL_LOCATION_ID = require('./lib-client').defaultLocationId();
 const POSTGRID_API_BASE = 'https://api.postgrid.com/print-mail/v1';
 const LOG_STORE = 'direct-mail-log';
 

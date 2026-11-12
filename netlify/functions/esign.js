@@ -99,7 +99,9 @@ try { blobs = require('@netlify/blobs'); } catch (e) { blobs = null; }
 const COOKIE_NAME = 'lm_auth';
 const HL_API_BASE = 'https://services.leadconnectorhq.com';
 const HL_API_VERSION = '2021-07-28'; // same as Contacts; verify at deploy
-const HL_LOCATION_ID = 'krKoHLudPnn7nT0DPtwa';
+// Location via the shared config point (lib-client.js): HL_LOCATION_ID
+// env var when set, else Troy's id — identical until the env var is set.
+const HL_LOCATION_ID = require('./lib-client').defaultLocationId();
 const LOG_STORE = 'esign-log';
 const HL_TIMEOUT_MS = 20000;
 
@@ -393,10 +395,65 @@ function isEmailDnd(contact) {
   return false;
 }
 // Ohio: SB 155 requires a boldface >=12pt wholesaler disclosure BEFORE any
-// binding contract (Dayton AND Cleveland). The dashboard cannot read the
-// template text, so it shows this reminder and requires Troy's confirm.
+// binding contract (Dayton AND Cleveland). v1 (Nov 11) only reminded.
+// ENFORCEMENT (Nov 11 cleanup build): a purchase-contract SEND for an
+// Ohio seller is blocked until that seller's disclosure document shows
+// as signed/completed in HighLevel. The disclosure document itself is
+// never blocked — it is the document that must go first. The check
+// reads the same HighLevel document list the refresh path uses; if
+// that read fails on an Ohio purchase send, the send fails CLOSED (an
+// unverifiable disclosure state never lets a contract out).
 function needsDisclosureReminder(state) {
   return String(state || '').toUpperCase() === 'OH';
+}
+const DISCLOSURE_TEMPLATE_NAME = 'WHOSALER DISCLOSURE STATEMENT OH';
+const SIGNED_DOC_STATUSES = ['completed', 'accepted'];
+function isDisclosureDocName(name) {
+  return /DISCLOSURE/i.test(String(name || ''));
+}
+function recipientSigned(r) {
+  return !!(r && (r.hasCompleted === true || r.signedDate || r.signedAt));
+}
+// Find this contact's SIGNED disclosure in an HL document list.
+// Signed = the document status is completed/accepted (HighLevel marks
+// a document completed when every signer has signed), or the seller's
+// own recipient record shows the signature (hasCompleted / signedDate
+// — the recipient record is where signing actually shows, per the
+// Nov 11 live reads in the header).
+function findSignedDisclosure(documents, contactId) {
+  const list = Array.isArray(documents) ? documents : [];
+  for (const d of list) {
+    if (!d || d.deleted === true) continue;
+    if (!isDisclosureDocName(d.name)) continue;
+    const recips = Array.isArray(d.recipients) ? d.recipients : [];
+    if (contactId && recips.length && !recips.some((r) => r && r.id === contactId)) continue;
+    if (SIGNED_DOC_STATUSES.includes(String(d.status || '').toLowerCase())) return d;
+    const seller = recips.find((r) => r && r.id === contactId);
+    if (seller && recipientSigned(seller)) return d;
+  }
+  return null;
+}
+// Pure gate for the Ohio rule (the send handler enforces it; prepare
+// reports it so the sheet can warn before Send is ever tapped).
+function disclosureStatus(opts) {
+  const o = opts || {};
+  const isDisclosureSend = isDisclosureDocName(o.templateName);
+  const required = needsDisclosureReminder(o.state) && !isDisclosureSend;
+  if (!required) return { required: false, signed: true, allowed: true, isDisclosureSend };
+  if (o.lookupFailed) {
+    return {
+      required: true, signed: false, allowed: false, code: 'ohio_disclosure_check_failed',
+      error: 'Ohio SB 155: the signed-disclosure check could not read the HighLevel document list, so this contract send is blocked (fail closed). Retry once HighLevel is reachable.',
+    };
+  }
+  const doc = findSignedDisclosure(o.documents, o.contactId);
+  if (doc) {
+    return { required: true, signed: true, allowed: true, documentId: docIdOf(doc), documentStatus: doc.status || '' };
+  }
+  return {
+    required: true, signed: false, allowed: false, code: 'ohio_disclosure_unsigned',
+    error: 'Ohio SB 155: the wholesaler disclosure must be SIGNED by the seller before the purchase contract can be sent. No signed disclosure for this seller was found in HighLevel. Send the "' + DISCLOSURE_TEMPLATE_NAME + '" document first, wait until it shows completed/signed, then send the contract.',
+  };
 }
 function templateForState(templates, state) {
   const st = String(state || '').toUpperCase();
@@ -482,6 +539,22 @@ function fieldsGateDecision(fieldsCheck, confirmations) {
   }
   return { allowed: false, error: 'Fields check did not pass — this contract cannot be sent.', missing: fieldsCheck.missing || [] };
 }
+// Read the live disclosure status for prepare/send. Only an Ohio
+// purchase send pays for the document-list read; everything else
+// resolves locally. A failed read reports lookupFailed (the send gate
+// fails closed on it; prepare only reports it).
+async function readDisclosureStatus(token, state, templateName, contactId) {
+  const base = { state, templateName, contactId };
+  if (!needsDisclosureReminder(state) || isDisclosureDocName(templateName)) {
+    return disclosureStatus(base);
+  }
+  try {
+    const docs = await hlListDocuments(token);
+    return disclosureStatus(Object.assign({}, base, { documents: docs }));
+  } catch (e) {
+    return disclosureStatus(Object.assign({}, base, { lookupFailed: true }));
+  }
+}
 // Envelope state machine: HL statuses only ever move the envelope forward.
 // A stale/older poll never rewinds a completed envelope.
 function nextEnvelopeState(current, hlStatus) {
@@ -512,7 +585,7 @@ function isDuplicate(existing, key, nowMs) {
 // HighLevel POST /proposals/templates/send rejects the call with HTTP 422
 // ("locationId should not be empty; locationId must be a string") when
 // locationId is absent — seen live Nov 11 ~7:52 PM on the 1 TEST ST lead.
-// HL_LOCATION_ID is the new CRM location (krKoHLudPnn7nT0DPtwa).
+// HL_LOCATION_ID is the new CRM location (resolved via lib-client.js).
 function buildSendTemplateBody({ templateId, userId, contactId, opportunityId, sendDocument }) {
   const body = { templateId, userId, contactId, locationId: HL_LOCATION_ID, sendDocument: sendDocument !== false };
   if (opportunityId) body.opportunityId = opportunityId;
@@ -793,7 +866,8 @@ exports.handler = async (event) => {
           }
         } catch (e) { /* best-effort — the 409 still returns the envelope */ }
       }
-      return json(409, { error: 'A contract for this seller, template and price was already prepared in the last 24 hours.', code: 'duplicate_envelope', envelopeId: existing.id, envelope: existing, disclosureReminder: needsDisclosureReminder(contactSummary(contact).state) });
+      const dupDisclosure = await readDisclosureStatus(token, contactSummary(contact).state, existing.templateName, contactId);
+      return json(409, { error: 'A contract for this seller, template and price was already prepared in the last 24 hours.', code: 'duplicate_envelope', envelopeId: existing.id, envelope: existing, disclosureReminder: needsDisclosureReminder(contactSummary(contact).state), disclosure: dupDisclosure });
     }
     // Create the draft (sendDocument:false). UNVERIFIED at build time:
     // if HL ignores the flag and sends, the deploy check must catch it.
@@ -839,6 +913,7 @@ exports.handler = async (event) => {
       id: newEnvelopeId(),
       leadId: body.leadId || '',
       contactId,
+      sellerState: contactSummary(contact).state || '',
       templateId,
       templateName: (KNOWN_TEMPLATES.find((t) => t.id === templateId) || {}).name || templateId,
       documentId: documentId || (draft && docIdOf(draft)) || '',
@@ -855,8 +930,16 @@ exports.handler = async (event) => {
       updatedAt: new Date().toISOString(),
     };
     appendEvent(envelope, 'prepared', `Draft created from template ${envelope.templateName}; document id ${envelope.documentId || 'UNRESOLVED — send will re-resolve from the document list before it can send'} (via ${envelope.draftResolution.via}); fields check ${fields.ready ? 'passed (signatures verified via the API)' : (fields.advisory ? 'ADVISORY — the API cannot see signature fields; send unlocks only on Troy\'s in-sheet confirmation that he checked them in HighLevel' : 'FAILED — send blocked')}.`, 'dashboard');
+    // Ohio disclosure status at prepare time — reported so the sheet
+    // can warn up front. Prepare sends nothing, so a failed read here
+    // never blocks the draft; the SEND gate re-checks and fails closed.
+    const disclosure = await readDisclosureStatus(token, envelope.sellerState, envelope.templateName, contactId);
+    envelope.disclosure = { required: disclosure.required, signed: disclosure.signed, documentId: disclosure.documentId || '', checkedAt: new Date().toISOString() };
+    if (disclosure.required && !disclosure.signed) {
+      appendEvent(envelope, 'ohio-disclosure-pending', 'Ohio SB 155: no signed wholesaler disclosure for this seller in HighLevel yet — the contract SEND will stay blocked until the signed disclosure shows there.', 'dashboard');
+    }
     await writeEnvelope(store, envelope);
-    return ok({ envelope, fieldsCheck: fields, disclosureReminder: needsDisclosureReminder(contactSummary(contact).state) });
+    return ok({ envelope, fieldsCheck: fields, disclosureReminder: needsDisclosureReminder(contactSummary(contact).state), disclosure });
   }
 
   // ---- send: draft must exist, fields must be ready, Troy must confirm. ----
@@ -880,6 +963,29 @@ exports.handler = async (event) => {
       return bad(gate.error, { missing: gate.missing || (envelope.fieldsCheck && envelope.fieldsCheck.missing) || [] });
     }
     envelope.fieldsGateMode = gate.mode;
+    // Ohio SB 155 ENFORCEMENT (Nov 11 cleanup): a purchase contract
+    // for an Ohio seller cannot send until the seller's wholesaler
+    // disclosure shows signed/completed in HighLevel. Seller state was
+    // stored on the envelope at prepare; older envelopes without it
+    // re-read the contact. A failed document-list read fails CLOSED.
+    // The disclosure document itself is exempt (it goes first), and
+    // non-Ohio sends never reach the check.
+    {
+      let ohState = envelope.sellerState || '';
+      if (!ohState) {
+        try { const c = await hlGetContact(token, envelope.contactId); ohState = (contactSummary(c) || {}).state || ''; } catch (e) { ohState = ''; }
+      }
+      if (needsDisclosureReminder(ohState) && !isDisclosureDocName(envelope.templateName)) {
+        const disclosure = await readDisclosureStatus(token, ohState, envelope.templateName, envelope.contactId);
+        envelope.disclosure = { required: true, signed: disclosure.signed, documentId: disclosure.documentId || '', checkedAt: new Date().toISOString() };
+        if (!disclosure.allowed) {
+          appendEvent(envelope, 'send-blocked-ohio-disclosure', disclosure.error, 'dashboard');
+          await writeEnvelope(store, envelope);
+          return json(409, { error: disclosure.error, code: disclosure.code, disclosure: envelope.disclosure });
+        }
+        appendEvent(envelope, 'ohio-disclosure-verified', `SB 155 disclosure signed in HighLevel (document ${disclosure.documentId || 'unknown id'}, status ${disclosure.documentStatus || 'signed'}) — contract send allowed.`, 'dashboard');
+      }
+    }
     // Document-id recovery: if prepare could not capture the draft's
     // id (the create response carried none and the draft was not yet
     // visible in the list), resolve it NOW from the document list,
@@ -979,6 +1085,10 @@ module.exports = {
   isSmsDnd,
   isEmailDnd,
   needsDisclosureReminder,
+  DISCLOSURE_TEMPLATE_NAME,
+  isDisclosureDocName,
+  findSignedDisclosure,
+  disclosureStatus,
   templateForState,
   fieldsReadyCheck,
   advisoryFieldsCheck,

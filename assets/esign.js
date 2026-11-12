@@ -97,7 +97,16 @@
         + '<tr><td style="padding:4px 0;color:var(--muted)">Contract date</td><td style="text-align:right">' + esc(c.contractDate || '—') + '</td></tr>'
         + '<tr><td style="padding:4px 0;color:var(--muted)">Closing date (contract + 30 days)</td><td style="text-align:right"><b>' + esc(c.closingDate || '—') + '</b></td></tr>'
         + '</table>';
-      if (current.disclosureReminder) {
+      if (current.disclosure && current.disclosure.required) {
+        // Ohio SB 155 ENFORCEMENT (Nov 11 cleanup): the server blocks
+        // the contract send until the signed disclosure shows in
+        // HighLevel — this line reports that live state.
+        if (current.disclosure.signed) {
+          html += '<p style="color:#1a7f37;font-size:13px;font-weight:600">✅ Ohio SB 155 disclosure: SIGNED in HighLevel for this seller — the contract send is allowed.</p>';
+        } else {
+          html += '<p style="color:#d33;font-size:13px;font-weight:600">⛔ Ohio SB 155: the wholesaler disclosure is NOT signed yet for this seller. Send is BLOCKED until the signed disclosure shows in HighLevel — send the "' + esc('WHOSALER DISCLOSURE STATEMENT OH') + '" document first, let the seller sign it, then send this contract.</p>';
+        }
+      } else if (current.disclosureReminder) {
         html += '<p style="color:#a60;font-size:13px">Ohio deal — the SB 155 wholesaler disclosure (boldface, ≥12pt) must be in the template before the contract binds. Confirm it is in your template.</p>';
       }
       // Signers
@@ -182,7 +191,7 @@
     var lead = findLead(leadId);
     if (!lead) { alert('Lead not found.'); return; }
     var contactId = lead.ghlContactId || lead.hlContactId || null;
-    current = { leadId: leadId, lead: lead, contactId: contactId, templates: [], envelope: null, fieldsCheck: null, missing: [], staleTemplates: false, disclosureReminder: false };
+    current = { leadId: leadId, lead: lead, contactId: contactId, templates: [], envelope: null, fieldsCheck: null, missing: [], staleTemplates: false, disclosureReminder: false, disclosure: null };
     var modal = document.getElementById('esignModal');
     if (modal) modal.classList.add('open');
     var b = document.getElementById('esignBody');
@@ -241,6 +250,7 @@
       current.envelope = res.envelope;
       current.fieldsCheck = res.fieldsCheck || (res.envelope && res.envelope.fieldsCheck) || null;
       current.disclosureReminder = Boolean(res.disclosureReminder);
+      current.disclosure = res.disclosure || (res.envelope && res.envelope.disclosure) || null;
       current.missing = [];
       // Link sticks: a successful prepare with a manually entered id
       // persists it on the lead, so the next open is already linked.
@@ -261,6 +271,7 @@
         current.envelope = e.data.envelope;
         current.fieldsCheck = e.data.envelope.fieldsCheck || null;
         current.disclosureReminder = Boolean(e.data.disclosureReminder);
+        current.disclosure = e.data.disclosure || e.data.envelope.disclosure || null;
         current.missing = [];
         renderSheet();
         return;

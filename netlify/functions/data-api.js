@@ -9,8 +9,11 @@
 // unchanged: { matched, address, property, comps }. The page tries this
 // source first and falls back to ATTOM when it fails or returns no comps.
 //
-// Costs ~2 API credits per address (1 property + 1 comparables). Reads the
-// response BODY status (the API returns HTTP 200 with embedded status codes).
+// Costs ~2 API credits per address (1 property + 1 comparables). The
+// comparables call asks for MLS-sourced rows first (Troy's decided
+// method, Nov 11); when MLS is thin it falls back once to MLS+public
+// record ("Both"), which can add 1 credit. Reads the response BODY
+// status (the API returns HTTP 200 with embedded status codes).
 
 // NOTE (Nov 5): this hostname is the real data-provider API endpoint.
 // The Nov 4 white-label scrub replaced it with api.data-api.com, which
@@ -243,10 +246,15 @@ function armsFromSituation(s) {
   return 'A';
 }
 
-function parseCompRow(r) {
+function parseCompRow(r, sourceLabel) {
   const amount = r.lastSaleAmount != null ? Number(r.lastSaleAmount) : null;
   const sqft = r.squareFeet != null && Number(r.squareFeet) > 0 ? Number(r.squareFeet) : null;
   return {
+    // Provenance: which comparables request produced this row ('MLS'
+    // or 'Both'). The upstream response documents NO per-row source
+    // field (comp-api vetting, Oct 31), so the request that returned
+    // the row is the only honest source label available.
+    rowSource: sourceLabel || null,
     address: [r.streetAddress, r.city, r.state, r.zip].filter(x => x !== undefined && x !== null && String(x).trim() !== '').join(', '),
     // NOTE: the comparables endpoint returns no per-row distance and no
     // per-row coordinates — every row passed the distanceFromSubject filter.
@@ -421,7 +429,9 @@ function compOut(c) {
     daysOnMarket: c.daysOnMarket,
     yearBuilt: c.yearBuilt || null,
     photoUrl: c.photoUrl || null,
-    source: 'data provider',
+    // MLS only when the row provably came from the MLS-filtered
+    // request; rows from the "Both" fallback stay the generic label.
+    source: c.rowSource === 'MLS' ? 'MLS' : 'data provider',
   };
 }
 
@@ -496,6 +506,16 @@ exports.handler = async (event) => {
 
     // --- 2. comparables: try propertyId, then APN, then full address ---
     // (all 404 "Subject property not found" so far — trying every target form)
+    // SOURCE ORDER (Nov 11, Troy's decided method): MLS-sourced comps
+    // first. The endpoint's comparableSource filter takes "MLS",
+    // "Public Record" or "Both" (vendor vetting, Oct 25). Per target:
+    // request "MLS"; if that call fails OR the merged rows yield fewer
+    // than 3 usable comps, fall back ONCE on the same target to "Both"
+    // (MLS + public record) and merge, deduped by address+amount+date.
+    // The fallback costs one extra credit and fires only when MLS is
+    // thin or absent — the public-record path is never lost. The ±20%
+    // sqft hard filter and the 3-comp minimum live in analyzeComps and
+    // are untouched; they are what "usable" means in the check below.
     const compTargets = [];
     if (rawProp.id) compTargets.push({ propertyId: rawProp.id });
     if (rawProp.apn) compTargets.push({ apn: rawProp.apn });
@@ -503,29 +523,54 @@ exports.handler = async (event) => {
     if (rawProp.county) addrTarget.county = rawProp.county;
     if (rawProp.fips) addrTarget.fips = rawProp.fips;
     compTargets.push(addrTarget);
-    let compRes = null;
+    const COMP_SOURCE_ORDER = ['MLS', 'Both'];
+    let compRows = null;
+    let compSourceUsed = '';
     for (const target of compTargets) {
-      compRes = await prPost('/comparables', {
-        target,
-        filter: {
-          distanceFromSubject: 2,
-          lastSaleDateMin: isoDaysAgo(365),
-          propertyClassCode: ['R'],
-        },
-      }, apiKey).catch(() => null);
-      if (bodyOk(compRes)) break;
-      const meta = compRes && compRes.json && compRes.json.meta;
-      console.log('[data-api] comparables failed: ' + JSON.stringify(meta || { http: compRes ? compRes.http : 'fetch-failed' }));
-      compRes = null;
+      const merged = [];
+      const seenKeys = new Set();
+      const used = [];
+      for (const source of COMP_SOURCE_ORDER) {
+        const res = await prPost('/comparables', {
+          target,
+          filter: {
+            distanceFromSubject: 2,
+            lastSaleDateMin: isoDaysAgo(365),
+            propertyClassCode: ['R'],
+            comparableSource: source,
+          },
+        }, apiKey).catch(() => null);
+        if (!bodyOk(res)) {
+          const meta = res && res.json && res.json.meta;
+          console.log('[data-api] comparables (' + source + ') failed: ' + JSON.stringify(meta || { http: res ? res.http : 'fetch-failed' }));
+          continue;
+        }
+        used.push(source);
+        for (const r of (res.json.properties || [])) {
+          const row = parseCompRow(r, source);
+          const key = row.address + '|' + row.amount + '|' + row.date;
+          if (seenKeys.has(key)) continue;
+          seenKeys.add(key);
+          merged.push(row);
+        }
+        // Enough usable comps — stop spending credits on this target.
+        if (analyzeComps(subject, merged, today).best.length >= 3) break;
+      }
+      if (used.length) { compRows = merged; compSourceUsed = used.join('+'); break; }
     }
 
     let comps = null;
-    if (compRes) {
-      const rows = (compRes.json.properties || []).map(parseCompRow);
+    if (compRows) {
+      const rows = compRows;
       const res = analyzeComps(subject, rows, today);
-      console.log('[data-api] comps raw=' + rows.length + ' candidates=' + res.candidates.length + ' best=' + res.best.length);
+      console.log('[data-api] comps source=' + compSourceUsed + ' raw=' + rows.length + ' candidates=' + res.candidates.length + ' best=' + res.best.length);
       comps = {
         criteria: 'data-api-2mi-12mo',
+        // Which source priced this set: 'MLS' when the MLS-filtered
+        // request alone produced the usable comps, 'MLS+Both' when
+        // the public-record fallback had to top the set up, 'Both'
+        // when the MLS request failed outright.
+        compSource: compSourceUsed,
         returnedCount: rows.length,
         candidateCount: res.candidates.length,
         indication: res.indication != null ? Math.round(res.indication) : null,

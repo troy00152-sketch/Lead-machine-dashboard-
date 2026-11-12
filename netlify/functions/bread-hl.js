@@ -36,8 +36,11 @@ const MAX_TOOL_ITERATIONS = 3;   // max HL tool calls per chat request
 
 const HL_API_BASE = 'https://services.leadconnectorhq.com';
 const HL_API_VERSION = '2021-07-28';
-// Troy's new CRM — "direct property buyers" (Fitness Lead Machine LLC)
-const HL_LOCATION_ID = 'krKoHLudPnn7nT0DPtwa';
+// Troy's new CRM — "direct property buyers" (Fitness Lead Machine LLC).
+// Location resolves via the shared config point (lib-client.js):
+// HL_LOCATION_ID env var when set, else Troy's id — identical in
+// production until the env var is set for another tenant.
+const HL_LOCATION_ID = require('./lib-client').defaultLocationId();
 // Paula Thomas — account owner (for contract sends, notes, etc.)
 const HL_USER_ID = 'BsoCeQWYI6BRct8hBKdz';
 

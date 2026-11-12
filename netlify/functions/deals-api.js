@@ -473,7 +473,9 @@ async function adminSetCover(s, body) {
 // when a link goes to many buyers at once; offers always alert immediately.
 // All failures are silent — notifications never break the buyer flow.
 const TROY_PHONE_DIGITS = '12035657810';
-const HL_LOCATION_ID_NOTIFY = 'krKoHLudPnn7nT0DPtwa';
+// Location via the shared config point (lib-client.js): HL_LOCATION_ID
+// env var when set, else Troy's id — identical until the env var is set.
+const HL_LOCATION_ID_NOTIFY = require('./lib-client').defaultLocationId();
 const HL_API_BASE_NOTIFY = 'https://services.leadconnectorhq.com';
 const HL_API_VERSION_NOTIFY = '2021-07-28';
 const NOTIFY_TIMEOUT_MS = 10000;
