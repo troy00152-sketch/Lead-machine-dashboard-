@@ -216,7 +216,12 @@ t('state: accepted maps at completed level', esign.nextEnvelopeState('sent', 'ac
   t('api: opportunityId passes through when given', opp.opportunityId === 'O1');
   const doc = esign.buildSendDocumentBody({ documentId: 'D1', sentBy: 'U1', medium: 'email', ccRecipients: [{ id: 'T', email: 'troy00152@gmail.com' }] });
   t('api: send-document body carries documentId, sentBy, medium email, Troy CC', doc.documentId === 'D1' && doc.sentBy === 'U1' && doc.medium === 'email' && doc.ccRecipients.length === 1);
+  // POST /proposals/document/send 422s ("locationId should not be
+  // empty") without locationId — live blocker Nov 11 ~10:05 PM.
+  t('api: send-document body carries locationId equal to the location constant', typeof doc.locationId === 'string' && doc.locationId === esign.HL_LOCATION_ID);
+  t('api: send-document locationId is the new CRM location', doc.locationId === 'krKoHLudPnn7nT0DPtwa');
   t('api: no CC when none given', !('ccRecipients' in esign.buildSendDocumentBody({ documentId: 'D1', sentBy: 'U1' })));
+  t('api: send-document body without CC still carries locationId', esign.buildSendDocumentBody({ documentId: 'D1', sentBy: 'U1' }).locationId === esign.HL_LOCATION_ID);
 })();
 
 // ---- 9. DND handling ----

@@ -519,7 +519,12 @@ function buildSendTemplateBody({ templateId, userId, contactId, opportunityId, s
   return body;
 }
 function buildSendDocumentBody({ documentId, sentBy, medium, ccRecipients }) {
-  const body = { documentId, sentBy, medium: medium || 'email' };
+  // locationId is REQUIRED by the proposals API: POST
+  // /proposals/document/send rejects with HTTP 422 ("locationId should
+  // not be empty; locationId must be a string") when it is absent —
+  // seen live Nov 11 ~10:05 PM on the 2 TEST ST sheet proof (same 422
+  // class the templates/send call had until locationId was added).
+  const body = { documentId, sentBy, medium: medium || 'email', locationId: HL_LOCATION_ID };
   if (ccRecipients && ccRecipients.length) body.ccRecipients = ccRecipients;
   return body;
 }
