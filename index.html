@@ -462,6 +462,15 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
 .spot-nums .num{font-size:22px}
 .spot-nums .lbl{color:var(--muted);font-size:11px;letter-spacing:.05em;text-transform:uppercase;margin-top:2px}
 </style>
+<!-- PWA (v1): manifest, theme, iOS install support, service worker -->
+<link rel="manifest" href="/manifest.webmanifest" />
+<meta name="theme-color" content="#050a14" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Command Center" />
+<link rel="apple-touch-icon" href="/assets/icons/icon-192.png" />
+<script src="/assets/pwa.js" defer></script>
 </head>
 <body>
 <button class="menu-btn" id="menuBtn" onclick="document.querySelector('.sidebar').classList.toggle('open')">☰</button>

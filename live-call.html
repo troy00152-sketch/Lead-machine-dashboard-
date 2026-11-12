@@ -82,6 +82,15 @@ footer{color:var(--muted);font-size:12.5px;line-height:1.6;margin-top:8px}
 footer b{color:var(--text)}
 @media(max-width:640px){h1{font-size:20px}}
 </style>
+<!-- PWA (v1): manifest, theme, iOS install support, service worker -->
+<link rel="manifest" href="/manifest.webmanifest" />
+<meta name="theme-color" content="#050a14" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Command Center" />
+<link rel="apple-touch-icon" href="/assets/icons/icon-192.png" />
+<script src="/assets/pwa.js" defer></script>
 </head>
 <body>
 <div class="wrap">

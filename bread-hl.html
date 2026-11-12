@@ -54,6 +54,15 @@
   .hint{font-size:11px; color:var(--ink-dim); text-align:center; padding:6px; flex-shrink:0}
   .err{color:#ff6b6b; font-size:13px}
 </style>
+<!-- PWA (v1): manifest, theme, iOS install support, service worker -->
+<link rel="manifest" href="/manifest.webmanifest" />
+<meta name="theme-color" content="#050a14" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Command Center" />
+<link rel="apple-touch-icon" href="/assets/icons/icon-192.png" />
+<script src="/assets/pwa.js" defer></script>
 </head>
 <body>
 <header>
