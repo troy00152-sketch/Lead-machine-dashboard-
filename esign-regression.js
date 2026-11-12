@@ -399,6 +399,52 @@ t('templates: ids unique', new Set(esign.KNOWN_TEMPLATES.map((x) => x.id)).size 
   t('findlead: no "Lead not found" alert in the live shape', !envG.alerts.some((a) => /Lead not found/.test(a)));
   t('findlead: sheet renders the manual contact-id field in the live shape', /id="esignContactId"/.test(envG.body()));
 
+  // (h) draft read-back — Nov 11 live failure: prepare created draft
+  // 6af5112d2feb5ce2ae8f93a3 but the sheet logged "Could not read the
+  // draft back". Two code bugs, both verified live via
+  // list-documents-contracts: (1) HL returns { data: { documents: [] } }
+  // and the code read parsed.documents (always []); (2) prepare passed
+  // the APN as `query`, and HL's query is a document-NAME search, so
+  // query=TEST-000000 returned 0 docs. hlListDocuments must parse the
+  // live shape, and the no-query call must not send a query param.
+  const liveDoc = {
+    documentId: '6af5112d2feb5ce2ae8f93a3', status: 'draft',
+    fillableFields: [
+      { id: '459bda42-618c-40d6-b109-f4523d62b9c9', fieldId: 'text_field_1', type: 'TextField', recipient: 'a4vyLnhwrRQn75dqek7k', isRequired: true },
+      { id: '7508a68f-9945-439b-96bd-faeb110312aa', fieldId: 'date_field_2', type: 'DateField', recipient: 'qFBg9HS2LtXQg8mWjQuA', isRequired: true },
+    ],
+    recipients: [
+      { id: 'qFBg9HS2LtXQg8mWjQuA', contactName: 'TEST E-Sign Do Not Use', role: 'signer' },
+      { id: 'a4vyLnhwrRQn75dqek7k', contactName: 'Paula Thomas', role: 'signer' },
+    ],
+  };
+  function fakeListImpl(payload) {
+    const seen = [];
+    const impl = async function (url, opts) {
+      seen.push(url);
+      return { status: 200, text: JSON.stringify(payload) };
+    };
+    return { impl: impl, seen: seen };
+  }
+  const f1 = fakeListImpl({ data: { documents: [liveDoc] } });
+  t('readback: live HL shape {data:{documents}} parses', JSON.stringify(await esign.hlListDocuments('T', undefined, f1.impl)) === JSON.stringify([liveDoc]));
+  t('readback: no-query call sends no query param', !f1.seen[0].includes('query='));
+  const f2 = fakeListImpl({ documents: [liveDoc] });
+  t('readback: flat {documents} shape still parses', (await esign.hlListDocuments('T', undefined, f2.impl)).length === 1);
+  const f3 = fakeListImpl([liveDoc]);
+  t('readback: bare array shape still parses', (await esign.hlListDocuments('T', undefined, f3.impl)).length === 1);
+  const f4 = fakeListImpl({ data: {} });
+  t('readback: empty data -> empty list, never null', JSON.stringify(await esign.hlListDocuments('T', undefined, f4.impl)) === '[]');
+  const f5 = fakeListImpl({ data: { documents: [liveDoc] } });
+  await esign.hlListDocuments('T', 'AGREEMENT TO PURCHASE REAL ESTATE IN', f5.impl);
+  t('readback: a name query still passes through (documents action)', f5.seen[0].includes('query=AGREEMENT'));
+  // The live draft itself: once the read-back is fixed, the guard must
+  // STILL block — it has TextField + DateField only, zero Signature
+  // fields for either signer. Fixing the read-back must not bypass this.
+  const liveCheck = esign.fieldsReadyCheck(liveDoc);
+  t('readback: live draft 6af5112d has no Signature field for either signer', liveCheck.ready === false && liveCheck.missing.some((m) => /TEST E-Sign/.test(m) && /Signature/.test(m)) && liveCheck.missing.some((m) => /Paula Thomas/.test(m) && /Signature/.test(m)), JSON.stringify(liveCheck.missing));
+  t('readback: live draft Paula is also missing a Date field', liveCheck.missing.some((m) => /Paula Thomas/.test(m) && /Date/.test(m)));
+
   // handler export (Nov 11 live 502): module.exports overwrote exports.handler,
   // so Netlify reported "esign.handler is undefined or not exported".
   t('exports: handler is exported (Netlify runtime needs esign.handler)', typeof esign.handler === 'function');

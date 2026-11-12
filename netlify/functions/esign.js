@@ -475,6 +475,14 @@ async function hlListDocuments(token, query, impl) {
   const q = new URLSearchParams({ locationId: HL_LOCATION_ID, limit: '20' });
   if (query) q.set('query', query);
   const parsed = await hlJson(token, 'GET', `/proposals/document?${q.toString()}`, null, impl);
+  // Live HL shape (verified Nov 11 via list-documents-contracts):
+  // { data: { documents: [...] } } — NOT { documents: [...] }. The old
+  // `parsed.documents` read always returned [], so prepare could never
+  // read its draft back ("Could not read the draft back"). Accept the
+  // flat shape and a bare array too, for safety.
+  if (Array.isArray(parsed)) return parsed;
+  if (parsed && Array.isArray(parsed.data)) return parsed.data;
+  if (parsed && parsed.data && Array.isArray(parsed.data.documents)) return parsed.data.documents;
   return parsed.documents || [];
 }
 async function hlGetContact(token, contactId, impl) {
@@ -595,11 +603,14 @@ exports.handler = async (event) => {
     } catch (e) { return json(503, { error: 'HighLevel could not create the contract draft: ' + (e.message || 'unknown error'), hlStatus: e.status || null, hlError: e.body || null }); }
     const links = created.links || [];
     const documentId = (links[0] && links[0].documentId) || created.documentId || '';
-    // Read the draft back and verify its fields.
+    // Read the draft back and verify its fields. No `query` here: HL's
+    // `query` is a document-NAME search — passing the APN returned 0
+    // docs live (Nov 11), so the draft was unfindable. Find by
+    // documentId in the unfiltered list instead (6 docs total live).
     let draft = null;
     try {
-      const docs = await hlListDocuments(token, check.contract.apn || contactSummary(contact).name);
-      draft = docs.find((d) => (d.documentId || d._id) === documentId) || docs[0] || null;
+      const docs = await hlListDocuments(token);
+      draft = docs.find((d) => (d.documentId || d._id) === documentId) || null;
     } catch (e) { draft = null; }
     const fields = draft ? fieldsReadyCheck(draft) : { ready: false, missing: ['Could not read the draft back from HighLevel to verify its fields.'], unrecognized: [], reason: 'Draft created, but the fields check could not run — verify the fields in HighLevel before sending.' };
     const envelope = {
@@ -686,7 +697,7 @@ exports.handler = async (event) => {
     if (!envelope) return json(404, { error: 'No envelope with that id.' });
     if (!token) return unavailable('HighLevel is not connected.');
     let docs = [];
-    try { docs = await hlListDocuments(token, envelope.contract.apn || ''); } catch (e) { return unavailable('HighLevel document list failed: ' + (e.message || 'unknown error')); }
+    try { docs = await hlListDocuments(token); } catch (e) { return unavailable('HighLevel document list failed: ' + (e.message || 'unknown error')); }
     const doc = docs.find((d) => (d.documentId || d._id) === envelope.documentId) || null;
     if (!doc) return ok({ envelope, hlStatus: 'not-found', note: 'HighLevel did not return this document in the list — it may have been deleted or the list is paged.' });
     const prev = envelope.state;
@@ -731,6 +742,7 @@ module.exports = {
   buildSendDocumentBody,
   signingLinkFor,
   hlErrorText,
+  hlListDocuments,
   FIELD_IDS,
   KNOWN_TEMPLATES,
   ENVELOPE_STATES,
