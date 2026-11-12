@@ -256,7 +256,8 @@ t('templates: ids unique', new Set(esign.KNOWN_TEMPLATES.map((x) => x.id)).size 
   const vm = require('vm');
   const uiSrc = fs.readFileSync(path.join(__dirname, 'assets/esign.js'), 'utf8');
 
-  function makeEnv() {
+  function makeEnv(opts) {
+    const bareLeadsOnly = Boolean(opts && opts.bareLeadsOnly);
     const calls = []; // { action, body }
     const alerts = [];
     let saveStateCalls = 0;
@@ -296,7 +297,14 @@ t('templates: ids unique', new Set(esign.KNOWN_TEMPLATES.map((x) => x.id)).size 
       confirm: function () { return true; },
       saveState: function () { saveStateCalls++; },
     };
-    sandbox.window = sandbox;
+    // Live shape: index.html declares `let leads = []` at top level, and a
+    // top-level `let` does NOT create window.leads. When bareLeadsOnly is
+    // set, window is a separate object with no `leads` — bare `leads`
+    // must still resolve. The old makeEnv masked this by setting
+    // window = sandbox (so window.leads always existed).
+    sandbox.window = bareLeadsOnly
+      ? { document: sandbox.document, saveState: sandbox.saveState }
+      : sandbox;
     vm.createContext(sandbox);
     vm.runInContext(uiSrc, sandbox);
     return {
@@ -369,6 +377,19 @@ t('templates: ids unique', new Set(esign.KNOWN_TEMPLATES.map((x) => x.id)).size 
   t('ui-link: typed id survives a failed prepare (re-render keeps it)', /value="C-nofields"/.test(envF.body()));
   t('ui-link: failed prepare does not link the lead', envF.leads[0].ghlContactId === undefined);
   t('ui-link: failed prepare sends nothing', envF.sendCalls === 0);
+
+  // (g) findLead reads the bare `leads` global (Nov 11 live regression):
+  // commit 4d43c7d regressed findLead to `window.leads || window.LEADS`,
+  // but the dashboard declares `let leads = []`, which creates no
+  // window.leads — so on the live page findLead always returned null and
+  // "Send for Signature" did nothing ("Lead not found."). This env
+  // reproduces the live shape: bare `leads` exists, window.leads does not.
+  const envG = makeEnv({ bareLeadsOnly: true });
+  envG.leads.push({ id: 'L1', state: 'IN', address1: '1 Test St' });
+  await envG.sandbox.window.esignOpenSheet('L1');
+  t('findlead: sheet opens when only the bare leads global exists', envG.calls.some((c) => c.action === 'templates'));
+  t('findlead: no "Lead not found" alert in the live shape', !envG.alerts.some((a) => /Lead not found/.test(a)));
+  t('findlead: sheet renders the manual contact-id field in the live shape', /id="esignContactId"/.test(envG.body()));
 
   console.log(`\nesign-regression: ${pass} passed, ${fail} failed.`);
   if (fail) { console.error('Failures:\n- ' + failures.join('\n- ')); process.exit(1); }

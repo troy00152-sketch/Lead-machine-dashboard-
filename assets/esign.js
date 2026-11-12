@@ -24,7 +24,10 @@
     return '$' + n.toLocaleString('en-US', { maximumFractionDigits: 0 });
   }
   function findLead(id) {
-    var list = (window.leads || window.LEADS || []);
+    // index.html declares `let leads = []` — a top-level `let` creates NO
+    // window.leads, so window-only lookup always misses. Read the bare
+    // global first (same pattern as assets/mail.js).
+    var list = (typeof leads !== 'undefined' ? leads : (window.leads || window.LEADS || []));
     for (var i = 0; i < list.length; i++) if (String(list[i].id) === String(id)) return list[i];
     return null;
   }
