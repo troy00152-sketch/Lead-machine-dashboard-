@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live Coach — Irish · Direct Property Buyers</title>
+<style>
+/* Holographic theme — same variables as live-call.html / command-center.html */
+:root{
+  --bg:#050a14; --bg2:rgba(10,18,38,.88); --panel:rgba(13,25,48,.55); --panel2:rgba(20,35,65,.45);
+  --line:rgba(0,212,255,.22); --text:#e8f4ff; --muted:#7a9cc6; --muted2:#4a6a94;
+  --accent:#00d4ff; --accent2:#0090ff; --green:#00ffaa; --red:#ff4466;
+  --blue:#4488ff; --chip:rgba(0,212,255,.12); --radius:14px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  background-color:#050a14; color:var(--text); min-height:100vh;
+  background-image:
+    radial-gradient(ellipse 80% 50% at 15% 0%, rgba(0,212,255,.09), transparent 60%),
+    radial-gradient(ellipse 70% 55% at 85% 100%, rgba(0,102,255,.11), transparent 60%);
+}
+.wrap{max-width:880px;margin:0 auto;padding:18px 16px 60px}
+header{margin-bottom:14px}
+h1{font-size:28px;font-weight:800}
+h1 span{color:var(--accent);text-shadow:0 0 18px rgba(0,212,255,.8)}
+.sub{color:var(--muted);font-size:15px;margin-top:4px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px;margin-bottom:14px;backdrop-filter:blur(8px)}
+.panel h2{font-size:19px;margin-bottom:4px}
+.panel h2 .n{color:var(--accent)}
+.panel .hint{color:var(--muted);font-size:14.5px;margin-bottom:12px;line-height:1.5}
+.lbl{font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+input{
+  background:rgba(10,18,38,.7);color:var(--text);border:1px solid var(--line);
+  border-radius:8px;padding:11px 12px;font-size:16px;font-family:inherit;width:100%;
+}
+input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 18px rgba(0,212,255,.2)}
+input[type=checkbox]{width:auto;padding:0;accent-color:var(--accent)}
+.btn{
+  display:inline-block;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#001220;
+  border:none;border-radius:8px;padding:13px 22px;font-size:16px;font-weight:800;cursor:pointer;min-height:48px;
+  box-shadow:0 0 18px rgba(0,212,255,.35);
+}
+.btn:hover{box-shadow:0 0 26px rgba(0,212,255,.65);transform:translateY(-1px)}
+.btn:disabled{opacity:.5;cursor:default;transform:none}
+.btn.ghost{background:transparent;color:var(--accent);border:1px solid var(--line);box-shadow:none}
+.row{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;align-items:center}
+.muted{color:var(--muted);font-size:14px}
+.obj{margin-top:10px;padding:12px 14px;background:var(--panel2);border:1px solid var(--line);border-radius:8px}
+.obj-t{font-weight:700;font-size:14px}
+.obj-r{color:var(--text);font-size:17.5px;margin-top:4px;line-height:1.5}
+.note{padding:6px 2px;border-bottom:1px solid var(--line);font-size:16px;line-height:1.5}
+.note:last-child{border-bottom:none}
+.tag{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;padding:3px 8px;border-radius:4px;background:var(--chip);color:var(--accent);border:1px solid var(--line)}
+details.tt summary{cursor:pointer;font-size:19px;font-weight:800;list-style:none}
+details.tt summary::-webkit-details-marker{display:none}
+details.tt summary .n{color:var(--accent)}
+.tt-step{margin-top:14px}
+.tt-step h3{font-size:16px;color:var(--accent);margin-bottom:6px}
+.tt-step ul{margin:0 0 0 20px}
+.tt-step li{font-size:15.5px;line-height:1.55;margin-bottom:4px}
+.tt-step li.say{color:var(--text)}
+.outcome{font-size:19px;font-weight:800;color:var(--accent);text-shadow:0 0 14px rgba(0,212,255,.4)}
+footer{color:var(--muted);font-size:13px;line-height:1.6;margin-top:8px}
+footer b{color:var(--text)}
+@media(max-width:640px){h1{font-size:24px}.obj-r{font-size:16.5px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>🎙 Live <span>Coach</span></h1>
+  <div class="sub">For Irish — cold calls. It listens, shows what they said, and flashes what to say.</div>
+</header>
+
+<!-- ============ LIVE COACH ============ -->
+<section class="panel">
+  <h2><span class="n">●</span> Live Coach — listens and suggests</h2>
+  <div class="hint">Start the coach when the call starts. It listens on this device's mic (put the call on speaker), shows what the seller just said, and flashes 1–3 replies in about 2 seconds. Tap a reply to use it. When a vetted objection line matches, it comes first — the AI suggestions are the backup.</div>
+  <div class="row" style="margin-top:0">
+    <button type="button" class="btn" id="coachToggle">🎙 Start listening</button>
+    <span class="muted" id="coachStatus">Coach off. The mic is never on unless you start it.</span>
+    <span class="muted" id="coachLatency"></span>
+  </div>
+  <label style="display:flex;gap:8px;align-items:center;font-size:15px;margin-top:12px">
+    <input type="checkbox" id="coachConsent"> Seller knows I'm taking notes on this call
+  </label>
+  <div class="muted" style="margin-top:4px">Florida and 10+ other states are all-party consent — tell the seller first: “I take notes on my calls — is that alright with you?”</div>
+  <div class="lbl" style="margin-top:16px">They said</div>
+  <div id="coachTranscript" class="obj" style="min-height:72px;max-height:220px;overflow-y:auto"><p class="muted">Nothing heard yet.</p></div>
+  <div class="lbl" style="margin-top:16px">Say this</div>
+  <div id="coachSuggestions"><p class="muted">Suggestions appear here while the seller is talking.</p></div>
+  <div class="row">
+    <input id="coachSimInput" placeholder="Test: type what the seller just said, e.g. That's too low." style="flex:1;min-width:220px">
+    <button type="button" class="btn ghost" id="coachSimBtn">Test suggestion</button>
+  </div>
+  <div class="muted" style="margin-top:8px">Listens with your browser's free speech recognition (Chrome on desktop or Android).</div>
+</section>
+
+<!-- ============ TALK TRACK ============ -->
+<section class="panel">
+  <details class="tt" open>
+    <summary><span class="n">●</span> Talk track — the framework for every call</summary>
+    <div class="tt-step">
+      <h3>1 · Opener</h3>
+      <ul>
+        <li>Say your name and why you're calling — keep it short.</li>
+        <li>Confirm you're talking to the owner of the property.</li>
+        <li>Ask if they'd consider selling if the numbers worked.</li>
+      </ul>
+    </div>
+    <div class="tt-step">
+      <h3>2 · Qualify</h3>
+      <ul>
+        <li class="say">Do you own the home?</li>
+        <li class="say">How long have you owned it?</li>
+        <li class="say">Is anyone living there now — you, family, or a tenant?</li>
+        <li class="say">If you sold, when would you want it done by?</li>
+        <li class="say">Do you have a price in mind?</li>
+        <li class="say">Is there anyone else who'd need to agree before you could sell?</li>
+      </ul>
+    </div>
+    <div class="tt-step">
+      <h3>3 · Hot-lead close</h3>
+      <ul>
+        <li>If they're open to selling: book the partner call — offer a time, confirm this is the best number, and tell them your partner will call to talk through numbers and next steps.</li>
+        <li>If the timing isn't right: agree on a callback time before you hang up.</li>
+        <li>After the call: tag the lead <b>hot lead</b> in the CRM so it lands on the board.</li>
+      </ul>
+    </div>
+  </details>
+</section>
+
+<!-- ============ END OF CALL ============ -->
+<section class="panel" id="callEndPanel" hidden>
+  <h2><span class="n">●</span> End of call</h2>
+  <div id="callSummary"><p class="muted">Summary appears here when you stop the coach.</p></div>
+  <div class="row">
+    <button type="button" class="btn ghost" id="copyNotesBtn">📋 Copy summary notes</button>
+    <span class="muted" id="copyStatus"></span>
+  </div>
+  <div class="lbl" style="margin-top:16px">Full transcript — this call</div>
+  <div id="callTranscriptFull" class="obj" style="max-height:320px;overflow-y:auto"><p class="muted">No transcript yet.</p></div>
+</section>
+
+<footer>
+  <b>Listening:</b> the coach listens only while you have it on, on this device only — nothing is
+  recorded or stored, and only the words it needs to suggest a reply leave the device.
+  If you record a call yourself, get consent first: Florida and 10+ other states are all-party consent.
+  When in doubt, say: “Just so you know, I record my calls for quality — is that alright with you?”
+</footer>
+</div>
+
+<script>window.LIVE_CALL_OBJECTIONS = [{"id": "L001", "cat": "open", "trigger": "Who is this? / Who are you?", "keywords": ["who is this", "who are you", "who's this", "who is this?"], "reply": "I'm Ashley with Direct Property Buyers — my partner and I are looking to take on a few more places around [city]. Are you considering selling yours?"}, {"id": "L003", "cat": "open", "trigger": "What company are you with?", "keywords": ["what company", "who are you with", "what business"], "reply": "Direct Property Buyers. We take on a handful of places a year around [city], as-is, and we cover the closing costs. Is yours something you'd consider selling?"}, {"id": "L004", "cat": "open", "trigger": "Are you a realtor?", "keywords": ["are you a realtor", "are you an agent", "you a realtor", "you an agent"], "reply": "No — I'm not an agent. We work directly with owners, no middleman, and we cover the closing costs."}, {"id": "L005", "cat": "open", "trigger": "Are you a wholesaler?", "keywords": ["are you a wholesaler", "you a wholesaler", "wholesaler?"], "reply": "We work directly with owners and take places as-is. Sometimes we keep them, sometimes my partner handles the rehab. Either way you get paid at closing."}, {"id": "L006", "cat": "open", "trigger": "Is this a scam?", "keywords": ["is this a scam", "is this legit", "is this real", "scam?"], "reply": "Fair question. Everything goes through a licensed title company — you'd never hand us a dollar, they'd hand you one at closing."}, {"id": "L009", "cat": "open", "trigger": "I'm busy right now.", "keywords": ["i'm busy", "i am busy", "busy right now", "not a good time"], "reply": "No problem — thirty seconds. Are you the owner of [address], and would you ever consider selling it?"}, {"id": "L010", "cat": "open", "trigger": "I don't own that property.", "keywords": ["i don't own", "not my property", "don't own that", "not the owner"], "reply": "My mistake. Do you know who does, by any chance?"}, {"id": "L011", "cat": "open", "trigger": "Where are you calling from?", "keywords": ["where are you calling from", "where are you based", "where are you located"], "reply": "I work with a team that takes on places around [city] — my partner handles the local side."}, {"id": "L013", "cat": "price", "trigger": "That's too low.", "keywords": ["too low", "that's low", "that is low"], "reply": "I understand. To take it as-is and close fast, that's where we have to be. A realtor may get you more if you want to go the fixed-up, open-market route."}, {"id": "L014", "cat": "price", "trigger": "That's insulting.", "keywords": ["insulting", "insulted", "offensive"], "reply": "I hear you, and I'm not trying to insult you. That's just what the numbers let us do. What would you consider fair?"}, {"id": "L015", "cat": "price", "trigger": "I don't want a lowball offer.", "keywords": ["lowball", "low ball"], "reply": "What would you consider a lowball number? I want to make sure we're aligned."}, {"id": "L016", "cat": "price", "trigger": "I need $[X] for it.", "keywords": ["i need $", "i want $", "i'm asking $", "my price is", "have to get $"], "reply": "Okay — help me understand where that number comes from, because ours is built off what it'll sell for after repairs."}, {"id": "L017", "cat": "price", "trigger": "Zillow says it's worth more.", "keywords": ["zillow", "redfin", "worth more"], "reply": "Zillow's never been inside. It doesn't know the roof, the A/C, or the flooring. What would it take to make it move-in ready?"}, {"id": "L018", "cat": "price", "trigger": "My neighbor sold for $[X].", "keywords": ["neighbor sold", "neighbour sold", "next door sold"], "reply": "Was theirs updated? Ours has to work after repairs, and that's usually the whole difference."}, {"id": "L019", "cat": "price", "trigger": "I've got too much equity to give it away.", "keywords": ["too much equity", "give it away", "giving it away"], "reply": "You're not giving anything away — you're trading some of it for speed and no repairs. If that trade isn't worth it, a realtor is your move."}, {"id": "L020", "cat": "price", "trigger": "I'll wait for the market to come back.", "keywords": ["wait for the market", "market to come back", "market comes back"], "reply": "You might be right. If the timing changes, just text me back — I'm around."}, {"id": "L021", "cat": "price", "trigger": "I owe more than that.", "keywords": ["i owe more", "owe more than", "underwater", "owe more than that"], "reply": "Got it — what's the payoff? If there's no room I'll tell you straight and I won't waste your time."}, {"id": "L022", "cat": "price", "trigger": "Just make me an offer. (strike 2: car test-drive close)", "keywords": ["make me an offer", "just give me", "give me a number", "give me your number"], "reply": "Happy to get you a real number. But first — have you ever bought a car? Did you test drive it? Same thing. I need to see the place so I can give you a firm number, not one full of loopholes. When can my partner come by?", "strike": 2}, {"id": "L023", "cat": "price", "trigger": "What's your offer? (demanding)", "keywords": ["what's your offer", "what is your offer", "what are you offering", "what would you pay", "how much would you pay"], "reply": "I was talking to my partner about the place and he mentioned a range — but he never saw it. Where are you at on it?"}, {"id": "L024", "cat": "price", "trigger": "Is that your best?", "keywords": ["is that your best", "is that the best", "best you can do", "best number"], "reply": "That's where the numbers put us today. If something about the place changes what we know, tell me and I'll take another look."}, {"id": "L025", "cat": "price", "trigger": "Can you do a little better?", "keywords": ["do a little better", "can you do better", "a little better", "come up a bit", "move up"], "reply": "Maybe. What number gets this signed today?"}, {"id": "L026", "cat": "price", "trigger": "I paid more than that for it.", "keywords": ["i paid more", "paid more than", "i paid $"], "reply": "I believe you. Unfortunately what you paid doesn't set what a buyer pays today — I wish it worked that way."}, {"id": "L027", "cat": "price", "trigger": "I just put a new roof on it.", "keywords": ["new roof", "just put a new", "new kitchen", "just remodeled", "just renovated"], "reply": "That helps — tell me what else got done. It won't get you retail, but it moves our number."}, {"id": "L030", "cat": "stall", "trigger": "I need to think about it. (not conditioned)", "keywords": ["need to think about it", "think about it", "let me think"], "reply": "Understood — specifically, what do you need to think about?"}, {"id": "L031", "cat": "stall", "trigger": "Call me back next week.", "keywords": ["call me back next week", "call me next week", "call back next week", "call me in a week"], "reply": "No problem. Before we set that up — is this a no, or is there a number that would make it a yes?"}, {"id": "L032", "cat": "stall", "trigger": "Send me something in writing.", "keywords": ["send me something in writing", "something in writing", "send it in writing", "put it in writing"], "reply": "My partner can get the agreement over to you once we've got the details sorted — what's the best email?"}, {"id": "L033", "cat": "stall", "trigger": "Just email me the offer.", "keywords": ["just email me", "email me the offer", "email me your number", "email the offer"], "reply": "I can. But the number moves depending on the roof and the A/C, so let's do those two questions now and I'll email you a real one."}, {"id": "L034", "cat": "stall", "trigger": "I'm not in a rush.", "keywords": ["not in a rush", "no rush", "not in any rush"], "reply": "That's fine — then let's not waste each other's time. If the number were right, would you sell today or would you still wait?"}, {"id": "L035", "cat": "stall", "trigger": "I'll get back to you.", "keywords": ["i'll get back to you", "i will get back to you", "get back to you"], "reply": "Sounds good. What day works — Thursday or Friday?"}, {"id": "L036", "cat": "stall", "trigger": "Let me sleep on it.", "keywords": ["sleep on it"], "reply": "Fair. What's the one thing you'd be thinking about tonight?"}, {"id": "L037", "cat": "stall", "trigger": "I've got other people coming to look.", "keywords": ["other people coming", "others coming to look", "other buyers coming", "people coming to look"], "reply": "Good — you should. When's the last one? I'd rather be the last number you get than the first."}, {"id": "L038", "cat": "stall", "trigger": "Not right now, maybe later this year.", "keywords": ["maybe later", "not right now", "later this year", "maybe next year"], "reply": "Understood. If anything changes, just text me back."}, {"id": "L039", "cat": "third", "trigger": "I need to talk to my wife/husband.", "keywords": ["talk to my wife", "talk to my husband", "talk to my spouse", "check with my wife", "check with my husband"], "reply": "Totally fair. When can we get back on a call with both of you?"}, {"id": "L040", "cat": "third", "trigger": "My kids handle this for me.", "keywords": ["my kids handle", "my son handles", "my daughter handles", "kids handle this"], "reply": "Makes sense. What's the best way to get all of us on one call?"}, {"id": "L041", "cat": "third", "trigger": "There are other heirs — my brother and sister.", "keywords": ["other heirs", "my brother and sister", "siblings", "heirs"], "reply": "Got it. Everyone on the deed has to sign, so let's get all of you on one call before we put a number together."}, {"id": "L042", "cat": "third", "trigger": "My lawyer has to review it.", "keywords": ["my lawyer", "my attorney", "lawyer has to review", "attorney review"], "reply": "Totally fair — once we've talked through the details, my partner can get the agreement to your lawyer to look over."}, {"id": "L043", "cat": "third", "trigger": "My accountant told me to wait.", "keywords": ["my accountant", "accountant told me"], "reply": "Understood. Is that about taxes on the sale? That's usually solvable — ask them, and if it clears up, just text me back."}, {"id": "L044", "cat": "third", "trigger": "My friend is a realtor and says I can get more.", "keywords": ["friend is a realtor", "my realtor", "my friend is an agent"], "reply": "They're probably right — on the open market, fixed up, in six to nine months. We're the other option, not the same one."}, {"id": "L045", "cat": "third", "trigger": "I need to talk to the executor.", "keywords": ["talk to the executor", "the executor", "personal representative"], "reply": "That's exactly who we need too. Can you connect us, or get us all on one call?"}, {"id": "L046", "cat": "third", "trigger": "I have power of attorney, is that enough?", "keywords": ["power of attorney", "poa"], "reply": "It might be — the title company will confirm. Can you send a copy so we don't hit a snag at closing?"}, {"id": "L047", "cat": "compete", "trigger": "I got a higher offer.", "keywords": ["higher offer", "got a higher", "better offer", "another offer"], "reply": "That's great — why haven't you closed with them? Send it over."}, {"id": "L049", "cat": "compete", "trigger": "I already signed with another wholesaler.", "keywords": ["signed with another", "already signed", "signed with someone"], "reply": "Then I'll stay out of it — that's their deal. If it falls through, call me, that happens more than you'd think."}, {"id": "L050", "cat": "compete", "trigger": "Opendoor offered me more.", "keywords": ["opendoor", "zillow offers", "ibuyer", "offerpad"], "reply": "They might have. Read what they take off for repairs and fees at the end — if the net still beats ours, take it."}, {"id": "L051", "cat": "compete", "trigger": "My nephew is an agent, he'll list it.", "keywords": ["nephew is an agent", "my nephew", "niece is an agent", "family is an agent"], "reply": "Good — family should get the commission. If it sits, we're still here."}, {"id": "L052", "cat": "compete", "trigger": "I'm just going to list it myself.", "keywords": ["list it myself", "going to list it", "list it on my own", "sell it myself"], "reply": "Go for it. If it sits, give us a shout — we're still here."}, {"id": "L053", "cat": "compete", "trigger": "Three other people called me today.", "keywords": ["other people called", "three other", "everyone is calling", "so many calls"], "reply": "I bet. Did any of them ask you about the roof, or did they just throw a number at you?"}, {"id": "L054", "cat": "compete", "trigger": "Why should I sell to you and not them?", "keywords": ["why should i sell to you", "why you and not them", "why choose you"], "reply": "Because we'll tell you the truth about the number and we'll close on the day we say. Ask them for the last three addresses they closed."}, {"id": "L055", "cat": "process", "trigger": "How does this work?", "keywords": ["how does this work", "how does it work", "how would this work"], "reply": "Straightforward — we look at the place, if it's the right fit we agree on a number, we sign a two-page agreement, it goes to the title company, and you close on your date. As-is, no repairs, no commissions."}, {"id": "L057", "cat": "process", "trigger": "Do I have to pay any fees?", "keywords": ["pay any fees", "any fees", "what are the fees", "are there fees"], "reply": "No commissions, and we cover the closing costs. What the agreement says is what you walk away with."}, {"id": "L058", "cat": "process", "trigger": "Who pays closing costs?", "keywords": ["who pays closing", "closing costs", "who covers closing"], "reply": "We do. That's part of why our number looks the way it does."}, {"id": "L059", "cat": "process", "trigger": "Do you need an inspection?", "keywords": ["need an inspection", "do you inspect", "inspection?"], "reply": "We'll walk it once with my partner to plan repairs. There's no formal inspection and no repair requests."}, {"id": "L060", "cat": "process", "trigger": "Do I have to fix anything?", "keywords": ["have to fix", "do i have to fix", "fix anything", "make repairs"], "reply": "Nothing. We take it exactly as it sits."}, {"id": "L061", "cat": "process", "trigger": "Do I have to clean it out?", "keywords": ["clean it out", "clean out", "have to clean"], "reply": "Leave whatever you don't want. We'll handle it."}, {"id": "L062", "cat": "process", "trigger": "How do I know you'll actually close?", "keywords": ["actually close", "know you'll close", "prove you can close", "how do i know"], "reply": "Fair. Everything runs through a licensed title company — you're welcome to check with them. And we put earnest money down so you're not taking our word for it."}, {"id": "L064", "cat": "process", "trigger": "Can I stay in the house after closing?", "keywords": ["stay in the house", "stay after closing", "rent it back", "rent back"], "reply": "Sometimes that's possible — how long would you need? It's something to sort out on the call."}, {"id": "L065", "cat": "process", "trigger": "Are you just going to flip it and make money off me?", "keywords": ["flip it", "make money off me", "just going to flip"], "reply": "Probably, yeah. That's the business — we take the risk and the repair cost, and you get paid fast with no headaches. If that trade isn't worth it to you, a realtor is the better move."}, {"id": "L066", "cat": "process", "trigger": "Do you actually have the money?", "keywords": ["actually have the money", "do you have the money", "have the money", "proof of funds"], "reply": "Yes — and we'll put earnest money into escrow so you're not taking our word for it."}, {"id": "L067", "cat": "process", "trigger": "Send me proof of funds.", "keywords": ["proof of funds", "send me proof", "show me proof"], "reply": "My partner can get that over to you — what email should it go to?"}, {"id": "L068", "cat": "process", "trigger": "Can I see your real estate license?", "keywords": ["real estate license", "your license", "are you licensed"], "reply": "We don't have one — we're not agents. We work directly with owners."}, {"id": "L069", "cat": "process", "trigger": "What happens to my mortgage?", "keywords": ["my mortgage", "what happens to the mortgage", "mortgage?"], "reply": "It gets paid off at closing out of the sale proceeds. The title company handles it."}, {"id": "L070", "cat": "cond", "trigger": "The house needs a lot of work.", "keywords": ["needs a lot of work", "needs work", "lot of work", "rough shape"], "reply": "That's what we take on. Walk me through it — roof, A/C, kitchen, floors. What's the worst of it?"}, {"id": "L071", "cat": "cond", "trigger": "The house is in perfect condition.", "keywords": ["perfect condition", "great shape", "fully updated", "move-in ready", "mint condition"], "reply": "Then honestly you might do better with a realtor. But tell me about it — how old's the roof?"}, {"id": "L072", "cat": "cond", "trigger": "There's a tenant in it.", "keywords": ["tenant", "rented out", "someone renting", "has a renter"], "reply": "Not a problem — we take places with tenants in them. Are they on a lease, month-to-month, or behind?"}, {"id": "L073", "cat": "cond", "trigger": "It's full of my mother's things.", "keywords": ["full of", "mother's things", "full of stuff", "belongings"], "reply": "Take what matters to you and leave the rest. We'll take care of it."}, {"id": "L074", "cat": "cond", "trigger": "I'm in the middle of a renovation.", "keywords": ["middle of a renovation", "mid-renovation", "half-done", "half finished"], "reply": "We'll take it half-done. What's finished and what isn't?"}, {"id": "L075", "cat": "cond", "trigger": "There's mold / fire damage.", "keywords": ["mold", "fire damage", "water damage", "flood damage"], "reply": "We take those. Most fire damage is one room with a good place around it. What happened?"}, {"id": "L076", "cat": "cond", "trigger": "I can't let you inside.", "keywords": ["can't let you inside", "can't come inside", "won't let you in", "no showings"], "reply": "That's alright. Can you walk me through it on the phone, or send a few photos?"}, {"id": "L077", "cat": "cond", "trigger": "It's vacant and I'm out of state.", "keywords": ["vacant and", "out of state", "i'm out of state", "i live out of state"], "reply": "That's the easiest kind for us. Want my partner to sort out access with you on the call?"}, {"id": "L078", "cat": "situ", "trigger": "My mother just passed. (probate)", "keywords": ["mother just passed", "mom just passed", "my mother passed", "my mom passed", "just passed away", "passed away"], "reply": "I'm sorry — that's a hard thing. I don't want to add to it. Whenever you're ready, I'm happy to talk about the place."}, {"id": "L080", "cat": "situ", "trigger": "I'm going to catch up on my payments. (pre-foreclosure)", "keywords": ["catch up on my payments", "catching up on payments", "catch up on payments"], "reply": "I hope you do. If it doesn't work out, call me before the auction date — after that my hands are tied."}, {"id": "L081", "cat": "situ", "trigger": "I'm doing a loan modification.", "keywords": ["loan modification", "loan mod", "modification"], "reply": "Good. Those take a while — if it doesn't land, just text me back and we'll pick it up from there."}, {"id": "L082", "cat": "situ", "trigger": "I'm going to pay the taxes. (tax delinquent)", "keywords": ["pay the taxes", "paying the taxes", "catch up on taxes"], "reply": "Fair enough. How far behind are you? If it's more than a year the county moves faster than people expect."}, {"id": "L083", "cat": "situ", "trigger": "I'm going to fix the violation. (code)", "keywords": ["fix the violation", "fixing the violation", "take care of the violation", "code violation"], "reply": "What's the fine running at? Those add up daily and they'll follow you to closing either way."}, {"id": "L084", "cat": "situ", "trigger": "We're in the middle of a divorce.", "keywords": ["divorce", "getting divorced", "in the middle of a divorce"], "reply": "Understood. Do you both have to sign, and are you both on the same page about selling?"}, {"id": "L085", "cat": "situ", "trigger": "I'm evicting my tenant.", "keywords": ["evicting", "evict my tenant", "eviction"], "reply": "We'll take it with them in it — you don't have to finish the eviction. Would that help?"}, {"id": "L086", "cat": "situ", "trigger": "My siblings can't agree on what to do.", "keywords": ["siblings can't agree", "can't agree", "family can't agree", "siblings disagree"], "reply": "That's the hard part. Would it help if we gave you one number in writing that everybody could look at together?"}, {"id": "L087", "cat": "situ", "trigger": "I'm out of state and can't get down there.", "keywords": ["can't get down there", "can't come down", "can't get there"], "reply": "You don't need to. We can do everything remotely — the title company handles the signing and you never get on a plane."}];</script>
+<script>
+// Live Coach — COACH-ONLY page for Irish (cold calls). Extracted from the
+// Live Call Console coach (live-call.js) on 2026-11-12: the pure
+// match/prompt/guard block and the DOM coach are Troy's coach code, reused
+// — not reinvented. Differences from the console page: no prep card, no
+// deal form, no scorecard/notes, no dashboard chrome; the caller is Irish;
+// and NO deal numbers exist here, so coachDealContext is built with the
+// caller name only — every number field is null and the suggestion guard
+// fails closed on any $ figure (Irish qualifies and books the partner
+// call; she never quotes numbers). Suggestions POST to the same deployed
+// /.netlify/functions/coach-suggest endpoint, unchanged. The vetted
+// objection lines are inlined from the bot's knowledge/kb.json
+// `objections` array by the same method as build-live-call.py — edit and
+// re-vet them there, never here.
+(function (root) {
+  'use strict';
+
+  function renderReply(reply, callerName, city) {
+    var out = String(reply || '');
+    if (callerName) out = out.replace(/\bAshley\b/g, callerName).replace(/\bAmber\b/g, callerName);
+    if (city) out = out.replace(/\[city\]/g, city);
+    return out;
+  }
+
+  // Keyword match on the seller's words. Longest matching keyword wins;
+  // ties break by earliest line in the vetted list. No match -> null.
+  function matchObjection(text, objections) {
+    var t = String(text || '').toLowerCase();
+    if (!t || !Array.isArray(objections)) return null;
+    var best = null, bestLen = 0;
+    (objections || []).forEach(function (o) {
+      (o.keywords || []).forEach(function (kw) {
+        var k = String(kw || '').toLowerCase();
+        if (k && t.indexOf(k) !== -1 && k.length > bestLen) { best = o; bestLen = k.length; }
+      });
+    });
+    return best;
+  }
+
+  // Every $ amount in a line of text, as numbers (commas stripped).
+  function extractDollarAmounts(text) {
+    var out = [];
+    String(text || '').replace(/\$([\d,]+(?:\.\d+)?)/g, function (_, n) {
+      var v = Number(n.replace(/,/g, ''));
+      if (!isNaN(v)) out.push(v);
+      return _;
+    });
+    return out;
+  }
+
+  // Client-side number guard (defense in depth — the server prompt carries
+  // the same rule): a suggestion is safe only if every $ figure in it is
+  // at or below MAO. With no MAO known, any $ figure fails closed.
+  function coachSuggestionGuard(suggestion, mao) {
+    var amounts = extractDollarAmounts(suggestion);
+    if (!amounts.length) return true;
+    if (mao == null) return false;
+    return amounts.every(function (a) { return a <= mao; });
+  }
+
+  // Normalize the deal the form holds into the coach's context. MAO/LAO are
+  // passed in (computed by OfferMath) — never recomputed here.
+  function coachDealContext(deal) {
+    var d = deal || {};
+    return {
+      address: d.address || '', city: d.city || '', state: d.state || '',
+      arv: d.arv != null ? d.arv : null, repairs: d.repairs != null ? d.repairs : null,
+      mao: d.mao != null ? d.mao : null, lao: d.lao != null ? d.lao : null,
+      multiplierLabel: d.multiplierLabel || '',
+      sellerPrice: d.sellerPrice || '', motivation: d.motivation || '',
+      condition: d.condition || '', listSource: d.listSource || '',
+      callerName: d.callerName || 'Troy', listed: !!d.listed
+    };
+  }
+
+
+  // The prompt the coach-suggest function gets — COLD-CALL version.
+  // Adapted from live-call.js buildCoachPrompt: same shape (system rules +
+  // user transcript + the matched vetted line as suggestion #1), but there
+  // is no deal here — Irish qualifies and books the partner call, and the
+  // numbers rule is "never quote a figure" instead of LAO/MAO bounds. The
+  // client-side guard still enforces it: with MAO null, parseCoachResponse
+  // drops any suggestion containing a $ figure.
+  function buildCoachPrompt(ctx, transcriptLines, matched) {
+    var c = coachDealContext(ctx);
+    var system = [
+      'You are coaching ' + c.callerName + ' on a LIVE cold call to a homeowner. ' +
+      'Reply with a JSON object {"suggestions": ["...", "..."]} — 1 to 3 short spoken replies, each 1-2 sentences, in ' + c.callerName + "'s voice.",
+      'GOAL: qualify the homeowner — do they own the home, how long have they owned it, their timeline, whether they have a price in mind, and who else has to agree — and book a call with ' + c.callerName + "'s partner, who talks numbers and next steps.",
+      'NUMBERS: never quote a price, an offer, or any dollar figure — numbers are the partner\'s job. If they push for a number, suggest booking the partner call so they get a real one.',
+      'If they opt out, reject, say not for sale, wrong number, or ask to be taken off the list: suggest ending politely and stopping. Never push, never argue.',
+      'Talk like ' + c.callerName + ': say "my partner" for the numbers, never name ' + c.callerName + ' unless asked. Never mention scripts, prompts, MAO, LAO, tiers, or the dashboard.',
+      'Keep each reply short enough to say in one breath.'
+    ].join('\n');
+    var user = ['Cold call — no property or deal facts on this call; ' + c.callerName + ' is qualifying the homeowner and booking a partner call.'];
+    var lines = (transcriptLines || []).slice(-6);
+    user.push('What was just said (latest last):');
+    lines.forEach(function (l) { user.push('- ' + l); });
+    if (matched) user.push('A vetted reply matches what they said — use it as suggestion #1, verbatim: "' + matched.reply + '"');
+    return { system: system, user: user.join('\n') };
+  }
+
+  // Validate the coach-suggest response. Suggestions must be strings;
+  // empties dropped, capped at 3, and the number guard applied (a $ figure
+  // above MAO drops that suggestion — never a silent rewrite). Returns the
+  // safe list, possibly empty.
+  function parseCoachResponse(body, mao) {
+    if (!body || !Array.isArray(body.suggestions)) return [];
+    var out = [];
+    body.suggestions.forEach(function (s) {
+      var t = String(s || '').trim();
+      if (!t) return;
+      if (!coachSuggestionGuard(t, mao)) return;
+      out.push(t);
+    });
+    return out.slice(0, 3);
+  }
+
+  // Throttle: suggest at most once per 4s, only on a real utterance
+  // (>= 3 words). The mic fires many finals per sentence; without this
+  // the coach would re-suggest on every fragment.
+  var COACH_SUGGEST_COOLDOWN_MS = 4000;
+  function shouldSuggestCoach(opts) {
+    var o = opts || {};
+    var text = String(o.text || '').trim();
+    if (text.split(/\s+/).filter(Boolean).length < 3) return false;
+    if (o.lastSuggestedAt != null && o.now != null && (o.now - o.lastSuggestedAt) < COACH_SUGGEST_COOLDOWN_MS) return false;
+    return true;
+  }
+
+
+  // End-of-call outcome + summary — pure prompt/parse pair. The summary
+  // rides the SAME coach-suggest endpoint: it accepts any system/user pair
+  // and returns the {suggestions:[...]} envelope, so item 1 carries the
+  // outcome label and the rest carry summary lines. No new backend. These
+  // are notes for Irish, not lines to say out loud, so the number guard
+  // does NOT apply here (a summary may quote the seller's own price).
+  function buildSummaryPrompt(transcriptLines) {
+    var system = [
+      'You summarize a cold call between Irish, a real estate cold caller, and a homeowner.',
+      'Reply with a JSON object {"suggestions": ["...", "..."]} and nothing else.',
+      'Item 1 must be exactly "Outcome: <label>" where <label> is one of: Hot lead, Appointment booked, Follow-up, Not interested, Not the owner, Do not call, Other.',
+      'Items 2 to 4 are a short summary of what the homeowner said: their situation, their timeline, any price they mentioned, and the agreed next step. Plain facts only — never invent details that are not in the transcript.'
+    ].join('\n');
+    var lines = (transcriptLines || []).slice(-40);
+    var user = ['Call transcript (latest last):'];
+    lines.forEach(function (l) { user.push('- ' + l); });
+    return { system: system, user: user.join('\n') };
+  }
+
+  // Validate the summary response: strings only, empties dropped, capped
+  // at 5 (outcome + up to 4 lines). No number guard — see note above.
+  function parseSummaryResponse(body) {
+    if (!body || !Array.isArray(body.suggestions)) return [];
+    var out = [];
+    body.suggestions.forEach(function (s) {
+      var t = String(s || '').trim();
+      if (t) out.push(t);
+    });
+    return out.slice(0, 5);
+  }
+
+  var api = {
+    matchObjection: matchObjection, extractDollarAmounts: extractDollarAmounts,
+    coachSuggestionGuard: coachSuggestionGuard, coachDealContext: coachDealContext,
+    buildCoachPrompt: buildCoachPrompt, parseCoachResponse: parseCoachResponse,
+    shouldSuggestCoach: shouldSuggestCoach, COACH_SUGGEST_COOLDOWN_MS: COACH_SUGGEST_COOLDOWN_MS,
+    buildSummaryPrompt: buildSummaryPrompt, parseSummaryResponse: parseSummaryResponse,
+    renderReply: renderReply
+  };
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+  root.CoachOnly = api;
+
+  // ---------- DOM bindings (browser only) ----------
+  if (typeof document === 'undefined') return;
+
+  var $ = function (id) { return document.getElementById(id); };
+  var objections = root.LIVE_CALL_OBJECTIONS || [];
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function callerName() { return 'Irish'; }
+  function cityOf() { return ''; }
+
+  // ---------- live coach (DOM only) ----------
+  // Browser speech recognition (Chrome desktop/Android, free). Continuous
+  // mode + auto-restart: the API ends the session on pauses, so onend
+  // restarts while the coach is on. Interim results show live; finals are
+  // what trigger suggestions (debounced 1.2s after the last final, plus
+  // the 4s cooldown in shouldSuggestCoach). Same engine as the console.
+  var coach = {
+    listening: false, recog: null, transcript: [], lastSuggestedAt: null,
+    suggestTimer: null, interimText: '', ended: false
+  };
+  var callSummary = { state: 'idle', items: [] }; // idle | pending | done | failed
+
+  // No deal form on this page: the context is the caller name only, so
+  // every number is null and the guard blocks all price/offer talk.
+  function coachContext() {
+    return coachDealContext({ callerName: callerName() });
+  }
+
+  function coachSetStatus(text) { var el = $('coachStatus'); if (el) el.textContent = text; }
+  function coachSetLatency(ms) { var el = $('coachLatency'); if (el) el.textContent = ms != null ? ('suggested in ' + (ms / 1000).toFixed(1) + 's') : ''; }
+
+  function renderCoachTranscript() {
+    var box = $('coachTranscript');
+    if (!box) return;
+    var lines = coach.transcript.slice(-8);
+    var html = lines.map(function (t) { return '<div class="note">• ' + esc(t) + '</div>'; }).join('');
+    if (coach.interimText) html += '<div class="note" style="color:var(--muted)">• ' + esc(coach.interimText) + ' …</div>';
+    box.innerHTML = html || '<p class="muted">Nothing heard yet.</p>';
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function renderCoachSuggestions(suggestions, matched, latencyMs, source) {
+    var box = $('coachSuggestions');
+    if (!box) return;
+    var cards = [];
+    if (matched) cards.push({ text: renderReply(matched.reply, callerName(), cityOf()), vetted: true });
+    (suggestions || []).forEach(function (s) { cards.push({ text: s, vetted: false }); });
+    if (!cards.length) {
+      box.innerHTML = '<p class="muted">No line matched — glance at the talk track below and keep them talking.</p>';
+      return;
+    }
+    box.innerHTML = cards.slice(0, 3).map(function (c, i) {
+      return '<div class="obj coach-sug" data-i="' + i + '"><div class="obj-t">' +
+        (c.vetted ? 'Vetted line' : 'Coach suggestion') + '</div><div class="obj-r">' + esc(c.text) + '</div></div>';
+    }).join('') + '<div class="muted">Tap a reply to mark it used.' + (source ? ' · ' + esc(source) : '') + '</div>';
+    coachSetLatency(latencyMs);
+    box.querySelectorAll('.coach-sug').forEach(function (el) {
+      el.addEventListener('click', function () {
+        el.style.borderColor = 'var(--green)';
+        if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+          var r = el.querySelector('.obj-r');
+          if (r) navigator.clipboard.writeText(r.textContent).catch(function () {});
+        }
+      });
+    });
+  }
+
+  // One suggestion round: match the vetted lines first (instant, local),
+  // then ask the AI for backups. On any failure the vetted line alone is
+  // the answer — the coach never goes blank mid-call.
+  async function requestCoachSuggestions(latestText) {
+    var deal = coachContext();
+    var matched = matchObjection(latestText, objections);
+    var recent = coach.transcript.slice(-6);
+    var prompt = buildCoachPrompt(deal, recent, matched);
+    var t0 = Date.now();
+    var used = matched ? renderReply(matched.reply, callerName(), cityOf()) : null;
+    try {
+      var controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+      var timer = controller ? setTimeout(function () { controller.abort(); }, 10000) : null;
+      var res = await fetch('/.netlify/functions/coach-suggest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ system: prompt.system, user: prompt.user }),
+        signal: controller ? controller.signal : undefined
+      });
+      if (timer) clearTimeout(timer);
+      if (!res.ok) throw new Error('coach-suggest HTTP ' + res.status);
+      var body = await res.json();
+      var suggestions = parseCoachResponse(body, deal.mao);
+      // The matched vetted line is rendered first by renderCoachSuggestions;
+      // drop any AI suggestion that duplicates it.
+      if (used) suggestions = suggestions.filter(function (s) { return s !== used; });
+      renderCoachSuggestions(suggestions, matched, Date.now() - t0, 'AI');
+      coach.lastSuggestedAt = Date.now();
+    } catch (e) {
+      renderCoachSuggestions([], matched, null, 'vetted line only — AI unreachable');
+      coach.lastSuggestedAt = Date.now();
+    }
+  }
+
+  function coachOnFinal(text) {
+    var t = String(text || '').trim();
+    if (!t) return;
+    var stamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    coach.transcript.push(stamp + ' — ' + t);
+    coach.interimText = '';
+    renderCoachTranscript();
+    clearTimeout(coach.suggestTimer);
+    coach.suggestTimer = setTimeout(function () {
+      if (!coach.listening) return;
+      if (!shouldSuggestCoach({ text: t, lastSuggestedAt: coach.lastSuggestedAt, now: Date.now() })) return;
+      requestCoachSuggestions(t);
+    }, 1200);
+  }
+
+  function coachStart() {
+    var consent = $('coachConsent');
+    if (consent && !consent.checked) {
+      coachSetStatus('Tell the seller first — check the box above, then start.');
+      return;
+    }
+    var SR = (typeof window !== 'undefined') ? (window.SpeechRecognition || window.webkitSpeechRecognition) : null;
+    if (!SR) {
+      coachSetStatus('Live listening is not supported in this browser — use Chrome on desktop or Android. The test box below still works.');
+      return;
+    }
+    var recog;
+    try { recog = new SR(); } catch (e) { coachSetStatus('Could not start the mic: ' + (e && e.message ? e.message : e)); return; }
+    recog.continuous = true;
+    recog.interimResults = true;
+    recog.lang = 'en-US';
+    coach.recog = recog;
+    coach.listening = true;
+    // A fresh call gets a fresh transcript + summary; the previous call's
+    // end-of-call block is cleared off the screen.
+    if (coach.ended) {
+      coach.transcript = [];
+      coach.ended = false;
+      callSummary = { state: 'idle', items: [] };
+      var endPanel = $('callEndPanel');
+      if (endPanel) endPanel.hidden = true;
+      renderCoachTranscript();
+    }
+    var toggle = $('coachToggle');
+    if (toggle) toggle.textContent = '⏹ Stop listening';
+    coachSetStatus('Listening… put the call on speaker. Suggestions appear below.');
+    recog.onresult = function (ev) {
+      var interim = '', finals = [];
+      for (var i = ev.resultIndex; i < ev.results.length; i++) {
+        var r = ev.results[i];
+        if (r.isFinal) finals.push(r[0].transcript);
+        else interim += r[0].transcript;
+      }
+      coach.interimText = interim.trim();
+      renderCoachTranscript();
+      finals.forEach(function (f) { coachOnFinal(f); });
+    };
+    recog.onerror = function (ev) {
+      var err = ev && ev.error;
+      if (err === 'not-allowed' || err === 'service-not-allowed') {
+        coachStop();
+        coachSetStatus('Mic blocked — allow microphone access for this site, then start again.');
+      }
+      // 'no-speech' / 'aborted' / 'network': onend restarts while listening.
+    };
+    recog.onend = function () {
+      if (!coach.listening) return;
+      try { coach.recog.start(); } catch (e) { /* next onend retries */ }
+    };
+    try { recog.start(); } catch (e) { coachSetStatus('Could not start the mic: ' + (e && e.message ? e.message : e)); coach.listening = false; }
+  }
+
+  function coachStop() {
+    coach.listening = false;
+    clearTimeout(coach.suggestTimer);
+    if (coach.recog) { try { coach.recog.stop(); } catch (e) {} coach.recog = null; }
+    var toggle = $('coachToggle');
+    if (toggle) toggle.textContent = '🎙 Start listening';
+    coachSetStatus('Coach off. Transcript stays on this page for the debrief.');
+    coachSetLatency(null);
+    coach.ended = true;
+    showCallEnd();
+  }
+
+  // ---------- end of call: transcript + AI outcome/summary + copy ----------
+  function renderCallEnd() {
+    var panel = $('callEndPanel');
+    if (panel) panel.hidden = false;
+    var sum = $('callSummary');
+    if (sum) {
+      if (callSummary.state === 'pending') {
+        sum.innerHTML = '<p class="muted">Writing the call summary…</p>';
+      } else if (callSummary.state === 'done' && callSummary.items.length) {
+        sum.innerHTML = callSummary.items.map(function (it, i) {
+          return i === 0
+            ? '<div class="outcome">' + esc(it) + '</div>'
+            : '<div class="note">• ' + esc(it) + '</div>';
+        }).join('');
+      } else if (callSummary.state === 'failed') {
+        sum.innerHTML = '<p class="muted">Summary unavailable — the transcript below is the record. Copy it as-is.</p>';
+      } else {
+        sum.innerHTML = '<p class="muted">No summary for this call.</p>';
+      }
+    }
+    var full = $('callTranscriptFull');
+    if (full) {
+      full.innerHTML = coach.transcript.length
+        ? coach.transcript.map(function (t) { return '<div class="note">• ' + esc(t) + '</div>'; }).join('')
+        : '<p class="muted">No transcript for this call.</p>';
+      full.scrollTop = full.scrollHeight;
+    }
+  }
+
+  // The summary rides the SAME coach-suggest endpoint (any system/user
+  // pair returns the {suggestions:[...]} envelope) — no new backend.
+  async function requestCallSummary() {
+    callSummary = { state: 'pending', items: [] };
+    renderCallEnd();
+    var prompt = buildSummaryPrompt(coach.transcript);
+    try {
+      var controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+      var timer = controller ? setTimeout(function () { controller.abort(); }, 10000) : null;
+      var res = await fetch('/.netlify/functions/coach-suggest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ system: prompt.system, user: prompt.user }),
+        signal: controller ? controller.signal : undefined
+      });
+      if (timer) clearTimeout(timer);
+      if (!res.ok) throw new Error('coach-suggest HTTP ' + res.status);
+      var body = await res.json();
+      var items = parseSummaryResponse(body);
+      callSummary = items.length ? { state: 'done', items: items } : { state: 'failed', items: [] };
+    } catch (e) {
+      callSummary = { state: 'failed', items: [] };
+    }
+    renderCallEnd();
+  }
+
+  function showCallEnd() {
+    renderCallEnd();
+    if (coach.transcript.length) requestCallSummary();
+    else callSummary = { state: 'idle', items: [] };
+    renderCallEnd();
+  }
+
+  function summaryNotesText() {
+    var when = new Date().toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+    var lines = ['Live Coach notes — Irish — ' + when, ''];
+    if (callSummary.state === 'done' && callSummary.items.length) {
+      lines.push(callSummary.items[0]);
+      lines.push('Summary:');
+      callSummary.items.slice(1).forEach(function (it) { lines.push('- ' + it); });
+    } else {
+      lines.push('Summary unavailable.');
+    }
+    lines.push('', 'Transcript:');
+    if (coach.transcript.length) coach.transcript.forEach(function (t) { lines.push(t); });
+    else lines.push('(no transcript)');
+    return lines.join('\n');
+  }
+
+  function copySummaryNotes() {
+    var text = summaryNotesText();
+    var st = $('copyStatus');
+    function done() { if (st) { st.textContent = 'Copied ✓'; setTimeout(function () { st.textContent = ''; }, 2500); } }
+    if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(function () { fallbackCopy(text); done(); });
+    } else { fallbackCopy(text); done(); }
+  }
+  function fallbackCopy(text) {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); } catch (e) {}
+    document.body.removeChild(ta);
+  }
+
+  document.addEventListener('DOMContentLoaded', function () {
+    var coachBtn = $('coachToggle');
+    if (coachBtn) coachBtn.addEventListener('click', function () { coach.listening ? coachStop() : coachStart(); });
+    var simBtn = $('coachSimBtn');
+    if (simBtn) simBtn.addEventListener('click', function () {
+      var v = $('coachSimInput') ? $('coachSimInput').value.trim() : '';
+      if (!v) return;
+      coach.transcript.push(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' — ' + v + ' (test)');
+      renderCoachTranscript();
+      if ($('coachSimInput')) $('coachSimInput').value = '';
+      if (shouldSuggestCoach({ text: v, lastSuggestedAt: coach.lastSuggestedAt, now: Date.now() })) requestCoachSuggestions(v);
+    });
+    var copyBtn = $('copyNotesBtn');
+    if (copyBtn) copyBtn.addEventListener('click', copySummaryNotes);
+  });
+
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+</body>
+</html>
