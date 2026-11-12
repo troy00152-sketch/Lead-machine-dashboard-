@@ -391,6 +391,10 @@ t('templates: ids unique', new Set(esign.KNOWN_TEMPLATES.map((x) => x.id)).size 
   t('findlead: no "Lead not found" alert in the live shape', !envG.alerts.some((a) => /Lead not found/.test(a)));
   t('findlead: sheet renders the manual contact-id field in the live shape', /id="esignContactId"/.test(envG.body()));
 
+  // handler export (Nov 11 live 502): module.exports overwrote exports.handler,
+  // so Netlify reported "esign.handler is undefined or not exported".
+  t('exports: handler is exported (Netlify runtime needs esign.handler)', typeof esign.handler === 'function');
+
   console.log(`\nesign-regression: ${pass} passed, ${fail} failed.`);
   if (fail) { console.error('Failures:\n- ' + failures.join('\n- ')); process.exit(1); }
 })();

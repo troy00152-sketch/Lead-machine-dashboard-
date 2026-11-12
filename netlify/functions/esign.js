@@ -708,6 +708,7 @@ exports.handler = async (event) => {
 };
 
 module.exports = {
+  handler: exports.handler,
   closingDatePlus30,
   buildLegalDescription,
   customField,
