@@ -615,6 +615,19 @@ function signingLinkFor(recipientId, doc) {
   return l ? (l.url || l.link || l.href || '') : '';
 }
 
+// "Open draft in HighLevel" — the one-tap preview link owed since the
+// Nov 11 v1 build. Drafts carry NO links from the HL API (proven live
+// Nov 11: unsent drafts read links: []), so there is no per-draft URL to
+// hand back. The link therefore targets the tenant location's Documents
+// & Contracts list (Payments → Documents & Contracts in the HL UI),
+// where the just-prepared draft is the newest row and opens in one more
+// tap. Built from the shared location config point (HL_LOCATION_ID) —
+// never a hardcoded location id; empty when no location is configured
+// (the sheet then simply shows no link).
+function hlDocumentsUrl() {
+  return HL_LOCATION_ID ? 'https://app.gohighlevel.com/v2/location/' + HL_LOCATION_ID + '/payments/documents' : '';
+}
+
 // ---- document-id capture (Nov 11 late — the empty-documentId bug) ----
 // Live evidence (ghl CLI reads, Nov 11 ~9:47 PM): a DRAFT document
 // carries NO links — links are minted at send time (both unsent drafts
@@ -819,7 +832,7 @@ exports.handler = async (event) => {
       if (!store) return unavailable('Signature log is unavailable — cannot read the envelope.');
       const env = await readEnvelope(store, qs.id || '');
       if (!env) return json(404, { error: 'No signature record with that id.' });
-      return ok({ envelope: env });
+      return ok({ envelope: env, hlDocumentsUrl: hlDocumentsUrl() });
     }
     return bad('Unknown action. Use action=status|templates|documents|envelope.');
   }
@@ -875,7 +888,7 @@ exports.handler = async (event) => {
         } catch (e) { /* best-effort — the 409 still returns the envelope */ }
       }
       const dupDisclosure = await readDisclosureStatus(token, contactSummary(contact).state, existing.templateName, contactId);
-      return json(409, { error: 'A contract for this seller, template and price was already prepared in the last 24 hours.', code: 'duplicate_envelope', envelopeId: existing.id, envelope: existing, disclosureReminder: needsDisclosureReminder(contactSummary(contact).state), disclosure: dupDisclosure });
+      return json(409, { error: 'A contract for this seller, template and price was already prepared in the last 24 hours.', code: 'duplicate_envelope', envelopeId: existing.id, envelope: existing, hlDocumentsUrl: hlDocumentsUrl(), disclosureReminder: needsDisclosureReminder(contactSummary(contact).state), disclosure: dupDisclosure });
     }
     // Create the draft (sendDocument:false). UNVERIFIED at build time:
     // if HL ignores the flag and sends, the deploy check must catch it.
@@ -947,7 +960,7 @@ exports.handler = async (event) => {
       appendEvent(envelope, 'ohio-disclosure-pending', 'Ohio SB 155: no signed wholesaler disclosure for this seller in HighLevel yet — the contract SEND will stay blocked until the signed disclosure shows there.', 'dashboard');
     }
     await writeEnvelope(store, envelope);
-    return ok({ envelope, fieldsCheck: fields, disclosureReminder: needsDisclosureReminder(contactSummary(contact).state), disclosure });
+    return ok({ envelope, fieldsCheck: fields, hlDocumentsUrl: hlDocumentsUrl(), disclosureReminder: needsDisclosureReminder(contactSummary(contact).state), disclosure });
   }
 
   // ---- send: draft must exist, fields must be ready, Troy must confirm. ----
@@ -1045,7 +1058,7 @@ exports.handler = async (event) => {
     } catch (e) { sms.reason = 'SMS link send failed (email send already succeeded): ' + (e.message || 'unknown error'); }
     envelope.sms = sms;
     await writeEnvelope(store, envelope);
-    return ok({ envelope, sms });
+    return ok({ envelope, sms, hlDocumentsUrl: hlDocumentsUrl() });
   }
 
   // ---- refresh: poll HL for the envelope's current status. ----
@@ -1060,7 +1073,7 @@ exports.handler = async (event) => {
     let docs = [];
     try { docs = await hlListDocuments(token); } catch (e) { return unavailable('HighLevel document list failed: ' + (e.message || 'unknown error')); }
     const doc = docs.find((d) => (d.documentId || d._id) === envelope.documentId) || null;
-    if (!doc) return ok({ envelope, hlStatus: 'not-found', note: 'HighLevel did not return this document in the list — it may have been deleted or the list is paged.' });
+    if (!doc) return ok({ envelope, hlStatus: 'not-found', hlDocumentsUrl: hlDocumentsUrl(), note: 'HighLevel did not return this document in the list — it may have been deleted or the list is paged.' });
     const prev = envelope.state;
     envelope.state = nextEnvelopeState(envelope.state, doc.status);
     envelope.hlStatus = doc.status;
@@ -1076,7 +1089,7 @@ exports.handler = async (event) => {
       }
     }
     await writeEnvelope(store, envelope);
-    return ok({ envelope, hlStatus: doc.status });
+    return ok({ envelope, hlStatus: doc.status, hlDocumentsUrl: hlDocumentsUrl() });
   }
 
   return bad('Unknown action. Use action=prepare|send|refresh (POST) or action=status|templates|documents|envelope (GET).');
@@ -1108,6 +1121,7 @@ module.exports = {
   buildSendTemplateBody,
   buildSendDocumentBody,
   signingLinkFor,
+  hlDocumentsUrl,
   docIdOf,
   extractCreatedDocumentId,
   matchDraftInList,
