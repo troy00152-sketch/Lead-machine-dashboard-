@@ -190,7 +190,7 @@ async function run() {
           cityStateZip: 'Indianapolis, IN 46201', phone: data.PHONE, brand: data.BRAND,
         }, false);
         assert.ok(r && r.front && r.back, 'renders');
-        assert.ok(r.front.includes('(203) 565-7810'), 'front has phone');
+        assert.ok(r.front.includes('(860) 452-6497'), 'front has phone');
         assert.ok(r.back.includes('Ada'), 'back has owner name');
         assert.ok(r.back.includes('9 Oak Ave'), 'back has property');
         assert.ok(!r.front.includes('{{') && !r.back.includes('{{'), 'no unmerged vars');

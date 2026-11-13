@@ -17,7 +17,7 @@
 'use strict';
 
 const BRAND = 'Direct Property Buyers';
-const PHONE = '(203) 565-7810';
+const PHONE = '(860) 452-6497';
 
 const DEFAULT_FROM = {
   companyName: BRAND,
