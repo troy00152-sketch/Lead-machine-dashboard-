@@ -6,6 +6,10 @@
   "retailCount": 37,
   "unknownCount": 1,
   "calibrated": true,
+  "appliedCalibration": {
+    "band_120_220": 0.5696,
+    "overall": 0.714
+  },
   "multiplierMedian": 0.713939393939394,
   "multiplierMean": 0.6452714069225718,
   "multiplierP25": 0.49262285456187893,
@@ -34,8 +38,8 @@
   },
   "byBuildType": {},
   "buyBox": {
-    "yearBuilt": "1910 – 2004",
-    "priceBand": "$18,250 – $261,298",
+    "yearBuilt": "1910 \u2013 2004",
+    "priceBand": "$18,250 \u2013 $261,298",
     "bedsMostCommon": "3bd (27), 2bd (14), 4bd (10)",
     "bathsMostCommon": "1.5ba (20), 1ba (16), 2ba (7)"
   },
@@ -109,6 +113,7 @@
     }
   ],
   "notes": [
-    "Only 92 cash sales. The blueprint calls for the top ~100+ — a smaller sample makes the multiplier noisy."
+    "Only 92 cash sales. The blueprint calls for the top ~100+ \u2014 a smaller sample makes the multiplier noisy.",
+    "Nov 13, 2026: appliedCalibration added \u2014 the constants the Nov 10 ground-truth run actually applied (band_120_220 0.5696, overall 0.714; pricing_core.py INDY_CALIBRATION, validated 214/216 vs the CRM-written numbers). Dashboard + server offer math now select THESE, not the per-band medians above (the medians stay as the calibration run's raw record)."
   ]
 }

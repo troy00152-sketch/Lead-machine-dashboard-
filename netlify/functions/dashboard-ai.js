@@ -67,6 +67,15 @@ function tierFor(arv) {
 // the AI-path guard. This param exists for the offline check and any future
 // server-side use; the get_comps tool result carries city/state, but no code
 // path computes MAO/LAO from it.
+// Round-half-even, matching the pricing engine (pricing_core._round_money).
+function roundHalfEven(x) {
+  const f = Math.floor(x);
+  const d = x - f;
+  if (d > 0.5) return f + 1;
+  if (d < 0.5) return f;
+  return (f % 2 === 0) ? f : f + 1;
+}
+
 function offerMath(arv, repairs, calibration, market) {
   const tier = tierFor(arv);
   let multiplier = tier, source = 'tier default';
@@ -74,15 +83,29 @@ function offerMath(arv, repairs, calibration, market) {
     const calMarket = String(calibration.market || 'Indianapolis').toLowerCase().trim();
     const dealMarket = market == null ? null : String(market).toLowerCase().trim();
     if (dealMarket && dealMarket === calMarket) {
-      const band = arv < 120000 ? 'under $120k' : arv < 220000 ? '$120k-$220k' : arv < 300000 ? '$220k-$300k' : arv < 400000 ? '$300k-$400k' : '$400k+';
-      const entry = (calibration.byPriceBand || {})[band];
-      const cal = entry && entry.n >= 8 ? entry.median : calibration.multiplierMedian;
-      if (cal < tier) { multiplier = cal; source = 'calibrated'; }
+      // UNIFIED Nov 13, 2026 with the auto-pricing engine (pricing_core.py
+      // INDY_CALIBRATION, validated 214/216 vs the Nov 10 CRM-written
+      // numbers): when the calibration carries appliedCalibration
+      // { band_120_220, overall }, those engine constants rule (band
+      // constant in $120k-$220k, overall elsewhere) — NOT the per-band
+      // medians, which diverged from the CRM by up to ~$40K. Objects
+      // without appliedCalibration keep the legacy median selection.
+      const applied = calibration.appliedCalibration;
+      let cal, calSource = 'calibrated';
+      if (applied && typeof applied.band_120_220 === 'number' && typeof applied.overall === 'number') {
+        cal = (arv >= 120000 && arv < 220000) ? applied.band_120_220 : applied.overall;
+        calSource = 'calibrated (engine)';
+      } else {
+        const band = arv < 120000 ? 'under $120k' : arv < 220000 ? '$120k-$220k' : arv < 300000 ? '$220k-$300k' : arv < 400000 ? '$300k-$400k' : '$400k+';
+        const entry = (calibration.byPriceBand || {})[band];
+        cal = entry && entry.n >= 8 ? entry.median : calibration.multiplierMedian;
+      }
+      if (cal < tier) { multiplier = cal; source = calSource; }
     }
   }
-  const mao = (arv - repairs) * multiplier;
-  const lao = mao * 0.70;
-  return { tier, multiplier, source, mao: Math.round(mao), lao: Math.round(lao) };
+  const mao = roundHalfEven((arv - repairs) * multiplier);
+  const lao = roundHalfEven(mao * 0.70);
+  return { tier, multiplier, source, mao, lao };
 }
 
 const SYSTEM_PROMPT = `You are the AI assistant inside Troy's Acquisition Command Center dashboard. Troy is a real estate wholesaler running the FreeWholesaling playbook. You help him with three jobs: answer deal questions, run offer math, and draft texts. You are direct, plain-spoken, and you never pad.
@@ -131,6 +154,18 @@ function loadCalibration() {
 function systemPromptWithCalibration() {
   const cal = loadCalibration();
   if (!cal) return SYSTEM_PROMPT;
+  // UNIFIED Nov 13, 2026 with the pricing engine (pricing_core.py
+  // INDY_CALIBRATION): when the calibration carries appliedCalibration,
+  // the model gets the ENGINE rule — the as-applied constants — not the
+  // per-band medians, which diverged from the CRM by up to ~$40K.
+  const applied = cal.appliedCalibration;
+  if (applied && typeof applied.band_120_220 === 'number' && typeof applied.overall === 'number') {
+    return SYSTEM_PROMPT + `
+
+CALIBRATED MULTIPLIER — ${cal.market || 'market'} (as applied by the pricing engine, validated against the CRM-written numbers):
+For ${cal.market || 'this market'} deals the calibrated multiplier is ${(applied.band_120_220 * 100).toFixed(2)}% when the ARV is $120,000–$220,000, and ${(applied.overall * 100).toFixed(1)}% at every other ARV.
+RULE: the effective multiplier is min(calibrated, tier) — calibration can only LOWER MAO, never raise it. When the calibrated number is lower than the tier, use it and say so (e.g. "71.4% calibrated, tier was 81.5%"). When it is higher, use the tier. If a deal is outside the calibrated market, say the market is not calibrated and use the tier. Round MAO to the nearest dollar, then LAO = MAO × 70% rounded to the nearest dollar.`;
+  }
   const bands = Object.entries(cal.byPriceBand || {})
     .map(([b, v]) => `${b}: ${(v.median * 100).toFixed(1)}% (n=${v.n})`).join(', ');
   return SYSTEM_PROMPT + `
