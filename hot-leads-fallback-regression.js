@@ -179,8 +179,8 @@ const fns = ['esc', 'fmtMoney', 'timeAgo', 'scoreClass', 'calcMAO', 'resolveLead
   check('4 no stale 7,642 in command-center.html', !ccHtml.includes('7,642'));
   check('4 no stale 7,642 in index.html', !indexHtml.includes('7,642'));
   check('4 no stale 7,642 in cc-data.js', !ccData.includes('7,642'));
-  check('4 buyer tile is 28,670 in command-center.html', ccHtml.includes('<div class="n">28,670</div>'));
-  check("4 buyer tile is 28,670 in index.html", indexHtml.includes("textContent = '28,670'"));
+  check('4 buyer tile is 30,057 in command-center.html', ccHtml.includes('<div class="n">30,057</div>'));
+  check("4 buyer tile is 30,057 in index.html", indexHtml.includes("textContent = '30,057'"));
 
   if (failures) { console.log(`${failures} FAILURE(S)`); process.exit(1); }
   console.log('ALL hot-leads fallback regression tests PASS');
