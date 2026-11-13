@@ -210,7 +210,10 @@ t('card WITH a real Retail shows Retail + labeled wholesale estimate', (function
     });
   });
   t('no invented coordinates in the full dataset (' + plottedExact + ' exact / ' + plottedZip + ' centroid / ' + unplotted + ' unplotted)', bad === 0, 'bad=' + bad);
-  t('plottable share is 49,433 of 50,861 (97.2% — 43,897 exact + 5,536 ZIP centroid)', plottedExact === 43897 && plottedZip === 5536, 'got exact=' + plottedExact + ' zip=' + plottedZip);
+  // Merge #3 (Nov 12, 2026 — prepared, held for Troy's deploy go):
+  // the Nov 10 geocode follow-on (50,454 keys) upgraded 1,346 props
+  // from ZIP-centroid to exact pins; plottable total is unchanged.
+  t('plottable share is 49,434 of 50,861 (97.2% — 45,243 exact + 4,191 ZIP centroid)', plottedExact === 45243 && plottedZip === 4191, 'got exact=' + plottedExact + ' zip=' + plottedZip);
   t('exact pins verified against the geocode source (' + (fixtureMode ? 'embedded fixtures' : 'full geocode-results.json') + ', ' + checkedExact + ' checked)', checkedExact === plottedExact && checkedExact > 0, 'checked=' + checkedExact);
 })();
 

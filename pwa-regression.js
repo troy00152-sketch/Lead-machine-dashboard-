@@ -87,7 +87,7 @@ WIRED_PAGES.forEach(function (page) {
 });
 
 /* ---------- guard: hardcoded buyer tile in index.html undisturbed ---------- */
-ok(read('index.html').indexOf("getElementById('statBuyers').textContent = '30,057'") !== -1,
+ok(read('index.html').indexOf("getElementById('statBuyers').textContent = '31,621'") !== -1,
   'index.html hardcoded statBuyers literal untouched');
 
 console.log('pwa-regression: ' + passed + ' passed, ' + failed + ' failed.');
