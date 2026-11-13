@@ -59,7 +59,12 @@ check('Calibrated above tier -> tier wins MAO', highCal.mao, 168705);
 // ---- 3b. Market gate: the Indianapolis calibration must NOT leak onto other markets ----
 // Fixture mirrors the live assets/mao-calibration.json (Indianapolis, 54 investors).
 console.log('Market gate:');
+// Nov 13, 2026: fixture updated to mirror the shipped file AFTER the
+// engine unification — it now carries appliedCalibration (the Nov 10
+// as-applied engine constants, pricing_core.py INDY_CALIBRATION), and
+// offer-math selects those over the per-band medians.
 const indyCal = { calibrated: true, market: 'Indianapolis', multiplierMedian: 0.713939393939394,
+  appliedCalibration: { band_120_220: 0.5696, overall: 0.714 },
   byPriceBand: { '$120k-$220k': { median: 0.5695588898820925, n: 18 }, '$220k-$300k': { median: 0.5630630630630631, n: 9 }, '$300k-$400k': { median: 0.8121865161220281, n: 10 }, '$400k+': { median: 0.44028103044496486, n: 3 }, 'under $120k': { median: 0.789, n: 3 } } };
 check('marketFor Indianapolis IN', OfferMath.marketFor('Indianapolis', 'IN'), 'Indianapolis');
 check('marketFor case-insensitive', OfferMath.marketFor('indianapolis', 'in'), 'Indianapolis');
@@ -80,8 +85,8 @@ check('marketFor Miami FL -> null', OfferMath.marketFor('Miami', 'FL'), null);
 // The proof case: 303 Elizabeth St, Greenville NC, ARV $150K / repairs $50K
 // was getting MAO $56,956 (57.0% calibrated) — must be $80,000 / $56,000 tier.
 const indyDeal = OfferMath.offerMath(150000, 50000, indyCal, 'Indianapolis');
-check('Indianapolis 150K/50K MAO (calibrated)', indyDeal.mao, 56956);
-check('Indianapolis 150K/50K LAO (calibrated)', indyDeal.lao, 39869);
+check('Indianapolis 150K/50K MAO (calibrated)', indyDeal.mao, 56960);
+check('Indianapolis 150K/50K LAO (calibrated)', indyDeal.lao, 39872);
 check('Indianapolis 150K/50K label', indyDeal.label, '57.0% calibrated');
 const greenvilleDeal = OfferMath.offerMath(150000, 50000, indyCal, 'Carolina');
 check('Greenville NC 150K/50K MAO (tier)', greenvilleDeal.mao, 80000);
@@ -92,7 +97,7 @@ check('Blank market -> tier LAO', OfferMath.offerMath(150000, 50000, indyCal, nu
 check('Cleveland OH -> tier MAO', OfferMath.offerMath(150000, 50000, indyCal, 'Cleveland').mao, 80000);
 check('Dayton OH -> tier MAO', OfferMath.offerMath(150000, 50000, indyCal, 'Dayton').mao, 80000);
 // End-to-end through marketFor, as live-call.js calls it:
-check('marketFor-driven Indy deal MAO', OfferMath.offerMath(150000, 50000, indyCal, OfferMath.marketFor('Indianapolis', 'IN')).mao, 56956);
+check('marketFor-driven Indy deal MAO', OfferMath.offerMath(150000, 50000, indyCal, OfferMath.marketFor('Indianapolis', 'IN')).mao, 56960);
 check('marketFor-driven Greenville deal MAO', OfferMath.offerMath(150000, 50000, indyCal, OfferMath.marketFor('Greenville', 'NC')).mao, 80000);
 
 // ---- 4. live-call.js pure functions ----
@@ -216,12 +221,16 @@ check('params deal city', r3.deal.city, 'Greenville');
 check('params deal state', r3.deal.state, 'NC');
 check('params deal ZIP', r3.deal.zip, '27528');
 check('params deal street', r3.deal.address, '303 Elizabeth St');
-// MAO figures unchanged by this build (real calibration file, market-gated).
+// MAO figures with the real calibration file, market-gated. Greenville
+// unchanged (tier market). Indy 3928 UNIFIED Nov 13, 2026 to the engine
+// constants (pricing_core 0.5696 band): $65,504 / $45,853 — supersedes the
+// Nov 6 dashboard-calibration figures ($65,499 / $45,849) this check
+// previously asserted; the engine/CRM is the source of truth.
 OfferMath.setCalibration(require('./assets/mao-calibration.json'));
 check('Greenville 303 MAO unchanged', OfferMath.offerMath(150000, 50000, undefined, OfferMath.marketFor('Greenville', 'NC')).mao, 80000);
 check('Greenville 303 LAO unchanged', OfferMath.offerMath(150000, 50000, undefined, OfferMath.marketFor('Greenville', 'NC')).lao, 56000);
-check('Indy 3928 MAO unchanged', OfferMath.offerMath(145000, 30000, undefined, OfferMath.marketFor('Indianapolis', 'IN')).mao, 65499);
-check('Indy 3928 LAO unchanged', OfferMath.offerMath(145000, 30000, undefined, OfferMath.marketFor('Indianapolis', 'IN')).lao, 45849);
+check('Indy 3928 MAO unified (engine)', OfferMath.offerMath(145000, 30000, undefined, OfferMath.marketFor('Indianapolis', 'IN')).mao, 65504);
+check('Indy 3928 LAO unified (engine)', OfferMath.offerMath(145000, 30000, undefined, OfferMath.marketFor('Indianapolis', 'IN')).lao, 45853);
 
 // ---- 8. Calibration load race: a card built before the fetch resolves must
 // end up calibrated, and a failed/hanging fetch must fall back to tier. ----
@@ -239,8 +248,8 @@ async function section8() {
   check('slow fetch: waited for the fetch (>=250ms)', waited >= 250, true);
   // The proof case: 3928 Millersville Dr, Indianapolis, ARV $145K / $30K repairs
   // auto-built before the fetch resolved showed $92,000 / $64,400 tier-only.
-  check('slow fetch: Indy 3928 MAO calibrated after wait', OfferMath.offerMath(145000, 30000, undefined, 'Indianapolis').mao, 65499);
-  check('slow fetch: Indy 3928 LAO calibrated after wait', OfferMath.offerMath(145000, 30000, undefined, 'Indianapolis').lao, 45849);
+  check('slow fetch: Indy 3928 MAO calibrated after wait', OfferMath.offerMath(145000, 30000, undefined, 'Indianapolis').mao, 65504);
+  check('slow fetch: Indy 3928 LAO calibrated after wait', OfferMath.offerMath(145000, 30000, undefined, 'Indianapolis').lao, 45853);
   check('slow fetch: Greenville 303 MAO stays tier', OfferMath.offerMath(150000, 50000, undefined, 'Carolina').mao, 80000);
   check('slow fetch: Greenville 303 LAO stays tier', OfferMath.offerMath(150000, 50000, undefined, 'Carolina').lao, 56000);
   // Failed fetch: rejects outright -> settles immediately, tier fallback.
@@ -489,11 +498,13 @@ check('blankDealFields text ids blank', ['address', 'city', 'state', 'zip', 'arv
 check('blankDealFields listed false', LiveCall.blankDealFields().listed, false);
 check('blankDealFields listSource other (not probate)', LiveCall.blankDealFields().listSource, 'other');
 
-// MAO figures unchanged by this build (real calibration file, market-gated).
+// MAO figures with the real calibration file, market-gated. Greenville
+// unchanged (tier market); Indy 3928 unified to the engine constants
+// Nov 13, 2026 ($65,504 / $45,853 — see the §7 note).
 check('DOM-level: Greenville 303 MAO unchanged', OfferMath.offerMath(150000, 50000, undefined, OfferMath.marketFor('Greenville', 'NC')).mao, 80000);
 check('DOM-level: Greenville 303 LAO unchanged', OfferMath.offerMath(150000, 50000, undefined, OfferMath.marketFor('Greenville', 'NC')).lao, 56000);
-check('DOM-level: Indy 3928 MAO unchanged', OfferMath.offerMath(145000, 30000, undefined, OfferMath.marketFor('Indianapolis', 'IN')).mao, 65499);
-check('DOM-level: Indy 3928 LAO unchanged', OfferMath.offerMath(145000, 30000, undefined, OfferMath.marketFor('Indianapolis', 'IN')).lao, 45849);
+check('DOM-level: Indy 3928 MAO unified (engine)', OfferMath.offerMath(145000, 30000, undefined, OfferMath.marketFor('Indianapolis', 'IN')).mao, 65504);
+check('DOM-level: Indy 3928 LAO unified (engine)', OfferMath.offerMath(145000, 30000, undefined, OfferMath.marketFor('Indianapolis', 'IN')).lao, 45853);
 
 const domIndyDraft = Object.assign({}, indyDraft, { caller: 'Irish', direction: 'inbound', durationMin: '12', talkPct: '80' });
 const domGreenvilleDraft = { address: '303 Elizabeth St', city: 'Greenville', state: 'NC', zip: '27528', arv: 150000, repairs: 50000, bedsBaths: '3 / 2', sqft: '1450', yearBuilt: '1987', ownerName: 'Chet Mentlewski', sellerPhone: '(252) 555-0100', listSource: 'code violation', caller: 'Irish', motivation: 'Behind on taxes', durationMin: '12', talkPct: '80', 'sc-opener': true, __notes: ['11:02 — Seller: "I need to think about it."'] };
