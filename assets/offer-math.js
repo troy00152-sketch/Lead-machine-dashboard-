@@ -66,9 +66,15 @@
     return null;
   }
 
-  // Calibration object shape: { calibrated: true, multiplierMedian, byPriceBand: { band: { median, n } } }
-  // Same rule as the server (netlify/functions/dashboard-ai.js offerMath) and
-  // index.html: a band median counts only with n >= 8, else the overall median.
+  // Calibration object shape: { calibrated: true, multiplierMedian, byPriceBand: { band: { median, n } },
+  // appliedCalibration: { band_120_220, overall } }
+  // Nov 13, 2026 UNIFICATION: when appliedCalibration is present (the shipped
+  // Indianapolis file carries it), the engine constants rule — band constant
+  // in $120k-$220k, overall constant elsewhere — exactly as
+  // pricing_core.py INDY_CALIBRATION. The band-median selection (n >= 8, else
+  // overall median) survives ONLY for calibration objects without
+  // appliedCalibration. Same rule in index.html's inline copy and the server
+  // (netlify/functions/dashboard-ai.js offerMath).
   var MAO_CAL = null;
 
   function setCalibration(cal) {
@@ -136,12 +142,43 @@
     if (!dealMarket || dealMarket !== calMarket) {
       return { multiplier: t.tier, label: t.label + ' tier · not calibrated for this market', source: 'tier', tierMultiplier: t.tier, calibratedMultiplier: null };
     }
+    // UNIFIED Nov 13, 2026 with the auto-pricing engine — the source of
+    // truth is playbook-system/auto-pricing/pricing_core.py
+    // (INDY_CALIBRATION, validated 214/216 against the Nov 10 CRM-written
+    // numbers). When the calibration object carries the as-applied engine
+    // constants (appliedCalibration: { band_120_220, overall }), THOSE are
+    // the calibration: the band constant inside $120k-$220k, the overall
+    // constant in every other band. The per-band medians below are NOT
+    // used then — they are the Nov 6 dashboard calibration and diverged
+    // from the CRM/engine by up to ~$40K (222 N State Ave: $147,707
+    // dashboard vs $187,302 CRM). Calibration objects without
+    // appliedCalibration (older fixtures) keep the legacy median
+    // selection, unchanged.
+    var applied = MAO_CAL.appliedCalibration;
+    if (applied && typeof applied.band_120_220 === 'number' && typeof applied.overall === 'number') {
+      var inBand = arv >= 120000 && arv < 220000;
+      var aCal = inBand ? applied.band_120_220 : applied.overall;
+      var aSrc = inBand ? 'calibrated $120k-$220k band (engine)' : 'calibrated overall (engine)';
+      if (aCal < t.tier) return { multiplier: aCal, label: (aCal * 100).toFixed(1) + '% calibrated', source: aSrc, tierMultiplier: t.tier, calibratedMultiplier: aCal };
+      return { multiplier: t.tier, label: t.label + ' tier', source: 'tier — calibrated ' + (aCal * 100).toFixed(1) + '% is higher', tierMultiplier: t.tier, calibratedMultiplier: aCal };
+    }
     var band = maoPriceBand(arv);
     var entry = (MAO_CAL.byPriceBand || {})[band];
     var cal = MAO_CAL.multiplierMedian, calSrc = 'calibrated overall median';
     if (entry && entry.n >= 8) { cal = entry.median; calSrc = 'calibrated ' + band + ' band (n=' + entry.n + ')'; }
     if (cal < t.tier) return { multiplier: cal, label: (cal * 100).toFixed(1) + '% calibrated', source: calSrc, tierMultiplier: t.tier, calibratedMultiplier: cal };
     return { multiplier: t.tier, label: t.label + ' tier', source: 'tier — calibrated ' + (cal * 100).toFixed(1) + '% is higher', tierMultiplier: t.tier, calibratedMultiplier: cal };
+  }
+
+  // Round-half-even, matching the pricing engine (pricing_core._round_money):
+  // the Nov 10 ground-truth LAOs prove half-even on exact-.5 cases
+  // (39,322.5 -> 39,322). Math.round (half-up) is NOT the engine's rule.
+  function roundHalfEven(x) {
+    var f = Math.floor(x);
+    var d = x - f;
+    if (d > 0.5) return f + 1;
+    if (d < 0.5) return f;
+    return (f % 2 === 0) ? f : f + 1;
   }
 
   function fmtMoney(n) {
@@ -157,12 +194,12 @@
     if (calibration !== undefined) setCalibration(calibration);
     var em = effectiveMaoMultiplier(arv, market);
     if (arv == null || em.multiplier == null) return { tier: null, multiplier: null, source: 'none', mao: null, lao: null };
-    var mao = Math.max(0, Math.round((arv - Math.max(0, Number(repairs) || 0)) * em.multiplier));
-    var lao = Math.round(mao * 0.70);
+    var mao = Math.max(0, roundHalfEven((arv - Math.max(0, Number(repairs) || 0)) * em.multiplier));
+    var lao = roundHalfEven(mao * 0.70);
     return { tier: em.tierMultiplier != null ? em.tierMultiplier : em.multiplier, multiplier: em.multiplier, source: em.source, label: em.label, mao: mao, lao: lao };
   }
 
-  var api = { maoTier: maoTier, maoPriceBand: maoPriceBand, marketFor: marketFor, effectiveMaoMultiplier: effectiveMaoMultiplier, fmtMoney: fmtMoney, offerMath: offerMath, setCalibration: setCalibration, loadMaoCalibration: loadMaoCalibration, whenCalibrationReady: whenCalibrationReady, isCalibrationSettled: isCalibrationSettled, getCalibration: function () { return MAO_CAL; } };
+  var api = { maoTier: maoTier, maoPriceBand: maoPriceBand, marketFor: marketFor, effectiveMaoMultiplier: effectiveMaoMultiplier, fmtMoney: fmtMoney, offerMath: offerMath, roundHalfEven: roundHalfEven, setCalibration: setCalibration, loadMaoCalibration: loadMaoCalibration, whenCalibrationReady: whenCalibrationReady, isCalibrationSettled: isCalibrationSettled, getCalibration: function () { return MAO_CAL; } };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.OfferMath = api;
 })(typeof window !== 'undefined' ? window : globalThis);

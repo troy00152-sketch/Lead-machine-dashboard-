@@ -6,6 +6,10 @@
   "retailCount": 37,
   "unknownCount": 1,
   "calibrated": true,
+  "appliedCalibration": {
+    "band_120_220": 0.5696,
+    "overall": 0.714
+  },
   "multiplierMedian": 0.713939393939394,
   "multiplierMean": 0.6452714069225718,
   "multiplierP25": 0.49262285456187893,
@@ -109,6 +113,7 @@
     }
   ],
   "notes": [
-    "Only 92 cash sales. The blueprint calls for the top ~100+ — a smaller sample makes the multiplier noisy."
+    "Only 92 cash sales. The blueprint calls for the top ~100+ — a smaller sample makes the multiplier noisy.",
+    "Nov 13, 2026: appliedCalibration added — the constants the Nov 10 ground-truth run actually applied (band_120_220 0.5696, overall 0.714; pricing_core.py INDY_CALIBRATION, validated 214/216 vs the CRM-written numbers). Dashboard + server offer math now select THESE, not the per-band medians above (the medians stay as the calibration run's raw record)."
   ]
 }
