@@ -31,8 +31,8 @@
 'use strict';
 
 const BRAND = 'Direct Property Buyers';
-const PHONE = '(203) 565-7810';
-const PHONE_TEL = '+12035657810';
+const PHONE = '(860) 452-6497';
+const PHONE_TEL = '+18604526497';
 const SITE = 'directpropertybuyersllc.com';
 const LOGO_URL =
   'https://raw.githubusercontent.com/troy00152-sketch/Lead-machine-dashboard-/main/assets/dpb-logo.png';
