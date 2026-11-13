@@ -22,6 +22,8 @@
 <script src="assets/buyer-portfolio.js"></script>
 <script src="assets/mail.js"></script>
 <script src="assets/esign.js"></script>
+<link rel="stylesheet" href="assets/buyervault.css" />
+<script src="assets/buyervault.js"></script>
 <title>Acquisition Command Center</title>
 <script>
 /* White-label branding hook — additive, fails safe to Troy's defaults.
@@ -511,6 +513,7 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
       <div class="nav-sec">Tools</div>
       <button class="nav-item" data-nav="buyers"><span class="ico">🤝</span> Buyer Match Ai</button>
       <button class="nav-item" data-nav="masterbuyers"><span class="ico">📋</span> Master Buyers</button>
+      <button class="nav-item" data-nav="buyervault"><span class="ico">🗄️</span> BuyerVault</button>
       <button class="nav-item" data-nav="blast"><span class="ico">📣</span> Buyer Blast</button>
       <button class="nav-item" data-nav="dealrooms"><span class="ico">🏘️</span> Deal Rooms</button>
       <a class="nav-item" href="/closing-tracker.html" style="text-decoration:none"><span class="ico">📝</span> Closing Tracker</a>
@@ -792,7 +795,7 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
 
       <!-- MASTER BUYERS TAB -->
       <div class="tab-page" id="page-masterbuyers">
-        <div class="sec-title">📋 Master Buyers <span class="badge blue" style="font-size:10px" id="mbCount">28,670 BUYERS</span></div>
+        <div class="sec-title">📋 Master Buyers <span class="badge blue" style="font-size:10px" id="mbCount">34,683 BUYERS</span></div>
         <div class="card" style="margin-bottom:14px">
           <p style="color:var(--muted);font-size:13px;margin-bottom:12px">Search all buyers by name, city, state, or ZIP. The full database — not just the 3+ property filter.</p>
           <div style="display:flex;gap:10px;margin-bottom:12px">
@@ -836,6 +839,83 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
           <div id="mbMapNote" style="display:none;font-size:12px;color:var(--muted);margin-bottom:12px"></div>
           <div id="mbResults" style="max-height:600px;overflow-y:auto"></div>
           <div id="mbPagination" style="margin-top:12px;text-align:center"></div>
+        </div>
+      </div>
+
+      <!-- BUYERVAULT TAB (§5A wiring: market search + jobs, entity linking, HL sync OFF, saved markets) -->
+      <div class="tab-page" id="page-buyervault">
+        <div class="sec-title">🗄️ BuyerVault <span class="badge blue" style="font-size:10px">OWNED BUYER INTELLIGENCE</span></div>
+        <div class="bv-fresh" id="bvFresh">Loading BuyerVault snapshot…</div>
+        <div class="bv-tabs">
+          <button class="bv-tab active" id="bvTab-market" onclick="BuyerVaultUI.switchTab('market')">🔍 Market Search</button>
+          <button class="bv-tab" id="bvTab-entities" onclick="BuyerVaultUI.switchTab('entities')">🏛️ Entity Linking</button>
+          <button class="bv-tab" id="bvTab-sync" onclick="BuyerVaultUI.switchTab('sync')">🔄 HighLevel Sync <span class="bv-pill amber">OFF</span></button>
+          <button class="bv-tab" id="bvTab-saved" onclick="BuyerVaultUI.switchTab('saved')">⭐ Saved Markets</button>
+        </div>
+
+        <div id="bvSec-market">
+          <div class="card" style="margin-bottom:14px">
+            <p style="color:var(--muted);font-size:13px;margin-bottom:12px">Search any city, county, or ZIP — results come instantly from your <strong>owned</strong> BuyerVault data (master buyers + the Florida / North Carolina deed harvest). Refreshing a market records a job: stored sources re-read immediately, and any fresh external pull stops at the credit gate for Troy's approval — the dashboard never spends credits on its own.</p>
+            <div class="bv-searchrow">
+              <input class="field" id="bvQuery" list="bvMarketList" placeholder="City, county, or ZIP — e.g. Indianapolis, Duval County, 46201…" onkeydown="if(event.key==='Enter'){event.preventDefault();BuyerVaultUI.search();}" />
+              <datalist id="bvMarketList"></datalist>
+              <button class="btn primary" onclick="BuyerVaultUI.search()">🔍 Search market</button>
+            </div>
+            <div id="bvMarketResult"><p class="bv-muted bv-small">Markets with stored data appear as you type. A market with no stored data says so plainly — nothing is ever filled in.</p></div>
+          </div>
+          <div id="bvJobPanel" style="margin-bottom:14px"></div>
+          <div class="card">
+            <div class="sec-title" style="font-size:15px">Recent refresh jobs</div>
+            <div id="bvJobHistory"><p class="bv-small bv-muted">No refresh jobs yet.</p></div>
+          </div>
+        </div>
+
+        <div id="bvSec-entities" style="display:none">
+          <div class="card" style="margin-bottom:14px">
+            <p style="color:var(--muted);font-size:13px;margin-bottom:12px">Every Florida buyer candidate linked to a Sunbiz entity: registered agent, officers, and derived links (shared agent / shared address). Links are associations from public filings — shown with their basis, never presented as proof of common ownership.</p>
+            <div class="bv-searchrow">
+              <input class="field" id="bvEntityQuery" placeholder="Entity or registered-agent name…" onkeydown="if(event.key==='Enter'){event.preventDefault();BuyerVaultUI.entitySearch();}" />
+              <button class="btn primary" onclick="BuyerVaultUI.entitySearch()">🏛️ Search entities</button>
+            </div>
+            <div id="bvEntityDetail" style="margin-bottom:14px"></div>
+            <div id="bvEntityResults"><p class="bv-muted bv-small">Search to browse the Sunbiz-linked entities, or click “🏛️ Sunbiz” on any Florida candidate in Market Search.</p></div>
+          </div>
+        </div>
+
+        <div id="bvSec-sync" style="display:none">
+          <div class="bv-banner off" id="bvSyncBanner"><strong>Sync is OFF.</strong></div>
+          <div class="card" style="margin-bottom:14px">
+            <div class="sec-title" style="font-size:15px">Sync settings</div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;margin-bottom:12px">
+              <div><label class="lbl">Minimum buyer score (spec recommends 60)</label><input class="field" id="bvSyncThreshold" type="number" min="0" max="100" step="1" /></div>
+              <div><label class="lbl">Sync enabled</label><label style="display:flex;gap:8px;align-items:center;font-size:13px;cursor:pointer;margin-top:8px"><input type="checkbox" id="bvSyncEnabled" style="width:16px;height:16px" /> Enable sync configuration</label></div>
+              <div><label class="lbl">Qualification gate</label>
+                <label style="display:flex;gap:8px;align-items:center;font-size:13px;cursor:pointer;margin-top:8px"><input type="checkbox" id="bvSyncRequirePhone" style="width:16px;height:16px" /> Require verified phone</label>
+                <label style="display:flex;gap:8px;align-items:center;font-size:13px;cursor:pointer;margin-top:4px"><input type="checkbox" id="bvSyncRequireBuyBox" style="width:16px;height:16px" /> Require evidence buy box</label>
+              </div>
+            </div>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+              <button class="btn" onclick="BuyerVaultUI.syncSaveConfig()">💾 Save settings</button>
+              <button class="btn primary" onclick="BuyerVaultUI.syncAttempt()">▶ Preview sync run (dry run)</button>
+              <span class="bv-small bv-muted" id="bvSyncUpdated"></span>
+            </div>
+            <div class="bv-offernote">Even with settings saved ON, a live sync cannot run from this build: it also needs the Netlify env flag <strong>BUYERVAULT_SYNC_LIVE=1</strong> and the wired HighLevel transport, which ships only after Troy decides the threshold. Likely wholesalers and lender-only entities are excluded by rule [HARD RULE D], and synced contacts only ever receive BuyerVault <strong>bv-*</strong> tags — never a seller tag [HARD RULE I].</div>
+          </div>
+          <div class="card" style="margin-bottom:14px">
+            <div class="sec-title" style="font-size:15px">Eligibility preview</div>
+            <div id="bvSyncPreview"><p class="bv-small bv-muted">Loading preview…</p></div>
+          </div>
+          <div class="card">
+            <div class="sec-title" style="font-size:15px">Sync log</div>
+            <div id="bvSyncLog"><p class="bv-small bv-muted">No sync activity recorded yet.</p></div>
+          </div>
+        </div>
+
+        <div id="bvSec-saved" style="display:none">
+          <div class="card">
+            <div class="sec-title" style="font-size:15px">⭐ Saved markets &amp; monitoring</div>
+            <div id="bvSavedTable"><p class="bv-small bv-muted">Loading saved markets…</p></div>
+          </div>
         </div>
       </div>
 
@@ -1427,6 +1507,7 @@ function showPage(name){
   if(name === 'dealrooms' && typeof drLoadDeals === 'function') drLoadDeals();
   if(name === 'comps'){ renderCompMap(); setTimeout(()=>{ if(compMap){ compMap.invalidateSize(); renderCompMap(); } }, 150); }
   if(name === 'masterbuyers' && typeof syncMbView === 'function'){ setTimeout(()=>{ if(mbMap){ mbMap.invalidateSize(); if(mbView === 'map') renderBuyerMap(); } }, 150); }
+  if(name === 'buyervault' && typeof BuyerVaultUI !== 'undefined'){ BuyerVaultUI.init(); }
   /* Leaving Comps wipes it (never on entering, never on a same-page
      re-click): a return shows a blank page, never the previous property. */
   if(wasComps && name !== 'comps') resetCompsPage();
@@ -2296,7 +2377,7 @@ function updateStats(){
   document.getElementById('statLeads').textContent = leads.length;
   document.getElementById('leadCountNav').textContent = leads.length;
   document.getElementById('leadCountBadge').textContent = leads.length;
-  document.getElementById('statBuyers').textContent = '31,621';
+  document.getElementById('statBuyers').textContent = '34,683';
   document.getElementById('statHedge').textContent = (typeof HEDGE_FUNDS!=='undefined'?HEDGE_FUNDS.length:0);
   document.getElementById('statTraced').textContent = leads.filter(l=>l.traced).length;
   // Buyer counts now come live from the Buyer Match Ai database.
@@ -6719,7 +6800,7 @@ const coachObs = new MutationObserver(function(){
 });
 
 /* ---- Command palette (Cmd/Ctrl + K) ---- */
-const CMDK_PAGES = [['dashboard','🏠 Dashboard'],['paste','📋 Paste Leads'],['myleads','📁 My Leads'],['listimport','📥 List Import'],['buyers','🤝 Buyer Match Ai'],['skiptrace','🔍 Skip Trace'],['listsearch','🏗️ List Builder'],['comps','📊 Comps'],['settings','⚙️ Settings']];
+const CMDK_PAGES = [['dashboard','🏠 Dashboard'],['paste','📋 Paste Leads'],['myleads','📁 My Leads'],['listimport','📥 List Import'],['buyers','🤝 Buyer Match Ai'],['buyervault','🗄️ BuyerVault'],['skiptrace','🔍 Skip Trace'],['listsearch','🏗️ List Builder'],['comps','📊 Comps'],['settings','⚙️ Settings']];
 let cmdkSel = 0;
 let cmdkItems = [];
 function cmdkOpen(){ const o = ccEl('cmdkOverlay'); if(!o) return; o.classList.add('open'); const i = ccEl('cmdkInput'); i.value = ''; cmdkRender(''); setTimeout(function(){ i.focus(); }, 50); }
