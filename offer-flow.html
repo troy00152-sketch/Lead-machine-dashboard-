@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Offer Flow — Command Center</title>
+<link rel="stylesheet" href="assets/offer-flow.css">
+</head>
+<body>
+  <div class="of-topbar">
+    <div class="logo">Direct Property Buyers<small>Command Center · Offer Flow</small></div>
+    <div class="spacer"></div>
+    <span class="badge">Local build — not deployed</span>
+  </div>
+  <div class="of-steps">
+    <span><b>1 · Lead lands priced</b> (auto-pricing writes ARV / MAO / LAO to the CRM)</span>
+    <span class="arr">→</span>
+    <span><b>2 · Listed-first check verifies</b></span>
+    <span class="arr">→</span>
+    <span><b>3 · Fire the offer</b> — LOI letter, postcard, or the bot's priced reply</span>
+  </div>
+  <div class="of-layout">
+    <div class="of-rail" id="rail"></div>
+    <div class="of-main">
+      <div class="of-head" id="head"></div>
+      <div class="banner amber" id="banner"></div>
+      <div class="of-grid">
+        <div class="card" id="priceCard"></div>
+        <div class="card" id="scoreCard"></div>
+      </div>
+      <div class="card" id="compsCard"></div>
+      <div class="card" id="actionsCard"></div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="loiModal">
+    <div class="modal">
+      <button class="x" onclick="closeLoiSheet()">✕</button>
+      <h3>✉️ Send LOI</h3>
+      <div style="color:var(--dim);font-size:13px">The letter of intent, exactly as it will print — test mode, nothing mails live.</div>
+      <div id="loiBody"></div>
+    </div>
+  </div>
+
+  <script src="assets/offer-flow-data.js"></script>
+  <script src="assets/offer-flow.js"></script>
+</body>
+</html>

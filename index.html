@@ -2511,6 +2511,22 @@ function effectiveMaoMultiplier(arv, market){
   const calMarket = String(MAO_CAL.market || 'Indianapolis').toLowerCase().trim();
   const dealMarket = market == null ? null : String(market).toLowerCase().trim();
   if(!dealMarket || dealMarket !== calMarket) return { multiplier: t.tier, label: t.label + ' tier · not calibrated for this market', source: 'tier', tierMultiplier: t.tier, calibratedMultiplier: null };
+  // UNIFIED Nov 13, 2026 with the auto-pricing engine (source of truth:
+  // playbook-system/auto-pricing/pricing_core.py INDY_CALIBRATION, validated
+  // 214/216 vs the Nov 10 CRM-written numbers) — mirrors assets/offer-math.js:
+  // when the calibration carries appliedCalibration { band_120_220, overall },
+  // those engine constants are the calibration (band constant in $120k-$220k,
+  // overall elsewhere), NOT the per-band medians (Nov 6 dashboard calibration;
+  // diverged from the CRM by up to ~$40K). Objects without appliedCalibration
+  // keep the legacy median selection below.
+  const applied = MAO_CAL.appliedCalibration;
+  if(applied && typeof applied.band_120_220 === 'number' && typeof applied.overall === 'number'){
+    const inBand = arv >= 120000 && arv < 220000;
+    const aCal = inBand ? applied.band_120_220 : applied.overall;
+    const aSrc = inBand ? 'calibrated $120k-$220k band (engine)' : 'calibrated overall (engine)';
+    if(aCal < t.tier) return { multiplier: aCal, label: (aCal * 100).toFixed(1) + '% calibrated', source: aSrc, tierMultiplier: t.tier, calibratedMultiplier: aCal };
+    return { multiplier: t.tier, label: t.label + ' tier', source: 'tier — calibrated ' + (aCal * 100).toFixed(1) + '% is higher', tierMultiplier: t.tier, calibratedMultiplier: aCal };
+  }
   const band = maoPriceBand(arv);
   const entry = (MAO_CAL.byPriceBand || {})[band];
   let cal = MAO_CAL.multiplierMedian, calSrc = 'calibrated overall median';
@@ -2522,6 +2538,15 @@ function fmtMoney(n){
   if(n == null || isNaN(n)) return '—';
   return '$' + Math.round(n).toLocaleString();
 }
+// Round-half-even, matching the pricing engine (pricing_core._round_money) —
+// used for MAO/LAO so dashboard numbers equal the CRM/engine exactly.
+function roundHalfEven(x){
+  const f = Math.floor(x);
+  const d = x - f;
+  if(d > 0.5) return f + 1;
+  if(d < 0.5) return f;
+  return (f % 2 === 0) ? f : f + 1;
+}
 function setLeadRepairs(id, val){
   const l = leads.find(x=>x.id===id); if(!l) return;
   l.repairs = Math.max(0, Number(val) || 0);
@@ -2530,8 +2555,8 @@ function setLeadRepairs(id, val){
   const { tier, label } = (function(){ const _em = effectiveMaoMultiplier(arv, leadMarket(l)); return { tier: _em.multiplier, label: _em.label }; })();
   const el = document.getElementById('anMaoLao');
   if(el && arv != null && tier){
-    const mao = Math.max(0, Math.round((arv - l.repairs) * tier));
-    const lao = Math.round(mao * 0.70);
+    const mao = Math.max(0, roundHalfEven((arv - l.repairs) * tier));
+    const lao = roundHalfEven(mao * 0.70);
     el.innerHTML = fmtMoney(mao) + ' / ' + fmtMoney(lao) + ' <span style="color:var(--muted)">(' + label + ', ' + fmtMoney(l.repairs) + ' repairs)</span>';
   }
 }
@@ -2550,8 +2575,8 @@ function analyzeDeal(id){
   const repairs = Math.max(0, Number(l.repairs) || 0);
   const _em = effectiveMaoMultiplier(arv, leadMarket(l));
   const tier = _em.multiplier, label = _em.label;
-  const mao = (arv != null && tier) ? Math.max(0, Math.round((arv - repairs) * tier)) : null;
-  const lao = mao != null ? Math.round(mao * 0.70) : null;
+  const mao = (arv != null && tier) ? Math.max(0, roundHalfEven((arv - repairs) * tier)) : null;
+  const lao = mao != null ? roundHalfEven(mao * 0.70) : null;
   const _ws = wholesaleScore(l);
 
   // Equity
@@ -2943,8 +2968,8 @@ function leadMaoLao(l){
   const _em = effectiveMaoMultiplier(arv, leadMarket(l));
   if(!_em || _em.multiplier == null) return { mao: null, lao: null };
   const repairs = Number(l.repairs) || 0;
-  const mao = Math.max(0, Math.round((arv - repairs) * _em.multiplier));
-  return { mao: mao, lao: Math.round(mao * 0.70) };
+  const mao = Math.max(0, roundHalfEven((arv - repairs) * _em.multiplier));
+  return { mao: mao, lao: roundHalfEven(mao * 0.70) };
 }
 function leadToPayload(l){
   const mobiles = leadMobilePhones(l);
