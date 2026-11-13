@@ -11,7 +11,7 @@
  *
  * Bump CACHE_NAME on any strategy change: activate deletes every old cache.
  */
-var CACHE_NAME = 'leadmachine-pwa-v1';
+var CACHE_NAME = 'leadmachine-pwa-v2';
 
 var PRECACHE_URLS = [
   '/manifest.webmanifest',
@@ -65,6 +65,24 @@ self.addEventListener('fetch', function (event) {
         return caches.match(request).then(function (cached) {
           return cached || caches.match('/index.html');
         });
+      })
+    );
+    return;
+  }
+
+  // Data assets whose content changes on data rebuilds (buyer merges):
+  // network-first so a deploy is never masked by a stale cached copy;
+  // the cache is only an offline fallback.
+  if (url.origin === self.location.origin && url.pathname === '/assets/master-buyers.js') {
+    event.respondWith(
+      fetch(request).then(function (response) {
+        if (response && response.ok) {
+          var copy = response.clone();
+          caches.open(CACHE_NAME).then(function (cache) { cache.put(request, copy); });
+        }
+        return response;
+      }).catch(function () {
+        return caches.match(request);
       })
     );
     return;
