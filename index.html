@@ -380,6 +380,10 @@ tr.clickable{cursor:pointer}
 .img-thumbs img{width:33.33%;height:62px;object-fit:cover;border-radius:8px;cursor:pointer;border:2px solid var(--line);display:block}
 .img-thumbs img.active{border-color:var(--accent)}
 .img-listing-link{display:inline-block;margin-top:10px;font-size:12.5px;font-weight:700;color:var(--accent);text-decoration:none}
+.img-view-actions{display:inline-flex;gap:8px;margin:10px 0 2px 10px;vertical-align:top}
+#compSubjectCard .img-view-actions{display:flex;margin:0 0 12px}
+.img-view-link{display:inline-block;padding:7px 12px;border-radius:8px;border:1px solid var(--accent);background:var(--accent);color:#fff;font-size:12.5px;font-weight:700;text-decoration:none}
+.img-view-link.secondary{background:transparent;color:var(--accent)}
 .img-zoom-hint{position:absolute;bottom:8px;right:10px;background:rgba(0,0,0,.65);color:#fff;font-size:11px;padding:4px 10px;border-radius:20px}
 /* Prominent sticky segmented view toggle — always visible in the lead modal */
 .img-toggle-bar{position:sticky;top:-20px;z-index:6;background:var(--bg2);padding:12px 0 8px;margin:0}
@@ -2400,6 +2404,47 @@ function leadGeoLoc(l){
   return (l.latitude != null && l.longitude != null && l.latitude !== '' && l.longitude !== '')
     ? (l.latitude + ',' + l.longitude) : leadGeoQuery(l);
 }
+/* ============ 3D VIEW / STREET VIEW deep links (Nov 13, Troy) ============
+ * Pre-targeted per property at render time: the URL is built from the
+ * record being displayed, so the moment a lead page or comp card opens the
+ * button already points at THAT house — zero typing, zero searching, one
+ * click straight into Google Earth 3D. Coords win when present; the full
+ * address is the fallback; with neither, no URL is built and callers hide
+ * the button (never a dead link, never a fake target). Plain outbound
+ * links only — $0, no API keys, no per-hit services. */
+function geoHasCoords(lat, lng){
+  return lat != null && lng != null && lat !== '' && lng !== ''
+    && isFinite(Number(lat)) && isFinite(Number(lng));
+}
+function earthViewUrl(addr, lat, lng){
+  if(geoHasCoords(lat, lng)){
+    return 'https://earth.google.com/web/@' + Number(lat) + ',' + Number(lng)
+      + ',80a,120d,35y,0h,60t,0r';
+  }
+  const a = (addr || '').trim();
+  if(!a) return '';
+  return 'https://earth.google.com/web/search/' + encodeURIComponent(a);
+}
+function streetViewLinkUrl(addr, lat, lng){
+  if(geoHasCoords(lat, lng)){
+    return 'https://www.google.com/maps?q=&layer=c&cbll=' + Number(lat) + ',' + Number(lng);
+  }
+  const a = (addr || '').trim();
+  if(!a) return '';
+  return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(a);
+}
+function leadFullAddress(l){
+  return [l.address, l.city, l.state, l.zip].filter(Boolean).join(', ');
+}
+function viewLinksHtml(addr, lat, lng){
+  const earth = earthViewUrl(addr, lat, lng);
+  if(!earth) return '';
+  const sv = streetViewLinkUrl(addr, lat, lng);
+  return '<span class="img-view-actions">'
+    + '<a class="img-view-link" href="' + earth + '" target="_blank" rel="noopener">🌐 3D View ↗</a>'
+    + (sv ? '<a class="img-view-link secondary" href="' + sv + '" target="_blank" rel="noopener">📍 Street View ↗</a>' : '')
+    + '</span>';
+}
 function streetViewUrl(l, size){
   return 'https://maps.googleapis.com/maps/api/streetview?size='+(size||'800x500')
     +'&location='+leadGeoLoc(l)+'&key='+GOOGLE_MAPS_KEY;
@@ -2457,7 +2502,8 @@ function renderImgFrame(l){
       +'<img src="'+tSat+'" class="'+(imgMode==='satellite'?'active':'')+'" onclick="setImgMode(\'satellite\')" title="Satellite view">'
       +'<img src="'+tMap+'" class="'+(imgMode==='map'?'active':'')+'" onclick="setImgMode(\'map\')" title="Map view">'
       +'</div>'
-      +'<a class="img-listing-link" href="'+zillowUrl(l)+'" target="_blank" rel="noopener">🏠 Listing photos — inside the house, when it was listed ↗</a>';
+      +'<a class="img-listing-link" href="'+zillowUrl(l)+'" target="_blank" rel="noopener">🏠 Listing photos — inside the house, when it was listed ↗</a>'
+      + viewLinksHtml(leadFullAddress(l), l.latitude, l.longitude);
   }
 }
 function openLightbox(url){
@@ -5905,6 +5951,7 @@ function renderCompSubjectCard(prop, typedAddr, matchedAddr, unavailable, linked
     + (showAddr ? '<div style="font-size:14px;font-weight:700;margin-bottom:10px">' + esc(showAddr) + '</div>' : '')
     + zipWarn
     + photoHtml
+    + viewLinksHtml(showAddr, prop.latitude, prop.longitude)
     + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;font-size:13px">'
     + '<div><span style="color:var(--muted)">Beds:</span> <strong>' + esc(compField(prop.beds)) + '</strong></div>'
     + '<div><span style="color:var(--muted)">Baths:</span> <strong>' + esc(compField(prop.baths)) + '</strong></div>'
