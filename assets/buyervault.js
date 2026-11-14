@@ -64,12 +64,36 @@
     var d = new Date(iso);
     return isNaN(d.getTime()) ? '—' : d.toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
   }
+  /* Phone display rule (fixed Nov 13, Troy's Tampa screenshot): a buyer's
+     phones each carry their OWN skip-trace DNC flag. The list must show a
+     CLEAN number first — prefer a clean mobile, then any clean number —
+     and may only stamp the buyer "DNC" when EVERY number on file is DNC.
+     Showing phones[0] verbatim flagged 45 of 92 Tampa buyers DNC even
+     though 72 of the 92 hold at least one clean number. */
+  function pickPrimaryPhone(phones) {
+    if (!phones || !phones.length) return null;
+    var clean = phones.filter(function (p) { return !p.dnc; });
+    if (clean.length) {
+      var mob = clean.filter(function (p) { return /^mob/i.test(p.type || ''); });
+      return mob[0] || clean[0];
+    }
+    return phones[0];
+  }
+  function allPhonesDnc(phones) {
+    return !!(phones && phones.length && phones.every(function (p) { return !!p.dnc; }));
+  }
+  function cleanPhoneCount(phones) {
+    if (!phones || !phones.length) return 0;
+    return phones.filter(function (p) { return !p.dnc; }).length;
+  }
 
   var api = {
     helpers: {
       dash: dash, count: count, money: money, shortMoney: shortMoney,
       esc: escLocal, runStatePill: runStatePill, jobProgress: jobProgress,
       savedStatusLabel: savedStatusLabel, stamp: stamp,
+      pickPrimaryPhone: pickPrimaryPhone, allPhonesDnc: allPhonesDnc,
+      cleanPhoneCount: cleanPhoneCount,
     },
   };
   if (typeof module !== 'undefined' && module.exports) { module.exports = api; }
@@ -78,7 +102,7 @@
 
   /* ---------------- browser UI ---------------- */
   var FN = '/.netlify/functions/';
-  var state = { market: null, meta: null, markets: [], saved: [], tab: 'market', syncCfg: null };
+  var state = { market: null, meta: null, markets: [], saved: [], tab: 'market', syncCfg: null, buyers: [] };
   function esc(s) { return (typeof global.esc === 'function') ? global.esc(s) : escLocal(s); }
   function el(id) { return document.getElementById(id); }
   async function get(fn, qs) {
@@ -186,13 +210,21 @@
         if (!b.buyers.length) {
           box.innerHTML = '<p class="bv-muted bv-small">No master buyers stored for this market — the candidate harvest below is the starting list.</p>';
         } else {
-          var rows = b.buyers.map(function (x) {
-            var ph = x.phones && x.phones.length ? esc(x.phones[0].phone) + (x.phones[0].dnc ? ' <span class="bv-pill red">DNC</span>' : '') : '—';
-            return '<tr><td><strong>' + esc(x.name) + '</strong><div class="bv-small bv-muted">' + esc([x.city, x.state, x.zip].filter(Boolean).join(', ')) + '</div></td>'
+          state.buyers = b.buyers;
+          var rows = b.buyers.map(function (x, i) {
+            var prim = pickPrimaryPhone(x.phones);
+            var ph = prim
+              ? esc(prim.phone)
+                + (allPhonesDnc(x.phones) ? ' <span class="bv-pill red">DNC</span>' : '')
+                + (x.phones.length > 1 ? ' <span class="bv-small bv-muted">+' + (x.phones.length - 1) + ' more</span>' : '')
+              : '—';
+            return '<tr><td><span class="bv-link" onclick="BuyerVaultUI.buyerDetail(' + i + ')"><strong>' + esc(x.name) + '</strong></span><div class="bv-small bv-muted">' + esc([x.city, x.state, x.zip].filter(Boolean).join(', ')) + '</div></td>'
               + '<td>' + ph + '</td><td>' + count(x.props) + '</td><td>' + shortMoney(x.portfolioValue) + '</td>'
               + '<td>' + money(x.avgPurchase) + '</td><td>' + esc([x.isFlipper ? 'Flipper' : '', x.isLandlord ? 'Landlord' : ''].filter(Boolean).join(' + ') || '—') + '</td></tr>';
           }).join('');
           box.innerHTML = '<div class="sec-title" style="font-size:15px">Buyers on file <span class="badge blue" style="font-size:10px">' + count(b.total) + '</span></div>'
+            + '<p class="bv-small bv-muted" style="margin-bottom:8px">Click a buyer for every number on file. The number shown is the first clean one (mobile first) — a buyer is stamped DNC only when every number on file is DNC.</p>'
+            + '<div id="bvBuyerDetail"></div>'
             + '<div class="bv-scroll"><table class="bv-table"><thead><tr><th>Buyer</th><th>Phone</th><th>Props</th><th>Portfolio</th><th>Avg purchase</th><th>Strategy</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
             + (b.total > b.buyers.length ? '<p class="bv-small bv-muted">Showing top ' + b.buyers.length + ' by portfolio size.</p>' : '');
         }
@@ -263,6 +295,43 @@
     try { var r = await get('buyervault-jobs', 'action=job&id=' + encodeURIComponent(id)); renderJob(r.job); } catch (e) { /* noop */ }
   }
   function pickMarket(label) { el('bvQuery').value = label; search(); }
+
+  /* ---- buyer detail (click a buyer in the market table) ---- */
+  function buyerDetailHtml(x) {
+    function kv(k, v) { return '<div><div class="k">' + k + '</div><div class="v">' + esc(dash(v)) + '</div></div>'; }
+    var phones = (x.phones || []).map(function (p) {
+      return '<tr><td>' + esc(p.phone) + '</td><td>' + esc(dash(p.type)) + '</td><td>'
+        + (p.dnc ? '<span class="bv-pill red">DNC</span>' : '<span class="bv-pill green">Clean</span>') + '</td></tr>';
+    }).join('');
+    var emails = (x.emails || []).filter(Boolean);
+    return '<div class="card"><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:4px">'
+      + '<div style="font-size:17px;font-weight:800">' + esc(x.name) + '</div>'
+      + (allPhonesDnc(x.phones) ? '<span class="bv-pill red">All numbers DNC</span>' : '')
+      + '<span style="flex:1"></span>'
+      + '<button class="btn small" onclick="BuyerVaultUI.entityFor(\'' + esc(x.name).replace(/'/g, "\\'") + '\')">🏛️ Sunbiz entity</button></div>'
+      + '<p class="bv-small bv-muted" style="margin-bottom:12px">' + esc([x.city, x.state, x.zip].filter(Boolean).join(', '))
+      + ' · ' + count(cleanPhoneCount(x.phones)) + ' clean of ' + count((x.phones || []).length) + ' numbers on file'
+      + ' · DNC flags are per-number, from the skip trace — a DNC number is never the one shown first when a clean number exists.</p>'
+      + '<div class="bv-kv">'
+      + kv('Properties', count(x.props)) + kv('Portfolio value', shortMoney(x.portfolioValue))
+      + kv('Avg purchase', money(x.avgPurchase)) + kv('Flips', count(x.flips))
+      + kv('Strategy', [x.isFlipper ? 'Flipper' : '', x.isLandlord ? 'Landlord' : ''].filter(Boolean).join(' + ') || null)
+      + kv('Entity', x.isEntity ? 'Yes (LLC/trust)' : 'Individual')
+      + kv('Mailing address', x.mailingAddress || null)
+      + kv('Email', emails.length ? emails.join(', ') : null)
+      + '</div>'
+      + (phones
+        ? '<div style="margin-top:12px"><div class="lbl">All numbers on file</div><table class="bv-table"><thead><tr><th>Phone</th><th>Type</th><th>Status</th></tr></thead><tbody>' + phones + '</tbody></table></div>'
+        : '<p class="bv-muted bv-small" style="margin-top:10px">No phone numbers on file for this buyer.</p>')
+      + '</div>';
+  }
+  function buyerDetail(i) {
+    var x = (state.buyers || [])[i];
+    var box = el('bvBuyerDetail');
+    if (!x || !box) return;
+    box.innerHTML = buyerDetailHtml(x);
+    box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
 
   /* ---- (4) saved markets ---- */
   async function save() {
@@ -476,6 +545,7 @@
     showJob: showJob, pickMarket: pickMarket, save: save,
     refreshSaved: refreshSaved, unsave: unsave, cadence: cadence,
     entitySearch: entitySearch, entityDetail: entityDetail, entityFor: entityFor,
+    buyerDetail: buyerDetail,
     syncSaveConfig: syncSaveConfig, syncAttempt: syncAttempt, loadSync: loadSync,
   };
 })(typeof window !== 'undefined' ? window : globalThis);
