@@ -143,6 +143,36 @@ t('helpers: run state pills label the credit gate honestly',
 t('helpers: jobProgress counts finished runs', H.jobProgress({ runs: [{ state: 'succeeded' }, { state: 'blocked_budget' }, { state: 'queued' }] }) === 67);
 t('helpers: saved status labels', H.savedStatusLabel({ cadence: 'paused' }) === 'Paused' && H.savedStatusLabel({ cadence: 'weekly' }) === 'Never refreshed');
 
+/* Phone display (Nov 13 fix, Troy's Tampa screenshot): DNC is per-NUMBER.
+   Real Tampa rows from buyers-data: the #1 buyer (84 props) lists a DNC
+   mobile first but holds a clean third number; Nnn Reit LP lists a DNC
+   landline first with two clean numbers behind it. */
+t('phone picker: skips a DNC first number for the clean one behind it',
+  H.pickPrimaryPhone([{ phone: '6463725096', type: 'Mobi', dnc: true },
+    { phone: '5166062503', type: 'Mobi', dnc: true },
+    { phone: '5166060625', type: 'Mobi', dnc: false }]).phone === '5166060625'
+  && H.pickPrimaryPhone([{ phone: '4074403620', type: 'Land', dnc: true },
+    { phone: '4073705290', type: 'Land', dnc: false }]).phone === '4073705290');
+t('phone picker: prefers a clean mobile over a clean landline',
+  H.pickPrimaryPhone([{ phone: '111', type: 'Land', dnc: false },
+    { phone: '222', type: 'Mobi', dnc: false }]).phone === '222');
+t('phone picker: all-DNC falls back to the first number; empty stays null',
+  H.pickPrimaryPhone([{ phone: '6129631331', type: 'Mobi', dnc: true }]).phone === '6129631331'
+  && H.pickPrimaryPhone([]) === null && H.pickPrimaryPhone(null) === null);
+t('phone flags: DNC stamp only when EVERY number is DNC',
+  H.allPhonesDnc([{ phone: '1', dnc: true }, { phone: '2', dnc: true }]) === true
+  && H.allPhonesDnc([{ phone: '1', dnc: true }, { phone: '2', dnc: false }]) === false
+  && H.allPhonesDnc([]) === false
+  && H.cleanPhoneCount([{ phone: '1', dnc: true }, { phone: '2', dnc: false }, { phone: '3', dnc: false }]) === 2);
+
+/* ---------- buyer rows are clickable + phone render source checks ---------- */
+const bvSrc = fs.readFileSync(path.join(__dirname, 'assets', 'buyervault.js'), 'utf8');
+t('buyervault.js: buyer names open the buyer detail panel',
+  bvSrc.includes('BuyerVaultUI.buyerDetail(') && bvSrc.includes('buyerDetail: buyerDetail')
+  && bvSrc.includes('id="bvBuyerDetail"'));
+t('buyervault.js: list renders the picked clean phone, never raw phones[0]',
+  bvSrc.includes('pickPrimaryPhone(x.phones)') && !bvSrc.includes('x.phones[0].phone'));
+
 /* ---------- index.html wiring ---------- */
 const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
 t('index.html: BuyerVault nav + page + assets wired',
