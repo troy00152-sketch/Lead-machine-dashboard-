@@ -7,6 +7,8 @@
  * Pins:
  *  - the URL builders live in index.html inline code, extract cleanly and run
  *  - coords win over address (Earth @lat,lng URL / Maps cbll URL)
+ *  - coords framing is TIGHT (55d distance, 50y tilt — Nov 13 late, Troy:
+ *    "see the house a little bit clearer"; 120d/35y landed ~140–200 m wide)
  *  - address fallback is fully URL-encoded (spaces, commas, # safe)
  *  - no address AND no coords -> NO url (button renders nothing: never a
  *    dead link, never a fake target)
@@ -51,8 +53,10 @@ const { earthViewUrl, streetViewLinkUrl, leadFullAddress, viewLinksHtml } = ctx;
 /* --- coords preference --- */
 check('earth: coords preferred over address',
   earthViewUrl && earthViewUrl('236 N Mount St, Indianapolis, IN 46222', 39.77, -86.17)
-    === 'https://earth.google.com/web/@39.77,-86.17,80a,120d,35y,0h,60t,0r',
+    === 'https://earth.google.com/web/@39.77,-86.17,80a,55d,50y,0h,60t,0r',
   earthViewUrl && earthViewUrl('236 N Mount St, Indianapolis, IN 46222', 39.77, -86.17));
+check('earth: coords framing is the tight one (55d distance, 50y tilt)',
+  earthViewUrl && earthViewUrl('', 39.77, -86.17).indexOf(',55d,50y,') > 0);
 check('street view: coords preferred (cbll)',
   streetViewLinkUrl && streetViewLinkUrl('236 N Mount St, Indianapolis, IN 46222', '39.77', '-86.17')
     === 'https://www.google.com/maps?q=&layer=c&cbll=39.77,-86.17');

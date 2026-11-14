@@ -2418,8 +2418,14 @@ function geoHasCoords(lat, lng){
 }
 function earthViewUrl(addr, lat, lng){
   if(geoHasCoords(lat, lng)){
+    /* Tight framing (Nov 13 late, Troy: "see the house a little bit
+       clearer"): 55d + 50y lands close and oblique — one house and its
+       lot fill the frame, roof and front both readable. The original
+       120d/35y landed ~140–200 m up, a whole-neighborhood view. The
+       address-search fallback below can't carry a zoom; Earth picks its
+       own framing there. */
     return 'https://earth.google.com/web/@' + Number(lat) + ',' + Number(lng)
-      + ',80a,120d,35y,0h,60t,0r';
+      + ',80a,55d,50y,0h,60t,0r';
   }
   const a = (addr || '').trim();
   if(!a) return '';
