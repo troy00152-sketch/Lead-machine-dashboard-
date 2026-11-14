@@ -185,6 +185,7 @@
 [data-theme="holographic"] .filter-drawer{background:rgba(5,12,28,.96);border-left:1px solid rgba(0,212,255,.25)}
 [data-theme="holographic"] .bulk-bar{background:rgba(0,212,255,.08);border:1px solid rgba(0,212,255,.4);box-shadow:0 0 18px rgba(0,212,255,.15)}
 [data-theme="holographic"] .lb-chip.active{background:rgba(0,212,255,.16)!important;border-color:#00d4ff!important;color:#00d4ff!important}
+[data-theme="holographic"] .lb-recipe.active{background:rgba(0,212,255,.16)!important;border-color:#00d4ff!important;color:#00d4ff!important}
 [data-theme="holographic"] .qs-card:hover{border-color:rgba(0,212,255,.5);box-shadow:0 0 22px rgba(0,212,255,.15)}
 /* ============ HOLOGRAPHIC MAP STYLING (Leaflet) ============ */
 [data-theme="holographic"] .leaflet-container{background:#040912;outline:1px solid rgba(0,212,255,.25);outline-offset:-1px}
@@ -336,6 +337,10 @@ label.lbl{display:block;color:var(--muted);font-size:12px;font-weight:600;margin
 .btn.ghost{background:none}
 .lb-chip{transition:all .15s ease}
 .lb-chip.active{background:rgba(255,122,26,.16)!important;border-color:var(--accent)!important;color:var(--accent)!important;font-weight:700}
+.lb-recipe{transition:all .15s ease}
+.lb-recipe.active{background:rgba(255,122,26,.16)!important;border-color:var(--accent)!important;color:var(--accent)!important;font-weight:700}
+.lb-recipe:disabled{opacity:.45;cursor:not-allowed}
+.lb-lane{font-size:10px;background:var(--chip);border-radius:99px;padding:2px 7px;margin-left:4px;font-weight:700}
 .btn:disabled{opacity:.5;cursor:not-allowed}
 select.field{appearance:none}
 /* Tables */
@@ -1059,6 +1064,19 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
         <div class="sec-title">🎯 List Builder <span class="badge green" style="font-size:10px">LIVE DATA</span></div>
         <div class="card" style="margin-bottom:14px">
           <p style="color:var(--muted);font-size:13px;margin-bottom:12px">Build a targeted seller list straight from a 150M+ property database. Pick a ZIP, stack your distress filters, preview the cost free — then pull the list.</p>
+          <div style="margin-bottom:14px">
+            <label class="lbl" style="margin-bottom:8px;display:block">⚡ One-Click Recipes <span style="color:var(--muted);font-weight:400">(the system's lanes — pick one, or stack 2+ and a property must match them ALL)</span></label>
+            <div style="display:flex;gap:8px;flex-wrap:wrap" id="lbRecipes">
+              <button class="btn small ghost lb-recipe" data-r="tiredLandlord" title="Absentee owner who has held the property 10+ years">🏠 Tired Landlord</button>
+              <button class="btn small ghost lb-recipe" data-r="taxLien" title="Tax-delinquent records in the search database">🧾 Tax Lien</button>
+              <button class="btn small ghost lb-recipe" data-r="preForeclosure" title="Pre-foreclosure records in the search database">⚖️ Pre-Foreclosure</button>
+              <button class="btn small ghost lb-recipe" data-r="codeViolation" disabled title="Runs on county code-violation lists pulled weekly — those sellers land in the CRM tagged, not in this search database">⚠️ Code Violation <span class="lb-lane">county lane</span></button>
+              <button class="btn small ghost lb-recipe" data-r="waterShutoff" disabled title="Runs on county water-shutoff lists pulled weekly (Indianapolis + Greenville) — those sellers land in the CRM tagged, not in this search database">💧 Water Shutoff <span class="lb-lane">county lane</span></button>
+              <button class="btn small ghost lb-recipe" data-r="probate" disabled title="Runs on county probate lists (Pitt County on file + weekly pull) — those sellers land in the CRM tagged, not in this search database">🕊️ Probate / Inherited <span class="lb-lane">county lane</span></button>
+            </div>
+            <div id="lbRecipePreview" style="margin-top:8px;font-size:12px;color:var(--muted)">No recipe armed — arm one above, or stack the manual filters below. Either way it runs as ONE search, same as a manual build.</div>
+            <p style="color:var(--muted);font-size:12px;margin:8px 0 0">⚠️ Code Violation · 💧 Water Shutoff · 🕊️ Probate run on county lists we pull every Monday — those sellers land in the CRM tagged and get worked from there. That data isn't in this search database, so there's no button here faking a count for them.</p>
+          </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px">
             <div>
               <label class="lbl">ZIP Code</label>
@@ -2055,6 +2073,163 @@ function addAllPropSearchToLeads(){
 
 /* ============ LIST BUILDER via data provider /v1/search (Nov 4 — DealMachine removed) ============ */
 let lbSearchCache = [];
+let lbLastRecipeCounts = null;
+
+/* ============ ONE-CLICK RECIPES (Nov 13, Troy delegated the call to Bread:
+   "you're the one that runs the system... if you think that's something we
+   need then do it") — modeled on DealBreeze's Lead Finder (county records +
+   stackable named filters), but grounded ONLY in fields this List Builder's
+   data path verifiably carries. The data path is POST /.netlify/functions/
+   data-search -> PropertyReach /v1/search; its projected record fields are:
+   address/city/state/zip, propertyId, propertyType, beds/baths/sqft,
+   yearBuilt, estimatedValue, lastSaleAmount, lastSaleDate, onMarket,
+   listingStatus, photoUrl. Distress flags (absenteeOwner / preforeclosure /
+   taxDelinquentYear) are stamped onto returned records by prRunListSearch
+   from the pull's own filters — the same convention the manual chips use.
+
+   RECIPE DEFINITIONS (verified fields only):
+   - tiredLandlord  = absentee owner (server filter absenteeOwner=true;
+     record test: absenteeOwner 'Yes'/true or ownerOccupied === false)
+     AND owned 10+ years, tested client-side on the projected lastSaleDate.
+     /v1/search has NO verified server-side years-owned / last-sale-before
+     filter in this codebase, so the date test runs here. A record with NO
+     lastSaleDate FAILS the recipe — 10+ years can't be verified, and an
+     unknown is never counted as a match. (No rental-indicator field exists
+     on this data path, so none is used.)
+   - taxLien        = server filter taxDelinquent=true; record test:
+     taxDelinquentYear / taxDelinquent truthy. (The verified field is tax
+     delinquency — the button keeps Troy's "Tax Lien" name for it.)
+   - preForeclosure = server filter preForeclosure=true; record test:
+     preforeclosure truthy.
+   - codeViolation / waterShutoff / probate = NOT available on this data
+     path. Those run on county lists we own (weekly Monday pull ->
+     CRM): code violations (Marion IN, Pitt/Cumberland/Mecklenburg/Wake
+     NC on file), water shutoffs (Indianapolis + Greenville), probate
+     (Pitt County on file). Their buttons render disabled with a
+     "county lane" tag — never a fake count, never a silent empty
+     result presented as real. lbMatchRecipe returns false for them and
+     lbRecipeServerFilter contributes nothing for them.
+
+   STACKING: 2+ armed recipes = AND — a property must match EVERY armed
+   recipe (Troy's standing 2+ stack rule). Server-expressible filters are
+   merged into the ONE search call (same 1 credit as a manual build — no
+   extra calls, no per-hit lookups); the Tired Landlord date test then
+   intersects the returned set client-side.
+   COUNT PREVIEW: this data path has no free count (data-search header:
+   "/v1/search has no free preview; each search is 1 credit"), so the
+   preview line shows the armed stack + the LAST pull's real match
+   counts. Nothing is ever counted before it exists. */
+function lbRecipeDefs(){
+  return {
+    tiredLandlord:  { name: 'Tired Landlord',    available: true,  chip: 'absentee' },
+    taxLien:        { name: 'Tax Lien',          available: true,  chip: 'taxDelinquent' },
+    preForeclosure: { name: 'Pre-Foreclosure',   available: true,  chip: 'preforeclosure' },
+    codeViolation:  { name: 'Code Violation',    available: false, chip: null },
+    waterShutoff:   { name: 'Water Shutoff',     available: false, chip: null },
+    probate:        { name: 'Probate / Inherited', available: false, chip: null }
+  };
+}
+function lbYearsOwned(lastSaleDate, nowMs){
+  if(!lastSaleDate) return null;
+  const t = Date.parse(lastSaleDate);
+  if(isNaN(t)) return null;
+  return (nowMs - t) / (365.25 * 24 * 60 * 60 * 1000);
+}
+function lbIsAbsentee(p){
+  return !!p && (p.absenteeOwner === 'Yes' || p.absenteeOwner === true || p.ownerOccupied === false);
+}
+function lbMatchTiredLandlord(p, nowMs){
+  if(!lbIsAbsentee(p)) return false;
+  const yrs = lbYearsOwned(p && p.lastSaleDate, nowMs);
+  return yrs !== null && yrs >= 10;
+}
+function lbMatchTaxLien(p){
+  return !!p && (!!p.taxDelinquentYear || p.taxDelinquent === true || p.taxDelinquent === 'Yes');
+}
+function lbMatchPreForeclosure(p){
+  return !!p && (p.preforeclosure === 'Yes' || p.preforeclosure === true);
+}
+function lbMatchRecipe(key, p, nowMs){
+  if(key === 'tiredLandlord') return lbMatchTiredLandlord(p, nowMs);
+  if(key === 'taxLien') return lbMatchTaxLien(p);
+  if(key === 'preForeclosure') return lbMatchPreForeclosure(p);
+  return false; // county-lane recipes never match on this data path
+}
+function lbMatchAllRecipes(p, keys, nowMs){
+  return (keys || []).every(k => lbMatchRecipe(k, p, nowMs));
+}
+function lbRecipeCounts(records, keys, nowMs){
+  const per = {};
+  (keys || []).forEach(k => { per[k] = 0; });
+  let stacked = 0;
+  (records || []).forEach(p => {
+    let all = (keys || []).length > 0;
+    (keys || []).forEach(k => { if(lbMatchRecipe(k, p, nowMs)) per[k]++; else all = false; });
+    if(all) stacked++;
+  });
+  return { total: (records || []).length, per: per, stacked: stacked };
+}
+function lbRecipeServerFilter(keys){
+  const f = {};
+  (keys || []).forEach(k => {
+    if(k === 'tiredLandlord') f.absenteeOwner = true;
+    else if(k === 'taxLien') f.taxDelinquent = true;
+    else if(k === 'preForeclosure') f.preForeclosure = true;
+    // county-lane recipes contribute nothing — no such filter exists here
+  });
+  return f;
+}
+function lbRecipeSignals(keys){
+  const defs = lbRecipeDefs();
+  return (keys || []).filter(k => defs[k] && defs[k].available).map(k => defs[k].name);
+}
+function lbArmedRecipes(){
+  const out = [];
+  document.querySelectorAll('.lb-recipe.active').forEach(b => { if(!b.disabled) out.push(b.dataset.r); });
+  return out;
+}
+function lbSyncRecipeChips(){
+  const defs = lbRecipeDefs();
+  lbArmedRecipes().forEach(k => {
+    const chipKey = defs[k] && defs[k].chip;
+    if(!chipKey) return;
+    document.querySelectorAll('.lb-chip').forEach(c => { if(c.dataset.f === chipKey) c.classList.add('active'); });
+  });
+}
+function lbUpdateRecipePreview(){
+  const el = document.getElementById('lbRecipePreview');
+  if(!el) return;
+  const keys = lbArmedRecipes();
+  if(!keys.length){
+    el.textContent = 'No recipe armed — arm one above, or stack the manual filters below. Either way it runs as ONE search, same as a manual build.';
+    return;
+  }
+  const names = lbRecipeSignals(keys).join(' + ');
+  let txt = '⚡ Recipe stack armed: ' + names + (keys.length > 1 ? ' — a property must match ALL of them (AND stack).' : '.');
+  txt += ' Runs as ONE search (1 credit — same as a manual build; this database has no free count, so match counts land with the results).';
+  if(lbLastRecipeCounts){
+    txt += ' Last pull: ' + lbLastRecipeCounts.stacked + ' of ' + lbLastRecipeCounts.total + ' returned matched the full stack.';
+  }
+  el.textContent = txt;
+}
+function lbRecipeStatusHtml(){
+  const keys = lbArmedRecipes();
+  if(!keys.length || !lbLastRecipeCounts) return '';
+  return ' · ⚡ Recipes: ' + lbRecipeSignals(keys).join(' + ') + ' — <b>' + lbLastRecipeCounts.stacked + '</b> matched the full stack';
+}
+/* Chip + recipe toggle wiring. NOTE (found Nov 13): the manual .lb-chip
+   filter chips never had a click handler anywhere — lbGetFilters() read
+   .active classes nothing could set, so manual stacks silently did
+   nothing. This one delegated handler wires BOTH the chips and the new
+   recipe buttons. */
+document.addEventListener('click', function(e){
+  const t = e.target;
+  if(!t || !t.closest) return;
+  const chip = t.closest('.lb-chip');
+  if(chip){ chip.classList.toggle('active'); return; }
+  const rb = t.closest('.lb-recipe');
+  if(rb && !rb.disabled){ rb.classList.toggle('active'); lbSyncRecipeChips(); lbUpdateRecipePreview(); }
+});
 
 function lbGetFilters(){
   const out = {};
@@ -2079,6 +2254,9 @@ function prSearchFilters(){
   const maxV = parseFloat(document.getElementById('lbMaxVal').value);
   if(!isNaN(minV) && minV > 0) filter.estimatedValueMin = minV;
   if(!isNaN(maxV) && maxV > 0) filter.estimatedValueMax = maxV;
+  // One-Click Recipes: armed recipes merge their server-side filters into
+  // this SAME single search call — no extra calls, no extra credits.
+  Object.assign(filter, lbRecipeServerFilter(lbArmedRecipes()));
   return filter;
 }
 async function prRunListSearch(){
@@ -2104,23 +2282,37 @@ async function prRunListSearch(){
     // Stamp the pull's filter signals onto each record so the Motivation Score
     // (and the lead created from it) knows why this property was pulled.
     const lf = lbGetFilters();
+    const armedRecipes = lbArmedRecipes();
     const pullSignals = [];
     if(lf.absentee) pullSignals.push('Absentee Owner');
     if(lf.preforeclosure) pullSignals.push('Pre-Foreclosure');
     if(lf.taxDelinquent) pullSignals.push('Tax Delinquent');
     if(lf.freeAndClear) pullSignals.push('Free & Clear');
     if(lf.highEquity) pullSignals.push('High Equity');
+    // Armed recipes stamp their own names too — a lead created from this
+    // pull says which recipe lane it came from.
+    lbRecipeSignals(armedRecipes).forEach(n => { if(!pullSignals.includes(n)) pullSignals.push(n); });
     lbSearchCache.forEach(p => {
       p._stackSignals = pullSignals.slice();
       if(lf.absentee){ p.absenteeOwner = 'Yes'; p.ownerOccupied = false; }
       if(lf.preforeclosure) p.preforeclosure = 'Yes';
       if(lf.taxDelinquent) p.taxDelinquentYear = 'Yes';
       if(lf.freeAndClear) p._freeAndClear = true;
+      if(armedRecipes.includes('tiredLandlord')){ p.absenteeOwner = 'Yes'; p.ownerOccupied = false; }
+      if(armedRecipes.includes('taxLien')) p.taxDelinquentYear = 'Yes';
+      if(armedRecipes.includes('preForeclosure')) p.preforeclosure = 'Yes';
     });
+    // Recipe stack (AND): counts are computed over the returned set first
+    // (that's the live count the preview line quotes), then the set is
+    // intersected so results show only full-stack matches. The Tired
+    // Landlord 10-year date test is the client-side half of this.
+    lbLastRecipeCounts = armedRecipes.length ? lbRecipeCounts(lbSearchCache, armedRecipes, Date.now()) : null;
+    if(armedRecipes.length) lbSearchCache = lbSearchCache.filter(p => lbMatchAllRecipes(p, armedRecipes, Date.now()));
     lbSearchCache.sort((a,b)=>wholesaleScore(b).score - wholesaleScore(a).score);
     const total = d.resultCount ?? lbSearchCache.length;
-    statusEl.innerHTML = '<span style="color:var(--green)">✓ Pulled <b>' + lbSearchCache.length + '</b> of <b>' + esc(String(total)) + '</b> matching properties</span> <button class="btn small primary" style="margin-left:10px" onclick="addAllListResultsToLeads()">➕ Add All to My Leads</button>';
+    statusEl.innerHTML = '<span style="color:var(--green)">✓ Pulled <b>' + lbSearchCache.length + '</b> of <b>' + esc(String(total)) + '</b> matching properties</span>' + lbRecipeStatusHtml() + ' <button class="btn small primary" style="margin-left:10px" onclick="addAllListResultsToLeads()">➕ Add All to My Leads</button>';
     renderListBuilderResults();
+    lbUpdateRecipePreview();
     recentSearches.unshift({q:'List Builder: ' + zip, at:new Date().toISOString()});
     recentSearches = recentSearches.slice(0,8); saveState(); renderRecentSearches();
   }catch(e){
