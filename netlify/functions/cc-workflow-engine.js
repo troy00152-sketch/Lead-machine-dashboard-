@@ -164,6 +164,59 @@ function lowerTags(tags) {
   return (Array.isArray(tags) ? tags : []).map((t) => String(t).trim().toLowerCase());
 }
 
+// ---- pricing / identity stamping helpers ----
+// A pricing value counts only when it is a finite number > 0 (numeric
+// strings are coerced); 0, negatives, 'abc', null, objects etc. are
+// treated as absent.
+function normalizePricingValue(v) {
+  if (v == null || v === '' || typeof v === 'boolean' || typeof v === 'object') return null;
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+function normalizePricingFields(src) {
+  const out = {};
+  if (!src || typeof src !== 'object') return out;
+  for (const k of ['arv', 'mao', 'lao']) {
+    const n = normalizePricingValue(src[k]);
+    if (n != null) out[k] = n;
+  }
+  return out;
+}
+// Pricing may arrive as contact.pricing {arv, mao, lao} OR as top-level
+// arv/mao/lao fields (the latter is also how older enrollment records
+// may carry it). The nested object wins field-by-field.
+function extractPricing(obj) {
+  const o = obj || {};
+  const out = normalizePricingFields(o);
+  const nested = normalizePricingFields(o.pricing);
+  return Object.assign(out, nested);
+}
+function unionTags(existingTags, newTags) {
+  const out = [];
+  const seen = new Set();
+  for (const t of [...(Array.isArray(existingTags) ? existingTags : []), ...(Array.isArray(newTags) ? newTags : [])]) {
+    const tag = String(t);
+    const k = tag.trim().toLowerCase();
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    out.push(tag);
+  }
+  return out;
+}
+function ensureTag(tags, tag) {
+  if (!lowerTags(tags).includes(tag.toLowerCase())) tags.push(tag);
+  return tags;
+}
+// A record is sealed when it carries any seal marker: the dnd flag, a
+// sealedAt / sealReason stamp, or the 'dnc' tag.
+function isSealedRecord(rec) {
+  if (!rec) return false;
+  return rec.dnd === true || rec.sealedAt != null || rec.sealReason != null || lowerTags(rec.tags).includes('dnc');
+}
+function listingVerifiedOf(c, lt) {
+  return c.listingVerified === true || lt.includes('listing-verified') || lt.includes('priced-verified');
+}
+
 // enroll(contact, event?) -> {ok:true, enrollment} | {ok:false, reason}
 // contact: {phone, name, firstName?, address1, city, market?, tags: []}
 async function enroll(contact, event) {
@@ -196,6 +249,57 @@ async function enroll(contact, event) {
     return { ok: false, reason: 'missing trigger tag "' + workflow.tag + '"' };
   }
 
+  // Pricing + identity stamping inputs (see helpers above).
+  const newPricing = extractPricing(c);
+  const listingVerified = listingVerifiedOf(c, lt);
+  const dndInput = c.dnd === true || lt.includes('dnc');
+
+  const s = enrollStore(event);
+  // Load any existing record BEFORE writing: a re-enrollment must
+  // never resurrect a sealed contact, and a live (non-terminal)
+  // enrollment is updated in place rather than replaced.
+  const existing = await loadEnrollment(s, key);
+  let terminalExisting = null;
+  let terminalSealed = false;
+
+  if (existing) {
+    const existingStage = String(existing.stage || '');
+    const isTerminal = existingStage.startsWith('ended-') || existingStage === 'done';
+    const sealed = isSealedRecord(existing);
+
+    if (!isTerminal) {
+      // Update in place: union tags, merge pricing (new fields win,
+      // absent fields keep existing), keep stage/path/enrolledAt and
+      // every other existing field (sentAt, messageId, seal stamps…).
+      const merged = { ...existing };
+      merged.tags = unionTags(existing.tags, tags);
+      const mergedPricing = { ...extractPricing(existing), ...newPricing };
+      if (Object.keys(mergedPricing).length) merged.pricing = mergedPricing;
+      else delete merged.pricing;
+      if (listingVerified || existing.listingVerified === true) merged.listingVerified = true;
+      if (c.phoneType != null && c.phoneType !== '') merged.phoneType = c.phoneType;
+      if (dndInput) merged.dnd = true;
+      if (sealed) {
+        // Seal persistence: dnd + seal stamps + the 'dnc' tag all
+        // survive. tick() checks the 'dnc' tag first and ends such a
+        // record 'ended-dnc' before any send.
+        merged.dnd = true;
+        if (existing.sealedAt != null) merged.sealedAt = existing.sealedAt;
+        if (existing.sealReason != null) merged.sealReason = existing.sealReason;
+        ensureTag(merged.tags, 'dnc');
+      }
+      merged.updatedAt = Date.now();
+      await saveEnrollment(s, merged);
+      return { ok: true, enrollment: merged, merged: true };
+    }
+
+    // Terminal existing record: fall through to a fresh enrollment,
+    // EXCEPT the seal preservation and (when the new contact carries
+    // no pricing at all) pricing preservation applied below.
+    terminalExisting = existing;
+    terminalSealed = sealed;
+  }
+
   const path = PATHS[Math.min(PATHS.length - 1, Math.floor(randomImpl() * PATHS.length))];
   const rec = {
     key,
@@ -214,7 +318,22 @@ async function enroll(contact, event) {
     lastError: null,
     lastAttemptAt: null,
   };
-  const s = enrollStore(event);
+  if (Object.keys(newPricing).length) rec.pricing = newPricing;
+  if (listingVerified) rec.listingVerified = true;
+  if (c.phoneType != null && c.phoneType !== '') rec.phoneType = c.phoneType;
+  if (dndInput) rec.dnd = true;
+  if (terminalExisting) {
+    if (!Object.keys(newPricing).length) {
+      const keptPricing = extractPricing(terminalExisting);
+      if (Object.keys(keptPricing).length) rec.pricing = keptPricing;
+    }
+    if (terminalSealed) {
+      rec.dnd = true;
+      if (terminalExisting.sealedAt != null) rec.sealedAt = terminalExisting.sealedAt;
+      if (terminalExisting.sealReason != null) rec.sealReason = terminalExisting.sealReason;
+      ensureTag(rec.tags, 'dnc');
+    }
+  }
   await saveEnrollment(s, rec);
   return { ok: true, enrollment: rec };
 }
@@ -227,6 +346,8 @@ async function appendOutbound(cs, key, phoneE164, market, msg) {
   if (!Array.isArray(thread.messages)) thread.messages = [];
   thread.phone = phoneE164;
   if (market && !thread.market) thread.market = market;
+  // The Conversations screen shows "Texting from" this number.
+  if (msg && msg.from) thread.ourNumber = msg.from;
   thread.messages.push(msg);
   if (thread.messages.length > MAX_MESSAGES_PER_THREAD) {
     thread.messages = thread.messages.slice(-MAX_MESSAGES_PER_THREAD);
@@ -383,6 +504,29 @@ async function tick(now, event) {
   return { at: ts, dateET: etDateString(ts), results };
 }
 
+// ---- stampPricing (the auto-pricing writer's write path) ----
+// stampPricing(phoneOrKey, pricing, event?, opts?) -> {ok:true,
+// enrollment} | {ok:false, reason}. Merges normalized pricing fields
+// onto an existing enrollment without wiping anything else;
+// opts.listingVerified stamps the listing-verified flag.
+async function stampPricing(phoneOrKey, pricing, event, opts) {
+  let key;
+  try {
+    key = lib.phoneKey(phoneOrKey);
+  } catch (e) {
+    return { ok: false, reason: 'invalid phone: ' + String(phoneOrKey || '') };
+  }
+  const s = enrollStore(event);
+  const rec = await loadEnrollment(s, key);
+  if (!rec) return { ok: false, reason: 'not enrolled' };
+  const mergedPricing = { ...extractPricing(rec), ...normalizePricingFields(pricing) };
+  if (Object.keys(mergedPricing).length) rec.pricing = mergedPricing;
+  if (opts && opts.listingVerified) rec.listingVerified = true;
+  rec.updatedAt = Date.now();
+  await saveEnrollment(s, rec);
+  return { ok: true, enrollment: rec };
+}
+
 // ---- counts (for cc-enroll-api GET) ----
 async function counts(event) {
   const es = enrollStore(event);
@@ -400,7 +544,7 @@ async function counts(event) {
   return { byMarket, totals, total };
 }
 
-module.exports = { enroll, tick, counts };
+module.exports = { enroll, tick, counts, stampPricing };
 
 // Test hooks (not part of the deployed surface).
 module.exports._test = {

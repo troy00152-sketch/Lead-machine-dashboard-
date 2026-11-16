@@ -32,6 +32,20 @@ try {
 
 const lib = require('./telnyx-lib');
 
+// cc-watchdog.js (built in parallel) owns the notification flags the
+// Conversations topbar badge reads. Required lazily so this module
+// still loads before that file lands; tests inject a fake via
+// _test.setWatchdog.
+let watchdogOverride = null;
+function watchdog() {
+  if (watchdogOverride) return watchdogOverride;
+  try {
+    return require('./cc-watchdog');
+  } catch (e) {
+    return null;
+  }
+}
+
 const STORE_NAME = 'cc-conversations';
 const INDEX_KEY = 'index';
 const COOKIE_NAME = 'lm_auth';
@@ -49,6 +63,8 @@ function json(status, obj) {
 const ok = (obj) => json(200, obj);
 const bad = (msg) => json(400, { error: msg });
 const unauth = () => json(401, { error: 'Not signed in — open the dashboard and sign in first.' });
+const forbidden = () => json(403, { error: 'Calling access only — conversations are not part of the calling login.' });
+const ccAuth = require('./cc-auth');
 function serverError(msg) {
   return json(503, { error: 'Conversations storage is not ready yet', detail: msg });
 }
@@ -144,7 +160,7 @@ function cleanStr(v, max) {
 exports.handler = async (event) => {
   try {
     if (event.httpMethod === 'OPTIONS') return json(200, {});
-    if (!isAdmin(event)) return unauth();
+    if (!isAdmin(event)) return ccAuth.isIrish(event) ? forbidden() : unauth();
 
     const params = event.queryStringParameters || {};
     let body = {};
@@ -179,6 +195,21 @@ exports.handler = async (event) => {
         thread.unread = 0;
         thread.updatedAt = Date.now();
         await saveThread(s, thread);
+      }
+      // Backfill ourNumber for older records: the number WE texted
+      // from is the last inbound message's `to` (they wrote to us on
+      // it), else the last outbound message's `from`.
+      if (!thread.ourNumber) {
+        let found = null;
+        for (let i = thread.messages.length - 1; i >= 0 && !found; i--) {
+          const m = thread.messages[i];
+          if (m.dir === 'in' && m.to) found = m.to;
+        }
+        for (let i = thread.messages.length - 1; i >= 0 && !found; i--) {
+          const m = thread.messages[i];
+          if (m.dir === 'out' && m.from) found = m.from;
+        }
+        thread.ourNumber = found || null;
       }
       return ok({ thread, markedRead: wasUnread });
     }
@@ -223,6 +254,7 @@ exports.handler = async (event) => {
         const sent = await lib.sendSms({ to: toE164, body: text, market: market || undefined });
         msg.id = sent.id || msg.id;
         msg.from = sent.from;
+        if (sent.from) thread.ourNumber = sent.from;
         await saveThread(s, thread);
         return ok({ ok: true, message: msg, segments: sent.segments });
       } catch (e) {
@@ -257,6 +289,29 @@ exports.handler = async (event) => {
       return ok({ date: today, perMarket, totals });
     }
 
+    if (action === 'notifications') {
+      const wd = watchdog();
+      if (!wd || typeof wd.listFlags !== 'function') {
+        return serverError('cc-watchdog is not available yet.');
+      }
+      const result = await wd.listFlags(event);
+      const flags = result && Array.isArray(result.flags) ? result.flags : [];
+      const openCount =
+        result && typeof result.openCount === 'number' ? result.openCount : flags.length;
+      return ok({ flags, openCount });
+    }
+
+    if (action === 'notification-dismiss') {
+      const id = body.id || params.id;
+      if (!id) return bad('Missing flag id.');
+      const wd = watchdog();
+      if (!wd || typeof wd.dismissFlag !== 'function') {
+        return serverError('cc-watchdog is not available yet.');
+      }
+      await wd.dismissFlag(id, event);
+      return ok({ ok: true, id });
+    }
+
     return bad('Unknown action.');
   } catch (e) {
     return serverError(String((e && e.message) || e));
@@ -268,5 +323,8 @@ exports._test = {
   etDateString,
   setStoreFactory(fn) {
     storeFactory = fn;
+  },
+  setWatchdog(wd) {
+    watchdogOverride = wd || null;
   },
 };

@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="dark">
+<title>Dialer — Direct Property Buyers</title>
+<style>
+  :root{
+    --bg:#0d1117; --bg2:#131a24; --panel:#161e2b; --panel2:#1c2536;
+    --line:#26314a; --text:#e8edf5; --muted:#8b96ad; --muted2:#5d6a84;
+    --accent:#ff6b1a; --accent2:#ff8c42; --green:#2ecc71; --red:#e74c3c;
+    --blue:#3498db; --chip:#223052;
+    --radius:10px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,-apple-system,sans-serif;font-size:14px;line-height:1.5}
+  a{color:var(--accent2)}
+  .wrap{max-width:1440px;margin:0 auto;padding:20px 16px 40px}
+  .topbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+  .topbar h1{font-size:22px}
+  .topbar h1 span{color:var(--accent)}
+  .topbar small{color:var(--muted);display:block;font-size:13px}
+  .back{margin-left:auto;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:24px;padding:9px 16px;font-size:13px;font-weight:600;text-decoration:none;white-space:nowrap}
+  .back:hover{border-color:var(--accent);color:var(--accent)}
+  .btn{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px 16px;font-size:14px;font-weight:600;cursor:pointer}
+  .btn:hover{border-color:var(--accent)}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .btn.primary:hover{background:var(--accent2)}
+  .btn.danger{border-color:var(--red);color:#ff8a7a}
+  .btn.danger:hover{background:rgba(231,76,60,.12)}
+  .btn:disabled{background:var(--panel2);color:var(--muted2);border-color:var(--line);cursor:default}
+  .btn.small{padding:6px 10px;font-size:13px}
+  .field{width:100%;background:var(--bg2);border:1px solid var(--line);border-radius:8px;color:var(--text);padding:9px 10px;font-size:14px;font-family:inherit}
+  .field:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(255,107,26,.15)}
+  .error{background:rgba(231,76,60,.12);border:1px solid var(--red);color:#ff8a7a;border-radius:8px;padding:12px;font-size:14px;margin-bottom:16px}
+  .empty{text-align:center;color:var(--muted);padding:32px 16px}
+  .empty .big{font-size:32px;margin-bottom:8px}
+  .note{color:var(--muted);font-size:13px}
+  .hidden{display:none}
+  #toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px 18px;font-size:14px;display:none;z-index:60;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+  .pill{display:inline-block;font-size:11px;font-weight:700;border-radius:99px;padding:2px 10px;background:var(--chip);color:var(--text)}
+  .pill.green{background:rgba(46,204,113,.18);color:var(--green)}
+  .pill.red{background:rgba(231,76,60,.18);color:#ff8a7a}
+  .pill.blue{background:rgba(52,152,219,.18);color:var(--blue)}
+  .pill.orange{background:rgba(255,107,26,.18);color:var(--accent2)}
+  /* ---- stat cards ---- */
+  .statcards{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin-bottom:16px}
+  .statcard{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:12px 14px}
+  .statcard .n{font-size:22px;font-weight:700;line-height:1.1}
+  .statcard .k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+  .statcard .n.green{color:var(--green)} .statcard .n.red{color:var(--red)} .statcard .n.blue{color:var(--blue)} .statcard .n.orange{color:var(--accent2)}
+  /* ---- layout ---- */
+  .grid{display:grid;grid-template-columns:340px minmax(0,1fr) 340px;gap:16px;align-items:start}
+  @media (max-width:1150px){ .grid{grid-template-columns:300px minmax(0,1fr)} .col-right{grid-column:1 / -1} }
+  @media (max-width:760px){ .grid{grid-template-columns:1fr} }
+  .pane{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;margin-bottom:16px}
+  .pane-head{padding:12px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .pane-head h2{font-size:15px}
+  .pane-body{padding:14px}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .row + .row{margin-top:10px}
+  label.lbl{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:4px}
+  select.field{appearance:none}
+  textarea.field{resize:vertical}
+  /* ---- line slots ---- */
+  .slots{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+  @media (max-width:760px){ .slots{grid-template-columns:1fr} }
+  .slot{background:var(--bg2);border:1px solid var(--line);border-radius:var(--radius);padding:14px;min-height:110px}
+  .slot.live{border-color:var(--green);box-shadow:0 0 0 3px rgba(46,204,113,.12)}
+  .slot.ringing{border-color:var(--blue)}
+  .slot .s-k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+  .slot .s-phone{font-size:17px;font-weight:700;margin-top:4px}
+  .slot .s-state{margin-top:6px}
+  /* ---- connected call ---- */
+  .seller-name{font-size:20px;font-weight:700}
+  .facts{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0}
+  .fact .k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+  .fact .v{font-weight:600;word-break:break-word}
+  .script{background:var(--bg2);border:1px solid var(--line);border-radius:8px;padding:12px;font-size:13.5px;max-height:300px;overflow-y:auto}
+  .script h3{font-size:13px;color:var(--accent2);margin:10px 0 4px}
+  .script h3:first-child{margin-top:0}
+  .script p{margin-bottom:6px}
+  .script ul{margin:0 0 6px 18px}
+  .dispos{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
+  @media (max-width:760px){ .dispos{grid-template-columns:repeat(2,1fr)} }
+  .dispos .btn.hot{background:var(--accent);border-color:var(--accent);color:#fff}
+  .dispos .btn.appt{background:rgba(46,204,113,.15);border-color:var(--green);color:var(--green)}
+  .dispos .btn.dnc{border-color:var(--red);color:#ff8a7a}
+  /* ---- queue + recordings ---- */
+  .q-list{max-height:420px;overflow-y:auto}
+  .q-item{padding:9px 14px;border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:baseline}
+  .q-item .q-name{font-weight:600;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .q-item .q-sub{color:var(--muted);font-size:12px}
+  .rec-item{padding:9px 14px;border-bottom:1px solid var(--line)}
+  .rec-item .r-top{display:flex;gap:8px;align-items:baseline}
+  .rec-item .r-name{font-weight:600;flex:1}
+  .rec-item audio{width:100%;margin-top:6px;height:32px}
+  .status-dot{display:inline-block;width:9px;height:9px;border-radius:99px;background:var(--muted2);vertical-align:middle}
+  .status-dot.on{background:var(--green)}
+  .status-dot.warn{background:var(--accent2)}
+</style>
+<!-- PWA (v1): manifest, theme, iOS install support, service worker -->
+<link rel="manifest" href="/manifest.webmanifest" />
+<meta name="theme-color" content="#050a14" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Command Center" />
+<link rel="apple-touch-icon" href="/assets/icons/icon-192.png" />
+<script src="/assets/pwa.js" defer></script>
+<!-- Telnyx WebRTC client SDK (browser voice leg). Loaded defensively:
+     if the CDN is unreachable the page still works and "Connect audio"
+     explains itself — it never fakes a connection. -->
+<script src="https://unpkg.com/@telnyx/webrtc@2/dist/telnyx-rtc.min.js" defer></script>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <div>
+      <h1>📞 <span>Dialer</span></h1>
+      <small>Triple-line seller dialer — our own numbers (Telnyx Voice), answering-machine detection on</small>
+    </div>
+    <button class="btn small" id="refreshBtn" type="button">↻ Refresh</button>
+    <a class="back" href="/index.html">← Back to Dashboard</a>
+  </div>
+
+  <div id="authError" class="error hidden">
+    Not signed in — open the <a href="/index.html">dashboard</a> and sign in first, then come back here.
+  </div>
+  <div id="loadError" class="error hidden"></div>
+
+  <!-- Voice-not-configured empty state (shown until the Telnyx voice
+       env + numbers land — no fake calls, no sample data). -->
+  <div id="notConfigured" class="pane hidden">
+    <div class="empty">
+      <div class="big">🔌</div>
+      <div><strong>Voice isn't switched on yet.</strong></div>
+      <div class="note" id="notConfiguredDetail" style="margin-top:6px">
+        The dialer needs the Telnyx voice setup finished (Call Control app + voice numbers + server keys)
+        before it can place a real call. Nothing here dials until that's done.
+      </div>
+    </div>
+  </div>
+
+  <section class="statcards" id="statCards" aria-label="Session stats"></section>
+
+  <main class="grid">
+    <!-- LEFT: list + session controls -->
+    <div>
+      <section class="pane" aria-label="Call list">
+        <div class="pane-head"><h2>1 · Call list</h2></div>
+        <div class="pane-body">
+          <div class="row" role="radiogroup" aria-label="List source">
+            <label class="note"><input type="radio" name="src" value="enrollments" checked> Enrolled sellers</label>
+            <label class="note"><input type="radio" name="src" value="paste"> Paste a list</label>
+          </div>
+          <div id="enrollFields">
+            <label class="lbl" for="marketSel">Market</label>
+            <select class="field" id="marketSel">
+              <option value="">All markets</option>
+              <option value="indianapolis">Indianapolis</option>
+              <option value="carolina">Carolina</option>
+              <option value="kansascity">Kansas City</option>
+              <option value="cleveland">Cleveland</option>
+              <option value="florida">Florida</option>
+            </select>
+            <div class="note" style="margin-top:6px">Sealed (DNC) and bad-number contacts are always excluded.</div>
+          </div>
+          <div id="pasteFields" class="hidden">
+            <label class="lbl" for="pasteBox">One seller per line — Name, Phone, Address, City</label>
+            <textarea class="field" id="pasteBox" rows="7" placeholder="Jane Seller, 3175551234, 123 Main St, Indianapolis"></textarea>
+          </div>
+          <div class="row">
+            <button class="btn" id="createBtn" type="button">Build the list</button>
+            <span class="note" id="listInfo"></span>
+          </div>
+        </div>
+      </section>
+
+      <section class="pane" aria-label="Session controls">
+        <div class="pane-head"><h2>2 · Session</h2></div>
+        <div class="pane-body">
+          <div class="row">
+            <span class="status-dot" id="audioDot"></span>
+            <span id="audioStatus" class="note">Audio not connected</span>
+          </div>
+          <div class="row">
+            <button class="btn" id="audioBtn" type="button">🎧 Connect audio</button>
+          </div>
+          <div class="row">
+            <button class="btn primary" id="startBtn" type="button">▶ Start dialing</button>
+            <button class="btn" id="pauseBtn" type="button">⏸ Pause</button>
+            <button class="btn danger" id="stopBtn" type="button">⏹ Stop</button>
+          </div>
+          <div class="row">
+            <span class="note">Session: <strong id="sessionStatus">none</strong></span>
+            <span class="note" id="sessionError" style="color:#ff8a7a"></span>
+          </div>
+          <div class="note">Three lines dial at once. The first seller who answers (a real person — machines are detected and skipped) connects to you here; the other lines drop instantly.</div>
+        </div>
+      </section>
+
+      <section class="pane" aria-label="Queue">
+        <div class="pane-head"><h2>Queue</h2><span class="note" id="queueCount"></span></div>
+        <div class="q-list" id="queueList">
+          <div class="empty"><div>No list built yet.</div></div>
+        </div>
+      </section>
+    </div>
+
+    <!-- CENTER: lines + connected call -->
+    <div>
+      <section class="pane" aria-label="Lines">
+        <div class="pane-head"><h2>Lines</h2></div>
+        <div class="pane-body">
+          <div class="slots" id="slots"></div>
+        </div>
+      </section>
+
+      <section class="pane" aria-label="Connected call">
+        <div class="pane-head"><h2>Connected call</h2><span class="pill green hidden" id="livePill">LIVE</span></div>
+        <div class="pane-body" id="callCard">
+          <div class="empty"><div class="big">📞</div><div>No call connected right now.</div><div class="note">When a seller answers, their info and the script land here.</div></div>
+        </div>
+      </section>
+
+      <section class="pane" aria-label="Script">
+        <div class="pane-head"><h2>Live coach — script</h2></div>
+        <div class="pane-body">
+          <div class="script">
+            <h3>Opener</h3>
+            <p>"Hi, this is Irish with Direct Property Buyers. I'm calling about your property — we buy houses in the area for cash, as-is. Is now an okay time for two quick questions?"</p>
+            <h3>Qualify</h3>
+            <ul>
+              <li>"Is the property still yours, and are you the one who'd make the decision to sell?"</li>
+              <li>"What's the situation with it — are you living there, renting it out, or is it sitting empty?"</li>
+              <li>"If we could pay cash and close on your timeline, is selling something you'd consider?"</li>
+            </ul>
+            <h3>If they're warm</h3>
+            <p>"Great — here's what happens next: my partner reviews the property and puts a real cash number together for you. What's the best time for him to call you back today?" → mark <strong>Hot Lead</strong> (or <strong>Appointment Set</strong> if a time is locked).</p>
+            <h3>If they say no</h3>
+            <p>"Totally understand — thanks for your time." → <strong>Not Interested</strong>. If they say don't call again → <strong>DNC</strong> (that seals the number everywhere, for good).</p>
+            <h3>Rules</h3>
+            <ul>
+              <li>Never quote a price on the call — numbers come from the partner.</li>
+              <li>Never claim we drove by the house.</li>
+              <li>Wrong person? → <strong>Wrong Number</strong>. Machine or no answer files itself.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- RIGHT: recordings (dialer area only) -->
+    <div class="col-right">
+      <section class="pane" aria-label="Recordings">
+        <div class="pane-head"><h2>Recordings</h2><span class="note">this dialer only</span></div>
+        <div id="recList">
+          <div class="empty"><div>No recordings yet.</div></div>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<audio id="remoteAudio" autoplay playsinline></audio>
+<div id="toast"></div>
+
+<script>
+'use strict';
+var API = '/.netlify/functions/cc-dialer-api';
+var TOKEN_API = '/.netlify/functions/cc-voice-token';
+var MARKET_LABELS = { indianapolis: 'Indianapolis', carolina: 'Carolina', kansascity: 'Kansas City', cleveland: 'Cleveland', florida: 'Florida' };
+var DISPOSITIONS = ['Hot Lead', 'Appointment Set', 'Not Interested', 'Wrong Number', 'DNC', 'Callback Later', 'No Answer', 'Voicemail', 'Machine'];
+
+var state = {
+  config: null,
+  session: null,
+  recordings: [],
+  agentSipUri: '',
+  audioConnected: false,
+  rtcClient: null,
+};
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+function toast(msg) {
+  var t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.display = 'block';
+  setTimeout(function () { t.style.display = 'none'; }, 3500);
+}
+function showError(id, msg) {
+  var el = document.getElementById(id);
+  el.textContent = msg;
+  el.classList.remove('hidden');
+}
+function hideError(id) { document.getElementById(id).classList.add('hidden'); }
+function fmtPhone(e164) {
+  var d = String(e164 || '').replace(/\D/g, '');
+  if (d.length === 11 && d.charAt(0) === '1') d = d.slice(1);
+  if (d.length === 10) return '(' + d.slice(0, 3) + ') ' + d.slice(3, 6) + '-' + d.slice(6);
+  return e164 || '';
+}
+function fmtTime(ts) {
+  if (!ts) return '';
+  try {
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+    }).format(new Date(ts));
+  } catch (e) { return new Date(ts).toLocaleString(); }
+}
+function fmtDur(secs) {
+  if (secs == null) return '';
+  var m = Math.floor(secs / 60), s = Math.round(secs % 60);
+  return m + ':' + (s < 10 ? '0' : '') + s;
+}
+
+async function api(path, body) {
+  var opts = { credentials: 'include' };
+  if (body !== undefined) {
+    opts.method = 'POST';
+    opts.headers = { 'Content-Type': 'application/json' };
+    opts.body = JSON.stringify(body);
+  }
+  var r = await fetch(API + path, opts);
+  var text = await r.text();
+  var data = {};
+  try { data = JSON.parse(text); } catch (e) { data = {}; }
+  if (!r.ok) {
+    var err = new Error((data && data.error) || ('Request failed (HTTP ' + r.status + ')'));
+    err.status = r.status;
+    err.data = data;
+    throw err;
+  }
+  return data;
+}
+function handleLoadError(e) {
+  if (e && e.status === 401) {
+    document.getElementById('authError').classList.remove('hidden');
+  } else {
+    showError('loadError', 'Could not load the dialer: ' + (e && e.message ? e.message : e));
+  }
+}
+
+/* ---------- config / not-configured state ---------- */
+async function loadConfig() {
+  try {
+    state.config = await api('?action=config');
+  } catch (e) {
+    state.config = null;
+  }
+  var cfg = state.config;
+  var notReady = !cfg || !cfg.configured;
+  document.getElementById('notConfigured').classList.toggle('hidden', !notReady);
+  if (notReady && cfg && cfg.missing && cfg.missing.length) {
+    document.getElementById('notConfiguredDetail').textContent =
+      'Still needed on the server: ' + cfg.missing.join(', ') + ' — plus voice numbers in at least one market. Nothing here dials until that lands.';
+  }
+  var anyPool = cfg && cfg.poolsReady && Object.keys(cfg.poolsReady).some(function (k) { return cfg.poolsReady[k]; });
+  document.getElementById('startBtn').disabled = notReady || !anyPool;
+  document.getElementById('audioBtn').disabled = notReady;
+}
+
+/* ---------- stats ---------- */
+function renderStats() {
+  var el = document.getElementById('statCards');
+  var s = (state.session && state.session.stats) || { dials: 0, connects: 0, machines: 0, noAnswers: 0, hotLeads: 0, appointments: 0, callbacks: 0 };
+  var counts = (state.session && state.session.counts) || { pending: 0, dialing: 0, connected: 0, done: 0 };
+  function card(n, k, cls) {
+    return '<div class="statcard"><div class="n ' + (cls || '') + '">' + n + '</div><div class="k">' + k + '</div></div>';
+  }
+  el.innerHTML =
+    card(s.dials, 'Dials') +
+    card(s.connects, 'Connects', 'green') +
+    card(s.hotLeads, 'Hot leads', 'orange') +
+    card(s.appointments, 'Appointments', 'green') +
+    card(s.machines + s.noAnswers, 'Machine / no answer') +
+    card(counts.pending, 'Left in queue', 'blue') +
+    card(counts.done, 'Finished');
+}
+
+/* ---------- line slots ---------- */
+function slotStateLabel(leg) {
+  if (!leg) return '<span class="pill">Idle</span>';
+  if (leg.state === 'bridged') return '<span class="pill green">Connected</span>';
+  if (leg.state === 'answered-human') return '<span class="pill green">Human — connecting</span>';
+  if (leg.state === 'answered') return '<span class="pill blue">Answered — checking…</span>';
+  return '<span class="pill blue">Dialing / ringing</span>';
+}
+function renderSlots() {
+  var el = document.getElementById('slots');
+  var legs = ((state.session && state.session.activeLegs) || []).filter(function (l) { return l.kind === 'seller'; });
+  var html = '';
+  for (var i = 0; i < 3; i++) {
+    var leg = legs[i];
+    var cls = !leg ? '' : (leg.state === 'bridged' || leg.state === 'answered-human' ? ' live' : ' ringing');
+    html += '<div class="slot' + cls + '"><div class="s-k">Line ' + (i + 1) + '</div>' +
+      (leg
+        ? '<div class="s-phone">' + esc(fmtPhone(leg.phone)) + '</div><div class="s-state">' + slotStateLabel(leg) + '</div>'
+        : '<div class="s-phone" style="color:var(--muted2)">—</div><div class="s-state"><span class="pill">Idle</span></div>') +
+      '</div>';
+  }
+  el.innerHTML = html;
+}
+
+/* ---------- queue ---------- */
+function statusPill(l) {
+  if (l.status === 'done') {
+    if (l.disposition === 'Hot Lead') return '<span class="pill orange">Hot Lead</span>';
+    if (l.disposition === 'DNC') return '<span class="pill red">DNC</span>';
+    return '<span class="pill">' + esc(l.disposition || 'Done') + '</span>';
+  }
+  if (l.status === 'dialing' || l.status === 'answered') return '<span class="pill blue">Dialing</span>';
+  if (l.status === 'connected' || l.status === 'awaiting-disposition') return '<span class="pill green">Connected</span>';
+  return '<span class="pill">Queued</span>';
+}
+function renderQueue() {
+  var el = document.getElementById('queueList');
+  var s = state.session;
+  document.getElementById('queueCount').textContent = s ? s.totalLeads + ' sellers' : '';
+  if (!s || !s.queue || !s.queue.length) {
+    el.innerHTML = '<div class="empty"><div>No list built yet.</div></div>';
+    return;
+  }
+  el.innerHTML = s.queue.map(function (l) {
+    return '<div class="q-item"><div style="flex:1;min-width:0"><div class="q-name">' + esc(l.name || fmtPhone(l.phone)) + '</div>' +
+      '<div class="q-sub">' + esc(fmtPhone(l.phone)) + (l.address1 ? ' · ' + esc(l.address1) : '') + (l.city ? ', ' + esc(l.city) : '') + '</div></div>' +
+      statusPill(l) + '</div>';
+  }).join('');
+}
+
+/* ---------- connected call card ---------- */
+function renderCallCard() {
+  var el = document.getElementById('callCard');
+  var lead = state.session && state.session.connectedLead;
+  document.getElementById('livePill').classList.toggle('hidden', !lead);
+  if (!lead) {
+    el.innerHTML = '<div class="empty"><div class="big">📞</div><div>No call connected right now.</div><div class="note">When a seller answers, their info and the script land here.</div></div>';
+    return;
+  }
+  function fact(k, v) {
+    return '<div class="fact"><div class="k">' + esc(k) + '</div><div class="v">' + esc(v == null || v === '' ? '—' : v) + '</div></div>';
+  }
+  var dispos = DISPOSITIONS.map(function (d) {
+    var cls = d === 'Hot Lead' ? ' hot' : (d === 'Appointment Set' ? ' appt' : (d === 'DNC' ? ' dnc' : ''));
+    return '<button type="button" class="btn' + cls + '" data-dispo="' + esc(d) + '">' + esc(d) + '</button>';
+  }).join('');
+  el.innerHTML =
+    '<div class="seller-name">' + esc(lead.name || fmtPhone(lead.phone)) + '</div>' +
+    '<div class="facts">' +
+    fact('Phone', fmtPhone(lead.phone)) +
+    fact('Market', lead.market ? (MARKET_LABELS[lead.market] || lead.market) : '') +
+    fact('Property', lead.address1 || '') +
+    fact('City', lead.city || '') +
+    '</div>' +
+    '<label class="lbl" for="callNotes">Call notes</label>' +
+    '<textarea class="field" id="callNotes" rows="2" placeholder="What they said, best callback time, situation…"></textarea>' +
+    '<div class="dispos">' + dispos + '</div>' +
+    '<div class="note" style="margin-top:8px">Filing a disposition ends this call slot and the dialer moves on. <strong>DNC is permanent</strong> — it seals this seller everywhere (texts too).</div>';
+}
+
+/* ---------- recordings ---------- */
+function renderRecordings() {
+  var el = document.getElementById('recList');
+  if (!state.recordings.length) {
+    el.innerHTML = '<div class="empty"><div>No recordings yet.</div></div>';
+    return;
+  }
+  el.innerHTML = state.recordings.map(function (r) {
+    return '<div class="rec-item"><div class="r-top"><span class="r-name">' + esc(r.name || fmtPhone(r.phone)) + '</span>' +
+      '<span class="note">' + esc(fmtTime(r.at)) + (r.durationSecs != null ? ' · ' + esc(fmtDur(r.durationSecs)) : '') + '</span></div>' +
+      '<div class="note">' + esc(fmtPhone(r.phone)) + '</div>' +
+      (r.url ? '<audio controls preload="none" src="' + esc(r.url) + '"></audio>' : '') + '</div>';
+  }).join('');
+}
+
+/* ---------- session rendering ---------- */
+function renderSession() {
+  var s = state.session;
+  document.getElementById('sessionStatus').textContent = s ? s.status : 'none';
+  document.getElementById('sessionError').textContent = s && s.lastError ? s.lastError : '';
+  document.getElementById('listInfo').textContent = s ? s.totalLeads + ' sellers (' + s.source + (s.market ? ', ' + (MARKET_LABELS[s.market] || s.market) : '') + ')' : '';
+  document.getElementById('startBtn').textContent = s && s.status === 'paused' ? '▶ Resume dialing' : '▶ Start dialing';
+  renderStats();
+  renderSlots();
+  renderQueue();
+  renderCallCard();
+}
+
+/* ---------- data ---------- */
+async function refreshState() {
+  var data = await api('?action=state');
+  var prevConnected = state.session && state.session.connectedLead ? state.session.connectedLead.key : null;
+  state.session = data.session;
+  state.recordings = Array.isArray(data.recordings) ? data.recordings : [];
+  renderSession();
+  renderRecordings();
+  var nowConnected = state.session && state.session.connectedLead ? state.session.connectedLead.key : null;
+  if (nowConnected && nowConnected !== prevConnected) toast('📞 Seller connected — you are live.');
+}
+
+/* ---------- list building ---------- */
+function parsePaste(text) {
+  var leads = [];
+  String(text || '').split(/\r?\n/).forEach(function (line) {
+    var parts = line.split(/[,\t]/).map(function (p) { return p.trim(); }).filter(Boolean);
+    if (!parts.length) return;
+    var phoneIdx = -1;
+    for (var i = 0; i < parts.length; i++) {
+      if (parts[i].replace(/\D/g, '').length >= 10) { phoneIdx = i; break; }
+    }
+    if (phoneIdx === -1) return;
+    var rest = parts.filter(function (_, i) { return i !== phoneIdx; });
+    leads.push({
+      name: rest[0] || '',
+      phone: parts[phoneIdx],
+      address1: rest[1] || '',
+      city: rest[2] || '',
+    });
+  });
+  return leads;
+}
+async function createSession() {
+  var src = document.querySelector('input[name="src"]:checked').value;
+  var body = { action: 'create-session', source: src };
+  if (src === 'paste') {
+    body.leads = parsePaste(document.getElementById('pasteBox').value);
+    if (!body.leads.length) { toast('No usable rows in the pasted list — each line needs a phone number.'); return; }
+  } else {
+    body.market = document.getElementById('marketSel').value || undefined;
+  }
+  try {
+    var data = await api('', body);
+    state.session = data.session;
+    renderSession();
+    toast('List built: ' + data.session.totalLeads + ' sellers queued.');
+  } catch (e) {
+    toast('Could not build the list: ' + (e && e.message ? e.message : e));
+  }
+}
+
+/* ---------- audio (Telnyx WebRTC) ---------- */
+function setAudioStatus(txt, on, warn) {
+  document.getElementById('audioStatus').textContent = txt;
+  var dot = document.getElementById('audioDot');
+  dot.className = 'status-dot' + (on ? ' on' : (warn ? ' warn' : ''));
+}
+async function connectAudio() {
+  if (typeof TelnyxRTC === 'undefined') {
+    setAudioStatus('Calling library failed to load — check your connection and refresh.', false, true);
+    return;
+  }
+  setAudioStatus('Connecting audio…', false, true);
+  try {
+    var r = await fetch(TOKEN_API, { credentials: 'include' });
+    var data = {};
+    try { data = await r.json(); } catch (e) { data = {}; }
+    if (!r.ok || !data.token) {
+      setAudioStatus('Voice is not configured on the server yet — audio cannot connect.', false, true);
+      return;
+    }
+    state.agentSipUri = data.sipUri || '';
+    var client = new TelnyxRTC({ login_token: data.token });
+    state.rtcClient = client;
+    client.on('telnyx.ready', function () {
+      state.audioConnected = true;
+      setAudioStatus('Audio connected — answered sellers will ring in here.', true, false);
+    });
+    client.on('telnyx.error', function () {
+      state.audioConnected = false;
+      setAudioStatus('Audio connection error — try Connect audio again.', false, true);
+    });
+    client.on('telnyx.notification', function (note) {
+      // The dialer server rings this browser when a seller answers —
+      // pick up automatically so the bridge lands instantly.
+      try {
+        var call = note && note.call;
+        if (call && note.type === 'callReceived') {
+          var audio = document.getElementById('remoteAudio');
+          if (audio && call.remoteStream) audio.srcObject = call.remoteStream;
+          if (typeof call.answer === 'function') call.answer();
+        }
+      } catch (e) { /* best-effort */ }
+    });
+    await client.connect();
+  } catch (e) {
+    setAudioStatus('Audio could not connect: ' + (e && e.message ? e.message : e), false, true);
+  }
+}
+
+/* ---------- session controls ---------- */
+async function startSession() {
+  if (!state.audioConnected || !state.agentSipUri) {
+    toast('Connect audio first — answered calls need somewhere to land.');
+    return;
+  }
+  try {
+    var data = await api('', { action: 'start', agentSipUri: state.agentSipUri });
+    state.session = data.session;
+    renderSession();
+    if (data.error) toast('Dialing stopped: ' + data.error);
+  } catch (e) {
+    toast('Could not start: ' + (e && e.message ? e.message : e));
+  }
+}
+async function pauseSession() {
+  try {
+    var data = await api('', { action: 'pause' });
+    state.session = data.session;
+    renderSession();
+  } catch (e) { toast('Pause failed: ' + (e && e.message ? e.message : e)); }
+}
+async function stopSession() {
+  if (!window.confirm('Stop this session? Live lines hang up and the queue closes.')) return;
+  try {
+    var data = await api('', { action: 'stop' });
+    state.session = data.session;
+    renderSession();
+    toast('Session stopped.');
+  } catch (e) { toast('Stop failed: ' + (e && e.message ? e.message : e)); }
+}
+async function fileDisposition(d) {
+  var lead = state.session && state.session.connectedLead;
+  if (!lead) return;
+  if (d === 'DNC' && !window.confirm('DNC seals this seller permanently — no more texts or calls, ever. File it?')) return;
+  var notesEl = document.getElementById('callNotes');
+  try {
+    var data = await api('', {
+      action: 'disposition',
+      leadKey: lead.key,
+      disposition: d,
+      notes: notesEl ? notesEl.value : undefined,
+    });
+    state.session = data.session;
+    renderSession();
+    toast('Filed: ' + d);
+  } catch (e) {
+    toast('Could not file: ' + (e && e.message ? e.message : e));
+  }
+}
+
+/* ---------- init ---------- */
+function init() {
+  document.querySelectorAll('input[name="src"]').forEach(function (r) {
+    r.addEventListener('change', function () {
+      var paste = document.querySelector('input[name="src"]:checked').value === 'paste';
+      document.getElementById('pasteFields').classList.toggle('hidden', !paste);
+      document.getElementById('enrollFields').classList.toggle('hidden', paste);
+    });
+  });
+  document.getElementById('createBtn').addEventListener('click', createSession);
+  document.getElementById('audioBtn').addEventListener('click', connectAudio);
+  document.getElementById('startBtn').addEventListener('click', startSession);
+  document.getElementById('pauseBtn').addEventListener('click', pauseSession);
+  document.getElementById('stopBtn').addEventListener('click', stopSession);
+  document.getElementById('refreshBtn').addEventListener('click', function () {
+    loadConfig().then(function () { return refreshState(); }).catch(handleLoadError);
+  });
+  document.getElementById('callCard').addEventListener('click', function (ev) {
+    var btn = ev.target.closest ? ev.target.closest('[data-dispo]') : null;
+    if (btn) fileDisposition(btn.getAttribute('data-dispo'));
+  });
+  loadConfig()
+    .then(function () { return refreshState(); })
+    .catch(handleLoadError);
+  setInterval(function () {
+    if (state.session && ['running', 'connected', 'paused'].includes(state.session.status)) {
+      refreshState().catch(function () { /* keep the last good render */ });
+    }
+  }, 3000);
+}
+
+if (typeof document !== 'undefined' && document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', init);
+} else if (typeof document !== 'undefined') {
+  init();
+}
+</script>
+</body>
+</html>

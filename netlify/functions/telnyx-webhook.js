@@ -162,6 +162,13 @@ async function applyEvent(s, evt) {
     const thread = await loadThread(s, key);
     thread.phone = lib.toE164(from);
     if (to0) {
+      // The number the seller wrote TO is the number we text them
+      // from — the Conversations UI shows it as "Texting from".
+      try {
+        thread.ourNumber = lib.toE164(to0);
+      } catch (e) {
+        thread.ourNumber = to0;
+      }
       const m = marketForOurNumber(lib.toE164(to0));
       if (m) thread.market = m;
     }
