@@ -238,9 +238,13 @@ function lowerTags(tags) {
 }
 // Callable = has a phone, is not sealed (dnc tag / dnd), not bad-number.
 // Mirrors the messaging side's guards — a sealed seller is never dialed.
+// A manual call-channel DND (cc-dnd dndChannels.call) also blocks
+// dialing even when the texting seal is off — HL parity: the Calls
+// DND box stops calls, not texts.
 function enrollmentCallable(rec) {
   if (!rec || !rec.phone) return false;
   if (rec.dnd === true) return false;
+  if (rec.dndChannels && rec.dndChannels.call === true) return false;
   const lt = lowerTags(rec.tags);
   if (lt.includes('dnc') || lt.includes('bad-number')) return false;
   return true;
