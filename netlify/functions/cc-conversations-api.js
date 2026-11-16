@@ -6,7 +6,15 @@
 // Routing (same action pattern as the other dashboard functions):
 //   GET  ?action=threads[&market=indianapolis]   thread list (index),
 //                                                newest activity first
-//   GET  ?action=thread&phone=<digits|e164>      one thread; marks it read
+//   GET  ?action=thread&phone=<digits|e164>      one thread; marks it read;
+//                                                the response also carries
+//                                                the contact's DND state
+//                                                (cc-dnd) as `dnd`
+//   POST {action:'dnd-set', phone, channels}     manual DND: set the
+//                                                per-channel DND state
+//                                                {sms, email, call} on the
+//                                                contact (cc-dnd), exactly
+//                                                like the HL DND panel
 //   POST {action:'send', phone, body, market?}   manual outbound SMS via
 //                                                telnyx-lib; stored as
 //                                                'queued', the webhook
@@ -41,6 +49,18 @@ function watchdog() {
   if (watchdogOverride) return watchdogOverride;
   try {
     return require('./cc-watchdog');
+  } catch (e) {
+    return null;
+  }
+}
+
+// cc-dnd.js owns the manual per-channel DND state the contact panel
+// reads and writes. Same lazy-require + test-override pattern.
+let dndOverride = null;
+function dnd() {
+  if (dndOverride) return dndOverride;
+  try {
+    return require('./cc-dnd');
   } catch (e) {
     return null;
   }
@@ -211,7 +231,47 @@ exports.handler = async (event) => {
         }
         thread.ourNumber = found || null;
       }
-      return ok({ thread, markedRead: wasUnread });
+      // The contact's manual-DND state (cc-dnd) rides along so the
+      // contact panel can render the per-channel toggles truthfully.
+      // Fail-soft: a DND read failure never breaks the thread view —
+      // the panel simply hides until a read succeeds.
+      let dndState = null;
+      const d = dnd();
+      if (d && typeof d.getState === 'function') {
+        try {
+          dndState = await d.getState(key, event);
+        } catch (e) {
+          dndState = null;
+        }
+      }
+      return ok({ thread, markedRead: wasUnread, dnd: dndState });
+    }
+
+    if (action === 'dnd-set') {
+      const rawPhone = body.phone;
+      if (!rawPhone) return bad('Missing phone.');
+      let key;
+      try {
+        key = lib.phoneKey(rawPhone);
+      } catch (e) {
+        return bad('Invalid phone number.');
+      }
+      if (!body.channels || typeof body.channels !== 'object' || Array.isArray(body.channels)) {
+        return bad('Missing channels.');
+      }
+      const d = dnd();
+      if (!d || typeof d.setChannels !== 'function') {
+        return serverError('cc-dnd is not available yet.');
+      }
+      // Only an explicit true turns a channel on — the same
+      // normalization cc-dnd.cleanChannels applies.
+      const channels = {
+        sms: body.channels.sms === true,
+        email: body.channels.email === true,
+        call: body.channels.call === true,
+      };
+      const state = await d.setChannels(key, channels, event);
+      return ok({ ok: true, dnd: state });
     }
 
     if (action === 'send') {
@@ -326,5 +386,8 @@ exports._test = {
   },
   setWatchdog(wd) {
     watchdogOverride = wd || null;
+  },
+  setDnd(d) {
+    dndOverride = d || null;
   },
 };
