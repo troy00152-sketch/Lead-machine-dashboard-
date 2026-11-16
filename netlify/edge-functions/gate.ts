@@ -214,6 +214,29 @@ export default async function handler(req: Request, context: any) {
     return res;
   }
 
+  // Public seller-facing website pages + the cash-offer funnel endpoint
+  // (added Nov 16, 2026 — standalone mirror of the HL site on
+  // directpropertybuyersllc.com). These are PUBLIC by design: the funnel
+  // is the A2P opt-in proof page and must be reachable with no login.
+  // The pages pass through untouched (no noindex — they are the public
+  // website); the function only ever accepts a form POST and stores a
+  // lead + consent record (cc-funnel-api.js) — it reads nothing back.
+  if (
+    url.pathname === "/cash-offer" ||
+    url.pathname === "/cash-offer.html" ||
+    url.pathname === "/privacy-policy" ||
+    url.pathname === "/privacy-policy.html" ||
+    url.pathname === "/terms-of-service" ||
+    url.pathname === "/terms-of-service.html"
+  ) {
+    return context.next();
+  }
+  if (url.pathname === "/.netlify/functions/cc-funnel-api") {
+    const res = await context.next();
+    res.headers.set("x-robots-tag", "noindex, nofollow");
+    return res;
+  }
+
   // Not configured yet — fail closed with a clear message, not an open door.
   if (!password) {
     return new Response(
