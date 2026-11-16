@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sell Your House Fast For Cash | Direct Property Buyers</title>
+<meta name="description" content="Direct Property Buyers buys houses as-is, in any condition. No repairs, no cleaning, no agent fees, no closing costs. Get a fair cash offer and close on your timeline.">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #1c2733; background: #f6f7f9; line-height: 1.55; }
+  header { background: #10222e; color: #fff; padding: 16px 20px; }
+  header .brand { max-width: 960px; margin: 0 auto; font-size: 20px; font-weight: 800; letter-spacing: .2px; }
+  header .brand span { color: #ff6b1a; }
+  header .call { max-width: 960px; margin: 2px auto 0; font-size: 14px; color: #c8d4dd; }
+  header .call a { color: #ffb287; text-decoration: none; font-weight: 600; }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 36px 20px 56px; }
+  h1 { font-size: 38px; line-height: 1.15; margin-bottom: 14px; }
+  .sub { font-size: 18px; color: #3d4c5c; max-width: 640px; margin-bottom: 26px; }
+  .points { list-style: none; margin-bottom: 34px; }
+  .points li { font-size: 17px; font-weight: 600; padding: 9px 0 9px 30px; position: relative; }
+  .points li::before { content: "✓"; color: #ff6b1a; font-weight: 800; position: absolute; left: 2px; }
+  .card { background: #fff; border: 1px solid #dde3e9; border-radius: 14px; padding: 28px; max-width: 640px; box-shadow: 0 6px 24px rgba(16,34,46,.07); }
+  .card h2 { font-size: 24px; margin-bottom: 18px; }
+  .row { display: flex; gap: 14px; }
+  .row .field { flex: 1; }
+  .field { margin-bottom: 14px; }
+  label { display: block; font-size: 14px; font-weight: 600; margin-bottom: 6px; }
+  label .req { color: #d33; }
+  input[type="text"], input[type="tel"], input[type="email"] {
+    width: 100%; border: 1px solid #c3ced7; border-radius: 8px; padding: 11px 12px; font-size: 16px; background: #fff;
+  }
+  input:focus { outline: 2px solid #ff6b1a; outline-offset: 0; border-color: #ff6b1a; }
+  .consent { border: 1px solid #e2e8ee; border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; background: #fafbfc; }
+  .consent h3 { font-size: 14px; margin-bottom: 8px; }
+  .consent label { display: flex; gap: 10px; font-weight: 400; font-size: 13.5px; color: #3d4c5c; cursor: pointer; }
+  .consent input[type="checkbox"] { margin-top: 3px; width: 17px; height: 17px; flex: none; accent-color: #ff6b1a; }
+  button.cta {
+    width: 100%; background: #ff6b1a; color: #fff; border: 0; border-radius: 10px;
+    font-size: 18px; font-weight: 700; padding: 15px; cursor: pointer;
+  }
+  button.cta:hover { background: #e55f16; }
+  button.cta:disabled { opacity: .6; cursor: default; }
+  .err { display: none; background: #fdecec; border: 1px solid #f3b8b8; color: #8f1d1d; border-radius: 8px; padding: 10px 12px; font-size: 14px; margin-bottom: 14px; }
+  .hp { position: absolute; left: -9999px; top: -9999px; height: 1px; width: 1px; overflow: hidden; }
+  .thanks { text-align: center; padding: 18px 6px; }
+  .thanks .big { font-size: 26px; font-weight: 800; margin-bottom: 10px; }
+  .thanks p { color: #3d4c5c; margin-bottom: 10px; }
+  footer { border-top: 1px solid #dde3e9; padding: 22px 20px 34px; color: #66788a; font-size: 13.5px; }
+  footer .inner { max-width: 960px; margin: 0 auto; }
+  footer a { color: #66788a; }
+  @media (max-width: 560px) { .row { flex-direction: column; gap: 0; } h1 { font-size: 30px; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">Direct <span>Property Buyers</span></div>
+  <div class="call">Questions? Call us at <a href="tel:+18604526497">(860) 452-6497</a></div>
+</header>
+
+<div class="wrap">
+  <h1>Sell Your House Fast For Cash</h1>
+  <p class="sub">Direct Property Buyers buys houses as-is, in any condition. No repairs, no cleaning, no agent fees, no closing costs. Get a fair cash offer and close on your timeline — in as little as 7 days.</p>
+
+  <ul class="points">
+    <li>Cash offer — no banks, no financing delays</li>
+    <li>Sell as-is — leave whatever you don't want behind</li>
+    <li>No commissions or fees — we cover closing costs</li>
+    <li>Close in as little as 7 days, or on your schedule</li>
+  </ul>
+
+  <div class="card" id="formCard">
+    <h2>Get My Cash Offer</h2>
+    <div class="err" id="formErr"></div>
+    <form id="offerForm" novalidate>
+      <div class="row">
+        <div class="field">
+          <label for="firstName">First Name <span class="req">*</span></label>
+          <input type="text" id="firstName" name="firstName" autocomplete="given-name" required>
+        </div>
+        <div class="field">
+          <label for="lastName">Last Name <span class="req">*</span></label>
+          <input type="text" id="lastName" name="lastName" autocomplete="family-name" required>
+        </div>
+      </div>
+      <div class="field">
+        <label for="phone">Phone</label>
+        <input type="tel" id="phone" name="phone" autocomplete="tel">
+      </div>
+      <div class="field">
+        <label for="email">Email</label>
+        <input type="email" id="email" name="email" autocomplete="email">
+      </div>
+      <div class="field">
+        <label for="address1">Property Address <span class="req">*</span></label>
+        <input type="text" id="address1" name="address1" autocomplete="street-address" required>
+      </div>
+      <div class="row">
+        <div class="field">
+          <label for="state">State <span class="req">*</span></label>
+          <input type="text" id="state" name="state" autocomplete="address-level1" required>
+        </div>
+        <div class="field">
+          <label for="city">City <span class="req">*</span></label>
+          <input type="text" id="city" name="city" autocomplete="address-level2" required>
+        </div>
+        <div class="field">
+          <label for="postalCode">Postal Code <span class="req">*</span></label>
+          <input type="text" id="postalCode" name="postalCode" autocomplete="postal-code" required>
+        </div>
+      </div>
+
+      <div class="consent">
+        <h3>Consent <span class="req" style="color:#d33">*</span></h3>
+        <label>
+          <input type="checkbox" id="consentSms" name="consentSms">
+          <span>Consent to Receive SMS Notifications, Alerts &amp; Updates from Fitness Lead Machine LLC, DBA Direct Property Buyers. Message frequency may vary. Message &amp; data rates may apply. Text HELP for assistance. You can reply STOP to unsubscribe at any time.</span>
+        </label>
+      </div>
+
+      <div class="consent">
+        <h3>Marketing Consent</h3>
+        <label>
+          <input type="checkbox" id="consentMarketing" name="consentMarketing">
+          <span>Consent to Receive the Occasional Marketing Messages from Fitness Lead Machine LLC, DBA Direct Property Buyers. You can reply STOP to unsubscribe at any time.</span>
+        </label>
+      </div>
+
+      <div class="hp" aria-hidden="true">
+        <label>Website <input type="text" id="website2" name="website2" tabindex="-1" autocomplete="off"></label>
+      </div>
+
+      <button type="submit" class="cta" id="submitBtn">Get My Cash Offer</button>
+    </form>
+  </div>
+
+  <div class="card thanks" id="thanksCard" style="display:none">
+    <div class="big" id="thanksTitle">Thanks — we got your request!</div>
+    <p id="thanksBody">We'll take a look at your property and reach out shortly with next steps.</p>
+    <p id="thanksConsent" style="display:none">You didn't opt in to text messages, so we'll reach out by phone or email instead.</p>
+    <p>Need us sooner? Call <a href="tel:+18604526497" style="color:#ff6b1a;font-weight:600">(860) 452-6497</a>.</p>
+  </div>
+</div>
+
+<footer>
+  <div class="inner">
+    © 2026 Fitness Lead Machine LLC d/b/a Direct Property Buyers. All rights reserved.
+    &nbsp;·&nbsp; <a href="/privacy-policy">Privacy Policy</a>
+    &nbsp;·&nbsp; <a href="/terms-of-service">Terms of Service</a>
+  </div>
+</footer>
+
+<script>
+(function () {
+  var form = document.getElementById('offerForm');
+  var errBox = document.getElementById('formErr');
+  var btn = document.getElementById('submitBtn');
+
+  function val(id) { return document.getElementById(id).value.trim(); }
+  function showErr(msg) {
+    errBox.textContent = msg;
+    errBox.style.display = 'block';
+    errBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  form.addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    errBox.style.display = 'none';
+
+    var required = [
+      ['firstName', 'First Name'], ['lastName', 'Last Name'],
+      ['address1', 'Property Address'], ['state', 'State'],
+      ['city', 'City'], ['postalCode', 'Postal Code']
+    ];
+    for (var i = 0; i < required.length; i++) {
+      if (!val(required[i][0])) { showErr('Please fill in ' + required[i][1] + '.'); return; }
+    }
+    if (!val('phone') && !val('email')) {
+      showErr('Please give us a phone number or an email so we can reach you.');
+      return;
+    }
+    var consentSms = document.getElementById('consentSms').checked;
+    if (!consentSms) {
+      showErr('Please check the Consent box so we can contact you about your offer.');
+      return;
+    }
+
+    var payload = {
+      firstName: val('firstName'),
+      lastName: val('lastName'),
+      phone: val('phone'),
+      email: val('email'),
+      address1: val('address1'),
+      city: val('city'),
+      state: val('state'),
+      postalCode: val('postalCode'),
+      consentSms: consentSms,
+      consentMarketing: document.getElementById('consentMarketing').checked,
+      sourceUrl: window.location.href,
+      website2: val('website2')
+    };
+
+    btn.disabled = true;
+    btn.textContent = 'Sending…';
+    fetch('/.netlify/functions/cc-funnel-api', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).then(function (res) {
+      return res.json().then(function (data) { return { status: res.status, data: data }; });
+    }).then(function (r) {
+      if (r.status === 200 && r.data && r.data.ok) {
+        document.getElementById('thanksTitle').textContent =
+          'Thanks, ' + payload.firstName + ' — we got your request!';
+        document.getElementById('thanksBody').textContent =
+          "We'll take a look at " + payload.address1 + ' and reach out shortly with next steps.';
+        if (!r.data.textable) document.getElementById('thanksConsent').style.display = 'block';
+        document.getElementById('formCard').style.display = 'none';
+        document.getElementById('thanksCard').style.display = 'block';
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      } else {
+        showErr((r.data && r.data.error) || 'Something went wrong — please try again or call (860) 452-6497.');
+        btn.disabled = false;
+        btn.textContent = 'Get My Cash Offer';
+      }
+    }).catch(function () {
+      showErr('Something went wrong — please try again or call (860) 452-6497.');
+      btn.disabled = false;
+      btn.textContent = 'Get My Cash Offer';
+    });
+  });
+})();
+</script>
+</body>
+</html>
