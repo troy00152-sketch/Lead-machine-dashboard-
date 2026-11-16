@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="dark">
+<title>Conversations — Direct Property Buyers</title>
+<style>
+  :root{
+    --bg:#0d1117; --bg2:#131a24; --panel:#161e2b; --panel2:#1c2536;
+    --line:#26314a; --text:#e8edf5; --muted:#8b96ad; --muted2:#5d6a84;
+    --accent:#ff6b1a; --accent2:#ff8c42; --green:#2ecc71; --red:#e74c3c;
+    --blue:#3498db; --chip:#223052;
+    --radius:10px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,-apple-system,sans-serif;font-size:14px;line-height:1.5}
+  a{color:var(--accent2)}
+  .wrap{max-width:1440px;margin:0 auto;padding:20px 16px 40px}
+  .topbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+  .topbar h1{font-size:22px}
+  .topbar h1 span{color:var(--accent)}
+  .topbar small{color:var(--muted);display:block;font-size:13px}
+  .back{margin-left:auto;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:24px;padding:9px 16px;font-size:13px;font-weight:600;text-decoration:none;white-space:nowrap}
+  .back:hover{border-color:var(--accent);color:var(--accent)}
+  .btn{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px 16px;font-size:14px;font-weight:600;cursor:pointer}
+  .btn:hover{border-color:var(--accent)}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .btn.primary:hover{background:var(--accent2)}
+  .btn:disabled{background:var(--panel2);color:var(--muted2);border-color:var(--line);cursor:default}
+  .btn.small{padding:6px 10px;font-size:13px}
+  .field{width:100%;background:var(--bg2);border:1px solid var(--line);border-radius:8px;color:var(--text);padding:9px 10px;font-size:14px;font-family:inherit}
+  .field:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(255,107,26,.15)}
+  .error{background:rgba(231,76,60,.12);border:1px solid var(--red);color:#ff8a7a;border-radius:8px;padding:12px;font-size:14px;margin-bottom:16px}
+  .empty{text-align:center;color:var(--muted);padding:32px 16px}
+  .empty .big{font-size:32px;margin-bottom:8px}
+  .note{color:var(--muted);font-size:13px}
+  .hidden{display:none}
+  #toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px 18px;font-size:14px;display:none;z-index:60;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+  .pill{display:inline-block;font-size:11px;font-weight:700;border-radius:99px;padding:2px 10px;background:var(--chip);color:var(--text)}
+  /* ---- header market cards ---- */
+  .statcards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:16px}
+  .statcard{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px}
+  .statcard .mkt{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:8px}
+  .statcard .nums{display:flex;gap:16px;flex-wrap:wrap}
+  .statcard .n{font-size:20px;font-weight:700;line-height:1.1}
+  .statcard .k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+  .statcard .n.green{color:var(--green)} .statcard .n.red{color:var(--red)} .statcard .n.blue{color:var(--blue)}
+  /* ---- three-pane layout ---- */
+  .panes{display:grid;grid-template-columns:330px minmax(0,1fr) 300px;gap:16px;align-items:start}
+  @media (max-width:1100px){ .panes{grid-template-columns:300px minmax(0,1fr)} .pane-side{grid-column:1 / -1} }
+  @media (max-width:720px){ .panes{grid-template-columns:1fr} }
+  .pane{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);display:flex;flex-direction:column;overflow:hidden}
+  .pane-head{padding:12px 14px;border-bottom:1px solid var(--line)}
+  .pane-head h2{font-size:15px}
+  /* left: thread list */
+  .chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+  .chip{border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:99px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer}
+  .chip:hover{border-color:var(--accent)}
+  .chip.active{background:var(--accent);border-color:var(--accent);color:#fff}
+  .thread-list{overflow-y:auto;max-height:calc(100vh - 330px);min-height:200px}
+  .thread-item{padding:11px 14px;border-bottom:1px solid var(--line);cursor:pointer}
+  .thread-item:hover{background:var(--panel2)}
+  .thread-item.active{background:var(--panel2);box-shadow:inset 3px 0 0 var(--accent)}
+  .thread-item .t-top{display:flex;align-items:baseline;gap:8px}
+  .thread-item .t-name{font-weight:700;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .thread-item .t-time{font-size:11px;color:var(--muted2);white-space:nowrap}
+  .thread-item .t-preview{color:var(--muted);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
+  .thread-item .t-meta{display:flex;align-items:center;gap:8px;margin-top:4px}
+  .unread-badge{background:var(--accent);color:#fff;font-size:11px;font-weight:700;border-radius:99px;min-width:20px;height:20px;line-height:20px;text-align:center;padding:0 6px;margin-left:auto}
+  /* center: thread */
+  .messages{overflow-y:auto;height:calc(100vh - 420px);min-height:280px;padding:16px 14px;display:flex;flex-direction:column;gap:4px;background:var(--bg2)}
+  .msg{max-width:75%;padding:9px 12px;border-radius:14px;white-space:pre-wrap;word-break:break-word}
+  .msg .m-body{font-size:14px}
+  .msg .m-meta{font-size:11px;margin-top:4px;display:flex;gap:8px;align-items:center}
+  .msg.out{align-self:flex-end;background:var(--blue);color:#fff;border-bottom-right-radius:4px}
+  .msg.out .m-meta{color:rgba(255,255,255,.85);justify-content:flex-end}
+  .msg.in{align-self:flex-start;background:var(--panel2);border:1px solid var(--line);border-bottom-left-radius:4px}
+  .msg.in .m-meta{color:var(--muted2)}
+  .msg .st-failed{color:#ffb3a7;font-weight:700}
+  .msg.out .st-failed{color:#ffd9d2}
+  .day-sep{align-self:center;color:var(--muted2);font-size:11px;margin:8px 0}
+  .sendbox{border-top:1px solid var(--line);padding:12px 14px;display:flex;gap:10px;align-items:flex-end}
+  .sendbox textarea{flex:1;resize:vertical;min-height:42px;max-height:140px}
+  /* right: contact panel */
+  .facts{display:grid;grid-template-columns:1fr;gap:10px;padding:14px}
+  .fact .k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+  .fact .v{font-weight:600;word-break:break-word}
+  .fact .v.tbd{color:var(--accent2)}
+</style>
+<!-- PWA (v1): manifest, theme, iOS install support, service worker -->
+<link rel="manifest" href="/manifest.webmanifest" />
+<meta name="theme-color" content="#050a14" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Command Center" />
+<link rel="apple-touch-icon" href="/assets/icons/icon-192.png" />
+<script src="/assets/pwa.js" defer></script>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <div>
+      <h1>💬 <span>Conversations</span></h1>
+      <small>Seller texts — our own numbers (Telnyx), mirrored from the HighLevel inbox</small>
+    </div>
+    <button class="btn small" id="refreshBtn" type="button">↻ Refresh</button>
+    <a class="back" href="/index.html">← Back to Dashboard</a>
+  </div>
+
+  <div id="authError" class="error hidden">
+    Not signed in — open the <a href="/index.html">dashboard</a> and sign in first, then come back here.
+  </div>
+  <div id="loadError" class="error hidden"></div>
+
+  <section class="statcards" id="statCards" aria-label="Today by market"></section>
+
+  <main class="panes">
+    <!-- LEFT: thread list -->
+    <section class="pane" aria-label="Conversation list">
+      <div class="pane-head">
+        <div class="chips" id="marketChips"></div>
+        <input class="field" id="searchBox" type="search" placeholder="Search name, phone, or message…">
+        <label class="note" style="display:flex;gap:6px;align-items:center;margin-top:8px">
+          <input type="checkbox" id="unreadOnly"> Unread only
+          <span class="spacer" style="flex:1"></span>
+          <span id="threadCount"></span>
+        </label>
+      </div>
+      <div class="thread-list" id="threadList"></div>
+    </section>
+
+    <!-- CENTER: open thread -->
+    <section class="pane" aria-label="Open conversation">
+      <div class="pane-head">
+        <h2 id="threadTitle">No conversation selected</h2>
+        <div class="note" id="threadSub"></div>
+      </div>
+      <div class="messages" id="messages">
+        <div class="empty"><div class="big">💬</div><div>Pick a conversation on the left to read it here.</div></div>
+      </div>
+      <form class="sendbox" id="sendForm">
+        <textarea class="field" id="sendText" placeholder="Type a text…" disabled></textarea>
+        <button class="btn primary" id="sendBtn" type="submit" disabled>Send</button>
+      </form>
+      <div id="sendError" class="error hidden" style="margin:12px 14px"></div>
+    </section>
+
+    <!-- RIGHT: contact / property panel -->
+    <aside class="pane pane-side" aria-label="Contact details">
+      <div class="pane-head"><h2>Contact</h2></div>
+      <div class="facts" id="contactPanel">
+        <div class="empty"><div>Select a conversation to see the contact and property details.</div></div>
+      </div>
+    </aside>
+  </main>
+</div>
+
+<div id="toast"></div>
+
+<script>
+'use strict';
+var API = '/.netlify/functions/cc-conversations-api';
+var MARKETS = [
+  { id: '', label: 'All markets' },
+  { id: 'indianapolis', label: 'Indianapolis' },
+  { id: 'carolina', label: 'Carolina' },
+  { id: 'kansascity', label: 'Kansas City' },
+  { id: 'cleveland', label: 'Cleveland' },
+  { id: 'florida', label: 'Florida' },
+];
+var MARKET_LABELS = { indianapolis: 'Indianapolis', carolina: 'Carolina', kansascity: 'Kansas City', cleveland: 'Cleveland', florida: 'Florida' };
+
+var state = {
+  market: '',
+  threads: [],
+  selectedKey: null,
+  selectedThread: null,
+  stats: null,
+};
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+function toast(msg) {
+  var t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.display = 'block';
+  setTimeout(function () { t.style.display = 'none'; }, 3500);
+}
+function showError(id, msg) {
+  var el = document.getElementById(id);
+  el.textContent = msg;
+  el.classList.remove('hidden');
+}
+function hideError(id) { document.getElementById(id).classList.add('hidden'); }
+
+function fmtPhone(e164) {
+  var d = String(e164 || '').replace(/\D/g, '');
+  if (d.length === 11 && d.charAt(0) === '1') d = d.slice(1);
+  if (d.length === 10) return '(' + d.slice(0, 3) + ') ' + d.slice(3, 6) + '-' + d.slice(6);
+  return e164 || '';
+}
+function fmtTime(ts) {
+  if (!ts) return '';
+  try {
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+    }).format(new Date(ts));
+  } catch (e) { return new Date(ts).toLocaleString(); }
+}
+function fmtDay(ts) {
+  try {
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric',
+    }).format(new Date(ts));
+  } catch (e) { return ''; }
+}
+
+async function api(path, body) {
+  var opts = { credentials: 'include' };
+  if (body !== undefined) {
+    opts.method = 'POST';
+    opts.headers = { 'Content-Type': 'application/json' };
+    opts.body = JSON.stringify(body);
+  }
+  var r = await fetch(API + path, opts);
+  var text = await r.text();
+  var data = {};
+  try { data = JSON.parse(text); } catch (e) { data = {}; }
+  if (!r.ok) {
+    var err = new Error((data && data.error) || ('Request failed (HTTP ' + r.status + ')'));
+    err.status = r.status;
+    err.data = data;
+    throw err;
+  }
+  return data;
+}
+function handleLoadError(e) {
+  if (e && e.status === 401) {
+    document.getElementById('authError').classList.remove('hidden');
+  } else {
+    showError('loadError', 'Could not load conversations: ' + (e && e.message ? e.message : e));
+  }
+}
+
+/* ---------- header market cards ---------- */
+function statCard(label, s) {
+  s = s || { sent: 0, queued: 0, failed: 0, replies: 0 };
+  return '<div class="statcard"><div class="mkt">' + esc(label) + '</div><div class="nums">' +
+    '<div><div class="n green">' + s.sent + '</div><div class="k">Sent today</div></div>' +
+    '<div><div class="n">' + s.queued + '</div><div class="k">Queued</div></div>' +
+    '<div><div class="n blue">' + s.replies + '</div><div class="k">Replies</div></div>' +
+    '<div><div class="n red">' + s.failed + '</div><div class="k">Failed</div></div>' +
+    '</div></div>';
+}
+function renderStats() {
+  var el = document.getElementById('statCards');
+  var per = (state.stats && state.stats.perMarket) || {};
+  var html = statCard('All markets — today', state.stats && state.stats.totals);
+  ['indianapolis', 'carolina', 'kansascity', 'cleveland', 'florida'].forEach(function (m) {
+    html += statCard(MARKET_LABELS[m], per[m]);
+  });
+  el.innerHTML = html;
+}
+async function loadStats() {
+  state.stats = await api('?action=stats');
+  renderStats();
+}
+
+/* ---------- left: thread list ---------- */
+function renderChips() {
+  var el = document.getElementById('marketChips');
+  el.innerHTML = MARKETS.map(function (m) {
+    return '<button type="button" class="chip' + (state.market === m.id ? ' active' : '') + '" data-market="' + esc(m.id) + '">' + esc(m.label) + '</button>';
+  }).join('');
+}
+function visibleThreads() {
+  var q = document.getElementById('searchBox').value.trim().toLowerCase();
+  var unreadOnly = document.getElementById('unreadOnly').checked;
+  return state.threads.filter(function (t) {
+    if (unreadOnly && !(t.unread > 0)) return false;
+    if (!q) return true;
+    var hay = ((t.name || '') + ' ' + (t.phone || '') + ' ' + (t.preview || '')).toLowerCase();
+    return hay.indexOf(q) !== -1;
+  });
+}
+function renderThreads() {
+  var el = document.getElementById('threadList');
+  var list = visibleThreads();
+  document.getElementById('threadCount').textContent = list.length + ' conversation' + (list.length === 1 ? '' : 's');
+  if (!state.threads.length) {
+    el.innerHTML = '<div class="empty"><div class="big">📭</div><div>No conversations yet.</div><div class="note">Threads appear here as soon as the first text is sent or received on our own numbers.</div></div>';
+    return;
+  }
+  if (!list.length) {
+    el.innerHTML = '<div class="empty"><div>No conversations match this filter.</div></div>';
+    return;
+  }
+  el.innerHTML = list.map(function (t) {
+    var name = t.name || fmtPhone(t.phone) || t.phone;
+    var arrow = t.lastDir === 'out' ? '↗ ' : (t.lastDir === 'in' ? '↙ ' : '');
+    return '<div class="thread-item' + (state.selectedKey === t.key ? ' active' : '') + '" data-key="' + esc(t.key) + '">' +
+      '<div class="t-top"><span class="t-name">' + esc(name) + '</span><span class="t-time">' + esc(fmtTime(t.lastAt)) + '</span></div>' +
+      '<div class="t-preview">' + esc(arrow + (t.preview || '')) + '</div>' +
+      '<div class="t-meta">' + (t.market ? '<span class="pill">' + esc(MARKET_LABELS[t.market] || t.market) + '</span>' : '') +
+      (t.unread > 0 ? '<span class="unread-badge">' + t.unread + '</span>' : '') + '</div></div>';
+  }).join('');
+}
+async function loadThreads() {
+  var q = state.market ? '?action=threads&market=' + encodeURIComponent(state.market) : '?action=threads';
+  var data = await api(q);
+  state.threads = Array.isArray(data.threads) ? data.threads : [];
+  renderThreads();
+}
+
+/* ---------- center: open thread ---------- */
+function statusTick(m) {
+  if (m.dir === 'in') return '';
+  if (m.status === 'delivered') return '<span>✓✓ Delivered</span>';
+  if (m.status === 'sent') return '<span>✓ Sent</span>';
+  if (m.status === 'failed') return '<span class="st-failed">✗ Failed' + (m.failureReason ? ' — ' + esc(m.failureReason) : '') + '</span>';
+  return '<span>Queued</span>';
+}
+function renderMessages() {
+  var box = document.getElementById('messages');
+  var t = state.selectedThread;
+  if (!t) {
+    box.innerHTML = '<div class="empty"><div class="big">💬</div><div>Pick a conversation on the left to read it here.</div></div>';
+    return;
+  }
+  if (!t.messages || !t.messages.length) {
+    box.innerHTML = '<div class="empty"><div>No messages in this conversation yet.</div></div>';
+    return;
+  }
+  var html = '';
+  var lastDay = '';
+  t.messages.forEach(function (m) {
+    var day = fmtDay(m.at);
+    if (day && day !== lastDay) {
+      html += '<div class="day-sep">' + esc(day) + '</div>';
+      lastDay = day;
+    }
+    html += '<div class="msg ' + (m.dir === 'out' ? 'out' : 'in') + '"><div class="m-body">' + esc(m.body) + '</div>' +
+      '<div class="m-meta"><span>' + esc(fmtTime(m.at)) + '</span>' + statusTick(m) + '</div></div>';
+  });
+  box.innerHTML = html;
+  box.scrollTop = box.scrollHeight;
+}
+function renderContactPanel() {
+  var el = document.getElementById('contactPanel');
+  var t = state.selectedThread;
+  if (!t) {
+    el.innerHTML = '<div class="empty"><div>Select a conversation to see the contact and property details.</div></div>';
+    return;
+  }
+  var msgs = t.messages || [];
+  var first = msgs[0];
+  var last = msgs[msgs.length - 1];
+  function fact(k, v) {
+    var tbd = v == null || v === '';
+    return '<div class="fact"><div class="k">' + esc(k) + '</div><div class="v' + (tbd ? ' tbd' : '') + '">' + esc(tbd ? '—' : v) + '</div></div>';
+  }
+  el.innerHTML =
+    fact('Name', t.name) +
+    fact('Phone', fmtPhone(t.phone)) +
+    fact('Market', t.market ? (MARKET_LABELS[t.market] || t.market) : '') +
+    fact('Property address', t.address1 || t.address) +
+    fact('Messages', String(msgs.length)) +
+    fact('First message', first ? fmtTime(first.at) : '') +
+    fact('Last activity', last ? fmtTime(last.at) : '');
+}
+function renderThreadHead() {
+  var t = state.selectedThread;
+  var title = document.getElementById('threadTitle');
+  var sub = document.getElementById('threadSub');
+  var canSend = !!t;
+  document.getElementById('sendText').disabled = !canSend;
+  document.getElementById('sendBtn').disabled = !canSend;
+  if (!t) {
+    title.textContent = 'No conversation selected';
+    sub.textContent = '';
+    return;
+  }
+  title.textContent = t.name || fmtPhone(t.phone) || t.phone;
+  sub.textContent = fmtPhone(t.phone) + (t.market ? ' · ' + (MARKET_LABELS[t.market] || t.market) : '');
+}
+async function selectThread(key) {
+  state.selectedKey = key;
+  renderThreads();
+  var entry = state.threads.find(function (t) { return t.key === key; });
+  var phone = entry ? entry.phone : key;
+  var data = await api('?action=thread&phone=' + encodeURIComponent(phone));
+  state.selectedThread = data.thread;
+  renderThreadHead();
+  renderMessages();
+  renderContactPanel();
+  // The API marked the thread read — reflect that in the list.
+  var local = state.threads.find(function (t) { return t.key === key; });
+  if (local) local.unread = 0;
+  renderThreads();
+}
+
+async function sendCurrent(ev) {
+  ev.preventDefault();
+  var t = state.selectedThread;
+  if (!t) return;
+  var input = document.getElementById('sendText');
+  var body = input.value.trim();
+  if (!body) return;
+  var btn = document.getElementById('sendBtn');
+  btn.disabled = true;
+  hideError('sendError');
+  try {
+    await api('', { action: 'send', phone: t.phone, body: body, market: t.market || state.market || undefined });
+    input.value = '';
+    await selectThread(state.selectedKey);
+    await loadThreads();
+    await loadStats();
+  } catch (e) {
+    // cc-conversations-api stores the message as 'failed' with the
+    // reason when the send itself throws — show it and reload so the
+    // failed bubble is visible, never silently dropped.
+    showError('sendError', 'Send failed: ' + (e && e.message ? e.message : e));
+    try { await selectThread(state.selectedKey); } catch (e2) { /* keep the error visible */ }
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function refreshAll() {
+  try {
+    document.getElementById('authError').classList.add('hidden');
+    hideError('loadError');
+    await loadStats();
+    await loadThreads();
+    if (state.selectedKey) {
+      var entry = state.threads.find(function (t) { return t.key === state.selectedKey; });
+      if (entry) {
+        var data = await api('?action=thread&phone=' + encodeURIComponent(entry.phone));
+        var before = state.selectedThread ? state.selectedThread.messages.length : 0;
+        state.selectedThread = data.thread;
+        renderThreadHead();
+        renderContactPanel();
+        if (!data.thread.messages || data.thread.messages.length !== before) renderMessages();
+      }
+    }
+  } catch (e) {
+    handleLoadError(e);
+  }
+}
+
+function init() {
+  renderChips();
+  renderStats();
+  document.getElementById('marketChips').addEventListener('click', function (ev) {
+    var chip = ev.target.closest ? ev.target.closest('[data-market]') : null;
+    if (!chip) return;
+    state.market = chip.getAttribute('data-market') || '';
+    renderChips();
+    loadThreads().catch(handleLoadError);
+  });
+  document.getElementById('searchBox').addEventListener('input', renderThreads);
+  document.getElementById('unreadOnly').addEventListener('change', renderThreads);
+  document.getElementById('threadList').addEventListener('click', function (ev) {
+    var item = ev.target.closest ? ev.target.closest('[data-key]') : null;
+    if (!item) return;
+    selectThread(item.getAttribute('data-key')).catch(handleLoadError);
+  });
+  document.getElementById('sendForm').addEventListener('submit', sendCurrent);
+  document.getElementById('sendText').addEventListener('keydown', function (ev) {
+    if (ev.key === 'Enter' && !ev.shiftKey) {
+      ev.preventDefault();
+      document.getElementById('sendForm').requestSubmit();
+    }
+  });
+  document.getElementById('refreshBtn').addEventListener('click', refreshAll);
+  refreshAll();
+  setInterval(refreshAll, 30000);
+}
+
+if (typeof document !== 'undefined' && document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', init);
+} else if (typeof document !== 'undefined') {
+  init();
+}
+</script>
+</body>
+</html>
