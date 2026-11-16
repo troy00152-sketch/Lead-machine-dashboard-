@@ -87,6 +87,17 @@
   .fact .k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
   .fact .v{font-weight:600;word-break:break-word}
   .fact .v.tbd{color:var(--accent2)}
+  /* manual DND section (mirrors the HL DND panel) */
+  .dnd-box{border:1px solid var(--line);border-radius:8px;padding:12px;background:var(--bg2)}
+  .dnd-box h3{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:8px}
+  .dnd-box .pill.sealed{background:rgba(231,76,60,.18);color:#ff8a7a}
+  .dnd-box .pill.partial{background:rgba(255,140,66,.18);color:var(--accent2)}
+  .dnd-state{font-size:13px;color:var(--muted);margin:8px 0 4px}
+  .dnd-row{display:flex;align-items:center;gap:9px;padding:6px 0;font-size:14px;cursor:pointer}
+  .dnd-row input{width:18px;height:18px;accent-color:var(--red);cursor:pointer}
+  .dnd-actions{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+  .btn.danger{background:rgba(231,76,60,.15);border-color:var(--red);color:#ff8a7a}
+  .btn.danger:hover{border-color:#ff8a7a}
   /* notifications dropdown */
   .topbar{position:relative}
   #notifPanel{position:absolute;top:52px;right:16px;z-index:50;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:8px;min-width:280px;max-width:360px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
@@ -198,6 +209,7 @@ var state = {
   threads: [],
   selectedKey: null,
   selectedThread: null,
+  selectedDnd: null,
   stats: null,
   flags: [],
 };
@@ -398,7 +410,55 @@ function renderContactPanel() {
     fact('Property address', t.address1 || t.address) +
     fact('Messages', String(msgs.length)) +
     fact('First message', first ? fmtTime(first.at) : '') +
-    fact('Last activity', last ? fmtTime(last.at) : '');
+    fact('Last activity', last ? fmtTime(last.at) : '') +
+    dndSection();
+}
+/* Manual DND — same panel Troy uses in the HighLevel app: per-channel
+   toggles (Text Messages / Email / Calls & voicemail) plus one-action
+   seal and clear. State comes from the server (cc-dnd) on every
+   thread load; nothing here infers state from a master flag. */
+var DND_CHANNELS = [
+  { id: 'sms', label: 'Text Messages' },
+  { id: 'email', label: 'Email' },
+  { id: 'call', label: 'Calls & voicemail' },
+];
+function dndSection() {
+  var d = state.selectedDnd;
+  if (!d || !d.channels) return '';
+  var ch = d.channels;
+  var pill, line;
+  if (d.allOn) {
+    pill = '<span class="pill sealed">DND — Sealed</span>';
+    line = 'Sealed on every channel. The bot and the workflows will not contact this seller.';
+  } else if (d.anyOn) {
+    var off = DND_CHANNELS.filter(function (c) { return ch[c.id]; }).map(function (c) { return c.label; });
+    pill = '<span class="pill partial">DND — Partial</span>';
+    line = 'Off-limits: ' + off.join(', ') + '.';
+  } else {
+    pill = '<span class="pill">Not on DND</span>';
+    line = 'All channels open.';
+  }
+  var rows = DND_CHANNELS.map(function (c) {
+    return '<label class="dnd-row"><input type="checkbox" data-dnd-channel="' + c.id + '"' +
+      (ch[c.id] ? ' checked' : '') + '> ' + esc(c.label) + '</label>';
+  }).join('');
+  var actions = '';
+  if (!d.allOn) actions += '<button type="button" class="btn small danger" data-dnd-action="all">DNC this contact</button>';
+  if (d.anyOn) actions += '<button type="button" class="btn small" data-dnd-action="none">Remove DND</button>';
+  return '<div class="dnd-box"><h3>🚫 Do Not Contact</h3>' + pill +
+    '<div class="dnd-state">' + esc(line) + '</div>' + rows +
+    (actions ? '<div class="dnd-actions">' + actions + '</div>' : '') +
+    '<div class="dnd-state">Same as the DND panel in HighLevel — takes effect right away.</div></div>';
+}
+async function setDnd(channels) {
+  var t = state.selectedThread;
+  if (!t) return;
+  var data = await api('', { action: 'dnd-set', phone: t.phone, channels: channels });
+  state.selectedDnd = data.dnd || null;
+  renderContactPanel();
+  if (state.selectedDnd && state.selectedDnd.allOn) toast('Contact DNC’d — sealed on every channel.');
+  else if (state.selectedDnd && !state.selectedDnd.anyOn) toast('DND removed — all channels open.');
+  else toast('DND updated.');
 }
 function renderThreadHead() {
   var t = state.selectedThread;
@@ -425,6 +485,7 @@ async function selectThread(key) {
   var phone = entry ? entry.phone : key;
   var data = await api('?action=thread&phone=' + encodeURIComponent(phone));
   state.selectedThread = data.thread;
+  state.selectedDnd = data.dnd || null;
   renderThreadHead();
   renderMessages();
   renderContactPanel();
@@ -631,6 +692,7 @@ async function refreshAll() {
         var data = await api('?action=thread&phone=' + encodeURIComponent(entry.phone));
         var before = state.selectedThread ? state.selectedThread.messages.length : 0;
         state.selectedThread = data.thread;
+        state.selectedDnd = data.dnd || null;
         renderThreadHead();
         renderContactPanel();
         if (!data.thread.messages || data.thread.messages.length !== before) renderMessages();
@@ -679,6 +741,33 @@ function init() {
     api('', { action: 'notification-dismiss', id: id })
       .then(loadNotifications)
       .catch(function (e) { toast('Could not dismiss: ' + (e && e.message ? e.message : e)); });
+  });
+  var contactPanel = document.getElementById('contactPanel');
+  contactPanel.addEventListener('change', function (ev) {
+    var box = ev.target.closest ? ev.target.closest('[data-dnd-channel]') : null;
+    if (!box || !state.selectedDnd || !state.selectedDnd.channels) return;
+    var channels = {
+      sms: state.selectedDnd.channels.sms,
+      email: state.selectedDnd.channels.email,
+      call: state.selectedDnd.channels.call,
+    };
+    channels[box.getAttribute('data-dnd-channel')] = box.checked;
+    setDnd(channels).catch(function (e) {
+      toast('DND update failed: ' + (e && e.message ? e.message : e));
+      renderContactPanel();
+    });
+  });
+  contactPanel.addEventListener('click', function (ev) {
+    var btn = ev.target.closest ? ev.target.closest('[data-dnd-action]') : null;
+    if (!btn) return;
+    var action = btn.getAttribute('data-dnd-action');
+    var channels = action === 'all'
+      ? { sms: true, email: true, call: true }
+      : { sms: false, email: false, call: false };
+    setDnd(channels).catch(function (e) {
+      toast('DND update failed: ' + (e && e.message ? e.message : e));
+      renderContactPanel();
+    });
   });
   refreshAll();
   setInterval(refreshAll, 30000);
