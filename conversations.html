@@ -87,6 +87,16 @@
   .fact .k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
   .fact .v{font-weight:600;word-break:break-word}
   .fact .v.tbd{color:var(--accent2)}
+  /* notifications dropdown */
+  .topbar{position:relative}
+  #notifPanel{position:absolute;top:52px;right:16px;z-index:50;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:8px;min-width:280px;max-width:360px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+  .notif-item{display:flex;gap:8px;align-items:flex-start;padding:8px;border-bottom:1px solid var(--line)}
+  .notif-item:last-child{border-bottom:0}
+  .notif-item .n-body{flex:1;min-width:0}
+  .notif-item .n-name{font-weight:700}
+  .notif-item .n-prev{color:var(--muted);font-size:13px;word-break:break-word}
+  .notif-item .n-time{color:var(--muted2);font-size:11px}
+  .notif-item .n-x{background:none;border:1px solid var(--line);border-radius:6px;color:var(--text);cursor:pointer;padding:2px 8px}
 </style>
 <!-- PWA (v1): manifest, theme, iOS install support, service worker -->
 <link rel="manifest" href="/manifest.webmanifest" />
@@ -97,6 +107,7 @@
 <meta name="apple-mobile-web-app-title" content="Command Center" />
 <link rel="apple-touch-icon" href="/assets/icons/icon-192.png" />
 <script src="/assets/pwa.js" defer></script>
+<script src="https://unpkg.com/@telnyx/webrtc@2/dist/telnyx-rtc.min.js" defer></script>
 </head>
 <body>
 <div class="wrap">
@@ -106,6 +117,8 @@
       <small>Seller texts — our own numbers (Telnyx), mirrored from the HighLevel inbox</small>
     </div>
     <button class="btn small" id="refreshBtn" type="button">↻ Refresh</button>
+    <button class="btn small" id="notifBtn" type="button">🔔 <span id="notifCount"></span></button>
+    <div id="notifPanel" class="hidden"></div>
     <a class="back" href="/index.html">← Back to Dashboard</a>
   </div>
 
@@ -136,6 +149,10 @@
       <div class="pane-head">
         <h2 id="threadTitle">No conversation selected</h2>
         <div class="note" id="threadSub"></div>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+          <button class="btn small" id="callBtn" type="button" disabled>📞 Call</button>
+          <span class="note" id="callStatus"></span>
+        </div>
       </div>
       <div class="messages" id="messages">
         <div class="empty"><div class="big">💬</div><div>Pick a conversation on the left to read it here.</div></div>
@@ -158,6 +175,7 @@
 </div>
 
 <div id="toast"></div>
+<audio id="remoteAudio" autoplay></audio>
 
 <script>
 'use strict';
@@ -172,13 +190,21 @@ var MARKETS = [
 ];
 var MARKET_LABELS = { indianapolis: 'Indianapolis', carolina: 'Carolina', kansascity: 'Kansas City', cleveland: 'Cleveland', florida: 'Florida' };
 
+var CALL_API = '/.netlify/functions/cc-call-api';
+var VOICE_TOKEN_API = '/.netlify/functions/cc-voice-token';
+
 var state = {
   market: '',
   threads: [],
   selectedKey: null,
   selectedThread: null,
   stats: null,
+  flags: [],
 };
+
+var voiceCheckPromise = null;
+var rtcClient = null;
+var callState = { callId: null, active: false, timer: null };
 
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -367,6 +393,7 @@ function renderContactPanel() {
   el.innerHTML =
     fact('Name', t.name) +
     fact('Phone', fmtPhone(t.phone)) +
+    fact('Texting from', t.ourNumber ? fmtPhone(t.ourNumber) : '') +
     fact('Market', t.market ? (MARKET_LABELS[t.market] || t.market) : '') +
     fact('Property address', t.address1 || t.address) +
     fact('Messages', String(msgs.length)) +
@@ -380,13 +407,16 @@ function renderThreadHead() {
   var canSend = !!t;
   document.getElementById('sendText').disabled = !canSend;
   document.getElementById('sendBtn').disabled = !canSend;
+  var callBtn = document.getElementById('callBtn');
+  if (callBtn && !callState.active) callBtn.disabled = !canSend;
   if (!t) {
     title.textContent = 'No conversation selected';
     sub.textContent = '';
     return;
   }
   title.textContent = t.name || fmtPhone(t.phone) || t.phone;
-  sub.textContent = fmtPhone(t.phone) + (t.market ? ' · ' + (MARKET_LABELS[t.market] || t.market) : '');
+  sub.textContent = fmtPhone(t.phone) + (t.market ? ' · ' + (MARKET_LABELS[t.market] || t.market) : '') +
+    (t.ourNumber ? ' · Texting from: ' + fmtPhone(t.ourNumber) : '');
 }
 async function selectThread(key) {
   state.selectedKey = key;
@@ -398,6 +428,12 @@ async function selectThread(key) {
   renderThreadHead();
   renderMessages();
   renderContactPanel();
+  // Learn once whether voice is switched on, so the Call button knows
+  // its state before the first click.
+  checkVoiceConfig().then(function (cfg) {
+    var btn = document.getElementById('callBtn');
+    if (btn) btn.dataset.state = cfg ? 'on' : 'off';
+  });
   // The API marked the thread read — reflect that in the list.
   var local = state.threads.find(function (t) { return t.key === key; });
   if (local) local.unread = 0;
@@ -431,7 +467,159 @@ async function sendCurrent(ev) {
   }
 }
 
+/* ---------- calling (Telnyx WebRTC + cc-call-api) ---------- */
+function checkVoiceConfig() {
+  if (!voiceCheckPromise) {
+    voiceCheckPromise = fetch(VOICE_TOKEN_API, { credentials: 'include' })
+      .then(function (r) {
+        return r.text().then(function (text) {
+          var data = {};
+          try { data = JSON.parse(text); } catch (e) { data = {}; }
+          if (!r.ok || !data || data.configured === false || !data.token) return null;
+          return data;
+        });
+      })
+      .catch(function () { return null; });
+  }
+  return voiceCheckPromise;
+}
+async function callApi(path, body) {
+  var opts = { credentials: 'include' };
+  if (body !== undefined) {
+    opts.method = 'POST';
+    opts.headers = { 'Content-Type': 'application/json' };
+    opts.body = JSON.stringify(body);
+  }
+  var r = await fetch(CALL_API + path, opts);
+  var data = {};
+  try { data = await r.json(); } catch (e) { data = {}; }
+  if (!r.ok) {
+    var err = new Error((data && data.error) || ('Request failed (HTTP ' + r.status + ')'));
+    err.status = r.status;
+    err.data = data;
+    throw err;
+  }
+  return data;
+}
+function setCallStatus(txt) {
+  document.getElementById('callStatus').textContent = txt || '';
+}
+async function ensureRtc(cfg) {
+  if (rtcClient) return rtcClient;
+  if (typeof TelnyxRTC === 'undefined') throw new Error('Calling library failed to load — refresh and try again.');
+  var client = new TelnyxRTC({ login_token: cfg.token });
+  client.on('telnyx.notification', function (note) {
+    // The server rings this browser with the agent leg — answer it so
+    // the bridge to the seller lands.
+    try {
+      var call = note && note.call;
+      if (call && note.type === 'callReceived') {
+        var audio = document.getElementById('remoteAudio');
+        if (audio && call.remoteStream) audio.srcObject = call.remoteStream;
+        if (typeof call.answer === 'function') call.answer();
+      }
+    } catch (e) { /* best-effort */ }
+  });
+  await client.connect();
+  rtcClient = client;
+  return client;
+}
+function stopCallPolling() {
+  if (callState.timer) { clearInterval(callState.timer); callState.timer = null; }
+}
+function finishCallUI(statusText) {
+  stopCallPolling();
+  callState.active = false;
+  callState.callId = null;
+  var btn = document.getElementById('callBtn');
+  btn.textContent = '📞 Call';
+  btn.disabled = !state.selectedThread;
+  setCallStatus(statusText || '');
+}
+function pollCallStatus() {
+  stopCallPolling();
+  callState.timer = setInterval(async function () {
+    if (!callState.callId) { stopCallPolling(); return; }
+    try {
+      var data = await callApi('?action=status&callId=' + encodeURIComponent(callState.callId));
+      var st = data.status || '';
+      if (st === 'bridged') setCallStatus('Connected');
+      else if (st === 'machine') { finishCallUI('Machine answered'); toast('A machine answered — call ended.'); }
+      else if (st === 'ended') { finishCallUI('Ended'); }
+      else setCallStatus('Calling…');
+    } catch (e) {
+      finishCallUI('Ended');
+    }
+  }, 3000);
+}
+async function endCurrentCall() {
+  var id = callState.callId;
+  finishCallUI('Ended');
+  if (id) {
+    try { await callApi('', { action: 'hangup', callId: id }); } catch (e) { /* already gone */ }
+  }
+}
+async function onCallClick() {
+  if (callState.active) { await endCurrentCall(); return; }
+  var t = state.selectedThread;
+  if (!t) return;
+  var btn = document.getElementById('callBtn');
+  var cfg = await checkVoiceConfig();
+  if (!cfg) {
+    btn.dataset.state = 'off';
+    toast("Voice isn't switched on yet — calling turns on when the Telnyx voice app is set up.");
+    return;
+  }
+  btn.disabled = true;
+  setCallStatus('Calling…');
+  try {
+    await ensureRtc(cfg);
+    var data = await callApi('', { action: 'start', phone: t.phone, market: t.market || undefined });
+    callState.callId = data.callId;
+    callState.active = true;
+    btn.disabled = false;
+    btn.textContent = 'End call';
+    setCallStatus('Calling…');
+    pollCallStatus();
+  } catch (e) {
+    btn.disabled = false;
+    setCallStatus('');
+    toast('Call failed: ' + (e && e.message ? e.message : e));
+  }
+}
+
+/* ---------- notifications (watchdog flags) ---------- */
+function renderNotifPanel() {
+  var panel = document.getElementById('notifPanel');
+  var flags = state.flags || [];
+  if (!flags.length) {
+    panel.innerHTML = '<div class="empty">No open alerts.</div>';
+    return;
+  }
+  panel.innerHTML = flags.map(function (f) {
+    var who = f.name || (f.phone ? fmtPhone(f.phone) : '') || 'Alert';
+    var prev = f.preview || f.message || f.reason || '';
+    var when = f.at || f.createdAt || f.updatedAt || 0;
+    return '<div class="notif-item"><div class="n-body"><div class="n-name">' + esc(who) + '</div>' +
+      (prev ? '<div class="n-prev">' + esc(prev) + '</div>' : '') +
+      (when ? '<div class="n-time">' + esc(fmtTime(when)) + '</div>' : '') +
+      '</div><button type="button" class="n-x" data-dismiss="' + esc(f.id) + '" title="Dismiss">✕</button></div>';
+  }).join('');
+}
+async function loadNotifications() {
+  try {
+    var data = await api('?action=notifications');
+    state.flags = Array.isArray(data.flags) ? data.flags : [];
+    var n = typeof data.openCount === 'number' ? data.openCount : state.flags.length;
+    var c = document.getElementById('notifCount');
+    c.textContent = n ? String(n) : '';
+    c.classList.toggle('hidden', !n);
+    renderNotifPanel();
+  } catch (e) { /* fail-soft: the badge never breaks the page */ }
+}
+
 async function refreshAll() {
+  loadNotifications();
   try {
     document.getElementById('authError').classList.add('hidden');
     hideError('loadError');
@@ -478,6 +666,20 @@ function init() {
     }
   });
   document.getElementById('refreshBtn').addEventListener('click', refreshAll);
+  document.getElementById('callBtn').addEventListener('click', function () {
+    onCallClick().catch(function (e) { toast('Call failed: ' + (e && e.message ? e.message : e)); });
+  });
+  document.getElementById('notifBtn').addEventListener('click', function () {
+    document.getElementById('notifPanel').classList.toggle('hidden');
+  });
+  document.getElementById('notifPanel').addEventListener('click', function (ev) {
+    var btn = ev.target.closest ? ev.target.closest('[data-dismiss]') : null;
+    if (!btn) return;
+    var id = btn.getAttribute('data-dismiss');
+    api('', { action: 'notification-dismiss', id: id })
+      .then(loadNotifications)
+      .catch(function (e) { toast('Could not dismiss: ' + (e && e.message ? e.message : e)); });
+  });
   refreshAll();
   setInterval(refreshAll, 30000);
 }
