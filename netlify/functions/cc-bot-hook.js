@@ -22,9 +22,15 @@
 //      with (contact + HL-shaped customFields {id, value} for pricing,
 //      tags, full thread history, the triggering inbound) and hand it to
 //      the bot through a configurable transport:
+//        CC_BOT_LOCAL=1 + runner configured -> the REAL vendored bot
+//                                    brain runs in-process against the
+//                                    standalone stores (cc-bot-runner
+//                                    -> cc-client). Wins over the URL
+//                                    transport; sends/tags/seals happen
+//                                    inside the bot via cc-client.
 //        CC_BOT_WEBHOOK_URL set   -> POST the payload there; apply the
 //                                    returned actions (contract below).
-//        CC_BOT_WEBHOOK_URL unset -> LOG-ONLY mode: the decision
+//        neither                  -> LOG-ONLY mode: the decision
 //                                    'bot-skipped: no transport configured'
 //                                    is recorded on the thread and NOTHING
 //                                    is sent. We never invent a reply.
@@ -267,15 +273,30 @@ function normalizeActions(resp) {
 // Send a bot reply: appended to the thread exactly like the other sends
 // (stored 'queued' with the real Telnyx id/from; the webhook advances
 // the status; a send failure marks the stored message 'failed').
+// FROM-NUMBER: the reply goes out on the number the seller texted (the
+// latest inbound's destination) whenever we know it — the conversation
+// stays on one number, exactly like HL. The market round-robin pool is
+// only the fallback when no inbound destination is on the thread.
 async function sendReply(cs, thread, enrollment, body) {
   const market = (enrollment && enrollment.market) || thread.market || undefined;
+  let replyFrom = '';
+  for (let i = thread.messages.length - 1; i >= 0; i--) {
+    const m = thread.messages[i];
+    if (m && m.dir === 'in' && m.to) {
+      try {
+        const candidate = lib.toE164(m.to);
+        if (candidate && candidate !== thread.phone) replyFrom = candidate;
+      } catch (e) { /* unusable destination — fall back to the pool */ }
+      break;
+    }
+  }
   const msg = {
     id: 'pending-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
     dir: 'out',
     body: String(body),
     status: 'queued',
     at: Date.now(),
-    from: '',
+    from: replyFrom,
     to: thread.phone,
     via: 'bot',
   };
@@ -283,9 +304,9 @@ async function sendReply(cs, thread, enrollment, body) {
   thread.updatedAt = Date.now();
   await saveThread(cs, thread);
   try {
-    const sent = await sendSmsImpl()({ to: thread.phone, body: msg.body, market });
+    const sent = await sendSmsImpl()({ to: thread.phone, body: msg.body, market, from: replyFrom || undefined });
     msg.id = sent.id || msg.id;
-    msg.from = sent.from || '';
+    msg.from = sent.from || replyFrom || '';
     await saveThread(cs, thread);
     return { ok: true, messageId: msg.id };
   } catch (e) {
@@ -334,6 +355,47 @@ async function processInbound(key, event) {
   }
 
   const payload = assembleBotInput(key, thread, enrollment, inbound);
+
+  // 2.5) LOCAL BOT (the standalone port): CC_BOT_LOCAL=1 + a configured
+  // runner (bot secret + LLM key) runs the real vendored bot brain
+  // in-process via cc-bot-runner -> cc-client against the standalone
+  // stores. The bot sends/tags/seals through cc-client itself, so the
+  // adapter only records the outcome. Local mode wins over the HTTP
+  // transport: it can never point at a HighLevel-backed deployment.
+  const localWanted = /^(1|true)$/i.test(String(process.env.CC_BOT_LOCAL || ''));
+  if (localWanted) {
+    let runner = null;
+    try {
+      runner = require('./cc-bot-runner');
+    } catch (e) {
+      runner = null;
+    }
+    if (runner && runner.configured()) {
+      const result = await runner.runBot({
+        contactId: key,
+        conversationId: key,
+        messageId: inbound.id || null,
+        body: String(inbound.body || ''),
+        type: 'SMS',
+        toNumber: inbound.to || null,
+      });
+      // The bot wrote to the same stores through cc-client — reload
+      // before logging so we never overwrite its messages with the
+      // stale in-memory copy.
+      const fresh = await loadThread(cs, key);
+      logBotEvent(fresh, {
+        type: 'bot-local',
+        decision: 'bot-local: ' + result.outcome,
+        inbound: String(inbound.body || ''),
+      });
+      fresh.updatedAt = Date.now();
+      await saveThread(cs, fresh);
+      return { handled: true, action: 'bot-local', outcome: result.outcome, botCalled: true };
+    }
+    // Wanted but not configured: fall through — the log-only branch
+    // below records why nothing ran.
+  }
+
   const url = process.env.CC_BOT_WEBHOOK_URL;
 
   // 3) LOG-ONLY mode — no transport configured. Record and stay silent.

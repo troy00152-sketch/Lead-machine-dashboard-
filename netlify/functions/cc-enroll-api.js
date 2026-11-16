@@ -2,6 +2,9 @@
 // lm_auth-gated enrollment API for the Phase 3 workflow engine — used by
 // future list imports to feed the mirrored HL market workflows.
 //
+//   POST {action:'pricing', phone, pricing:{arv, mao, lao},
+//         listingVerified?}                      stamp pricing onto an
+//                                                existing enrollment
 //   POST {action:'enroll', contact:{...}}        enroll one contact
 //   POST {action:'enroll', contacts:[{...},...]} enroll a batch
 //   POST [{...}, {...}]                          a bare array also works
@@ -20,6 +23,7 @@
 const crypto = require('crypto');
 
 const engine = require('./cc-workflow-engine');
+const ccAuth = require('./cc-auth');
 
 const COOKIE_NAME = 'lm_auth';
 const JSON_HEADERS = {
@@ -65,7 +69,12 @@ function isAdmin(event) {
 exports.handler = async (event) => {
   try {
     if (event.httpMethod === 'OPTIONS') return json(200, {});
-    if (!isAdmin(event)) return unauth();
+    if (!isAdmin(event)) {
+      // Irish's calling-only session is signed in but restricted —
+      // 403, not 401 (cc-auth two-tier split).
+      if (ccAuth.isIrish(event)) return json(403, { error: 'Calling access only — enrollments are not part of the calling login.' });
+      return unauth();
+    }
 
     const params = event.queryStringParameters || {};
     let body = null;
@@ -76,6 +85,19 @@ exports.handler = async (event) => {
 
     if (action === 'counts') {
       return ok(await engine.counts(event));
+    }
+
+    if (action === 'pricing') {
+      const phone = body && body.phone;
+      if (!phone) return bad('Missing phone.');
+      const r = await engine.stampPricing(
+        phone,
+        (body && body.pricing) || {},
+        event,
+        { listingVerified: !!(body && body.listingVerified) }
+      );
+      if (!r.ok) return bad(r.reason);
+      return ok(r);
     }
 
     if (action === 'enroll') {

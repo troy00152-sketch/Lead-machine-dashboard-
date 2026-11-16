@@ -38,6 +38,15 @@ exports.handler = async (event) => {
   }
   try {
     const summary = await engine.tick(Date.now(), event);
+    // Watchdog (unanswered-inbound flags) runs after every successful
+    // tick, FAIL-SOFT: a watchdog failure is reported on the summary as
+    // watchdogError and must never fail the tick response.
+    try {
+      const watchdog = require('./cc-watchdog');
+      summary.watchdog = await watchdog.scan({ now: Date.now() }, event);
+    } catch (e) {
+      summary.watchdogError = String((e && e.message) || e);
+    }
     return json(200, { ok: true, ...summary });
   } catch (e) {
     return json(500, { error: String((e && e.message) || e) });
