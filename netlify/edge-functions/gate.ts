@@ -6,6 +6,12 @@
 export const config = { path: "/*" };
 
 const COOKIE_NAME = "lm_auth";
+// Irish's calling-only login (Nov 16, 2026, Troy): a separate cookie
+// minted when the login attempt matches IRISH_ACCESS_CODE. It opens
+// ONLY the dialer surface (page + its two functions); everything else
+// answers 403. The full multi-user/roles layer is later — this is a
+// two-tier split: full / irish-calling-only.
+const IRISH_COOKIE_NAME = "lm_irish";
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
 
 const te = new TextEncoder();
@@ -49,6 +55,51 @@ async function isAuthed(req: Request, secret: string): Promise<boolean> {
   if (!Number.isFinite(exp) || exp * 1000 < Date.now()) return false;
   const expected = await hmacHex(expiry, secret);
   return safeEqual(sig, expected);
+}
+
+// Irish tier: cookie is "<expiry>.irish.<sig>" with
+// sig = HMAC("<expiry>.irish") — the same construction the functions
+// verify in cc-auth.js.
+async function isIrishAuthed(req: Request, secret: string): Promise<boolean> {
+  const cookie = getCookie(req, IRISH_COOKIE_NAME);
+  if (!cookie) return false;
+  const parts = cookie.split(".");
+  if (parts.length !== 3 || parts[1] !== "irish") return false;
+  const [expiry, , sig] = parts;
+  if (!expiry || !sig) return false;
+  const exp = parseInt(expiry, 10);
+  if (!Number.isFinite(exp) || exp * 1000 < Date.now()) return false;
+  const expected = await hmacHex(expiry + ".irish", secret);
+  return safeEqual(sig, expected);
+}
+
+// What Irish's session may reach: the dialer page, its static assets,
+// and the two calling functions. Everything else is 403.
+function irishAllowed(pathname: string): boolean {
+  return (
+    pathname === "/dialer.html" ||
+    pathname === "/manifest.webmanifest" ||
+    pathname.startsWith("/assets/") ||
+    pathname === "/.netlify/functions/cc-dialer-api" ||
+    pathname === "/.netlify/functions/cc-voice-token"
+  );
+}
+
+function irishDeniedPage(): Response {
+  const html = `<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Calling access only</title>
+<style>body{background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}.card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:36px 32px;max-width:380px;text-align:center}a{color:#ff6b1a}</style></head><body>
+<div class="card"><h2 style="margin-bottom:10px">Calling access only</h2><p style="color:#8b949e;font-size:14px">This login can only open the dialer.</p><p style="margin-top:16px"><a href="/dialer.html">Go to the dialer →</a></p></div></body></html>`;
+  return new Response(html, {
+    status: 403,
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+      "x-robots-tag": "noindex, nofollow",
+      "cache-control": "no-store",
+    },
+  });
 }
 
 function loginPage(error: boolean): Response {
@@ -123,6 +174,22 @@ export default async function handler(req: Request, context: any) {
         },
       });
     }
+    // Irish's calling-only code: mints the restricted cookie and lands
+    // her on the dialer. Fail closed when IRISH_ACCESS_CODE is unset.
+    const irishCode = getEnv("IRISH_ACCESS_CODE");
+    if (irishCode && attempt && safeEqual(attempt, irishCode)) {
+      const expiry = String(Math.floor(Date.now() / 1000) + COOKIE_MAX_AGE);
+      const sig = await hmacHex(expiry + ".irish", secret);
+      return new Response(null, {
+        status: 303,
+        headers: {
+          location: "/dialer.html",
+          "set-cookie": `${IRISH_COOKIE_NAME}=${expiry}.irish.${sig}; Path=/; Max-Age=${COOKIE_MAX_AGE}; HttpOnly; Secure; SameSite=None`,
+          "x-robots-tag": "noindex, nofollow",
+          "cache-control": "no-store",
+        },
+      });
+    }
     return loginPage(true);
   }
 
@@ -159,6 +226,18 @@ export default async function handler(req: Request, context: any) {
     const res = await context.next();
     res.headers.set("x-robots-tag", "noindex, nofollow");
     return res;
+  }
+
+  // Irish's calling-only session: the dialer surface only, and only
+  // while IRISH_ACCESS_CODE stays configured (unsetting it retires
+  // her access even before her cookie expires).
+  if (getEnv("IRISH_ACCESS_CODE") && (await isIrishAuthed(req, secret))) {
+    if (irishAllowed(url.pathname)) {
+      const res = await context.next();
+      res.headers.set("x-robots-tag", "noindex, nofollow");
+      return res;
+    }
+    return irishDeniedPage();
   }
 
   return loginPage(false);
