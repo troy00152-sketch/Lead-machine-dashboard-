@@ -82,12 +82,10 @@ const TITLE_COMPANIES = {
     phone: '336-793-1953',
     emailOrders: 'orders@innovativeclosingsolutions.com',
   },
-  jacksonville: {
-    market: 'Jacksonville, FL',
-    company: 'Title Company of Florida',
-    phone: '904-938-4853',
-    emailOrders: 'orders@titlecompanyofflorida.com',
-  },
+  // Jacksonville: NO default — Title Company of Florida removed 2026-11-14
+  // on Troy's order (wholesale only over $400K sales price; never use).
+  // Mockingbird Title + Marina Title emailed 2026-11-14; first clean yes
+  // becomes the default. Until then Jacksonville deals resolve to TBD.
   dayton: {
     market: 'Dayton, OH',
     company: 'CLOSED Title',

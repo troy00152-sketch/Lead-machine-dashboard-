@@ -50,7 +50,6 @@ const COOKIE_NAME = 'lm_auth';
 // (source of truth: ~/workspace/title-companies/defaults.md) plus Troy
 // himself as the only permitted test recipient. Any other To is rejected.
 const ALLOWED_RECIPIENTS = new Set([
-  'orders@titlecompanyofflorida.com', // Jacksonville — Title Company of Florida
   'contracts@hockerlaw.com',          // Indianapolis — Hocker Title
   'info@ohiorealtitle.com',           // Cleveland — Ohio Real Title Agency
   'orders@mycleartitle.com',          // Kansas City — Clear Title Nationwide
