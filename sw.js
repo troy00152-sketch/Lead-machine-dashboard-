@@ -11,7 +11,7 @@
  *
  * Bump CACHE_NAME on any strategy change: activate deletes every old cache.
  */
-var CACHE_NAME = 'leadmachine-pwa-v4';
+var CACHE_NAME = 'leadmachine-pwa-v5';
 
 var PRECACHE_URLS = [
   '/manifest.webmanifest',
