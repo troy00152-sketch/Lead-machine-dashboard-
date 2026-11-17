@@ -2642,7 +2642,7 @@ function viewLinksHtml(addr, lat, lng){
   if(!earth) return '';
   const sv = streetViewLinkUrl(addr, lat, lng);
   return '<span class="img-view-actions">'
-    + '<a class="img-view-link" href="' + earth + '" target="_blank" rel="noopener">🌐 3D View ↗</a>'
+    + '<a class="img-view-link" href="' + earth + '" target="_blank" rel="noopener">🌐 Google Earth 3D ↗</a>'
     + (sv ? '<a class="img-view-link secondary" href="' + sv + '" target="_blank" rel="noopener">📍 Street View ↗</a>' : '')
     + '</span>';
 }
@@ -5004,6 +5004,7 @@ function compDetailViewData(){
     address: (compDetailData && compDetailData.matchedAddress) || addr,
     city: prop ? (prop.city || '') : '', state: prop ? (prop.state || '') : '', zip: prop ? (prop.zipCode || prop.zip || '') : '',
     county: prop ? (prop.county || '') : '',
+    latitude: prop ? prop.latitude : null, longitude: prop ? prop.longitude : null,
     apn: prop ? (prop.apn || '') : '',
     legalDescription: prop ? (prop.legalDescription || '') : '',
     beds: prop ? prop.beds : null, baths: prop ? prop.baths : null,
