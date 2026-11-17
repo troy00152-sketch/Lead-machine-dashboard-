@@ -86,6 +86,41 @@
     return out;
   }
 
+  // ---- Google Earth / Street View deep links (Nov 16, Troy) ----
+  // Same builders as the lead modal / subject card in index.html, kept
+  // local so this module stays self-contained: coords win with the tight
+  // 55d/50y framing (one house fills the frame); the full address is the
+  // fallback; with neither, no link renders — never a dead link.
+  function pdvHasCoords(lat, lng) {
+    return lat != null && lng != null && lat !== '' && lng !== ''
+      && isFinite(Number(lat)) && isFinite(Number(lng));
+  }
+  function pdvFullAddr(v) {
+    var addr2 = ([v.city, v.state].filter(Boolean).join(', ') + (v.zip ? ' ' + v.zip : '')).trim();
+    return ((v.address || '') + (addr2 ? ', ' + addr2 : '')).trim();
+  }
+  function viewLinksHtml(v) {
+    v = v || {};
+    var full = pdvFullAddr(v);
+    var earth = '';
+    if (pdvHasCoords(v.latitude, v.longitude)) {
+      earth = 'https://earth.google.com/web/@' + Number(v.latitude) + ',' + Number(v.longitude) + ',80a,55d,50y,0h,60t,0r';
+    } else if (full) {
+      earth = 'https://earth.google.com/web/search/' + encodeURIComponent(full);
+    }
+    if (!earth) return '';
+    var sv = '';
+    if (pdvHasCoords(v.latitude, v.longitude)) {
+      sv = 'https://www.google.com/maps?q=&layer=c&cbll=' + Number(v.latitude) + ',' + Number(v.longitude);
+    } else if (full) {
+      sv = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(full);
+    }
+    return '<span class="img-view-actions" style="display:flex;margin:0 0 12px">'
+      + '<a class="img-view-link" href="' + esc(earth) + '" target="_blank" rel="noopener">🌐 Google Earth 3D ↗</a>'
+      + (sv ? '<a class="img-view-link secondary" href="' + esc(sv) + '" target="_blank" rel="noopener">📍 Street View ↗</a>' : '')
+      + '</span>';
+  }
+
   // ---- Header ----
   function headerHtml(v) {
     var facts = [];
@@ -111,6 +146,7 @@
       + '<div style="color:var(--muted);font-size:13px;margin:2px 0 8px">' + esc(addr2) + (v.county ? ' · ' + esc(v.county) : '') + '</div>'
       + '<div style="font-size:13px;margin-bottom:8px">' + esc(facts.join(' · ') || '—') + '</div>'
       + carouselHtml(v.photos || [], v.zillowUrl || '')
+      + viewLinksHtml(v)
       + '<div style="font-size:13px;line-height:1.6;margin-bottom:8px">'
       + '<div>👤 <strong>' + esc(v.owner || '—') + '</strong></div>'
       + (phones || '<div>📞 —</div>')
@@ -302,6 +338,7 @@
   var api = {
     SECTIONS: SECTIONS.map(function (s) { return s[0]; }),
     carouselHtml: carouselHtml,
+    viewLinksHtml: viewLinksHtml,
     headerHtml: headerHtml,
     detailViewHtml: detailViewHtml,
     yearsOwned: yearsOwned,

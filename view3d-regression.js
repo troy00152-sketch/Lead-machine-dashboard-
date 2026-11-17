@@ -99,7 +99,7 @@ check('leadFullAddress joins street/city/state/zip',
 check('leadFullAddress skips blanks',
   leadFullAddress && leadFullAddress({ address: '1 Main St', state: 'NC' }) === '1 Main St, NC');
 const rendered = viewLinksHtml ? viewLinksHtml(addr, 35.05, -78.87) : '';
-check('viewLinksHtml renders the 3D View button', rendered.indexOf('🌐 3D View ↗') > 0);
+check('viewLinksHtml renders the Google Earth 3D button', rendered.indexOf('🌐 Google Earth 3D ↗') > 0);
 check('viewLinksHtml renders the Street View link', rendered.indexOf('📍 Street View ↗') > 0);
 check('viewLinksHtml links open in a new tab', (rendered.match(/target="_blank"/g) || []).length === 2);
 check('viewLinksHtml earth href is pre-targeted at the coords',
@@ -113,6 +113,27 @@ check('lead modal: links render beside the Zillow listing-photos link',
 check('comps subject card: links render under the photo, bound to the subject record',
   scripts.indexOf("photoHtml\n    + viewLinksHtml(showAddr, prop.latitude, prop.longitude)") > 0);
 check('button CSS present (.img-view-link)', html.indexOf('.img-view-link{') > 0);
+
+/* --- property detail view (lower Comps detail section, Nov 16, Troy) ---
+ * The detail panel under the comps form was the one place the Earth /
+ * Street View buttons were missing. The module carries its own builders
+ * (self-contained IIFE); index.html must hand it the subject coords. */
+const PDV = require(path.join(__dirname, 'assets', 'property-detail-view.js'));
+const pdvSrc = fs.readFileSync(path.join(__dirname, 'assets', 'property-detail-view.js'), 'utf8');
+const dv = PDV.viewLinksHtml({ address: '236 N Mount St', city: 'Indianapolis', state: 'IN', zip: '46222', latitude: 39.77, longitude: -86.17 });
+check('detail view: renders the Google Earth 3D button', dv.indexOf('🌐 Google Earth 3D ↗') > 0);
+check('detail view: earth href pre-targeted at coords, tight framing',
+  dv.indexOf('https://earth.google.com/web/@39.77,-86.17,80a,55d,50y,') > 0);
+check('detail view: renders the Street View link', dv.indexOf('📍 Street View ↗') > 0 && dv.indexOf('cbll=39.77,-86.17') > 0);
+check('detail view: address-only falls back to encoded search URL',
+  PDV.viewLinksHtml({ address: addr }).indexOf('https://earth.google.com/web/search/' + encodeURIComponent(addr)) > 0);
+check('detail view: no address and no coords -> renders nothing', PDV.viewLinksHtml({}) === '');
+check('detail view: header wires the links under the carousel',
+  pdvSrc.indexOf("carouselHtml(v.photos || [], v.zillowUrl || '')\n      + viewLinksHtml(v)") > 0);
+check('comps detail data carries the subject coords to the view',
+  scripts.indexOf('latitude: prop ? prop.latitude : null, longitude: prop ? prop.longitude : null') > 0);
+const dvFull = PDV.detailViewHtml({ address: '236 N Mount St', city: 'Indianapolis', state: 'IN', zip: '46222', latitude: 39.77, longitude: -86.17, photos: [], ownerPhones: [] });
+check('detail view: full render includes the Earth button', dvFull.indexOf('🌐 Google Earth 3D ↗') > 0);
 
 /* --- $0 rule --- */
 check('builders reference no API key / no netlify function',
