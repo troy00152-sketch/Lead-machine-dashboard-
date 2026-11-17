@@ -32,7 +32,7 @@ const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
 const scripts = [...html.matchAll(/<script(?![^>]*src=)[^>]*>([\s\S]*?)<\/script>/g)].map(m => m[1]).join('\n');
 
 /* --- extract + eval the builder functions verbatim from index.html --- */
-const names = ['geoHasCoords', 'earthViewUrl', 'streetViewLinkUrl', 'leadFullAddress', 'viewLinksHtml'];
+const names = ['geoHasCoords', 'earthViewUrl', 'streetViewLinkUrl', 'leadFullAddress', 'viewLinksHtml', 'countyAerialUrl'];
 const fns = {};
 for (const n of names) {
   const i = scripts.indexOf('function ' + n + '(');
@@ -42,13 +42,13 @@ for (const n of names) {
   do { if (scripts[j] === '{') depth++; else if (scripts[j] === '}') depth--; j++; } while (depth > 0 && j < scripts.length);
   fns[n] = scripts.slice(i, j);
 }
-check('all 5 builder functions found in index.html', names.every(n => fns[n]));
+check('all builder functions found in index.html', names.every(n => fns[n]));
 const ctx = {};
 if (names.every(n => fns[n])) {
   const factory = new Function(names.map(n => fns[n]).join('\n') + '\nreturn { ' + names.join(', ') + ' };');
   Object.assign(ctx, factory());
 }
-const { earthViewUrl, streetViewLinkUrl, leadFullAddress, viewLinksHtml } = ctx;
+const { earthViewUrl, streetViewLinkUrl, leadFullAddress, viewLinksHtml, countyAerialUrl } = ctx;
 
 /* --- coords preference --- */
 check('earth: coords preferred over address',
@@ -134,6 +134,32 @@ check('comps detail data carries the subject coords to the view',
   scripts.indexOf('latitude: prop ? prop.latitude : null, longitude: prop ? prop.longitude : null') > 0);
 const dvFull = PDV.detailViewHtml({ address: '236 N Mount St', city: 'Indianapolis', state: 'IN', zip: '46222', latitude: 39.77, longitude: -86.17, photos: [], ownerPhones: [] });
 check('detail view: full render includes the Earth button', dvFull.indexOf('🌐 Google Earth 3D ↗') > 0);
+
+/* --- county aerial (Nov 16, Troy: command center does everything) ---
+ * Marion County's own leaf-off spring ImageServer, free/keyless. Gated
+ * to the county bbox; the bbox math is pinned against the hand-computed
+ * Web Mercator center for 3051 Eastern Ave (39.812248, -86.117855). */
+const caUrl = countyAerialUrl ? countyAerialUrl(39.812248, -86.117855) : '';
+check('county: Marion coords build the Indy ImageServer export URL',
+  caUrl.indexOf('https://gis.indy.gov/server/rest/services/Imagery/IMAGE2026_SPRING_WebMercator/ImageServer/exportImage?bbox=') === 0);
+const caBbox = (caUrl.split('bbox=')[1] || '').split('&')[0].split(',').map(Number);
+check('county: bbox is 140 projected meters square', caBbox.length === 4 && Math.abs((caBbox[2] - caBbox[0]) - 140) < 0.3 && Math.abs((caBbox[3] - caBbox[1]) - 140) < 0.3);
+check('county: bbox centered on the property (Web Mercator)',
+  caBbox.length === 4 && Math.abs((caBbox[0] + caBbox[2]) / 2 - (-9586595.8)) < 1 && Math.abs((caBbox[1] + caBbox[3]) / 2 - 4838696.1) < 1,
+  caUrl);
+check('county: string coords accepted', countyAerialUrl && countyAerialUrl('39.812248', '-86.117855') === caUrl);
+check('county: outside Marion (Charlotte NC) -> no URL', countyAerialUrl && countyAerialUrl(35.227, -80.843) === '');
+check('county: outside Marion (Kansas City) -> no URL', countyAerialUrl && countyAerialUrl(39.099, -94.578) === '');
+check('county: no coords -> no URL', countyAerialUrl && countyAerialUrl(null, null) === '');
+check('county: bad coords -> no URL', countyAerialUrl && countyAerialUrl('abc', 'def') === '');
+check('county: lead modal seg tab renders only when a URL exists',
+  scripts.indexOf('data-mode="county"') > 0 && scripts.indexOf("countyAerialUrl(l.latitude, l.longitude) ? `<div class=\"img-tab") > 0);
+check('county: renderImgFrame serves the county mode + satellite fallback',
+  scripts.indexOf("imgMode==='county'") > 0 && scripts.indexOf("imgMode==='satellite' || imgMode==='county'") > 0);
+check('county: comps subject gallery includes the aerial',
+  scripts.indexOf("galleryPhotos.push({ src: subjCounty, label: 'County aerial — spring, leaves off' })") > 0);
+check('county: comps detail photos include the aerial',
+  scripts.indexOf("photos.push({src: detCounty, label: 'County aerial — spring, leaves off'})") > 0);
 
 /* --- $0 rule --- */
 check('builders reference no API key / no netlify function',

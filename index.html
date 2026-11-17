@@ -2646,6 +2646,29 @@ function viewLinksHtml(addr, lat, lng){
     + (sv ? '<a class="img-view-link secondary" href="' + sv + '" target="_blank" rel="noopener">📍 Street View ↗</a>' : '')
     + '</span>';
 }
+/* ============ COUNTY AERIAL (Nov 16, Troy: "I want the command center
+ * to do everything") ============
+ * Marion County flies its own leaf-off spring aerials and serves them
+ * free from the city ArcGIS ImageServer — no key, no credits. Spring =
+ * leaves off the trees, so a tree-covered house that Google shows as a
+ * green blur comes out sharp (proven on 3051 Eastern Ave, Nov 16: the
+ * county shot shows every roof on the street; Google's is tree shadow).
+ * Coords -> Web Mercator bbox -> exportImage. Gated to the Marion County
+ * bbox (inline numbers — the regression harness evals this function
+ * standalone): outside it, no URL and every caller hides the view —
+ * never a wrong-county image, never a dead tab. */
+function countyAerialUrl(lat, lng){
+  if(!geoHasCoords(lat, lng)) return '';
+  const la = Number(lat), ln = Number(lng);
+  if(la < 39.63 || la > 39.94 || ln < -86.34 || ln > -85.93) return '';
+  const R = 6378137;
+  const x = R * ln * Math.PI / 180;
+  const y = R * Math.log(Math.tan(Math.PI / 4 + la * Math.PI / 360));
+  const h = 70;
+  const bbox = [x - h, y - h, x + h, y + h].map(v => v.toFixed(1)).join(',');
+  return 'https://gis.indy.gov/server/rest/services/Imagery/IMAGE2026_SPRING_WebMercator/ImageServer/exportImage?bbox='
+    + bbox + '&bboxSR=3857&imageSR=3857&size=1000,1000&format=jpg&f=image';
+}
 function streetViewUrl(l, size){
   return 'https://maps.googleapis.com/maps/api/streetview?size='+(size||'800x500')
     +'&location='+leadGeoLoc(l)+'&key='+GOOGLE_MAPS_KEY;
@@ -2680,11 +2703,12 @@ function zillowUrl(l){
 function renderImgFrame(l){
   const frame = document.getElementById('imgFrame'); if(!frame) return;
   let url = prImgUrl(l, imgMode), label;
-  if(imgMode==='satellite'){ label = 'Satellite / aerial view'; }
+  if(imgMode==='county'){ label = 'County aerial — spring, leaves off (Marion County)'; url = countyAerialUrl(l.latitude, l.longitude); }
+  else if(imgMode==='satellite'){ label = 'Satellite / aerial view'; }
   else if(imgMode==='map'){ label = 'Map view'; }
   else { label = 'Street view — house exterior'; }
   if(!url){
-    if(imgMode==='satellite') url = satelliteUrl(l);
+    if(imgMode==='satellite' || imgMode==='county') url = satelliteUrl(l);
     else if(imgMode==='map') url = mapUrl(l);
     else url = streetViewUrl(l);
   }
@@ -2698,9 +2722,11 @@ function renderImgFrame(l){
     const tStreet = prImgUrl(l,'street') || streetViewUrl(l);
     const tSat = prImgUrl(l,'satellite') || satelliteUrl(l);
     const tMap = prImgUrl(l,'map') || mapUrl(l);
+    const tCounty = countyAerialUrl(l.latitude, l.longitude);
     gal.innerHTML = '<div class="img-thumbs">'
       +'<img src="'+tStreet+'" class="'+(imgMode==='street'?'active':'')+'" onclick="setImgMode(\'street\')" title="Street view">'
       +'<img src="'+tSat+'" class="'+(imgMode==='satellite'?'active':'')+'" onclick="setImgMode(\'satellite\')" title="Satellite view">'
+      +(tCounty ? '<img src="'+tCounty+'" class="'+(imgMode==='county'?'active':'')+'" onclick="setImgMode(\'county\')" title="County aerial — spring, leaves off">' : '')
       +'<img src="'+tMap+'" class="'+(imgMode==='map'?'active':'')+'" onclick="setImgMode(\'map\')" title="Map view">'
       +'</div>'
       +'<a class="img-listing-link" href="'+zillowUrl(l)+'" target="_blank" rel="noopener">🏠 Listing photos — inside the house, when it was listed ↗</a>'
@@ -2982,6 +3008,7 @@ function openLead(id){
       <div class="img-seg">
         <div class="img-tab${imgMode==='street'?' active':''}" data-mode="street" onclick="setImgMode('street')">🏠 Street</div>
         <div class="img-tab${imgMode==='satellite'?' active':''}" data-mode="satellite" onclick="setImgMode('satellite')">🛰️ Satellite</div>
+        ${countyAerialUrl(l.latitude, l.longitude) ? `<div class="img-tab${imgMode==='county'?' active':''}" data-mode="county" onclick="setImgMode('county')">🌳 County</div>` : ''}
         <div class="img-tab${imgMode==='map'?' active':''}" data-mode="map" onclick="setImgMode('map')">🗺️ Map</div>
       </div>
     </div>
@@ -4964,6 +4991,8 @@ function compDetailPhotos(prop, addr){
   const photos = [];
   const photoUrl = prop && (prop.photoUrl || prop.photo_url);
   if(photoUrl) photos.push({src: photoUrl, label: 'Property photo'});
+  const detCounty = countyAerialUrl(prop && prop.latitude, prop && prop.longitude);
+  if(detCounty) photos.push({src: detCounty, label: 'County aerial — spring, leaves off'});
   if(typeof GOOGLE_MAPS_KEY !== 'undefined' && GOOGLE_MAPS_KEY){
     const svLoc = (prop && prop.latitude != null && prop.longitude != null) ? prop.latitude + ',' + prop.longitude : encodeURIComponent(addr || '');
     const labels = ['Street View — front', 'Street View — right', 'Street View — back', 'Street View — left'];
@@ -6109,6 +6138,8 @@ function renderCompSubjectCard(prop, typedAddr, matchedAddr, unavailable, linked
   // angles. Click any image opens a full-screen lightbox.
   const galleryPhotos = [];
   if (photoUrl) galleryPhotos.push({ src: photoUrl, label: 'Property photo' });
+  const subjCounty = countyAerialUrl(prop.latitude, prop.longitude);
+  if (subjCounty) galleryPhotos.push({ src: subjCounty, label: 'County aerial — spring, leaves off' });
   if (typeof GOOGLE_MAPS_KEY !== 'undefined' && GOOGLE_MAPS_KEY) {
     const svLoc = (prop.latitude != null && prop.longitude != null)
       ? prop.latitude + ',' + prop.longitude
