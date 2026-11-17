@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Workflows — Command Center</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#050a14">
+<link rel="apple-touch-icon" href="/assets/icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<script src="/assets/pwa.js" defer></script>
+<style>
+  :root{ --bg:#0d1117; --panel:#161e2b; --panel2:#1c2637; --line:#26314a; --text:#e8eef7; --muted:#93a4bd; --accent:#ff6b1a; --good:#37d67a; --warn:#ffb02e; --bad:#ff5d5d; --info:#4da3ff; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; background:var(--bg); color:var(--text); }
+  .wrap{ max-width:1100px; margin:0 auto; padding:18px 16px 60px; }
+  .topbar{ display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
+  .topbar h1{ font-size:22px; margin:0; }
+  .topbar h1 span{ color:var(--accent); }
+  .back{ margin-left:auto; color:var(--text); text-decoration:none; border:1px solid var(--line); background:var(--panel); padding:7px 12px; border-radius:999px; font-size:13px; }
+  .back:hover{ border-color:var(--accent); }
+  .card{ background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:14px; margin-bottom:14px; }
+  .muted{ color:var(--muted); }
+  .small{ font-size:12px; }
+  button{ font:inherit; cursor:pointer; border-radius:9px; border:1px solid var(--line); background:var(--panel2); color:var(--text); padding:8px 13px; font-size:13px; }
+  button:hover{ border-color:var(--accent); }
+  button.primary{ background:var(--accent); border-color:var(--accent); color:#14100c; font-weight:700; }
+  button.good{ background:#123524; border-color:#1f5c3d; color:#a9f0c6; }
+  button.warnb{ background:#3a2c10; border-color:#6b5316; color:#ffd88a; }
+  button:disabled{ opacity:.55; cursor:default; }
+  input,select,textarea{ font:inherit; background:#0d1524; color:var(--text); border:1px solid var(--line); border-radius:9px; padding:8px 10px; }
+  input:focus,select:focus,textarea:focus{ outline:none; border-color:var(--accent); }
+  textarea{ width:100%; min-height:74px; resize:vertical; line-height:1.45; }
+  label{ display:block; font-size:12px; color:var(--muted); margin:0 0 5px; }
+  .banner{ display:none; border-radius:12px; padding:12px 14px; margin-bottom:14px; font-size:14px; }
+  .banner.err{ display:block; background:#3a1420; border:1px solid #6e2438; color:#ffb3c1; }
+  .banner.warn{ display:block; background:#3a2c10; border:1px solid #6b5316; color:#ffd88a; }
+  .pill{ display:inline-block; padding:2px 9px; border-radius:999px; font-size:11px; font-weight:700; letter-spacing:.02em; }
+  .pill.pub{ background:#123524; color:#7fe6a8; border:1px solid #1f5c3d; }
+  .pill.draft{ background:#3a2c10; color:#ffd88a; border:1px solid #6b5316; }
+  .chip{ display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; background:#0d1524; border:1px solid var(--line); color:var(--muted); }
+  .wf-row{ display:flex; gap:12px; align-items:center; flex-wrap:wrap; padding:12px 4px; border-bottom:1px solid var(--line); }
+  .wf-row:last-child{ border-bottom:none; }
+  .wf-row .grow{ flex:1; min-width:220px; }
+  .wf-name{ font-weight:700; font-size:15px; }
+  .rowbtns{ display:flex; gap:8px; flex-wrap:wrap; }
+  /* ---- builder flow ---- */
+  .flow{ max-width:760px; margin:0 auto; }
+  .step{ background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:14px 16px; }
+  .step.locked{ border-color:#4a3a14; background:#171a20; }
+  .step-h{ display:flex; align-items:center; gap:9px; font-weight:700; font-size:15px; margin-bottom:6px; flex-wrap:wrap; }
+  .step-h .kind{ font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; }
+  .lockbadge{ margin-left:auto; font-size:11px; font-weight:700; color:#ffd88a; background:#3a2c10; border:1px solid #6b5316; border-radius:999px; padding:2px 9px; }
+  .locknote{ font-size:12px; color:#ffd88a; margin-top:8px; }
+  .arrow{ text-align:center; color:var(--muted); font-size:18px; line-height:1; padding:5px 0; }
+  .grid2{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  @media (max-width:640px){ .grid2{ grid-template-columns:1fr; } }
+  .days{ display:flex; gap:6px; flex-wrap:wrap; }
+  .days label{ display:flex; align-items:center; gap:5px; margin:0; font-size:13px; color:var(--text); background:#0d1524; border:1px solid var(--line); border-radius:999px; padding:5px 10px; cursor:pointer; }
+  .days input{ accent-color:var(--accent); margin:0; }
+  .timerow{ display:flex; gap:10px; align-items:end; flex-wrap:wrap; margin-top:10px; }
+  .timerow > div{ flex:1; min-width:120px; }
+  .ft-block{ margin-bottom:14px; }
+  .ft-block:last-child{ margin-bottom:0; }
+  .ft-head{ display:flex; align-items:center; gap:8px; margin-bottom:5px; }
+  .ft-head .pname{ font-weight:700; }
+  .ft-head .cnt{ margin-left:auto; font-size:11px; color:var(--muted); }
+  .actions{ display:flex; gap:8px; flex-wrap:wrap; margin:14px 0; }
+  #toast{ position:fixed; left:50%; bottom:22px; transform:translateX(-50%) translateY(20px); background:#0f1725; border:1px solid var(--accent); color:var(--text); padding:10px 16px; border-radius:999px; font-size:13px; opacity:0; pointer-events:none; transition:all .25s; z-index:60; max-width:92vw; text-align:center; }
+  #toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+  .hidden{ display:none !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <h1>🔀 <span>Workflows</span></h1>
+    <a class="back" href="/index.html">← Dashboard</a>
+  </div>
+
+  <div id="authError" class="banner"></div>
+  <div id="loadError" class="banner"></div>
+
+  <!-- ============ LIST VIEW ============ -->
+  <div id="listView">
+    <div class="card">
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <div class="grow" style="flex:1;min-width:220px">
+          <div style="font-weight:700;font-size:16px">Market workflows</div>
+          <div class="muted small">The engine runs the <b>Published</b> workflows. Drafts never send — saving is always safe; nothing goes out until you publish.</div>
+        </div>
+        <button class="primary" id="newBtn">➕ New workflow</button>
+      </div>
+      <div id="newForm" class="hidden" style="margin-top:14px;border-top:1px solid var(--line);padding-top:14px">
+        <div class="grid2">
+          <div><label>Workflow name</label><input id="newName" type="text" placeholder="e.g. Greenville sms" style="width:100%"></div>
+          <div><label>Trigger tag (fires when this tag is added to a contact)</label><input id="newTag" type="text" placeholder="e.g. greenville sms" style="width:100%"></div>
+        </div>
+        <div class="actions">
+          <button class="primary" id="createBtn">Create draft</button>
+          <button id="cancelNewBtn">Cancel</button>
+          <span class="muted small">Starts as a Draft with the standard flow and empty first texts.</span>
+        </div>
+      </div>
+      <div id="wfList" style="margin-top:6px"><div class="muted">Loading…</div></div>
+    </div>
+  </div>
+
+  <!-- ============ BUILDER VIEW ============ -->
+  <div id="builderView" class="hidden">
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+      <button id="backToList">← All workflows</button>
+      <span id="bStatus"></span>
+      <span id="bSource" class="muted small"></span>
+    </div>
+    <div class="actions">
+      <button class="primary" id="saveDraftBtn">💾 Save draft</button>
+      <button class="good" id="savePublishBtn">💾 Save &amp; publish</button>
+      <button id="togglePubBtn"></button>
+      <button id="dupBtn">⧉ Duplicate</button>
+    </div>
+    <div class="flow" id="flow"></div>
+    <div class="actions">
+      <button class="primary" id="saveDraftBtn2">💾 Save draft</button>
+      <button class="good" id="savePublishBtn2">💾 Save &amp; publish</button>
+    </div>
+    <div class="muted small" style="max-width:760px;margin:0 auto">Placeholders in first texts: <span class="chip">{{first_name}}</span> <span class="chip">{{address1}}</span> <span class="chip">{{city}}</span> — filled from the contact at send time. Locked steps are compliance guards and can't be removed or edited.</div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const PATHS = ['A','B','C','D','E'];
+const DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+let workflows = [];
+let current = null; // effective definition open in the builder
+
+function esc(s){
+  return String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+let toastTimer = null;
+function showToast(msg){
+  const t = $('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 3200);
+}
+async function api(path, opts){
+  const res = await fetch('/.netlify/functions/' + path, Object.assign({ credentials:'include' }, opts || {}));
+  let data = null;
+  try { data = await res.json(); } catch(e) {}
+  if (!res.ok){
+    const err = new Error((data && data.error) || ('Request failed (' + res.status + ')'));
+    err.status = res.status; err.data = data;
+    throw err;
+  }
+  return data;
+}
+function post(body){
+  return api('cc-workflows-api', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(body) });
+}
+function handleErr(e){
+  if (e.status === 401){
+    $('authError').className = 'banner err';
+    $('authError').textContent = '⚠️ Not signed in — open the dashboard, sign in, then come back.';
+  } else if (e.status === 403){
+    $('authError').className = 'banner err';
+    $('authError').textContent = '⚠️ ' + e.message;
+  } else {
+    showToast('⚠️ ' + e.message);
+  }
+}
+
+/* ================= LIST ================= */
+function statusPill(w){
+  return w.status === 'draft'
+    ? '<span class="pill draft">DRAFT</span>'
+    : '<span class="pill pub">PUBLISHED</span>';
+}
+function winSummary(w){
+  const win = w.window || {};
+  return esc((win.days || []).join(' ')) + ' · ' + esc(win.start || '') + '–' + esc(win.end || '');
+}
+function renderList(){
+  const box = $('wfList');
+  if (!workflows.length){
+    box.innerHTML = '<div class="muted">No workflows yet.</div>';
+    return;
+  }
+  box.innerHTML = workflows.map((w) => `
+    <div class="wf-row">
+      <div class="grow">
+        <div class="wf-name">${esc(w.name)} ${statusPill(w)}</div>
+        <div class="muted small" style="margin-top:3px">
+          Trigger tag <span class="chip">${esc(w.tag)}</span>
+          · drip ${esc(w.dripPerDay)}/day · ${winSummary(w)}
+          ${w.source === 'stored' ? '· <span style="color:var(--info)">customized</span>' : ''}
+        </div>
+      </div>
+      <div class="rowbtns">
+        <button onclick="openBuilder('${esc(w.id)}')">✏️ Open builder</button>
+        ${w.status === 'draft'
+          ? `<button class="good" onclick="togglePublish('${esc(w.id)}','published')">Publish</button>`
+          : `<button class="warnb" onclick="togglePublish('${esc(w.id)}','draft')">Unpublish</button>`}
+        <button onclick="duplicateWorkflow('${esc(w.id)}')">⧉ Duplicate</button>
+      </div>
+    </div>`).join('');
+}
+async function loadList(){
+  try {
+    const data = await api('cc-workflows-api?action=list');
+    workflows = data.workflows || [];
+    renderList();
+  } catch(e){ handleErr(e); }
+}
+async function togglePublish(id, to){
+  try {
+    const data = await post({ action: to === 'published' ? 'publish' : 'unpublish', id });
+    showToast(to === 'published' ? '✅ Published — the engine will run it.' : '📝 Unpublished — back to draft, sends stopped.');
+    if (current && current.id === id){ current = data.workflow; renderBuilderHead(); renderFlow(); }
+    await loadList();
+  } catch(e){ handleErr(e); }
+}
+async function duplicateWorkflow(id){
+  try {
+    const data = await post({ action:'duplicate', id });
+    showToast('⧉ Duplicated as a draft: ' + data.workflow.name);
+    await loadList();
+    openBuilder(data.workflow.id);
+  } catch(e){ handleErr(e); }
+}
+
+/* ================= BUILDER ================= */
+function windowEditor(prefix, w){
+  const win = w || {};
+  const days = (win.days || []).map((d) => esc(d));
+  return `
+    <div class="days" id="${prefix}Days">
+      ${DAYS.map((d) => `<label><input type="checkbox" value="${d}" ${days.includes(d) ? 'checked' : ''}> ${d}</label>`).join('')}
+    </div>
+    <div class="timerow">
+      <div><label>Send from</label><input type="time" id="${prefix}Start" value="${esc(win.start || '11:00')}" style="width:100%"></div>
+      <div><label>Send until</label><input type="time" id="${prefix}End" value="${esc(win.end || '17:00')}" style="width:100%"></div>
+      <div><label>Timezone</label><input type="text" value="${esc(win.timezone || 'America/New_York')}" disabled style="width:100%"></div>
+    </div>`;
+}
+function collectWindow(prefix, base){
+  const days = Array.from(document.querySelectorAll('#' + prefix + 'Days input:checked')).map((i) => i.value);
+  return {
+    timezone: (base && base.timezone) || 'America/New_York',
+    days,
+    start: $(prefix + 'Start').value,
+    end: $(prefix + 'End').value,
+  };
+}
+function stepShell(icon, kind, title, body, locked, lockNote){
+  return `
+    <div class="step ${locked ? 'locked' : ''}">
+      <div class="step-h">${icon} <span>${esc(title)}</span> <span class="kind">${esc(kind)}</span>${locked ? '<span class="lockbadge">🔒 LOCKED</span>' : ''}</div>
+      <div>${body}</div>
+      ${locked && lockNote ? `<div class="locknote">🔒 ${esc(lockNote)}</div>` : ''}
+    </div>`;
+}
+function arrow(){ return '<div class="arrow">↓</div>'; }
+
+function renderBuilderHead(){
+  $('bStatus').innerHTML = statusPill(current);
+  $('bSource').textContent = 'id: ' + current.id + (current.source === 'stored' ? ' · saved copy (overrides the built-in default)' : ' · built-in default');
+  $('togglePubBtn').textContent = current.status === 'draft' ? '🚀 Publish' : '📝 Unpublish';
+  $('togglePubBtn').className = current.status === 'draft' ? 'good' : 'warnb';
+}
+function renderFlow(){
+  const w = current;
+  const gateTags = (w.activeLeadTags || []).map((t) => `<span class="chip">${esc(t)}</span>`).join(' ');
+  const guardPaths = ((w.badNumberGuard && w.badNumberGuard.appliesToPaths) || PATHS).join(', ');
+  const users = (w.assign && w.assign.users) || [];
+  const splitTxt = w.split && w.split.paths
+    ? Object.entries(w.split.paths).map(([k, v]) => k + ' ' + v + '%').join(' · ')
+    : 'A 20% · B 20% · C 20% · D 20% · E 20%';
+  const steps = [];
+
+  steps.push(stepShell('🏷️', 'Trigger', 'Contact tag added', `
+    <label>Trigger tag — the workflow fires when this tag is added to a contact</label>
+    <input id="fTag" type="text" value="${esc(w.tag)}" style="width:100%">
+    <div style="margin-top:10px"><label>Workflow name</label>
+    <input id="fName" type="text" value="${esc(w.name)}" style="width:100%"></div>`));
+
+  steps.push(stepShell('📇', 'Action', 'Create opportunity', `
+    <div class="muted small">Pipeline <b style="color:var(--text)">${esc(w.pipeline || 'Lead')}</b> · Stage <b style="color:var(--text)">${esc(w.stage || 'New Lead')}</b> · Source <b style="color:var(--text)">${esc(w.opportunitySource || '')}</b> — created by the bot/appointment flow when a seller engages.</div>`));
+
+  steps.push(stepShell('💧', 'Drip', 'Daily drip limit', `
+    <label>Max new enrollments texted per day</label>
+    <input id="fDrip" type="number" min="1" max="5000" value="${esc(w.dripPerDay)}" style="width:140px">
+    <div class="muted small" style="margin-top:6px">Sends then go out one per minute inside the send window below.</div>`));
+
+  steps.push(stepShell('⏰', 'Wait', 'Wait — send window', windowEditor('win', w.window)));
+
+  steps.push(stepShell('⚙️', 'Settings', 'Workflow settings window', `
+    ${windowEditor('set', w.settingsWindow || w.window)}
+    <div class="muted small" style="margin-top:6px">Mirrors the HighLevel workflow Settings time window. Both windows are checked — keep them in step.</div>`));
+
+  steps.push(stepShell('🔀', 'If / Else', 'Is Active lead?', `
+    <div class="muted small">The contact must carry at least one of these tags or the workflow ends for them (no send):</div>
+    <div style="margin-top:7px">${gateTags}</div>`, true,
+    'Compliance guard — always on. A lead that went cold or was flagged bad-number must never be texted by this workflow.'));
+
+  steps.push(stepShell('👥', 'Action', 'Assign (round-robin)', `
+    <div class="muted small">${users.length
+      ? 'Round-robin across: ' + users.map((u) => esc(u.name)).join(', ')
+      : 'Round-robin assignment from the HighLevel workflow (standalone: the enrollment records the market; assignment happens when the seller engages).'}</div>`));
+
+  steps.push(stepShell('🎲', 'Split', 'Random split A–E', `
+    <div class="muted small">Each enrollment is randomly assigned one path: ${esc(splitTxt)}. The path picks which first text they get.</div>`));
+
+  steps.push(stepShell('🛡️', 'Guard', 'Bad-number guard (paths ' + guardPaths + ')', `
+    <div class="muted small">If the contact carries the <span class="chip">${esc((w.badNumberGuard && w.badNumberGuard.tag) || 'bad-number')}</span> tag, the workflow ends — no text is sent.</div>`, true,
+    'Compliance guard — always on. Numbers that failed as unreachable/landline are permanently excluded.'));
+
+  steps.push(stepShell('🚫', 'Guard', 'Do Not Contact (DND)', `
+    <div class="muted small">Contacts on DND (the <span class="chip">dnc</span> tag, or DND set from Conversations) are ended before any send — the engine and the bot both honor it on every message.</div>`, true,
+    'Compliance guard — always on. An opt-out is final.'));
+
+  const ftBody = PATHS.map((p) => `
+    <div class="ft-block">
+      <div class="ft-head"><span class="pname">Path ${p}</span><span class="muted small">first text</span><span class="cnt" id="cnt-${p}"></span></div>
+      <textarea id="ft-${p}" data-path="${p}">${esc((w.firstTexts || {})[p] || '')}</textarea>
+    </div>`).join('');
+  steps.push(stepShell('💬', 'Send SMS', 'First texts — one per path', ftBody));
+
+  $('flow').innerHTML = steps.join(arrow());
+  PATHS.forEach((p) => {
+    const ta = $('ft-' + p);
+    const upd = () => { $('cnt-' + p).textContent = ta.value.length + ' chars'; };
+    ta.addEventListener('input', upd);
+    upd();
+  });
+}
+function collectEdits(){
+  const firstTexts = {};
+  PATHS.forEach((p) => { firstTexts[p] = $('ft-' + p).value; });
+  return Object.assign({}, current, {
+    name: $('fName').value,
+    tag: $('fTag').value,
+    dripPerDay: Number($('fDrip').value),
+    window: collectWindow('win', current.window),
+    settingsWindow: collectWindow('set', current.settingsWindow),
+    firstTexts,
+  });
+}
+async function saveAs(status){
+  const btns = ['saveDraftBtn','savePublishBtn','saveDraftBtn2','savePublishBtn2'].map($);
+  btns.forEach((b) => { if (b) b.disabled = true; });
+  try {
+    const payload = Object.assign(collectEdits(), { status });
+    const data = await post({ action:'save', workflow: payload });
+    current = data.workflow;
+    renderBuilderHead();
+    renderFlow();
+    showToast(status === 'draft' ? '💾 Saved as draft — nothing will send.' : '🚀 Saved & published — live now.');
+    await loadList();
+  } catch(e){ handleErr(e); }
+  btns.forEach((b) => { if (b) b.disabled = false; });
+}
+async function openBuilder(id){
+  try {
+    const data = await api('cc-workflows-api?action=get&id=' + encodeURIComponent(id));
+    current = data.workflow;
+    $('listView').classList.add('hidden');
+    $('builderView').classList.remove('hidden');
+    renderBuilderHead();
+    renderFlow();
+    window.scrollTo(0, 0);
+  } catch(e){ handleErr(e); }
+}
+function closeBuilder(){
+  current = null;
+  $('builderView').classList.add('hidden');
+  $('listView').classList.remove('hidden');
+}
+
+/* ================= wiring ================= */
+$('newBtn').addEventListener('click', () => { $('newForm').classList.toggle('hidden'); $('newName').focus(); });
+$('cancelNewBtn').addEventListener('click', () => $('newForm').classList.add('hidden'));
+$('createBtn').addEventListener('click', async () => {
+  const name = $('newName').value.trim();
+  const tag = $('newTag').value.trim();
+  if (!name || !tag){ showToast('Give the workflow a name and a trigger tag first.'); return; }
+  try {
+    const data = await post({ action:'create', name, tag });
+    $('newForm').classList.add('hidden');
+    $('newName').value = ''; $('newTag').value = '';
+    showToast('➕ Created as a draft: ' + data.workflow.name);
+    await loadList();
+    openBuilder(data.workflow.id);
+  } catch(e){ handleErr(e); }
+});
+$('backToList').addEventListener('click', closeBuilder);
+$('saveDraftBtn').addEventListener('click', () => saveAs('draft'));
+$('savePublishBtn').addEventListener('click', () => saveAs('published'));
+$('saveDraftBtn2').addEventListener('click', () => saveAs('draft'));
+$('savePublishBtn2').addEventListener('click', () => saveAs('published'));
+$('togglePubBtn').addEventListener('click', () => { if (current) togglePublish(current.id, current.status === 'draft' ? 'published' : 'draft'); });
+$('dupBtn').addEventListener('click', () => { if (current) duplicateWorkflow(current.id); });
+
+loadList();
+</script>
+</body>
+</html>
