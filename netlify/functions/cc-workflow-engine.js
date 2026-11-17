@@ -54,6 +54,15 @@ try {
 
 const lib = require('./telnyx-lib');
 const cfg = require('./cc-workflows-config');
+// Workflow definitions resolve through cc-workflows-store: builder
+// edits stored in Blobs override the static seeds above, sanitized
+// so the locked steps (bad-number guard, active-lead gate) always
+// survive. A workflow whose effective status is 'draft' never
+// enrolls and never sends. Resolution FAILS CLOSED: if the stored
+// definitions cannot be read, enroll/tick throw rather than fall
+// back to the seeds — a transient read failure must never resurrect
+// a workflow the operator turned off.
+const wfStore = require('./cc-workflows-store');
 
 const ENROLL_STORE = 'cc-enrollments';
 const CONV_STORE = 'cc-conversations';
@@ -233,15 +242,24 @@ async function enroll(contact, event) {
   const lt = lowerTags(tags);
 
   // Market: explicit market id wins; otherwise resolve from the tags.
+  // Resolution runs over the EFFECTIVE definitions (stored builder
+  // overrides win over the static seeds).
+  const eff = await wfStore.loadEffective(event);
   let workflow = null;
-  if (c.market) workflow = cfg.getWorkflow(String(c.market).toLowerCase());
+  if (c.market) workflow = eff.map[String(c.market).toLowerCase()] || null;
   if (!workflow) {
     for (const t of tags) {
-      workflow = cfg.workflowByTag(t);
+      workflow = wfStore.workflowByTagFrom(eff.map, t);
       if (workflow) break;
     }
   }
   if (!workflow) return { ok: false, reason: 'no market workflow matched (no market, no trigger tag)' };
+
+  // Draft safety: a draft workflow never enrolls (HL fires nothing
+  // for a draft workflow either).
+  if (workflow.status === 'draft') {
+    return { ok: false, reason: 'workflow "' + workflow.id + '" is a draft (not published)' };
+  }
 
   // Trigger: the contact must carry the market's trigger tag (HL fires
   // on "Contact Tag Added" for exactly this tag).
@@ -393,9 +411,18 @@ async function tick(now, event) {
   const counter = await loadCounter(es, ts);
   const results = [];
 
-  for (const workflow of Object.values(cfg.WORKFLOWS)) {
+  const eff = await wfStore.loadEffective(event);
+  for (const workflow of eff.list) {
     const market = workflow.id;
     const res = { market, action: 'idle' };
+
+    // Draft safety: a draft workflow never sends, even for contacts
+    // enrolled before it was unpublished — they stay queued.
+    if (workflow.status === 'draft') {
+      res.action = 'draft';
+      results.push(res);
+      continue;
+    }
 
     if (!windowOpen(workflow.window, ts)) {
       res.action = 'window-closed';
@@ -458,7 +485,7 @@ async function tick(now, event) {
       continue;
     }
 
-    const body = cfg.renderFirstText(market, rec.path, {
+    const body = wfStore.renderFirstTextFrom(workflow, rec.path, {
       firstName: rec.firstName,
       address1: rec.address1,
       city: rec.city,

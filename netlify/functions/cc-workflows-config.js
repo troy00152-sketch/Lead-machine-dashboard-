@@ -191,4 +191,6 @@ function renderFirstText(workflowId, path, contact) {
   return tpl.replace(/\{\{(first_name|address1|city)\}\}/g, (m, k) => String(vals[k] || ''));
 }
 
-module.exports = { WORKFLOWS, WAIT_WINDOW, ACTIVE_LEAD_TAGS, getWorkflow, workflowByTag, renderFirstText };
+// `market` is exported for cc-workflows-store.js: the workflow builder
+// builds NEW workflow definitions from the same shared structure.
+module.exports = { WORKFLOWS, WAIT_WINDOW, ACTIVE_LEAD_TAGS, getWorkflow, workflowByTag, renderFirstText, market };
