@@ -98,6 +98,18 @@
   .dnd-actions{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
   .btn.danger{background:rgba(231,76,60,.15);border-color:var(--red);color:#ff8a7a}
   .btn.danger:hover{border-color:#ff8a7a}
+  /* grok assist box (mirrors the DND box) */
+  .grok-box{border:1px solid var(--line);border-radius:8px;padding:12px;background:var(--bg2)}
+  .grok-box h3{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:8px}
+  .grok-actions{display:flex;gap:8px;flex-wrap:wrap}
+  .grok-result{margin-top:10px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:14px;white-space:pre-wrap;word-break:break-word}
+  .grok-note{font-size:13px;color:var(--muted);margin-top:8px}
+  /* gemini assist box (mirrors the grok box) */
+  .gemini-box{border:1px solid var(--line);border-radius:8px;padding:12px;background:var(--bg2)}
+  .gemini-box h3{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:8px}
+  .gemini-actions{display:flex;gap:8px;flex-wrap:wrap}
+  .gemini-result{margin-top:10px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:14px;white-space:pre-wrap;word-break:break-word}
+  .gemini-note{font-size:13px;color:var(--muted);margin-top:8px}
   /* notifications dropdown */
   .topbar{position:relative}
   #notifPanel{position:absolute;top:52px;right:16px;z-index:50;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:8px;min-width:280px;max-width:360px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
@@ -203,6 +215,8 @@ var MARKET_LABELS = { indianapolis: 'Indianapolis', carolina: 'Carolina', kansas
 
 var CALL_API = '/.netlify/functions/cc-call-api';
 var VOICE_TOKEN_API = '/.netlify/functions/cc-voice-token';
+var GROK_API = '/.netlify/functions/grok-assist';
+var GEMINI_API = '/.netlify/functions/gemini-assist';
 
 var state = {
   market: '',
@@ -210,6 +224,8 @@ var state = {
   selectedKey: null,
   selectedThread: null,
   selectedDnd: null,
+  grok: { busy: false, status: null, text: '' },
+  gemini: { busy: false, status: null, text: '' },
   stats: null,
   flags: [],
 };
@@ -411,7 +427,9 @@ function renderContactPanel() {
     fact('Messages', String(msgs.length)) +
     fact('First message', first ? fmtTime(first.at) : '') +
     fact('Last activity', last ? fmtTime(last.at) : '') +
-    dndSection();
+    dndSection() +
+    grokSection() +
+    geminiSection();
 }
 /* Manual DND — same panel Troy uses in the HighLevel app: per-channel
    toggles (Text Messages / Email / Calls & voicemail) plus one-action
@@ -460,6 +478,114 @@ async function setDnd(channels) {
   else if (state.selectedDnd && !state.selectedDnd.anyOn) toast('DND removed — all channels open.');
   else toast('DND updated.');
 }
+/* Grok assist — summarize this thread or draft a follow-up for Troy's
+   review. Draft only: the function never sends anything; results land in
+   a read-only panel. With no XAI key or no xAI credit the panel shows
+   one calm dormant line instead of an error. */
+function grokSection() {
+  var g = state.grok;
+  var busy = g.busy ? ' disabled' : '';
+  var panel = '';
+  if (g.status === 'ok' && g.text) {
+    panel = '<div class="grok-result">' + esc(g.text) + '</div>';
+  } else if (g.status === 'dormant') {
+    panel = '<div class="grok-note">Grok isn\u2019t funded yet — add the API key / credits in the xAI console and this wakes up on its own.</div>';
+  } else if (g.status === 'error' && g.text) {
+    panel = '<div class="grok-note">' + esc(g.text) + '</div>';
+  } else if (g.busy) {
+    panel = '<div class="grok-note">Grok is thinking\u2026</div>';
+  }
+  return '<div class="grok-box"><h3>\u{1F916} Grok assist</h3>' +
+    '<div class="grok-actions">' +
+    '<button type="button" class="btn small" data-grok-action="summarize"' + busy + '>Summarize thread</button>' +
+    '<button type="button" class="btn small" data-grok-action="draft"' + busy + '>Draft follow-up</button>' +
+    '</div>' + panel +
+    '<div class="grok-note">Drafts only — nothing sends from here. You review it, you send it.</div></div>';
+}
+function threadText() {
+  var t = state.selectedThread;
+  if (!t) return '';
+  return (t.messages || []).map(function (m) {
+    return (m.dir === 'out' ? 'Us' : 'Seller') + ': ' + (m.body || '');
+  }).join('\n');
+}
+async function runGrok(action) {
+  var text = threadText();
+  if (!text) { toast('No messages in this thread yet.'); return; }
+  state.grok = { busy: true, status: null, text: '' };
+  renderContactPanel();
+  try {
+    var r = await fetch(GROK_API, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: action, text: text }),
+    });
+    var data = {};
+    try { data = await r.json(); } catch (e) { data = {}; }
+    if (data.status === 'ok') {
+      state.grok = { busy: false, status: 'ok', text: data.result || '' };
+    } else if (data.status === 'not_configured' || data.status === 'no_credit') {
+      state.grok = { busy: false, status: 'dormant', text: '' };
+    } else {
+      state.grok = { busy: false, status: 'error', text: data.error || 'Grok request failed — try again in a moment.' };
+    }
+  } catch (e) {
+    state.grok = { busy: false, status: 'error', text: 'Grok request failed — try again in a moment.' };
+  }
+  renderContactPanel();
+}
+/* Gemini assist — same shape as Grok assist: summarize this thread or
+   draft a follow-up for Troy's review. Draft only: the function never
+   sends anything; results land in a read-only panel. With no Gemini key
+   (or the free tier's limit hit) the panel shows one calm dormant line
+   instead of an error. */
+function geminiSection() {
+  var g = state.gemini;
+  var busy = g.busy ? ' disabled' : '';
+  var panel = '';
+  if (g.status === 'ok' && g.text) {
+    panel = '<div class="gemini-result">' + esc(g.text) + '</div>';
+  } else if (g.status === 'dormant') {
+    panel = '<div class="gemini-note">AI assist isn\u2019t configured yet — add the API key in the dashboard settings and this wakes up on its own.</div>';
+  } else if (g.status === 'error' && g.text) {
+    panel = '<div class="gemini-note">' + esc(g.text) + '</div>';
+  } else if (g.busy) {
+    panel = '<div class="gemini-note">AI assist is thinking\u2026</div>';
+  }
+  return '<div class="gemini-box"><h3>\u2728 AI assist</h3>' +
+    '<div class="gemini-actions">' +
+    '<button type="button" class="btn small" data-gemini-action="summarize"' + busy + '>Summarize thread</button>' +
+    '<button type="button" class="btn small" data-gemini-action="draft_reply"' + busy + '>Draft follow-up</button>' +
+    '</div>' + panel +
+    '<div class="gemini-note">Drafts only — nothing sends from here. You review it, you send it.</div></div>';
+}
+async function runGemini(action) {
+  var text = threadText();
+  if (!text) { toast('No messages in this thread yet.'); return; }
+  state.gemini = { busy: true, status: null, text: '' };
+  renderContactPanel();
+  try {
+    var r = await fetch(GEMINI_API, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: action, text: text }),
+    });
+    var data = {};
+    try { data = await r.json(); } catch (e) { data = {}; }
+    if (data.status === 'ok') {
+      state.gemini = { busy: false, status: 'ok', text: data.result || '' };
+    } else if (data.status === 'not_configured' || data.status === 'quota') {
+      state.gemini = { busy: false, status: 'dormant', text: '' };
+    } else {
+      state.gemini = { busy: false, status: 'error', text: data.error || 'AI assist request failed — try again in a moment.' };
+    }
+  } catch (e) {
+    state.gemini = { busy: false, status: 'error', text: 'AI assist request failed — try again in a moment.' };
+  }
+  renderContactPanel();
+}
 function renderThreadHead() {
   var t = state.selectedThread;
   var title = document.getElementById('threadTitle');
@@ -486,6 +612,8 @@ async function selectThread(key) {
   var data = await api('?action=thread&phone=' + encodeURIComponent(phone));
   state.selectedThread = data.thread;
   state.selectedDnd = data.dnd || null;
+  state.grok = { busy: false, status: null, text: '' };
+  state.gemini = { busy: false, status: null, text: '' };
   renderThreadHead();
   renderMessages();
   renderContactPanel();
@@ -768,6 +896,16 @@ function init() {
       toast('DND update failed: ' + (e && e.message ? e.message : e));
       renderContactPanel();
     });
+  });
+  contactPanel.addEventListener('click', function (ev) {
+    var gbtn = ev.target.closest ? ev.target.closest('[data-grok-action]') : null;
+    if (!gbtn) return;
+    runGrok(gbtn.getAttribute('data-grok-action'));
+  });
+  contactPanel.addEventListener('click', function (ev) {
+    var mbtn = ev.target.closest ? ev.target.closest('[data-gemini-action]') : null;
+    if (!mbtn) return;
+    runGemini(mbtn.getAttribute('data-gemini-action'));
   });
   refreshAll();
   setInterval(refreshAll, 30000);
