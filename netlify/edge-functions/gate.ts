@@ -237,6 +237,24 @@ export default async function handler(req: Request, context: any) {
     return res;
   }
 
+  // Seller photo walkthrough (added Nov 18, 2026): photos.html is a
+  // per-seller private link (photos.html?k=TOKEN) Troy texts out — the
+  // unguessable token IS the credential, checked server-side by
+  // photo-upload.js on every call. The page and its POST endpoint pass
+  // through with noindex (private links, not the public website);
+  // photo-upload's admin GET actions still require the lm_auth cookie
+  // inside the function, and photo-link + photos-admin.html stay
+  // behind this gate like every other dashboard surface.
+  if (
+    url.pathname === "/photos" ||
+    url.pathname === "/photos.html" ||
+    url.pathname === "/.netlify/functions/photo-upload"
+  ) {
+    const res = await context.next();
+    res.headers.set("x-robots-tag", "noindex, nofollow");
+    return res;
+  }
+
   // Not configured yet — fail closed with a clear message, not an open door.
   if (!password) {
     return new Response(
