@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="dark">
+<title>Seller Photos — Direct Property Buyers</title>
+<style>
+  :root{
+    --bg:#0d1117; --bg2:#131a24; --panel:#161e2b; --panel2:#1c2536;
+    --line:#26314a; --text:#e8edf5; --muted:#8b96ad; --muted2:#5d6a84;
+    --accent:#ff6b1a; --accent2:#ff8c42; --green:#2ecc71; --red:#e74c3c;
+    --blue:#3498db; --chip:#223052;
+    --radius:10px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,-apple-system,sans-serif;font-size:14px;line-height:1.5}
+  a{color:var(--accent2)}
+  .wrap{max-width:960px;margin:0 auto;padding:20px 16px 60px}
+  .topbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:20px}
+  .topbar h1{font-size:22px}
+  .topbar h1 span{color:var(--accent)}
+  .topbar small{color:var(--muted);display:block;font-size:13px}
+  .back{margin-left:auto;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:24px;padding:9px 16px;font-size:13px;font-weight:600;text-decoration:none;white-space:nowrap}
+  .back:hover{border-color:var(--accent);color:var(--accent)}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:18px;margin-bottom:16px}
+  .card h2{font-size:17px;margin-bottom:4px}
+  .card .sub{color:var(--muted);font-size:13px;margin-bottom:12px}
+  .btn{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px 16px;font-size:14px;font-weight:600;cursor:pointer}
+  .btn:hover{border-color:var(--accent)}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .btn.primary:hover{background:var(--accent2)}
+  .btn:disabled{background:var(--panel2);color:var(--muted2);border-color:var(--line);cursor:default}
+  .btn.small{padding:6px 10px;font-size:13px}
+  .field{width:100%;background:var(--bg2);border:1px solid var(--line);border-radius:8px;color:var(--text);padding:9px 10px;font-size:14px;font-family:inherit}
+  .field:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(255,107,26,.15)}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px}
+  .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .form-grid .full{grid-column:1 / -1}
+  @media (max-width:640px){ .form-grid{grid-template-columns:1fr} }
+  .pill{display:inline-block;font-size:11px;font-weight:700;border-radius:99px;padding:2px 10px;background:var(--chip);color:var(--text)}
+  .pill.green{background:rgba(46,204,113,.15);color:var(--green)}
+  .pill.orange{background:rgba(255,107,26,.15);color:var(--accent2)}
+  .pill.grey{background:var(--panel2);color:var(--muted)}
+  .row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .row .spacer{flex:1}
+  .session{cursor:pointer}
+  .session:hover{border-color:var(--accent)}
+  .session .addr{font-size:16px;font-weight:700}
+  .session .meta{color:var(--muted);font-size:13px}
+  .linkbox{display:flex;gap:8px;margin-top:12px}
+  .linkbox .field{font-family:ui-monospace,Menlo,monospace;font-size:13px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-top:12px}
+  .grid figure{background:var(--bg2);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .grid img{width:100%;height:130px;object-fit:cover;display:block;background:#0a0e14}
+  .grid figcaption{padding:6px 8px;font-size:12px;color:var(--muted)}
+  .grid figcaption b{color:var(--text);display:block;font-size:12.5px}
+  .err{display:none;background:rgba(231,76,60,.12);border:1px solid var(--red);color:#ffb3ab;border-radius:8px;padding:10px 12px;font-size:14px;margin-bottom:12px}
+  .ok{display:none;background:rgba(46,204,113,.12);border:1px solid var(--green);color:#a9e8c6;border-radius:8px;padding:10px 12px;font-size:14px;margin-bottom:12px}
+  .empty{color:var(--muted);font-size:14px;padding:8px 0}
+  .notes{margin-top:10px;background:var(--bg2);border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:14px}
+  .notes .k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:4px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <div>
+      <h1>Seller <span>Photos</span></h1>
+      <small>Text a seller a link — they walk their house with their phone camera and the photos land here.</small>
+    </div>
+    <a class="back" href="/">← Command Center</a>
+  </div>
+
+  <div class="err" id="pageErr"></div>
+  <div class="ok" id="pageOk"></div>
+
+  <div class="card">
+    <h2>Create a photo link</h2>
+    <p class="sub">One link per property. Text it to the seller — no login, no app, and the same link resumes if they stop halfway.</p>
+    <div class="form-grid">
+      <div class="full">
+        <label for="fAddress">Property address</label>
+        <input class="field" id="fAddress" type="text" placeholder="3051 Eastern Ave, Indianapolis, IN 46218">
+      </div>
+      <div>
+        <label for="fName">Seller name</label>
+        <input class="field" id="fName" type="text" placeholder="Elenora Hayes">
+      </div>
+      <div>
+        <label for="fPhone">Seller phone (optional)</label>
+        <input class="field" id="fPhone" type="tel" placeholder="(317) 555-0100">
+      </div>
+      <div>
+        <label for="fContact">CRM contact ID (optional)</label>
+        <input class="field" id="fContact" type="text" placeholder="">
+      </div>
+      <div style="display:flex;align-items:flex-end">
+        <button class="btn primary" id="createBtn" style="width:100%">Create Link</button>
+      </div>
+    </div>
+    <div class="linkbox" id="linkBox" style="display:none">
+      <input class="field" id="linkOut" type="text" readonly>
+      <button class="btn" id="copyBtn">Copy</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <div>
+        <h2>Photo sessions</h2>
+        <p class="sub" style="margin:0">Newest first. Click a session to see its photos.</p>
+      </div>
+      <div class="spacer"></div>
+      <button class="btn small" id="refreshBtn">Refresh</button>
+    </div>
+    <div id="sessionList" style="margin-top:12px"><p class="empty">Loading…</p></div>
+  </div>
+
+  <div class="card" id="galleryCard" style="display:none">
+    <h2 id="galleryTitle">Photos</h2>
+    <p class="sub" id="gallerySub"></p>
+    <div class="notes" id="galleryNotes" style="display:none"><span class="k">Seller notes</span><span id="galleryNotesText"></span></div>
+    <div class="grid" id="galleryGrid"></div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var LINK_API = '/.netlify/functions/photo-link';
+  var PHOTO_API = '/.netlify/functions/photo-upload';
+  var STEP_LABELS = {
+    front: 'Front of house', back: 'Back of house & yard', living: 'Living room',
+    kitchen: 'Kitchen', bedroom1: 'Bedroom 1', bedroom2: 'Bedroom 2', bedroom3: 'Bedroom 3',
+    bathroom1: 'Bathroom', bathroom2: 'Second bathroom', roof: 'Roof',
+    waterheater: 'Water heater', furnace: 'Furnace / HVAC', panel: 'Electrical panel',
+    damage: 'Damage', extra: 'Extra'
+  };
+
+  function $(id) { return document.getElementById(id); }
+  function showErr(msg) { var e = $('pageErr'); e.textContent = msg; e.style.display = 'block'; }
+  function showOk(msg) { var e = $('pageOk'); e.textContent = msg; e.style.display = 'block'; setTimeout(function () { e.style.display = 'none'; }, 4000); }
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  function fmtDate(iso) {
+    if (!iso) return '';
+    var d = new Date(iso);
+    return isNaN(d) ? '' : d.toLocaleString();
+  }
+
+  function loadSessions() {
+    var list = $('sessionList');
+    list.innerHTML = '<p class="empty">Loading…</p>';
+    fetch(LINK_API, { method: 'GET' }).then(function (res) {
+      return res.json().then(function (data) { return { status: res.status, data: data }; });
+    }).then(function (r) {
+      if (r.status === 401) {
+        list.innerHTML = '<p class="empty">You are not signed in — open the dashboard, sign in, then come back to this page.</p>';
+        return;
+      }
+      if (r.status !== 200 || !r.data || !r.data.ok) {
+        list.innerHTML = '<p class="empty">Could not load sessions. ' + esc((r.data && r.data.error) || '') + '</p>';
+        return;
+      }
+      var sessions = r.data.sessions || [];
+      if (!sessions.length) {
+        list.innerHTML = '<p class="empty">No photo sessions yet — create a link above and text it to a seller.</p>';
+        return;
+      }
+      list.innerHTML = '';
+      sessions.forEach(function (s) {
+        var card = document.createElement('div');
+        card.className = 'card session';
+        var pill = s.complete
+          ? '<span class="pill green">Complete</span>'
+          : (s.photoCount > 0 ? '<span class="pill orange">In progress</span>' : '<span class="pill grey">Link sent</span>');
+        card.innerHTML =
+          '<div class="row"><div class="addr">' + esc(s.address) + '</div><div class="spacer"></div>' + pill + '</div>' +
+          '<div class="meta">' + esc(s.sellerName) +
+          (s.phone ? ' · ' + esc(s.phone) : '') +
+          ' · ' + s.photoCount + (s.photoCount === 1 ? ' photo' : ' photos') +
+          ' · created ' + esc(fmtDate(s.createdAt)) +
+          (s.completedAt ? ' · finished ' + esc(fmtDate(s.completedAt)) : '') + '</div>';
+        card.addEventListener('click', function () { openGallery(s); });
+        list.appendChild(card);
+      });
+    }).catch(function () {
+      list.innerHTML = '<p class="empty">Could not load sessions — network error.</p>';
+    });
+  }
+
+  function openGallery(s) {
+    var card = $('galleryCard');
+    card.style.display = 'block';
+    $('galleryTitle').textContent = s.address || 'Photos';
+    $('gallerySub').textContent = 'Loading photos…';
+    $('galleryGrid').innerHTML = '';
+    $('galleryNotes').style.display = 'none';
+    card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    fetch(PHOTO_API + '?action=listPhotos&token=' + encodeURIComponent(s.token)).then(function (res) {
+      return res.json().then(function (data) { return { status: res.status, data: data }; });
+    }).then(function (r) {
+      if (r.status !== 200 || !r.data || !r.data.ok) {
+        $('gallerySub').textContent = 'Could not load this session. ' + ((r.data && r.data.error) || '');
+        return;
+      }
+      var m = r.data.manifest || {};
+      var photos = r.data.photos || [];
+      $('gallerySub').textContent = (m.sellerName || '') + ' · ' + photos.length + (photos.length === 1 ? ' photo' : ' photos') +
+        (m.complete ? ' · finished ' + fmtDate(m.completedAt) : ' · not finished yet');
+      if (m.notes) {
+        $('galleryNotesText').textContent = m.notes;
+        $('galleryNotes').style.display = 'block';
+      }
+      var grid = $('galleryGrid');
+      grid.innerHTML = '';
+      if (!photos.length) {
+        grid.innerHTML = '<p class="empty">No photos yet — the seller has not sent any on this link.</p>';
+        return;
+      }
+      photos.forEach(function (p) {
+        var fig = document.createElement('figure');
+        var src = PHOTO_API + '?action=getPhoto&token=' + encodeURIComponent(s.token) + '&key=' + encodeURIComponent(p.key);
+        var when = p.capturedAt ? 'Taken ' + fmtDate(p.capturedAt) : (p.at ? 'Sent ' + fmtDate(p.at) : '');
+        fig.innerHTML = '<a href="' + src + '" target="_blank" rel="noopener"><img loading="lazy" src="' + src + '" alt="' + esc(STEP_LABELS[p.stepId] || p.stepId) + '"></a>' +
+          '<figcaption><b>' + esc(STEP_LABELS[p.stepId] || p.stepId) + '</b>' + esc(when) + '</figcaption>';
+        grid.appendChild(fig);
+      });
+    }).catch(function () {
+      $('gallerySub').textContent = 'Could not load this session — network error.';
+    });
+  }
+
+  $('createBtn').addEventListener('click', function () {
+    var btn = $('createBtn');
+    $('pageErr').style.display = 'none';
+    var payload = {
+      address: $('fAddress').value.trim(),
+      sellerName: $('fName').value.trim(),
+      phone: $('fPhone').value.trim(),
+      contactId: $('fContact').value.trim()
+    };
+    if (!payload.address) { showErr('Enter the property address first.'); return; }
+    if (!payload.sellerName) { showErr('Enter the seller\u2019s name first.'); return; }
+    btn.disabled = true;
+    btn.textContent = 'Creating…';
+    fetch(LINK_API, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).then(function (res) {
+      return res.json().then(function (data) { return { status: res.status, data: data }; });
+    }).then(function (r) {
+      btn.disabled = false;
+      btn.textContent = 'Create Link';
+      if (r.status === 401) { showErr('You are not signed in — open the dashboard, sign in, then come back.'); return; }
+      if (r.status !== 200 || !r.data || !r.data.ok) {
+        showErr((r.data && r.data.error) || 'Could not create the link.');
+        return;
+      }
+      $('linkOut').value = r.data.url;
+      $('linkBox').style.display = 'flex';
+      showOk('Link created — copy it and text it to the seller.');
+      loadSessions();
+    }).catch(function () {
+      btn.disabled = false;
+      btn.textContent = 'Create Link';
+      showErr('Could not create the link — network error.');
+    });
+  });
+
+  $('copyBtn').addEventListener('click', function () {
+    var out = $('linkOut');
+    out.select();
+    var done = function () { showOk('Link copied.'); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(out.value).then(done, function () { document.execCommand('copy'); done(); });
+    } else {
+      document.execCommand('copy');
+      done();
+    }
+  });
+
+  $('refreshBtn').addEventListener('click', loadSessions);
+  loadSessions();
+})();
+</script>
+</body>
+</html>
