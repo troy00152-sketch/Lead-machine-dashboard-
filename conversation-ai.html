@@ -109,6 +109,21 @@
   .silence-note{ text-align:center; color:var(--muted); font-size:12.5px; font-style:italic; margin:10px 0; }
   .test-row{ display:flex; gap:8px; }
   .test-row input{ flex:1; }
+  /* bot avatars */
+  .bot-avatar{ display:inline-flex; width:44px; height:44px; border-radius:50%; overflow:hidden; flex:none; background:var(--bg); border:1px solid var(--line); }
+  .bot-avatar svg{ width:100%; height:100%; display:block; }
+  .bot-avatar.sm{ width:30px; height:30px; }
+  .pick-card .bot-avatar{ width:38px; height:38px; }
+  .pick-top{ display:flex; gap:10px; align-items:center; }
+  .pick-main{ flex:1; min-width:0; }
+  .avatar-row{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:12px; }
+  .avatar-row .lbl{ font-size:12px; color:var(--muted); font-weight:600; }
+  .avatar-opts{ display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+  .avatar-opt{ width:46px; height:46px; padding:0; border-radius:50%; border:2px solid var(--line); background:var(--bg); cursor:pointer; overflow:hidden; flex:none; }
+  .avatar-opt svg{ width:100%; height:100%; display:block; }
+  .avatar-opt:hover{ border-color:var(--accent); }
+  .avatar-opt.active{ border-color:var(--accent); box-shadow:0 0 0 2px var(--accent); }
+  .bubble-row.bot-row{ align-items:flex-start; gap:8px; }
 </style>
 </head>
 <body>
@@ -167,6 +182,7 @@
     <div class="bot-grid">
       <div class="bot-card" id="ashleyCard">
         <div class="bot-head">
+          <span class="bot-avatar" data-avatar-slot="ashley"></span>
           <span class="bot-name">💬 <span data-bot-ref="ashley">Ashley</span></span>
           <span class="pill green" id="ashleyState">On · Auto-Pilot</span>
           <span style="margin-left:auto"></span>
@@ -186,9 +202,15 @@
           <span class="lbl">Bot name</span>
           <input type="text" id="ashleyName" maxlength="40" autocomplete="off">
         </div>
+        <div class="avatar-row">
+          <span class="lbl">Avatar</span>
+          <span class="muted" style="font-size:12px">Pick a face for this bot.</span>
+        </div>
+        <div class="avatar-opts" id="ashleyAvatars"></div>
       </div>
       <div class="bot-card" id="samCard">
         <div class="bot-head">
+          <span class="bot-avatar" data-avatar-slot="sam"></span>
           <span class="bot-name">📞 <span data-bot-ref="sam">Sam</span></span>
           <span class="pill green" id="samState">On · Auto-Pilot</span>
           <span style="margin-left:auto"></span>
@@ -208,6 +230,11 @@
           <span class="lbl">Bot name</span>
           <input type="text" id="samName" maxlength="40" autocomplete="off">
         </div>
+        <div class="avatar-row">
+          <span class="lbl">Avatar</span>
+          <span class="muted" style="font-size:12px">Pick a face for this bot.</span>
+        </div>
+        <div class="avatar-opts" id="samAvatars"></div>
         <div class="voice-row">
           <span class="lbl">Voice library</span>
           <span class="muted" style="font-size:12px">Listen to each voice, then select the one this bot uses.</span>
@@ -849,6 +876,127 @@ function caiRestoreBotNames(storage, tenant) {
   return fresh;
 }
 
+/* ---- Bot avatars ---- */
+/* Every bot has a face, picked per account: a set of built-in
+   illustrated portraits (drawn inline as SVG by caiAvatarSvg from
+   the descriptors below — no image files, nothing external) plus
+   an "Initials" option: the bot's current initial in the account's
+   accent color, which follows renames automatically. The two
+   originals keep their picks in the avatars store (like names);
+   added profiles carry theirs on the profile (like voice). */
+var CAI_AVATAR_INITIALS = 'initials';
+var CAI_AVATAR_OPTIONS = [
+  { id: 'ava-aria', label: 'Aria', bg: '#ffd9c0', skin: '#8d5524', hair: '#1d1a17', hairStyle: 'long', shirt: '#2f6f6a', accessory: 'none' },
+  { id: 'ava-mateo', label: 'Mateo', bg: '#cfe8ff', skin: '#c68642', hair: '#3b2a20', hairStyle: 'short', shirt: '#31517d', accessory: 'none' },
+  { id: 'ava-june', label: 'June', bg: '#ffeef5', skin: '#f1c27d', hair: '#8a4b2a', hairStyle: 'bun', shirt: '#7d3c5e', accessory: 'none' },
+  { id: 'ava-omar', label: 'Omar', bg: '#d9f2e2', skin: '#6b4423', hair: '#12100e', hairStyle: 'buzz', shirt: '#274156', accessory: 'none' },
+  { id: 'ava-lena', label: 'Lena', bg: '#e8e2ff', skin: '#ffdbac', hair: '#e0a83f', hairStyle: 'ponytail', shirt: '#44546a', accessory: 'glasses' },
+  { id: 'ava-kai', label: 'Kai', bg: '#fff3c9', skin: '#e0ac69', hair: '#23262b', hairStyle: 'curly', shirt: '#5b7553', accessory: 'none' },
+  { id: 'ava-priya', label: 'Priya', bg: '#ffd6dd', skin: '#a0663a', hair: '#241a17', hairStyle: 'long', shirt: '#8c3b54', accessory: 'none' },
+  { id: 'ava-agent', label: 'Call agent', bg: '#c9e7ff', skin: '#f1c27d', hair: '#4a3226', hairStyle: 'short', shirt: '#20506e', accessory: 'headset' },
+  { id: 'ava-noah', label: 'Noah', bg: '#e2f0d9', skin: '#8d5524', hair: '#14100e', hairStyle: 'bald', shirt: '#6a4a2f', accessory: 'glasses' },
+  { id: 'ava-sofia', label: 'Sofia', bg: '#ffe8cc', skin: '#c68642', hair: '#5a3825', hairStyle: 'wavy', shirt: '#37505c', accessory: 'none' },
+];
+function caiAvatarOption(id) {
+  var found = null;
+  CAI_AVATAR_OPTIONS.forEach(function (o) { if (o.id === id) found = o; });
+  return found;
+}
+function caiHeadsetAvatarId() {
+  var found = null;
+  CAI_AVATAR_OPTIONS.forEach(function (o) { if (!found && o.accessory === 'headset') found = o; });
+  return found ? found.id : CAI_AVATAR_OPTIONS[0].id;
+}
+/* Shipped faces: the text bot gets the first portrait, the voice
+   bot gets the headset portrait. Anything else gets the first. */
+function caiDefaultAvatar(botId) {
+  return botId === 'sam' ? caiHeadsetAvatarId() : CAI_AVATAR_OPTIONS[0].id;
+}
+function caiSanitizeAvatarSel(v, dflt) {
+  var s = String(v == null ? '' : v).trim();
+  if (s === CAI_AVATAR_INITIALS || caiAvatarOption(s)) return s;
+  var d = String(dflt == null ? '' : dflt).trim();
+  if (d === CAI_AVATAR_INITIALS || caiAvatarOption(d)) return d;
+  return CAI_AVATAR_OPTIONS[0].id;
+}
+function caiDefaultAvatars() {
+  return { ashley: caiDefaultAvatar('ashley'), sam: caiDefaultAvatar('sam') };
+}
+function caiSanitizeAvatars(v) {
+  var d = caiDefaultAvatars();
+  if (!v || typeof v !== 'object') return d;
+  return {
+    ashley: caiSanitizeAvatarSel(v.ashley, d.ashley),
+    sam: caiSanitizeAvatarSel(v.sam, d.sam),
+  };
+}
+function caiLoadAvatars(storage, tenant) {
+  return caiSanitizeAvatars(caiLoadJson(storage, caiKey(tenant, 'avatars'), null));
+}
+function caiSaveAvatars(storage, tenant, avatars) {
+  var clean = caiSanitizeAvatars(avatars);
+  caiSaveJson(storage, caiKey(tenant, 'avatars'), clean);
+  return clean;
+}
+/* The letter an Initials avatar shows: the first letter or digit
+   of the bot's (sanitized) current name, or '?' when it has none. */
+function caiAvatarInitial(name) {
+  var clean = caiSanitizeBotName(name, '');
+  var m = clean.match(/[A-Za-z0-9]/);
+  return m ? m[0].toUpperCase() : '?';
+}
+/* Draw a bot's face as a self-contained inline SVG string: flat
+   head-and-shoulders portrait from the option's descriptor, or
+   the Initials disc in the account accent color. Pure string
+   building from internal constants + one safe initial letter —
+   the result is markup-safe to inject. */
+function caiAvatarSvg(sel, name, accent) {
+  var s = caiSanitizeAvatarSel(sel, CAI_AVATAR_OPTIONS[0].id);
+  if (s === CAI_AVATAR_INITIALS) {
+    var fill = /^#[0-9a-fA-F]{6}$/.test(String(accent || '')) ? String(accent) : '#ff6b1a';
+    return '<svg viewBox="0 0 64 64" class="cai-avatar" data-avatar="initials" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">'
+      + '<circle cx="32" cy="32" r="32" fill="' + fill + '"/>'
+      + '<text x="32" y="43" text-anchor="middle" font-size="30" font-weight="700" fill="#ffffff" font-family="system-ui,sans-serif">' + caiAvatarInitial(name) + '</text></svg>';
+  }
+  var o = caiAvatarOption(s) || CAI_AVATAR_OPTIONS[0];
+  var p = '<circle cx="32" cy="32" r="32" fill="' + o.bg + '"/>';
+  /* hair that falls behind the head (long styles, ponytail) */
+  if (o.hairStyle === 'long') p += '<rect x="17" y="20" width="30" height="30" rx="10" fill="' + o.hair + '"/>';
+  if (o.hairStyle === 'ponytail') p += '<rect x="42" y="24" width="7" height="18" rx="3.5" fill="' + o.hair + '"/>';
+  /* shoulders, neck, head */
+  p += '<path d="M12 64c2.5-10.5 10-16 20-16s17.5 5.5 20 16z" fill="' + o.shirt + '"/>';
+  p += '<rect x="28" y="40" width="8" height="10" rx="3" fill="' + o.skin + '"/>';
+  p += '<circle cx="32" cy="30" r="13" fill="' + o.skin + '"/>';
+  /* hair on top of the head, per style */
+  if (o.hairStyle === 'short' || o.hairStyle === 'bun' || o.hairStyle === 'ponytail') {
+    p += '<path d="M19 30a13 13 0 0 1 26 0z" fill="' + o.hair + '"/>';
+  }
+  if (o.hairStyle === 'buzz') p += '<path d="M19.5 26.5a13 13 0 0 1 25 0z" fill="' + o.hair + '"/>';
+  if (o.hairStyle === 'curly') {
+    p += '<path d="M19 29a13 13 0 0 1 26 0z" fill="' + o.hair + '"/>';
+    [[21.5, 23], [26, 19], [32, 17.5], [38, 19], [42.5, 23]].forEach(function (c) {
+      p += '<circle cx="' + c[0] + '" cy="' + c[1] + '" r="3.3" fill="' + o.hair + '"/>';
+    });
+  }
+  if (o.hairStyle === 'bun') p += '<circle cx="32" cy="15.5" r="4.6" fill="' + o.hair + '"/>';
+  if (o.hairStyle === 'wavy') {
+    p += '<path d="M19 29.5a13 13 0 0 1 26 0z" fill="' + o.hair + '"/>';
+    [24.5, 32, 39.5].forEach(function (x) {
+      p += '<circle cx="' + x + '" cy="30" r="2.6" fill="' + o.hair + '"/>';
+    });
+  }
+  /* face */
+  p += '<circle cx="27" cy="31" r="1.7" fill="#2a2320"/><circle cx="37" cy="31" r="1.7" fill="#2a2320"/>';
+  p += '<path d="M28 36.5q4 3.2 8 0" stroke="#2a2320" stroke-width="1.7" fill="none" stroke-linecap="round"/>';
+  if (o.accessory === 'glasses') {
+    p += '<g class="av-glasses" fill="none" stroke="#2b2b30" stroke-width="1.8"><rect x="20.5" y="26.5" width="10.5" height="8.5" rx="3"/><rect x="33" y="26.5" width="10.5" height="8.5" rx="3"/><path d="M31 29.5h2"/></g>';
+  }
+  if (o.accessory === 'headset') {
+    p += '<g class="av-headset"><path d="M18.5 31a13.5 13.5 0 0 1 27 0" fill="none" stroke="#2b2b30" stroke-width="3"/><rect x="15.8" y="28" width="5.4" height="10" rx="2.7" fill="#2b2b30"/><rect x="42.8" y="28" width="5.4" height="10" rx="2.7" fill="#2b2b30"/><path d="M45 37q-.8 5.5-7.5 6.5" fill="none" stroke="#2b2b30" stroke-width="2"/><circle cx="36.8" cy="43.2" r="1.9" fill="#2b2b30"/></g>';
+  }
+  return '<svg viewBox="0 0 64 64" class="cai-avatar" data-avatar="' + o.id + '" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' + p + '</svg>';
+}
+
 /* ---- Bot profiles: the picker list ---- */
 /* The picker shows the two original bots plus any profiles the
    account adds. Added profiles live in their own store; the
@@ -873,6 +1021,7 @@ function caiSanitizeProfiles(v) {
       mode: BOT_MODES.indexOf(p.mode) !== -1 ? p.mode : 'auto',
       on: typeof p.on === 'boolean' ? p.on : true,
       voice: caiSanitizeVoiceSel(p.voice),
+      avatar: caiSanitizeAvatarSel(p.avatar, p.channel === 'voice' ? caiDefaultAvatar('sam') : caiDefaultAvatar('ashley')),
     });
   });
   return out;
@@ -896,6 +1045,7 @@ function caiAddProfile(profiles, data) {
     mode: BOT_MODES.indexOf(data.mode) !== -1 ? data.mode : 'auto',
     on: true,
     voice: caiSanitizeVoiceSel(data.voice),
+    avatar: caiSanitizeAvatarSel(data.avatar, data.channel === 'voice' ? caiDefaultAvatar('sam') : caiDefaultAvatar('ashley')),
   };
   return { profile: profile, profiles: caiSanitizeProfiles(profiles).concat([profile]) };
 }
@@ -905,11 +1055,12 @@ function caiUpdateProfile(profiles, id, patch) {
   var out = caiSanitizeProfiles(profiles).map(function (p) {
     if (p.id !== id) return p;
     found = true;
-    var next = { id: p.id, name: p.name, channel: p.channel, mode: p.mode, on: p.on, voice: p.voice };
+    var next = { id: p.id, name: p.name, channel: p.channel, mode: p.mode, on: p.on, voice: p.voice, avatar: p.avatar };
     if (Object.prototype.hasOwnProperty.call(patch, 'name')) next.name = caiSanitizeBotName(patch.name, p.name);
     if (Object.prototype.hasOwnProperty.call(patch, 'mode') && BOT_MODES.indexOf(patch.mode) !== -1) next.mode = patch.mode;
     if (Object.prototype.hasOwnProperty.call(patch, 'on')) next.on = !!patch.on;
     if (Object.prototype.hasOwnProperty.call(patch, 'voice')) next.voice = caiSanitizeVoiceSel(patch.voice);
+    if (Object.prototype.hasOwnProperty.call(patch, 'avatar')) next.avatar = caiSanitizeAvatarSel(patch.avatar, p.avatar);
     return next;
   });
   return found ? out : null;
@@ -918,17 +1069,19 @@ function caiRemoveProfile(profiles, id) {
   if (CAI_RESERVED_BOT_IDS.indexOf(id) !== -1) return caiSanitizeProfiles(profiles);
   return caiSanitizeProfiles(profiles).filter(function (p) { return p.id !== id; });
 }
-/* One unified list for the picker: originals first (names and
-   on/mode from their own stores), then the added profiles. */
-function caiAllBots(names, bots, profiles) {
+/* One unified list for the picker: originals first (names,
+   on/mode and avatars from their own stores), then the added
+   profiles (which carry their avatar on the profile). */
+function caiAllBots(names, bots, profiles, avatars) {
   var n = caiSanitizeBotNames(names);
   var b = caiSanitizeBots(bots);
+  var av = caiSanitizeAvatars(avatars);
   var list = [
-    { id: 'ashley', name: n.ashley, channel: 'text', on: b.ashley.on, mode: b.ashley.mode, builtin: true },
-    { id: 'sam', name: n.sam, channel: 'voice', on: b.sam.on, mode: b.sam.mode, builtin: true },
+    { id: 'ashley', name: n.ashley, channel: 'text', on: b.ashley.on, mode: b.ashley.mode, builtin: true, avatar: av.ashley },
+    { id: 'sam', name: n.sam, channel: 'voice', on: b.sam.on, mode: b.sam.mode, builtin: true, avatar: av.sam },
   ];
   caiSanitizeProfiles(profiles).forEach(function (p) {
-    list.push({ id: p.id, name: p.name, channel: p.channel, on: p.on, mode: p.mode, builtin: false });
+    list.push({ id: p.id, name: p.name, channel: p.channel, on: p.on, mode: p.mode, builtin: false, avatar: p.avatar });
   });
   return list;
 }
@@ -1260,9 +1413,13 @@ var TENANT = caiTenantFromHost(location.hostname);
    it stays empty and the starter knowledge base renders verbatim —
    a name is never guessed. */
 var BRAND_NAME = '';
+/* This account's accent color, resolved by the branding hook.
+   The Initials avatar renders in it. */
+var ACCENT = '#ff6b1a';
 var state = {
   bots: caiLoadBots(localStorage, TENANT),
   names: caiLoadBotNames(localStorage, TENANT),
+  avatars: caiLoadAvatars(localStorage, TENANT),
   profiles: caiLoadProfiles(localStorage, TENANT),
   selected: 'ashley',
   voice: caiLoadVoice(localStorage, TENANT),
@@ -1272,8 +1429,8 @@ var state = {
   guardrails: caiLoadGuardrails(localStorage, TENANT),
   editingFaqId: '',
 };
-state.selected = caiLoadSelected(localStorage, TENANT, caiAllBots(state.names, state.bots, state.profiles));
-function allBots() { return caiAllBots(state.names, state.bots, state.profiles); }
+state.selected = caiLoadSelected(localStorage, TENANT, caiAllBots(state.names, state.bots, state.profiles, state.avatars));
+function allBots() { return caiAllBots(state.names, state.bots, state.profiles, state.avatars); }
 function selectedBot() {
   var list = allBots();
   var found = null;
@@ -1291,7 +1448,10 @@ function selectedBot() {
       var el = document.getElementById('brandName');
       if (el) el.textContent = brand.name;
     }
-    if (brand.color) document.documentElement.style.setProperty('--accent', brand.color);
+    if (brand.color) {
+      ACCENT = brand.color;
+      document.documentElement.style.setProperty('--accent', brand.color);
+    }
     if (brand.subdomain) TENANT = brand.subdomain;
   }
   function showSuspended() {
@@ -1311,12 +1471,14 @@ function selectedBot() {
         if (cfg && cfg.accountStatus === 'suspended') { showSuspended(); return; }
         var before = TENANT;
         var nameBefore = BRAND_NAME;
+        var accentBefore = ACCENT;
         applyBrand(cfg);
-        if (TENANT !== before || BRAND_NAME !== nameBefore) {
+        if (TENANT !== before || BRAND_NAME !== nameBefore || ACCENT !== accentBefore) {
           state.bots = caiLoadBots(localStorage, TENANT);
           state.names = caiLoadBotNames(localStorage, TENANT);
+          state.avatars = caiLoadAvatars(localStorage, TENANT);
           state.profiles = caiLoadProfiles(localStorage, TENANT);
-          state.selected = caiLoadSelected(localStorage, TENANT, caiAllBots(state.names, state.bots, state.profiles));
+          state.selected = caiLoadSelected(localStorage, TENANT, caiAllBots(state.names, state.bots, state.profiles, state.avatars));
           state.voice = caiLoadVoice(localStorage, TENANT);
           state.faqs = caiLoadFaqs(localStorage, TENANT, BRAND_NAME);
           state.instructions = caiLoadInstructions(localStorage, TENANT);
@@ -1524,6 +1686,7 @@ function wireBotName(bot, inputId) {
     e.target.value = clean;
     renderBotNames();
     renderPicker();
+    refreshAvatarBits();
     toast('Bot name saved: ' + clean);
   });
 }
@@ -1532,6 +1695,7 @@ document.getElementById('btnRestoreNames').addEventListener('click', function ()
   state.names = caiRestoreBotNames(localStorage, TENANT);
   renderBotNames();
   renderPicker();
+  refreshAvatarBits();
   toast('Default bot names restored.');
 });
 
@@ -1545,12 +1709,14 @@ function renderPicker() {
   var grid = document.getElementById('pickGrid');
   grid.innerHTML = allBots().map(function (b) {
     return '<button type="button" class="pick-card' + (b.id === state.selected ? ' selected' : '') + '" data-pick="' + esc(b.id) + '">' +
+      '<span class="pick-top"><span class="bot-avatar">' + caiAvatarSvg(b.avatar, b.name, ACCENT) + '</span>' +
+      '<span class="pick-main">' +
       '<span class="pname">' + (b.channel === 'voice' ? '📞 ' : '💬 ') + esc(b.name) + '</span>' +
       '<span class="prow">' + botStatePill(b) +
       '<span class="pill">' + (b.channel === 'voice' ? 'Voice' : 'Text') + '</span>' +
       (b.builtin ? '<span class="pill">Original</span>' : '') +
       (b.id === state.selected ? '<span class="pill green">Selected</span>' : '') +
-      '</span></button>';
+      '</span></span></span></button>';
   }).join('');
   document.getElementById('ashleyCard').classList.toggle('selected', state.selected === 'ashley');
   document.getElementById('samCard').classList.toggle('selected', state.selected === 'sam');
@@ -1593,6 +1759,7 @@ function renderAddedBots() {
     var stateLabel = caiBotState(p);
     return '<div class="bot-card' + (p.id === state.selected ? ' selected' : '') + '" data-bot-card="' + esc(p.id) + '">' +
       '<div class="bot-head">' +
+      '<span class="bot-avatar" data-avatar-slot="' + esc(p.id) + '"></span>' +
       '<span class="bot-name">' + (p.channel === 'voice' ? '📞 ' : '💬 ') + esc(p.name) + '</span>' +
       '<span class="pill ' + (stateLabel === 'Off' ? 'red' : (p.mode === 'suggest' ? 'amber' : 'green')) + '">' + esc(stateLabel) + '</span>' +
       '<span style="margin-left:auto"></span>' +
@@ -1610,6 +1777,8 @@ function renderAddedBots() {
       '</select></div>' +
       '<div class="name-row"><span class="lbl">Bot name</span>' +
       '<input type="text" maxlength="40" autocomplete="off" data-profile-name="' + esc(p.id) + '" value="' + esc(p.name) + '"></div>' +
+      '<div class="avatar-row"><span class="lbl">Avatar</span><span class="muted" style="font-size:12px">Pick a face for this bot.</span></div>' +
+      '<div class="avatar-opts" data-avatar-opts-for="' + esc(p.id) + '"></div>' +
       (p.channel === 'voice'
         ? '<div class="voice-row"><span class="lbl">Voice library</span><span class="muted" style="font-size:12px">Listen to each voice, then select the one this bot uses.</span></div>' +
           '<div class="voice-list" data-voices-for="' + esc(p.id) + '"></div>' +
@@ -1619,6 +1788,8 @@ function renderAddedBots() {
       '</div>';
   }).join('');
   profiles.forEach(function (p) { if (p.channel === 'voice') renderVoiceList(p.id); });
+  renderAvatarSlots();
+  renderAvatarChoosers();
 }
 document.getElementById('addedBotGrid').addEventListener('change', function (e) {
   var on = e.target.closest('[data-profile-on]');
@@ -1644,6 +1815,7 @@ document.getElementById('addedBotGrid').addEventListener('change', function (e) 
     if (upd3) state.profiles = caiSaveProfiles(localStorage, TENANT, upd3);
     renderPicker();
     renderAddedBots();
+    renderTestLog();
     toast('Bot name saved.');
   }
 });
@@ -1662,6 +1834,54 @@ document.getElementById('addedBotGrid').addEventListener('click', function (e) {
   renderAddedBots();
   toast(p.name + ' removed.');
 });
+
+/* ---- bot avatars ---- */
+function renderAvatarSlots() {
+  document.querySelectorAll('[data-avatar-slot]').forEach(function (el) {
+    var bot = botById(el.dataset.avatarSlot);
+    if (bot) el.innerHTML = caiAvatarSvg(bot.avatar, bot.name, ACCENT);
+  });
+}
+function avatarOptsHtml(bot) {
+  var opts = CAI_AVATAR_OPTIONS.map(function (o) { return { id: o.id, label: o.label }; });
+  opts.push({ id: CAI_AVATAR_INITIALS, label: 'Initials' });
+  return opts.map(function (o) {
+    return '<button type="button" class="avatar-opt' + (bot.avatar === o.id ? ' active' : '') + '" data-avatar-pick="' + esc(o.id) + '" data-avatar-owner="' + esc(bot.id) + '" title="' + esc(o.label) + '" aria-label="' + esc(o.label) + '">' + caiAvatarSvg(o.id, bot.name, ACCENT) + '</button>';
+  }).join('');
+}
+function renderAvatarChoosers() {
+  ['ashley', 'sam'].forEach(function (id) {
+    var el = document.getElementById(id + 'Avatars');
+    var bot = botById(id);
+    if (el && bot) el.innerHTML = avatarOptsHtml(bot);
+  });
+  document.querySelectorAll('[data-avatar-opts-for]').forEach(function (el) {
+    var bot = botById(el.dataset.avatarOptsFor);
+    if (bot) el.innerHTML = avatarOptsHtml(bot);
+  });
+}
+/* Every surface a rename touches, avatars included: picker cards,
+   editor-card faces, chooser strips (the Initials option follows
+   the name), and avatars already sitting in the test log. */
+function refreshAvatarBits() {
+  renderAvatarSlots();
+  renderAvatarChoosers();
+  renderTestLog();
+}
+function setBotAvatar(ownerId, sel) {
+  if (ownerId === 'ashley' || ownerId === 'sam') {
+    state.avatars[ownerId] = sel;
+    state.avatars = caiSaveAvatars(localStorage, TENANT, state.avatars);
+  } else {
+    var upd = caiUpdateProfile(state.profiles, ownerId, { avatar: sel });
+    if (upd) state.profiles = caiSaveProfiles(localStorage, TENANT, upd);
+  }
+  renderAvatarChoosers();
+  renderAvatarSlots();
+  renderPicker();
+  renderTestLog();
+  toast('Avatar saved.');
+}
 
 /* ---- voice library ---- */
 var SPEECH_VOICES = [];
@@ -1738,6 +1958,8 @@ function previewVoice(ownerId, selId) {
   }
 }
 document.addEventListener('click', function (e) {
+  var avPick = e.target.closest('[data-avatar-pick]');
+  if (avPick) { setBotAvatar(avPick.dataset.avatarOwner, avPick.dataset.avatarPick); return; }
   var listen = e.target.closest('[data-vlisten]');
   if (listen) { previewVoice(listen.dataset.vowner, listen.dataset.vlisten); return; }
   var select = e.target.closest('[data-vselect]');
@@ -1774,7 +1996,15 @@ function renderTestLog() {
   log.innerHTML = testLog.map(function (m) {
     if (m.who === 'silence') return '<div class="silence-note">🤫 No reply — ' + esc(m.text) + '</div>';
     if (m.who === 'user') return '<div class="bubble-row user"><div class="bubble user">' + esc(m.text) + '</div></div>';
-    return '<div><div class="bubble-who">' + esc(m.name) + '</div><div class="bubble-row"><div class="bubble bot">' + esc(m.text) + '</div></div></div>';
+    /* The reply wears the bot's CURRENT face and name — a rename or
+       a new avatar pick updates replies already in the log too.
+       Bots removed since fall back to what they wore when they
+       replied. */
+    var b = botById(m.botId);
+    var nm = b ? b.name : (m.name || 'Bot');
+    var sel = b ? b.avatar : m.avatarSel;
+    return '<div class="bubble-row bot-row"><span class="bot-avatar sm">' + caiAvatarSvg(sel, nm, ACCENT) + '</span>' +
+      '<div><div class="bubble-who">' + esc(nm) + '</div><div class="bubble bot">' + esc(m.text) + '</div></div></div>';
   }).join('');
   log.scrollTop = log.scrollHeight;
 }
@@ -1793,7 +2023,7 @@ function runTest() {
   if (res.type === 'empty') return;
   testLog.push({ who: 'user', text: msg });
   if (res.type === 'silence') testLog.push({ who: 'silence', text: res.note });
-  else testLog.push({ who: 'bot', name: bot.name, text: res.text });
+  else testLog.push({ who: 'bot', botId: bot.id, avatarSel: bot.avatar, name: bot.name, text: res.text });
   input.value = '';
   renderTestLog();
   input.focus();
@@ -1807,6 +2037,8 @@ function renderAll() {
   renderBots();
   renderBotNames();
   renderAddedBots();
+  renderAvatarSlots();
+  renderAvatarChoosers();
   renderVoiceList('sam');
   renderFaqs();
   renderInstructions();

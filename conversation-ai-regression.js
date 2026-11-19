@@ -44,6 +44,15 @@
  *      added bot profiles (add / edit / remove, originals
  *      structurally protected), the selected bot persisting and
  *      driving the test panel, per-voice Listen + Select rows.
+ *   J. Bot avatars (Troy, Nov 19 follow-on): every bot has a face —
+ *      at least 8 built-in illustrated portraits drawn as inline
+ *      SVG (self-contained, no external assets) plus an Initials
+ *      option in the account accent; selection persists per tenant
+ *      per bot (originals in the avatars store, added profiles on
+ *      the profile); defaults are the first portrait for the text
+ *      bot and the headset portrait for the voice bot; avatars
+ *      render on picker cards, editor cards, and test replies,
+ *      and a rename updates the Initials avatar.
  *
  * This screen is a config/view layer only: it must NOT reference the
  * live bot function or any send path. Fixtures only — no network.
@@ -84,7 +93,7 @@ function fakeStorage() {
   const html = readPage('conversation-ai.html');
   const m = html.match(/\/\* ==PURE== \*\/([\s\S]*?)\/\* ==\/PURE== \*\//);
   assert.ok(m, 'pure block markers present');
-  const P = new Function(m[1] + '; return { CAI_PREFIX, BOT_MODES, caiTenantFromHost, caiKey, caiBrandFromConfig, caiDefaultBots, caiSanitizeBots, caiLoadBots, caiSaveBots, caiBotState, CAI_DEFAULT_FAQS, caiDefaultFaqs, CAI_SOURCE_COMPANY, caiSwapCompanyName, caiStarterFaqs, caiLoadFaqs, caiSaveFaqs, caiAddFaq, caiUpdateFaq, caiDeleteFaq, caiSearchFaqs, caiRestoreFaqs, caiDefaultInstructions, caiLoadInstructions, caiSaveInstructions, caiDefaultBooking, caiSanitizeBooking, caiLoadBooking, caiSaveBooking, caiDefaultGuardrails, caiLoadGuardrails, caiSaveGuardrails, CAI_BOT_NAME_MAX, caiDefaultBotNames, caiSanitizeBotName, caiSanitizeBotNames, caiLoadBotNames, caiSaveBotNames, caiRestoreBotNames, CAI_RESERVED_BOT_IDS, CAI_CHANNELS, caiSanitizeProfiles, caiLoadProfiles, caiSaveProfiles, caiAddProfile, caiUpdateProfile, caiRemoveProfile, caiAllBots, caiValidSelected, caiLoadSelected, caiSaveSelected, CAI_VOICE_OPTIONS, caiDefaultVoiceSel, caiVoiceOption, caiSanitizeVoiceSel, caiLoadVoice, caiSaveVoice, caiVoiceLabel, caiGreeting, caiPickSpeechVoice, caiNormText, caiTokens, caiMatchFaq, caiIsOptOut, caiIsBookingIntent, caiParseMoneyAsk, caiOfferTimes, caiBookingReply, caiSwapPersona, caiDefaultReply, caiTestReply };')();
+  const P = new Function(m[1] + '; return { CAI_PREFIX, BOT_MODES, caiTenantFromHost, caiKey, caiBrandFromConfig, caiDefaultBots, caiSanitizeBots, caiLoadBots, caiSaveBots, caiBotState, CAI_DEFAULT_FAQS, caiDefaultFaqs, CAI_SOURCE_COMPANY, caiSwapCompanyName, caiStarterFaqs, caiLoadFaqs, caiSaveFaqs, caiAddFaq, caiUpdateFaq, caiDeleteFaq, caiSearchFaqs, caiRestoreFaqs, caiDefaultInstructions, caiLoadInstructions, caiSaveInstructions, caiDefaultBooking, caiSanitizeBooking, caiLoadBooking, caiSaveBooking, caiDefaultGuardrails, caiLoadGuardrails, caiSaveGuardrails, CAI_BOT_NAME_MAX, caiDefaultBotNames, caiSanitizeBotName, caiSanitizeBotNames, caiLoadBotNames, caiSaveBotNames, caiRestoreBotNames, CAI_RESERVED_BOT_IDS, CAI_CHANNELS, caiSanitizeProfiles, caiLoadProfiles, caiSaveProfiles, caiAddProfile, caiUpdateProfile, caiRemoveProfile, caiAllBots, caiValidSelected, caiLoadSelected, caiSaveSelected, CAI_AVATAR_OPTIONS, CAI_AVATAR_INITIALS, caiAvatarOption, caiHeadsetAvatarId, caiDefaultAvatar, caiSanitizeAvatarSel, caiDefaultAvatars, caiSanitizeAvatars, caiLoadAvatars, caiSaveAvatars, caiAvatarInitial, caiAvatarSvg, CAI_VOICE_OPTIONS, caiDefaultVoiceSel, caiVoiceOption, caiSanitizeVoiceSel, caiLoadVoice, caiSaveVoice, caiVoiceLabel, caiGreeting, caiPickSpeechVoice, caiNormText, caiTokens, caiMatchFaq, caiIsOptOut, caiIsBookingIntent, caiParseMoneyAsk, caiOfferTimes, caiBookingReply, caiSwapPersona, caiDefaultReply, caiTestReply };')();
 
   console.log('— A. Knowledge base defaults = the real 31 FAQs —');
   const kb = readJson('knowledge/kb.json');
@@ -668,6 +677,113 @@ function fakeStorage() {
       'caiTestReply(msg, {', 'botName: bot.name', 'bizName: BRAND_NAME', 'selectedBot()', 'No reply — ']) {
       assert.ok(html.includes(needle), 'missing ' + needle);
     }
+  });
+
+  console.log('— J. Bot avatars —');
+  await check('avatar options: at least 8 illustrated portraits, unique, fully described, headset + glasses present', async () => {
+    assert.ok(P.CAI_AVATAR_OPTIONS.length >= 8, 'at least 8 built-in illustrated avatars');
+    const ids = P.CAI_AVATAR_OPTIONS.map((o) => o.id);
+    assert.strictEqual(new Set(ids).size, ids.length, 'option ids unique');
+    P.CAI_AVATAR_OPTIONS.forEach((o) => {
+      assert.ok(o.label, o.id + ' has a label');
+      for (const field of ['bg', 'skin', 'hair', 'shirt']) {
+        assert.ok(/^#[0-9a-fA-F]{6}$/.test(o[field]), o.id + ' ' + field + ' is a color');
+      }
+      assert.ok(['short', 'long', 'bun', 'buzz', 'ponytail', 'curly', 'wavy', 'bald'].includes(o.hairStyle), o.id + ' hair style is a drawn style');
+      assert.ok(['none', 'glasses', 'headset'].includes(o.accessory), o.id + ' accessory is a drawn accessory');
+    });
+    assert.ok(P.CAI_AVATAR_OPTIONS.some((o) => o.accessory === 'headset'), 'a headset portrait exists for the voice bot');
+    assert.ok(P.CAI_AVATAR_OPTIONS.some((o) => o.accessory === 'glasses'), 'a glasses portrait exists');
+    assert.ok(new Set(P.CAI_AVATAR_OPTIONS.map((o) => o.skin)).size >= 4, 'portraits span varied skin tones');
+    assert.strictEqual(P.CAI_AVATAR_INITIALS, 'initials');
+  });
+  await check('avatar defaults: text bot = first portrait, voice bot = headset portrait', async () => {
+    assert.strictEqual(P.caiDefaultAvatar('ashley'), P.CAI_AVATAR_OPTIONS[0].id);
+    assert.strictEqual(P.caiDefaultAvatar('sam'), P.caiHeadsetAvatarId());
+    assert.strictEqual(P.caiAvatarOption(P.caiHeadsetAvatarId()).accessory, 'headset');
+    assert.strictEqual(P.caiDefaultAvatar('some-added-bot'), P.CAI_AVATAR_OPTIONS[0].id);
+    assert.deepStrictEqual(P.caiDefaultAvatars(), { ashley: P.CAI_AVATAR_OPTIONS[0].id, sam: P.caiHeadsetAvatarId() });
+    assert.deepStrictEqual(P.caiLoadAvatars(fakeStorage(), 'demo'), P.caiDefaultAvatars(), 'empty storage loads the shipped faces');
+  });
+  await check('avatar selection: sanitize accepts real picks + initials, refuses junk', async () => {
+    const someId = P.CAI_AVATAR_OPTIONS[3].id;
+    assert.strictEqual(P.caiSanitizeAvatarSel(someId, 'initials'), someId);
+    assert.strictEqual(P.caiSanitizeAvatarSel('initials', someId), 'initials');
+    assert.strictEqual(P.caiSanitizeAvatarSel('not-a-face', someId), someId, 'junk falls back to the given default');
+    assert.strictEqual(P.caiSanitizeAvatarSel('not-a-face', 'also-junk'), P.CAI_AVATAR_OPTIONS[0].id, 'junk default falls back to the first portrait');
+    assert.strictEqual(P.caiSanitizeAvatarSel(null, null), P.CAI_AVATAR_OPTIONS[0].id);
+    assert.deepStrictEqual(P.caiSanitizeAvatars({ ashley: 'bogus', sam: 'initials' }), { ashley: P.CAI_AVATAR_OPTIONS[0].id, sam: 'initials' });
+    assert.deepStrictEqual(P.caiSanitizeAvatars('junk'), P.caiDefaultAvatars());
+  });
+  await check('avatar selection: persists per tenant per bot, isolated', async () => {
+    const st = fakeStorage();
+    const pick = P.CAI_AVATAR_OPTIONS[5].id;
+    P.caiSaveAvatars(st, 'demo', { ashley: 'initials', sam: pick });
+    assert.deepStrictEqual(P.caiLoadAvatars(st, 'demo'), { ashley: 'initials', sam: pick });
+    assert.ok(st.data['acc_conv_ai_demo_avatars'], 'persisted under the demo avatars key');
+    assert.deepStrictEqual(P.caiLoadAvatars(st, 'troy'), P.caiDefaultAvatars(), 'owner account untouched by demo picks');
+  });
+  await check('avatar svg: illustrated portraits are self-contained inline SVG with their colors + accessories', async () => {
+    const first = P.CAI_AVATAR_OPTIONS[0];
+    const svg = P.caiAvatarSvg(first.id, 'Ashley', '#ff6b1a');
+    assert.ok(svg.startsWith('<svg'), 'renders an inline SVG, not an image file');
+    assert.ok(svg.includes('data-avatar="' + first.id + '"'), 'svg carries its option id');
+    assert.ok(svg.includes(first.bg) && svg.includes(first.skin) && svg.includes(first.shirt), 'portrait uses the descriptor colors');
+    assert.ok(!/src=|href=|url\(/.test(svg), 'no external references inside the svg');
+    const headset = P.caiAvatarSvg(P.caiHeadsetAvatarId(), 'Sam', '#ff6b1a');
+    assert.ok(headset.includes('class="av-headset"'), 'headset portrait draws the headset');
+    assert.ok(!svg.includes('av-headset'), 'non-headset portraits have no headset');
+    const glassesOpt = P.CAI_AVATAR_OPTIONS.find((o) => o.accessory === 'glasses');
+    assert.ok(P.caiAvatarSvg(glassesOpt.id, 'Lena', '#ff6b1a').includes('class="av-glasses"'), 'glasses portrait draws the glasses');
+    P.CAI_AVATAR_OPTIONS.forEach((o) => {
+      assert.ok(P.caiAvatarSvg(o.id, 'Bot', '#ff6b1a').includes('<svg'), o.id + ' renders');
+    });
+    assert.ok(P.caiAvatarSvg('bogus-id', 'Bot', '#ff6b1a').includes('data-avatar="' + first.id + '"'), 'unknown selection renders the default portrait');
+  });
+  await check('avatar svg: Initials disc uses the account accent + the bot\u2019s current initial, and follows renames', async () => {
+    const a = P.caiAvatarSvg('initials', 'Ashley', '#123abc');
+    assert.ok(a.includes('data-avatar="initials"'));
+    assert.ok(a.includes('fill="#123abc"'), 'disc is filled with the accent color');
+    assert.ok(a.includes('>A</text>'), 'shows the current initial');
+    const renamed = P.caiAvatarSvg('initials', 'Maria', '#123abc');
+    assert.ok(renamed.includes('>M</text>'), 'renaming the bot updates its Initials avatar');
+    assert.ok(!renamed.includes('>A</text>'), 'the old initial is gone');
+    assert.strictEqual(P.caiAvatarInitial('maria'), 'M');
+    assert.strictEqual(P.caiAvatarInitial('  rob '), 'R');
+    assert.strictEqual(P.caiAvatarInitial(''), '?');
+    assert.strictEqual(P.caiAvatarInitial('<b>Eve</b>'), 'E', 'markup in a name never reaches the svg');
+    const badAccent = P.caiAvatarSvg('initials', 'Ashley', 'not-a-color');
+    assert.ok(badAccent.includes('fill="#ff6b1a"'), 'a junk accent falls back to the default accent');
+  });
+  await check('avatars on profiles + unified list: added bots get sensible defaults, picks survive sanitize/update', async () => {
+    const voiceAdd = P.caiAddProfile([], { name: 'Rob', channel: 'voice', mode: 'auto' });
+    assert.strictEqual(voiceAdd.profile.avatar, P.caiHeadsetAvatarId(), 'an added voice bot defaults to the headset face');
+    const textAdd = P.caiAddProfile([], { name: 'Maria', channel: 'text', mode: 'auto' });
+    assert.strictEqual(textAdd.profile.avatar, P.CAI_AVATAR_OPTIONS[0].id, 'an added text bot defaults to the first portrait');
+    const cleaned = P.caiSanitizeProfiles([{ id: 'ok1', name: 'A', channel: 'text', mode: 'auto', on: true, avatar: 'initials' }, { id: 'ok2', name: 'B', channel: 'voice', mode: 'auto', on: true, avatar: 'junk-face' }]);
+    assert.strictEqual(cleaned[0].avatar, 'initials', 'a saved pick survives sanitize');
+    assert.strictEqual(cleaned[1].avatar, P.caiHeadsetAvatarId(), 'a junk pick on a voice profile falls back to the headset face');
+    const upd = P.caiUpdateProfile(cleaned, 'ok1', { avatar: P.CAI_AVATAR_OPTIONS[2].id });
+    assert.strictEqual(upd[0].avatar, P.CAI_AVATAR_OPTIONS[2].id, 'avatar is patchable like voice');
+    const all = P.caiAllBots({ ashley: 'Ash', sam: 'Sammy' }, P.caiDefaultBots(), upd, { ashley: 'initials', sam: P.CAI_AVATAR_OPTIONS[4].id });
+    assert.strictEqual(all[0].avatar, 'initials', 'unified list carries the text original\u2019s pick');
+    assert.strictEqual(all[1].avatar, P.CAI_AVATAR_OPTIONS[4].id, 'unified list carries the voice original\u2019s pick');
+    assert.strictEqual(all[2].avatar, P.CAI_AVATAR_OPTIONS[2].id, 'unified list carries the added bot\u2019s pick');
+    const noMap = P.caiAllBots(null, null, []);
+    assert.strictEqual(noMap[0].avatar, P.CAI_AVATAR_OPTIONS[0].id, 'no stored picks = shipped defaults');
+    assert.strictEqual(noMap[1].avatar, P.caiHeadsetAvatarId());
+  });
+  await check('page wiring: avatar slots, choosers, and persistence on every bot surface', async () => {
+    for (const needle of ['id="ashleyAvatars"', 'id="samAvatars"', 'data-avatar-slot="ashley"', 'data-avatar-slot="sam"',
+      'data-avatar-opts-for', 'data-avatar-slot="\' + esc(p.id) + \'"', 'data-avatar-pick', 'data-avatar-owner',
+      'class="lbl">Avatar</span>', 'Pick a face for this bot.',
+      'caiLoadAvatars(localStorage, TENANT)', 'caiSaveAvatars(localStorage, TENANT', 'state.avatars = caiLoadAvatars(localStorage, TENANT)',
+      'caiAvatarSvg(b.avatar, b.name, ACCENT)', 'caiAvatarSvg(sel, nm, ACCENT)', 'avatarSel: bot.avatar',
+      'bot-avatar sm', 'refreshAvatarBits()', 'renderAvatarChoosers()', 'renderAvatarSlots()']) {
+      assert.ok(html.includes(needle), 'missing ' + needle);
+    }
+    assert.ok(!/<img/.test(html), 'no image tags — every avatar is inline SVG');
+    assert.ok(!/src\s*=\s*"https?:/.test(html), 'no external asset URLs anywhere on the page');
   });
 
   console.log('');
