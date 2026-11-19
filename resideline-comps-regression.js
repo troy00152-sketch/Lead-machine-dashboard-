@@ -7,12 +7,15 @@
 // What it proves:
 //   1. No RESIDELINE_API_KEY -> 503 { error: 'not_configured' } and fetch
 //      is never called (dormant, same pattern as grok-assist).
-//   2. The upstream call is POST https://api.resideline.com/v2/api/
-//      property_value?enrich_if_missing=true with the API-Key header, the
-//      address as the only required body field, subject hints mapped to
-//      the upstream names (sqft -> sqft_size, yearBuilt ->
-//      subject_year_built), and the default comp bounds
-//      (radius 1 / age 365 / sqft band 300 / year diff 20).
+//   2. The chain is property_details first (POST
+//      https://api.resideline.com/v1/api/property_details, body exactly
+//      { address }, 0 credits), then property_value
+//      (?enrich_if_missing=true) with a SPEC-EXACT body — only address,
+//      beds, baths, sqft_size, subject_year_built, property_type; the
+//      legacy non-spec fields (city, zipcode, max_radius_miles,
+//      max_comp_age_days, sqft_band_abs, year_built_diff_cap) and any
+//      caller bounds are never forwarded. Caller facts beat fetched
+//      facts; fetched facts fill gaps.
 //   3. Money strings ("$120,938") parse to numbers; comp rows map to the
 //      dashboard comp shape (price -> amount, sold_date MM/DD/YYYY ->
 //      ISO date, price_per_sqft -> ppsf); vendor ARV/as-is come back
@@ -22,9 +25,18 @@
 //      no indication — no price verdict.
 //   5. Upstream 402 -> credits_exhausted, 403 -> invalid_key,
 //      404 -> not_found, 400 -> bad_input with only code/suggestion
-//      passed through. The key never appears in any response body.
-//   6. index.html wires Resideline as the Comps page's primary comp
-//      source ahead of the data provider / ATTOM fallbacks.
+//      passed through (top-level or under detail). The key never
+//      appears in any response body.
+//   6. The live failure modes from Nov 18, 2026: a property_value 400
+//      INVALID_PROPERTY_DATA is rescued by property_report when
+//      property_details supplied year_built + property_type (report
+//      body uses sqft / year_built, comps parse from
+//      property_valuation.comps); a property_value 200 whose comps
+//      nest under property_valuation parses without the report call;
+//      thin results everywhere stay insufficient_comps with the best
+//      vendor values found.
+//   7. index.html wires Resideline as the Comps page's primary comp
+//      source ahead of the data-provider fallback.
 'use strict';
 
 const fs = require('fs');
@@ -56,6 +68,21 @@ function stubFetch(impl) {
 function fakeRes(status, body) {
   const text = typeof body === 'string' ? body : JSON.stringify(body);
   return { ok: status >= 200 && status < 300, status, text: async () => text };
+}
+// Routes upstream calls by endpoint: routes = { details, value, report },
+// each an async (parsedBody) => fakeRes. A missing route throws, so a
+// test fails loudly if the chain makes a call it should not.
+function stubRoutes(routes) {
+  fetchCalls = [];
+  fetchImpl = null;
+  global.fetch = async (url, opts) => {
+    fetchCalls.push({ url, opts });
+    const kind = url.includes('property_details') ? 'details'
+      : url.includes('property_report') ? 'report' : 'value';
+    const impl = routes[kind];
+    if (!impl) throw new Error('unexpected upstream call: ' + kind + ' ' + url);
+    return impl(JSON.parse(opts.body || '{}'));
+  };
 }
 function post(body) {
   return { httpMethod: 'POST', body: typeof body === 'string' ? body : JSON.stringify(body) };
@@ -100,12 +127,21 @@ function upstreamOk(compCount) {
 
   // ---- 2. request shape (funded key) ----
   process.env.RESIDELINE_API_KEY = FAKE_KEY;
-  stubFetch(async () => fakeRes(200, upstreamOk(5)));
+  stubRoutes({
+    details: async () => fakeRes(200, {}),
+    value: async () => fakeRes(200, upstreamOk(5)),
+  });
   r = await fn.handler(post({ address: ADDR, beds: 2, baths: 1, sqft: 720, yearBuilt: 1947, propertyType: 'Single Family' }));
   check('funded -> 200', r.statusCode === 200, 'got ' + r.statusCode);
-  check('exactly one upstream call', fetchCalls.length === 1, 'calls=' + fetchCalls.length);
-  const call = fetchCalls[0];
-  check('upstream URL is property_value on api.resideline.com', call.url.startsWith('https://api.resideline.com/v2/api/property_value'), call.url);
+  check('chain stops after details+value when value has >= 3 comps', fetchCalls.length === 2, 'calls=' + fetchCalls.length);
+  const dCall = fetchCalls[0];
+  check('first call is property_details (v1)', dCall.url === 'https://api.resideline.com/v1/api/property_details', dCall.url);
+  check('details call carries the API-Key header', dCall.opts.headers['API-Key'] === FAKE_KEY);
+  check('details call is a POST', dCall.opts.method === 'POST');
+  const dBody = JSON.parse(dCall.opts.body);
+  check('details body is exactly { address }', dBody.address === ADDR && Object.keys(dBody).length === 1, JSON.stringify(dBody));
+  const call = fetchCalls[1];
+  check('second call is property_value on api.resideline.com', call.url.startsWith('https://api.resideline.com/v2/api/property_value'), call.url);
   check('enrich_if_missing=true is set', call.url.includes('enrich_if_missing=true'), call.url);
   check('API-Key header carries the key', call.opts.headers['API-Key'] === FAKE_KEY);
   check('Content-Type is JSON', call.opts.headers['Content-Type'] === 'application/json');
@@ -113,21 +149,26 @@ function upstreamOk(compCount) {
   const sent = JSON.parse(call.opts.body);
   check('body address is the full address', sent.address === ADDR, sent.address);
   check('body beds mapped', sent.beds === 2);
+  check('body baths mapped', sent.baths === 1);
   check('body sqft -> sqft_size', sent.sqft_size === 720, 'sqft_size=' + sent.sqft_size);
   check('body yearBuilt -> subject_year_built', sent.subject_year_built === 1947);
   check('body propertyType -> property_type', sent.property_type === 'Single Family');
-  check('body city/zipcode parsed from address', sent.city === 'Indianapolis' && sent.zipcode === '46218', JSON.stringify({ city: sent.city, zipcode: sent.zipcode }));
-  check('default bounds: radius 1', sent.max_radius_miles === 1, 'max_radius_miles=' + sent.max_radius_miles);
-  check('default bounds: age 365', sent.max_comp_age_days === 365);
-  check('default bounds: sqft band 300', sent.sqft_band_abs === 300);
-  check('default bounds: year diff 20', sent.year_built_diff_cap === 20);
+  const SPEC_KEYS = ['address', 'beds', 'baths', 'sqft_size', 'subject_year_built', 'property_type'];
+  check('value body is spec-exact (no non-spec fields)', Object.keys(sent).every(k => SPEC_KEYS.includes(k)), Object.keys(sent).join(','));
+  check('no city/zipcode/bounds fields leak upstream', !('city' in sent) && !('zipcode' in sent) && !('max_radius_miles' in sent) && !('max_comp_age_days' in sent) && !('sqft_band_abs' in sent) && !('year_built_diff_cap' in sent));
 
-  // bounds override + GET convention (what the Comps page sends)
-  stubFetch(async () => fakeRes(200, upstreamOk(5)));
+  // Caller bounds are legacy input: parsed, never forwarded upstream.
+  stubRoutes({
+    details: async () => fakeRes(200, {}),
+    value: async () => fakeRes(200, upstreamOk(5)),
+  });
   r = await fn.handler(post({ address: ADDR, bounds: { radiusMiles: 2, maxAgeDays: 180, sqftBand: 250, yearBuiltDiff: 15 } }));
-  const sent2 = JSON.parse(fetchCalls[0].opts.body);
-  check('bounds override respected', sent2.max_radius_miles === 2 && sent2.max_comp_age_days === 180 && sent2.sqft_band_abs === 250 && sent2.year_built_diff_cap === 15, JSON.stringify(sent2));
-  stubFetch(async () => fakeRes(200, upstreamOk(5)));
+  const sent2 = JSON.parse(fetchCalls[1].opts.body);
+  check('caller bounds are NOT forwarded upstream', !('max_radius_miles' in sent2) && !('max_comp_age_days' in sent2) && !('sqft_band_abs' in sent2) && !('year_built_diff_cap' in sent2), JSON.stringify(sent2));
+  stubRoutes({
+    details: async () => fakeRes(200, {}),
+    value: async () => fakeRes(200, upstreamOk(5)),
+  });
   r = await fn.handler(get({ address: ADDR }));
   check('GET ?address= works (dashboard convention)', r.statusCode === 200 && JSON.parse(r.body).matched === true, 'got ' + r.statusCode);
 
@@ -170,6 +211,7 @@ function upstreamOk(compCount) {
   b = JSON.parse(r.body);
   check('2 comps -> HTTP 200 with insufficient_comps', r.statusCode === 200 && b.error === 'insufficient_comps', 'got ' + r.statusCode + ' ' + (b.error || ''));
   check('2 comps -> matched false, comps null, no indication', b.matched === false && b.comps === null && b.compsReturned === 2);
+  check('2 comps + no facts anywhere -> report fallback not attempted', !fetchCalls.some(c => c.url.includes('property_report')), 'calls=' + fetchCalls.map(c => c.url).join(' | '));
   stubFetch(async () => fakeRes(200, upstreamOk(0)));
   r = await fn.handler(post({ address: ADDR }));
   b = JSON.parse(r.body);
@@ -200,6 +242,12 @@ function upstreamOk(compCount) {
   b = JSON.parse(r.body);
   check('upstream 400 -> bad_input', r.statusCode === 400 && b.error === 'bad_input');
   check('upstream 400 -> only code/suggestion pass through', b.code === 'MISSING_FACTS' && b.suggestion === 'Provide beds and sqft', JSON.stringify(b));
+  // The live Nov 18 400 body carries code/suggestion at the TOP level.
+  stubFetch(async () => fakeRes(400, { error: 'bad_input', code: 'INVALID_PROPERTY_DATA', suggestion: 'Provide these fields in the body or allow enrichment & scraping', secret_junk: 'do-not-forward' }));
+  r = await fn.handler(post({ address: ADDR }));
+  b = JSON.parse(r.body);
+  check('upstream 400 (top-level shape) -> bad_input with code/suggestion', r.statusCode === 400 && b.error === 'bad_input' && b.code === 'INVALID_PROPERTY_DATA' && b.suggestion === 'Provide these fields in the body or allow enrichment & scraping', JSON.stringify(b));
+  check('upstream 400 (top-level shape) -> other body fields never forwarded', !r.body.includes('do-not-forward') && !r.body.includes(FAKE_KEY));
   stubFetch(async () => { throw new Error('network down'); });
   r = await fn.handler(post({ address: ADDR }));
   check('fetch throw -> 502 upstream_failed', r.statusCode === 502 && JSON.parse(r.body).error === 'upstream_failed', 'got ' + r.statusCode);
@@ -210,20 +258,137 @@ function upstreamOk(compCount) {
   r = await fn.handler({ httpMethod: 'DELETE', body: '' });
   check('DELETE -> 405', r.statusCode === 405);
 
-  // ---- 6. frontend wiring ----
+  // ---- 6. the details -> value -> report chain ----
+  // unit: facts parsing from property_details shapes
+  const factsTop = T.parsePropertyDetails({ beds: 2, baths: 1, sqft: 720, year_built: 1947, property_type: 'Single Family' });
+  check('details parse: top-level record', factsTop && factsTop.beds === 2 && factsTop.baths === 1 && factsTop.sqft === 720 && factsTop.yearBuilt === 1947 && factsTop.propertyType === 'Single Family', JSON.stringify(factsTop));
+  const factsNested = T.parsePropertyDetails({ property_details: { beds: 3, baths: 2, sqft_size: 1100, subject_year_built: 1955, property_type: 'Condo' } });
+  check('details parse: nested property_details + sqft_size/subject_year_built variants', factsNested && factsNested.beds === 3 && factsNested.sqft === 1100 && factsNested.yearBuilt === 1955 && factsNested.propertyType === 'Condo', JSON.stringify(factsNested));
+  const factsWrapped = T.parsePropertyDetails({ data: { property_details: { beds: 4, baths: 2, sqft: 1500, year_built: 1970, property_type: 'Townhouse' } } });
+  check('details parse: data-wrapped record', factsWrapped && factsWrapped.beds === 4 && factsWrapped.sqft === 1500 && factsWrapped.yearBuilt === 1970, JSON.stringify(factsWrapped));
+  check('details parse: empty/garbage -> null', T.parsePropertyDetails({}) === null && T.parsePropertyDetails(null) === null && T.parsePropertyDetails({ credits_remaining: 5 }) === null);
+  const merged = T.mergeFacts({ beds: null, baths: null, sqft: 999, yearBuilt: null, propertyType: null }, factsTop);
+  check('mergeFacts: caller wins, fetched fills gaps', merged.sqft === 999 && merged.beds === 2 && merged.yearBuilt === 1947 && merged.propertyType === 'Single Family', JSON.stringify(merged));
+
+  // unit: valuation payload parsing from both comp locations
+  const okBody = upstreamOk(5);
+  const pvTop = T.parseValuationPayload(okBody);
+  check('value parse: top-level comps + vendor values', pvTop.comps.length === 5 && pvTop.vendorArv === 120938 && pvTop.vendorAsIs === 79318 && pvTop.interval[0] === 96750 && pvTop.interval[1] === 145126);
+  const nestedBody = {
+    property_valuation: {
+      arv_market_value: '$526,639', as_is_value: '$410,000',
+      value_low: '$450,000', value_high: '$600,000',
+      confidence_score: 0.45, comps: okBody.comps,
+    },
+    property_details: { address: ADDR, beds: 2, baths: 1, sqft: 720, year_built: 1947, property_type: 'Single Family' },
+  };
+  const pvNested = T.parseValuationPayload(nestedBody);
+  check('value parse: comps nested under property_valuation', pvNested.comps.length === 5, 'comps=' + pvNested.comps.length);
+  check('value parse: nested vendor values + value_low/high interval', pvNested.vendorArv === 526639 && pvNested.vendorAsIs === 410000 && pvNested.interval[0] === 450000 && pvNested.interval[1] === 600000, JSON.stringify({ v: pvNested.vendorArv, i: pvNested.interval }));
+  check('value parse: nested confidence score', pvNested.confidenceScore === 0.45, 'score=' + pvNested.confidenceScore);
+  check('value parse: subject record from property_details', pvNested.subject && pvNested.subject.sqft === 720 && pvNested.subject.year_built === 1947);
+  check('value parse: garbage -> empty parse, no throw', T.parseValuationPayload(null).comps.length === 0 && T.parseValuationPayload('x').vendorArv === null);
+
+  // unit: body builders
+  const repBody = T.buildReportBody({ address: ADDR }, { beds: 2, baths: 1, sqft: 720, yearBuilt: 1947, propertyType: 'Single Family' });
+  check('report body: address + year_built + property_type', repBody.address === ADDR && repBody.year_built === 1947 && repBody.property_type === 'Single Family', JSON.stringify(repBody));
+  check('report body: sqft (not sqft_size), no subject_year_built', repBody.sqft === 720 && !('sqft_size' in repBody) && !('subject_year_built' in repBody), JSON.stringify(repBody));
+  check('report body: beds/baths ride along', repBody.beds === 2 && repBody.baths === 1);
+  const valBody = T.buildUpstreamBody({ address: ADDR, beds: null, baths: null, sqft: null, yearBuilt: null, propertyType: null }, factsTop);
+  check('value body from fetched facts is spec-exact', valBody.sqft_size === 720 && valBody.subject_year_built === 1947 && valBody.property_type === 'Single Family' && Object.keys(valBody).every(k => SPEC_KEYS.includes(k)), JSON.stringify(valBody));
+  const prefer = T.preferParsed(T.parseValuationPayload(upstreamOk(2)), T.parseValuationPayload({ property_valuation: { arv_market_value: '$110,000', comps: okBody.comps.slice(0, 1) } }));
+  check('preferParsed: keeps the larger comp set + its vendor values', prefer.comps.length === 2 && prefer.vendorArv === 120938, 'comps=' + prefer.comps.length + ' arv=' + prefer.vendorArv);
+  check('factsSummary renders the log shape', T.factsSummary(factsTop) === 'beds:2,baths:1,sqft:720,yb:1947' && T.factsSummary(null) === 'none', T.factsSummary(factsTop));
+
+  // handler: Eastern Ave — details facts rescue a 400ing valuation via the report
+  const reportOk = {
+    property_details: { address: ADDR, beds: 2, baths: 1, sqft: 720, year_built: 1947, property_type: 'Single Family' },
+    property_valuation: {
+      arv_market_value: '$120,938', as_is_value: '$79,318',
+      value_low: '$96,750', value_high: '$145,126',
+      comps: okBody.comps, search_criteria_used: { via: 'report' },
+    },
+    credits_charged: 10, credits_remaining: 2480,
+  };
+  stubRoutes({
+    details: async () => fakeRes(200, { beds: 2, baths: 1, sqft: 720, year_built: 1947, property_type: 'Single Family', address: ADDR }),
+    value: async () => fakeRes(400, { error: 'bad_input', code: 'INVALID_PROPERTY_DATA', suggestion: 'Provide these fields in the body or allow enrichment & scraping' }),
+    report: async () => fakeRes(200, reportOk),
+  });
+  r = await fn.handler(post({ address: ADDR }));
+  b = JSON.parse(r.body);
+  check('chain: value 400 -> report rescues, matched', r.statusCode === 200 && b.matched === true, 'got ' + r.statusCode + ' ' + r.body.slice(0, 160));
+  check('chain: all three calls in order details -> value -> report', fetchCalls.length === 3 && fetchCalls[0].url.includes('property_details') && fetchCalls[1].url.includes('property_value') && fetchCalls[2].url.includes('property_report'), fetchCalls.map(c => c.url).join(' | '));
+  const repSent = JSON.parse(fetchCalls[2].opts.body);
+  check('chain: report body carries year_built + property_type from details', repSent.year_built === 1947 && repSent.property_type === 'Single Family', JSON.stringify(repSent));
+  check('chain: report body uses sqft, not sqft_size / subject_year_built', repSent.sqft === 720 && !('sqft_size' in repSent) && !('subject_year_built' in repSent), JSON.stringify(repSent));
+  check('chain: vendor values labeled from the report', b.vendorArv === 120938 && b.vendorAsIs === 79318, 'arv=' + b.vendorArv);
+  check('chain: engine indication computed from report comps, not vendor ARV', b.comps && b.comps.indication === Math.round((63000 + 65000 + 55000) / 3), 'indication=' + (b.comps && b.comps.indication));
+  check('chain: property facts from the report subject record', b.property && b.property.sqft === 720 && b.property.yearBuilt === 1947, JSON.stringify(b.property));
+  check('chain: key never leaks', !r.body.includes(FAKE_KEY));
+
+  // handler: Waterbury — value 200 with comps nested under property_valuation
+  stubRoutes({
+    details: async () => fakeRes(200, {}),
+    value: async () => fakeRes(200, nestedBody),
+  });
+  r = await fn.handler(post({ address: '229 Plaza Ave, Waterbury, CT 06710' }));
+  b = JSON.parse(r.body);
+  check('nested comps -> matched, report never called', b.matched === true && fetchCalls.length === 2, 'matched=' + b.matched + ' calls=' + fetchCalls.length);
+  check('nested comps -> vendor ARV from property_valuation', b.vendorArv === 526639 && b.vendorAsIs === 410000, 'arv=' + b.vendorArv);
+  check('nested comps -> vendor interval from value_low/high', Array.isArray(b.vendorInterval) && b.vendorInterval[0] === 450000 && b.vendorInterval[1] === 600000);
+  check('nested comps -> best picks present', (b.comps.best || []).length === 3, 'best=' + (b.comps && (b.comps.best || []).length));
+
+  // handler: details facts flow into the value body; caller facts win
+  stubRoutes({
+    details: async () => fakeRes(200, { beds: 2, baths: 1, sqft: 720, year_built: 1947, property_type: 'Single Family' }),
+    value: async () => fakeRes(200, upstreamOk(5)),
+  });
+  r = await fn.handler(post({ address: ADDR }));
+  const vSent = JSON.parse(fetchCalls[1].opts.body);
+  check('details facts fill the value body', vSent.beds === 2 && vSent.sqft_size === 720 && vSent.subject_year_built === 1947 && vSent.property_type === 'Single Family', JSON.stringify(vSent));
+  stubRoutes({
+    details: async () => fakeRes(200, { beds: 2, baths: 1, sqft: 720, year_built: 1947, property_type: 'Single Family' }),
+    value: async () => fakeRes(200, upstreamOk(5)),
+  });
+  r = await fn.handler(post({ address: ADDR, sqft: 999 }));
+  const vSent2 = JSON.parse(fetchCalls[1].opts.body);
+  check('caller facts beat fetched facts in the value body', vSent2.sqft_size === 999 && vSent2.subject_year_built === 1947, JSON.stringify(vSent2));
+
+  // handler: thin everywhere -> insufficient with the best vendor values
+  stubRoutes({
+    details: async () => fakeRes(200, { beds: 2, baths: 1, sqft: 720, year_built: 1947, property_type: 'Single Family' }),
+    value: async () => fakeRes(200, upstreamOk(2)),
+    report: async () => fakeRes(200, { property_valuation: { arv_market_value: '$110,000', comps: okBody.comps.slice(0, 1) } }),
+  });
+  r = await fn.handler(post({ address: ADDR }));
+  b = JSON.parse(r.body);
+  check('thin everywhere -> insufficient_comps, comps null', b.error === 'insufficient_comps' && b.matched === false && b.comps === null, 'error=' + (b.error || ''));
+  check('thin everywhere -> best comp count kept (2, not 1)', b.compsReturned === 2, 'compsReturned=' + b.compsReturned);
+  check('thin everywhere -> best vendor values kept', b.vendorArv === 120938 && b.vendorAsIs === 79318, 'arv=' + b.vendorArv);
+  check('thin everywhere -> report was attempted', fetchCalls.some(c => c.url.includes('property_report')));
+
+  // handler: a property_details failure is not fatal
+  stubRoutes({
+    details: async () => fakeRes(500, { detail: 'boom' }),
+    value: async () => fakeRes(200, upstreamOk(5)),
+  });
+  r = await fn.handler(post({ address: ADDR, beds: 2, baths: 1, sqft: 720, yearBuilt: 1947, propertyType: 'Single Family' }));
+  check('details 500 + caller facts -> value still succeeds', r.statusCode === 200 && JSON.parse(r.body).matched === true, 'got ' + r.statusCode);
+
+  // ---- 7. frontend wiring ----
   const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
-  // Scope the order checks to loadCompsForAddress itself — other pages
-  // (lead modal) call attom-lookup directly and sit earlier in the file.
+  // Scope the order checks to loadCompsForAddress itself — other lookups
+  // sit earlier in the file.
   const fnStart = html.indexOf('async function loadCompsForAddress');
   const fnEnd = html.indexOf('function openLiveCallForLead', fnStart);
   const seg = html.slice(fnStart, fnEnd > fnStart ? fnEnd : undefined);
   check('loadCompsForAddress found in index.html', fnStart > 0);
   const rlIdx = seg.indexOf("/.netlify/functions/resideline-comps?address=");
   const prIdx = seg.indexOf("if(!d && prData && prData.comps");
-  const atIdx = seg.indexOf("/.netlify/functions/attom-lookup?address=");
   check('index.html calls resideline-comps', rlIdx > 0);
   check('Resideline is tried before the data-provider comp fallback', rlIdx > 0 && prIdx > rlIdx, 'rl=' + rlIdx + ' pr=' + prIdx);
-  check('Resideline is tried before ATTOM', rlIdx > 0 && atIdx > rlIdx, 'rl=' + rlIdx + ' attom=' + atIdx);
+  check('no ATTOM fallback remains in loadCompsForAddress', !seg.includes('/.netlify/functions/attom-lookup'), 'attom-lookup call found in loadCompsForAddress');
   check('Resideline acceptance requires the 3-comp minimum', seg.includes("(rj.comps.best || []).length >= 3"));
   check('PR subject merge kept for the Resideline win', seg.includes("compSource = 'Resideline+PR'"));
   check('no Resideline key material in index.html', !html.includes('RESIDELINE_API_KEY'));

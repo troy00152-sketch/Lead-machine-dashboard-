@@ -175,7 +175,7 @@ const fns = ['esc', 'fmtMoney', 'timeAgo', 'scoreClass', 'calcMAO', 'resolveLead
   check('4 enrichHotLeads attaches lead.lao', ccData.includes('lead.lao = (contact && contact.lao) || null'));
   check('4 renderHotLeads falls back to lead values', ccHtml.includes('resolveLeadValues(lead,cached?cached.arv:null)'));
   check('4 no ATTOM routing added for hot leads', !/attom/i.test(ccData) && !/attom/i.test(ccHtml), 'attom mention found in cc-data.js or command-center.html');
-  check('4 subject analyzer ATTOM fallback untouched', ccHtml.includes("lookupSubjectProperty(addr)"));
+  check('4 subject analyzer lookup untouched', ccHtml.includes("lookupSubjectProperty(addr)"));
   check('4 no stale 7,642 in command-center.html', !ccHtml.includes('7,642'));
   check('4 no stale 7,642 in index.html', !indexHtml.includes('7,642'));
   check('4 no stale 7,642 in cc-data.js', !ccData.includes('7,642'));

@@ -332,20 +332,20 @@
   }
 
   // ---------- address lookup: property record + verified comps ----------
-  // SAME lookup path as the Comps page (index.html loadCompsForAddress):
-  // PropertyReach (data-api) first, ATTOM (attom-lookup) as fallback, PR
-  // subject merged over ATTOM when PR matched. The scoring, best-3 picking
-  // and confidence live server-side in those two functions — this code only
-  // reads d.property / d.comps, never re-scores and never invents a comp.
+  // PropertyReach (data-api) is the only lookup source (ATTOM removed
+  // Nov 18, 2026). The scoring, best-3 picking and confidence live
+  // server-side in that function — this code only reads d.property /
+  // d.comps, never re-scores and never invents a comp.
   // fetchFn is injected (the browser passes the real fetch) so tests run
-  // on fixtures with zero API credits. Returns null when neither source
-  // matched the address; THROWS only when both fetches failed (network
-  // down) so the caller can say "unavailable" instead of "no record".
+  // on fixtures with zero API credits. Returns null when the source did
+  // not match the address; THROWS only when the fetch itself failed
+  // (network down) so the caller can say "unavailable" instead of
+  // "no record".
   async function lookupPropertyAndComps(address, fetchFn) {
     var addr = String(address || '').trim();
     if (!addr || typeof fetchFn !== 'function') return null;
     var enc = encodeURIComponent(addr);
-    var prSubject = null, prComps = null, prMatched = false, prError = false, attomError = false;
+    var prSubject = null, prComps = null, prMatched = false, prError = false;
     try {
       var prRes = await fetchFn('/.netlify/functions/data-api?address=' + enc);
       if (prRes && prRes.ok) {
@@ -361,28 +361,13 @@
     if (prComps) {
       return { matched: true, source: 'data provider', property: prSubject, comps: prComps };
     }
-    var attomJson = null;
-    try {
-      var atRes = await fetchFn('/.netlify/functions/attom-lookup?address=' + enc);
-      if (atRes && atRes.ok) {
-        try { attomJson = await atRes.json(); } catch (e) { attomJson = null; }
-      } else { attomError = true; }
-    } catch (e) { attomError = true; }
-    if (attomJson) {
-      if (prSubject) {
-        attomJson.property = Object.assign({}, attomJson.property || {}, prSubject);
-        if (!attomJson.matched) attomJson.matched = true;
-      }
-      if (!attomJson.matched) return null;
-      return { matched: true, source: prSubject ? 'ATTOM+PR' : 'ATTOM', property: attomJson.property || null, comps: attomJson.comps || null };
-    }
-    // PR matched the property but ATTOM is down and PR had no comps: the
-    // record is still worth filling (owner/beds/sqft/year) with comps null
-    // — ARV stays gated, nothing is invented.
+    // PR matched the property but returned no comps: the record is still
+    // worth filling (owner/beds/sqft/year) with comps null — ARV stays
+    // gated, nothing is invented.
     if (prMatched) {
       return { matched: true, source: 'data provider', property: prSubject, comps: null };
     }
-    if (prError && attomError) throw new Error('lookup unavailable: both sources failed');
+    if (prError) throw new Error('lookup unavailable: data provider request failed');
     return null;
   }
 
@@ -554,13 +539,11 @@
   }
 
   // User-visible source label for a lookup result ('data provider' is the
-  // PropertyReach path; 'ATTOM+PR' is ATTOM comps over a PR subject record).
+  // PropertyReach path — the only lookup source).
   // The status line names the source so a number that moves between runs
   // is attributable instead of a mystery.
   function lookupSourceLabel(source) {
     if (source === 'data provider') return 'PropertyReach';
-    if (source === 'ATTOM') return 'ATTOM';
-    if (source === 'ATTOM+PR') return 'ATTOM + PropertyReach';
     return source || '';
   }
 
@@ -833,8 +816,8 @@
     setWhenPresent('sqft', deal.sqft);
     setWhenPresent('yearBuilt', deal.yearBuilt);
     // The lookup can only ADD the PASS, never remove Troy's manual check:
-    // an ATTOM-only record carries no listing info, and its listed=false
-    // must not uncheck a box he checked himself. (Unchecking on an
+    // a record carrying no listing info (listed=false) must not uncheck
+    // a box he checked himself. (Unchecking on an
     // address change is blankAddressFields' job, above — it runs before
     // the fetch returns; by the time this runs, the box already reflects
     // the new address or Troy's own check for THIS address.)
