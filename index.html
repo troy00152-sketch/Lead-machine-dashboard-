@@ -75,11 +75,37 @@
       }
     } catch (e) { /* branding must never break the dashboard */ }
   }
+  /* Kill switch (Nov 19): a suspended white-label client
+     (accountStatus "suspended" from the client-config function)
+     gets this neutral inactive notice INSTEAD of the app — the page
+     content is replaced, so no data renders behind it. Neutral
+     wording only: no vendor names, no operator branding. Troy's own
+     config can never report suspended (server-side hard safety), and
+     the neutral default never does either. */
+  function showSuspended() {
+    window.LM_SUSPENDED = true;
+    var render = function () {
+      if (!document.body) return;
+      document.title = 'Account Inactive';
+      document.body.innerHTML =
+        '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0d1117;color:#e8edf5;font-family:Arial,Helvetica,sans-serif;padding:24px;box-sizing:border-box">' +
+        '<div style="max-width:520px;width:100%;text-align:center;background:#161e2b;border:1px solid #26314a;border-radius:12px;padding:44px 34px;box-sizing:border-box">' +
+        '<h1 style="font-size:22px;margin:0 0 14px;font-weight:600">Account Inactive</h1>' +
+        '<p style="font-size:15px;line-height:1.65;color:#8b96ad;margin:0">This account is currently inactive. Please contact your provider to restore service.</p>' +
+        '</div></div>';
+    };
+    if (document.body) render();
+    else document.addEventListener('DOMContentLoaded', render);
+  }
   function fallback() { applyBrand(DEFAULTS, true); }
   try {
     window.LM_CFG_PROMISE = fetch('/.netlify/functions/client-config', { cache: 'no-store' })
       .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
-      .then(function (cfg) { applyBrand(cfg, false); })
+      .then(function (cfg) {
+        if (cfg && cfg.accountStatus === 'suspended') { showSuspended(); return cfg; }
+        applyBrand(cfg, false);
+        return cfg;
+      })
       .catch(fallback);
     // Safety net: if the fetch hangs, apply defaults after 3s.
     setTimeout(function () {

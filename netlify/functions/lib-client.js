@@ -154,17 +154,40 @@ function headerSubdomain(event) {
   return safe || null;
 }
 
+// ACCOUNT STATUS / KILL SWITCH (Nov 19): a white-label client's
+// config may carry "active": false — the operator flips that ONE
+// field in clients/{subdomain}.json (and redeploys) to disconnect a
+// non-paying client: the public config then reports the account as
+// suspended (the pages render an inactive notice instead of the app),
+// and resolveClientData returns null so NO CRM data flows to them.
+// Flipping it back to true restores everything. A MISSING field means
+// active, so every config written before this switch keeps working.
+// HARD SAFETY: Troy's own client (isTroy) can NEVER be suspended by
+// this flag — the flag is ignored for Troy in every layer, so a stray
+// edit to troy.json cannot lock Troy out of his own system. The
+// neutral default is never suspended either (it has no data anyway).
+function isClientSuspended(cfg, isTroy) {
+  if (isTroy) return false; // HARD SAFETY: Troy is unsuspendable.
+  if (!cfg) return false;
+  return cfg.active === false;
+}
+
 // Resolve the request to a client config. Never throws.
-// Returns { cfg, subdomain, isTroy, isNeutral } — cfg is the neutral
-// config when nothing else resolves, so callers can always brand the
-// page; callers that need CRM data must check isNeutral / locationId.
+// Returns { cfg, subdomain, isTroy, isNeutral, suspended } — cfg is
+// the neutral config when nothing else resolves, so callers can
+// always brand the page; callers that need CRM data must check
+// isNeutral / locationId. `suspended` is true only for a real
+// (non-Troy, non-neutral) client whose config sets "active": false.
 function resolveClient(event) {
   const headerSub = headerSubdomain(event);
   const host = (event && event.headers && (event.headers.host || event.headers.Host)) || '';
   let subdomain = headerSub || subdomainFromHost(host);
   if (subdomain) {
     const cfg = loadClient(subdomain);
-    if (cfg) return { cfg, subdomain, isTroy: subdomain === TROY_SUBDOMAIN, isNeutral: false };
+    if (cfg) {
+      const isTroy = subdomain === TROY_SUBDOMAIN;
+      return { cfg, subdomain, isTroy, isNeutral: false, suspended: isClientSuspended(cfg, isTroy) };
+    }
   }
   // Unknown subdomain, or a header naming a client file that does not
   // exist: neutral default. Never Troy.
@@ -174,6 +197,7 @@ function resolveClient(event) {
     subdomain: NEUTRAL_SUBDOMAIN,
     isTroy: false,
     isNeutral: true,
+    suspended: false,
   };
 }
 
@@ -184,6 +208,10 @@ function resolveClient(event) {
 // subdomain would be a data leak, not a fallback.
 function resolveClientData(event) {
   const resolved = resolveClient(event);
+  // Kill switch: a suspended client gets NO CRM data, exactly like a
+  // client with no location configured. (Never true for Troy — see
+  // isClientSuspended.)
+  if (resolved.suspended) return null;
   const cfg = resolved.cfg || {};
   const hl = cfg.highLevel || {};
   const isTroy = resolved.isTroy;
@@ -219,16 +247,25 @@ function resolveClientData(event) {
 // (the page hides the CRM buttons and refuses the push). Neither is a
 // secret: both URLs already shipped in the page source before this
 // pass; tokens still never leave the server.
-function publicConfig(cfg) {
+// accountStatus (kill switch, Nov 19): the caller (client-config.js)
+// passes the resolver's `suspended` verdict via opts — publicConfig
+// only sees the raw config, and suspension is a RESOLUTION property
+// (it depends on isTroy, which the raw file cannot prove). When
+// suspended, the CRM link and lead-push webhook are blanked as
+// defense in depth: the pages show the inactive notice and refuse
+// pushes, on top of resolveClientData already returning null.
+function publicConfig(cfg, opts) {
   const c = cfg || {};
   const hl = c.highLevel || {};
+  const suspended = !!(opts && opts.suspended);
   return {
     companyName: c.companyName || 'Command Center',
     logo: c.logo || '',
     primaryColor: c.primaryColor || '#00d4ff',
     subdomain: c.subdomain || NEUTRAL_SUBDOMAIN,
-    crmUrl: hl.locationId ? 'https://app.gohighlevel.com/v2/location/' + hl.locationId + '/' : '',
-    ghlWebhookUrl: hl.webhookUrl || '',
+    accountStatus: suspended ? 'suspended' : 'active',
+    crmUrl: suspended ? '' : (hl.locationId ? 'https://app.gohighlevel.com/v2/location/' + hl.locationId + '/' : ''),
+    ghlWebhookUrl: suspended ? '' : (hl.webhookUrl || ''),
   };
 }
 
@@ -253,6 +290,7 @@ module.exports = {
   loadNeutral,
   subdomainFromHost,
   headerSubdomain,
+  isClientSuspended,
   resolveClient,
   resolveClientData,
   publicConfig,
