@@ -1153,6 +1153,7 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
         <div class="card">
           <div id="compSubjectHead" style="font-size:17px;font-weight:800;margin-bottom:12px">Comps — enter a property address below</div>
           <div id="compSubjectCard" style="display:none;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:12px"></div>
+          <div id="compAssumedNote" style="display:none;border:1px solid #e6a200;color:#e6a200;border-radius:8px;padding:8px 10px;font-size:13px;font-weight:700;margin-bottom:12px"></div>
           <div style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:12px">
             <div style="font-weight:800;font-size:13px;margin-bottom:4px">🚦 Listing Check — FIRST, before any comp math</div>
             <p style="color:var(--muted);font-size:12px;margin:0 0 10px">If it's listed with a realtor, PASS immediately — no MAO, no LAO, no offer. Listing fields fill themselves in automatically — anything the feed can't find, check the listing by hand and set it here. The panel below shows the full picture: status, price + $/sqft, status-change date, above/below value, and the description.</p>
@@ -6340,6 +6341,17 @@ async function loadCompsForAddress(retryAttempt){
       d = { matched: false };
     }
     compDataSource = compSource;
+    /* Assumed-facts disclosure (round 4): when the winning Resideline
+       response valued the subject with an assumed bath count
+       (assumedFacts: ['baths'] from resideline-comps), say so on
+       screen — the assumption is never silent. Any other outcome
+       (provider win, no assumption, no match) hides the note. */
+    const assumedNoteEl = document.getElementById('compAssumedNote');
+    if(assumedNoteEl){
+      const assumedBaths = !!(d && Array.isArray(d.assumedFacts) && d.assumedFacts.indexOf('baths') >= 0);
+      assumedNoteEl.style.display = assumedBaths ? 'block' : 'none';
+      if(assumedBaths) assumedNoteEl.textContent = 'Baths not on record — valued as 1 bath (assumed).';
+    }
     if(!d.matched){ compRows = []; compPicks = []; compLoadedAddr = ''; compSubjectLat = null; compSubjectLng = null; compConfidence = ''; compConfidenceText = ''; compSubjectSqft = null; compSubjectAvm = null; compSubjectBeds = null; compDetailData = null; compStabilityWarns = []; resetCompFilters(); resetCompMortgage(); renderCompSubjectCard(null, addr, ''); if(msg) msg.textContent = 'No ownership records found for this address — type an ARV below to run the math manually.'; renderCompList(); renderCompMortgage(); calcComp(); return; }
     renderCompSubjectCard(d.property || null, addr, d.address || '', null, d.linkedProperties || []);
     applyCompMortgageFromRecords(d.property || null, addr);
@@ -6420,6 +6432,8 @@ async function loadCompsForAddress(retryAttempt){
        map. Fire-and-forget; never touches the subject or the offer math. */
     geocodeMissingCompRows();
   }catch(e){
+    const assumedNoteElErr = document.getElementById('compAssumedNote');
+    if(assumedNoteElErr) assumedNoteElErr.style.display = 'none';
     renderCompSubjectCard(null, addr, '', true);
     if(msg) msg.textContent = 'Verified comps unavailable right now — type an ARV below to run the math manually.';
   }
