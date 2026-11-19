@@ -53,6 +53,17 @@
  *      bot and the headset portrait for the voice bot; avatars
  *      render on picker cards, editor cards, and test replies,
  *      and a rename updates the Initials avatar.
+ *   K. Voice-call test mode (Troy, Nov 19 follow-on): the Test
+ *      your bot panel also rehearses a voice bot by call — a
+ *      Text | Voice call toggle (voice gated to voice bots), the
+ *      bot speaks its greeting and its replies through the same
+ *      style→voice path as the Listen buttons, spoken utterances
+ *      run through the SAME single test exchange as typed tests
+ *      (guardrail silence is never spoken), a transcript lands in
+ *      the log, and the fallbacks are honest (no speech input →
+ *      hear-the-bot typing mode, no speech at all → note, mic
+ *      blocked → note, no crash). Browser-only: no network, no
+ *      phone line, no send path.
  *
  * This screen is a config/view layer only: it must NOT reference the
  * live bot function or any send path. Fixtures only — no network.
@@ -839,6 +850,85 @@ function fakeStorage() {
     }
     assert.ok(!/<img/.test(html), 'no image tags — every avatar is inline SVG');
     assert.ok(!/src\s*=\s*"https?:/.test(html), 'no external asset URLs anywhere on the page');
+  });
+
+  console.log('— K. Voice-call test mode —');
+  await check('voice-call test: Text | Voice call toggle, call controls, status line, honest browser-call labeling', async () => {
+    for (const needle of ['id="btnTestModeText"', 'id="btnTestModeVoice"', '💬 Text', '📞 Voice call',
+      'id="testVoiceArea"', 'id="testVoiceGate"', 'id="testCallControls"', 'id="btnStartCall"', 'id="btnEndCall"',
+      'id="testCallStatus"', 'id="testVoiceNote"', '📞 Start test call', '>End call</button>', 'Not on a call',
+      'Browser test call — uses your microphone and speakers. Not a live phone line.']) {
+      assert.ok(html.includes(needle), 'missing ' + needle);
+    }
+    const testAt = html.indexOf('<h2>Test your bot</h2>');
+    const toggleAt = html.indexOf('id="btnTestModeText"');
+    const kbAt = html.indexOf('<h2>Knowledge Base</h2>');
+    assert.ok(toggleAt > testAt && toggleAt < kbAt, 'the mode toggle lives inside the Test your bot panel');
+  });
+  await check('voice-call test: voice mode is gated to voice bots (text bot gets the pick-a-voice-bot note)', async () => {
+    const render = html.slice(html.indexOf('function renderTestMode()'), html.indexOf('function setTestMode(mode)'));
+    assert.ok(render.includes("bot.channel === 'voice'"), 'the gate reads the selected bot\u2019s channel');
+    assert.ok(render.includes('gate.hidden = isVoice'), 'the gate note shows exactly when the bot is not a voice bot');
+    assert.ok(render.includes('controls.style.display'), 'the call controls hide for a text bot');
+    assert.ok(html.includes('Voice-call testing is for voice bots — pick a voice bot in the picker at the top of this page'), 'plain-language gate note');
+    const start = html.slice(html.indexOf('function startTestCall()'), html.indexOf('function endTestCall()'));
+    assert.ok(start.includes("bot.channel !== 'voice'"), 'starting a call refuses a text bot outright');
+  });
+  await check('voice-call test: spoken utterances and typed lines share ONE exchange — a single caiTestReply call', async () => {
+    assert.strictEqual((html.match(/caiTestReply\(/g) || []).length, 2, 'the engine is defined once and called once — no second reply path for voice');
+    const exchange = html.slice(html.indexOf('function testExchange(msg)'), html.indexOf('function runTest()'));
+    assert.ok(exchange.includes('caiTestReply(msg, {'), 'the shared exchange is the one place the engine runs');
+    const typed = html.slice(html.indexOf('function runTest()'), html.indexOf("document.getElementById('btnTestSend')"));
+    assert.ok(typed.includes('testExchange(msg)'), 'typed tests route through the shared exchange');
+    const spoken = html.slice(html.indexOf('function handleCallUtterance(text)'), html.indexOf('function startTestCall()'));
+    assert.ok(spoken.includes('testExchange(text)'), 'recognized utterances route through the same shared exchange');
+    assert.ok(spoken.includes("if (res.type === 'reply') speakTestReply(res.text);"), 'only real replies are spoken — guardrail silence is never spoken aloud');
+  });
+  await check('voice-call test: the bot speaks through the library\u2019s own style→voice path (same as Listen)', async () => {
+    const speak = html.slice(html.indexOf('function speakWithSelection(text, selId'), html.indexOf('function previewVoice(ownerId, selId)'));
+    assert.ok(speak.includes('caiPickSpeechVoice(voices, selId)'), 'one voice-matching helper for previews and calls');
+    assert.ok(speak.includes('SpeechSynthesisUtterance'), 'speech is the browser\u2019s own synthesis');
+    const preview = html.slice(html.indexOf('function previewVoice(ownerId, selId)'), html.indexOf("document.addEventListener('click'"));
+    assert.ok(preview.includes('speakWithSelection(caiGreeting(botName, BRAND_NAME), selId)'), 'Listen buttons preview through the shared speech path');
+    const reply = html.slice(html.indexOf('function speakTestReply(text)'), html.indexOf('function handleCallUtterance(text)'));
+    assert.ok(reply.includes('voiceSelectionFor(bot.id)'), 'call replies use the bot\u2019s saved library voice selection');
+    assert.ok(reply.includes('speakWithSelection(text,'), 'call replies speak through the shared path');
+    const start = html.slice(html.indexOf('function startTestCall()'), html.indexOf('function endTestCall()'));
+    assert.ok(start.includes('speakTestReply(caiGreeting(bot.name, BRAND_NAME))'), 'the call opens with the bot speaking its greeting');
+  });
+  await check('voice-call test: fallbacks — no speech input, no speech at all, mic blocked, typed lines on a call still spoken', async () => {
+    assert.ok(html.includes('window.SpeechRecognition || window.webkitSpeechRecognition'), 'speech input is feature-detected under both names');
+    assert.ok(html.includes('Voice input isn\u2019t supported in this browser'), 'no-recognition browsers get the hear-the-bot note');
+    assert.ok(html.includes('Voice isn\u2019t available in this browser — the bot can\u2019t speak here'), 'no-synthesis browsers get a clear note and text testing carries on');
+    assert.ok(html.includes("err === 'not-allowed'"), 'microphone permission denial is handled by name');
+    assert.ok(html.includes('Microphone access was blocked'), 'mic denial shows a clear note, never a crash');
+    assert.ok(html.includes('callRecogBlocked = true'), 'a blocked mic stops recognition retries instead of looping');
+    const typed = html.slice(html.indexOf('function runTest()'), html.indexOf("document.getElementById('btnTestSend')"));
+    assert.ok(typed.includes("if (callActive && res.type === 'reply') speakTestReply(res.text);"), 'a line typed during a call gets a spoken reply (the hear-the-bot fallback)');
+  });
+  await check('voice-call test: lifecycle — status line, transcript notes, switching bot or mode ends the call cleanly', async () => {
+    assert.ok(html.includes("'On a test call with '"), 'the status line names the bot on the call');
+    assert.ok(html.includes('📞 Test call started with '), 'call start is written into the transcript');
+    assert.ok(html.includes("text: 'Test call ended.'"), 'call end is written into the transcript');
+    const log = html.slice(html.indexOf('function renderTestLog()'), html.indexOf('function testExchange(msg)'));
+    assert.ok(log.includes("m.who === 'note'"), 'the log renders call notes as transcript lines');
+    const setMode = html.slice(html.indexOf('function setTestMode(mode)'), html.indexOf('function updateCallStatus()'));
+    assert.ok(setMode.includes('endTestCall()'), 'switching back to Text mode mid-call ends the call');
+    const select = html.slice(html.indexOf('function selectBot(id, scroll)'), html.indexOf("document.getElementById('pickGrid').addEventListener"));
+    assert.ok(select.includes('endTestCall()'), 'switching bots mid-call ends the call');
+    assert.ok(select.includes('renderTestMode();'), 'switching bots re-renders the test mode gate');
+    const end = html.slice(html.indexOf('function endTestCall()'));
+    assert.ok(end.includes('stopListening()'), 'ending the call stops recognition');
+    assert.ok(end.includes('speechSynthesis.cancel()'), 'ending the call stops the bot mid-sentence');
+    assert.ok(end.includes('clearInterval(callTimerId)'), 'ending the call stops the timer');
+  });
+  await check('voice-call test: self-contained — the call code makes no network calls and sends nothing', async () => {
+    const block = html.slice(html.indexOf('test panel: voice-call mode'), html.indexOf('function renderAll()'));
+    assert.ok(block.length > 500, 'voice-call block found');
+    assert.ok(!block.includes('fetch('), 'no fetch in the test-call code');
+    assert.ok(!block.includes('XMLHttpRequest'), 'no XHR in the test-call code');
+    assert.ok(!block.includes('WebSocket'), 'no socket in the test-call code');
+    assert.ok(!block.includes('getUserMedia'), 'microphone access goes through speech recognition only, never raw recording');
   });
 
   console.log('');

@@ -108,6 +108,9 @@
   .silence-note{ text-align:center; color:var(--muted); font-size:12.5px; font-style:italic; margin:10px 0; }
   .test-row{ display:flex; gap:8px; }
   .test-row input{ flex:1; }
+  .test-modes{ display:flex; gap:8px; margin-bottom:12px; }
+  .test-mode-btn.active{ border-color:var(--accent); color:var(--accent); }
+  .call-row{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px; }
   /* bot avatars */
   .bot-avatar{ display:inline-flex; width:44px; height:44px; border-radius:50%; overflow:hidden; flex:none; background:var(--bg); border:1px solid var(--line); }
   .bot-avatar svg{ width:100%; height:100%; display:block; }
@@ -253,6 +256,20 @@
       here is sent anywhere. Type like a seller would and see what the bot says back. You are
       testing: <b id="testBotLabel"></b> <span class="muted">(switch bots in the picker at the top of this page)</span>
     </p>
+    <div class="test-modes">
+      <button class="btn small test-mode-btn active" id="btnTestModeText" type="button">💬 Text</button>
+      <button class="btn small test-mode-btn" id="btnTestModeVoice" type="button">📞 Voice call</button>
+    </div>
+    <div id="testVoiceArea" hidden>
+      <p class="muted" style="margin:0 0 10px;font-size:12.5px">Browser test call — uses your microphone and speakers. Not a live phone line.</p>
+      <div class="muted" id="testVoiceGate" style="margin:0 0 10px" hidden>Voice-call testing is for voice bots — pick a voice bot in the picker at the top of this page (like <span data-bot-ref="sam">Sam</span>) to try a test call.</div>
+      <div class="call-row" id="testCallControls">
+        <button class="btn primary" id="btnStartCall" type="button">📞 Start test call</button>
+        <button class="btn danger" id="btnEndCall" type="button" hidden>End call</button>
+        <span class="pill" id="testCallStatus">Not on a call</span>
+      </div>
+      <div class="muted" id="testVoiceNote" style="font-size:12px;margin-bottom:10px"></div>
+    </div>
     <div class="test-log" id="testLog"></div>
     <div class="test-row">
       <input type="text" id="testInput" placeholder="Type a seller message — try &quot;Who is this?&quot; or &quot;Can we set up a call?&quot;" autocomplete="off">
@@ -1779,10 +1796,13 @@ function renderPicker() {
   renderTestBotLabel();
 }
 function selectBot(id, scroll) {
-  state.selected = caiValidSelected(id, allBots());
+  var next = caiValidSelected(id, allBots());
+  if (callActive && next !== callBotId) endTestCall();
+  state.selected = next;
   caiSaveSelected(localStorage, TENANT, state.selected);
   renderPicker();
   renderAddedBots();
+  renderTestMode();
   if (scroll) {
     var card = document.querySelector('[data-bot-card="' + state.selected + '"]') ||
       (state.selected === 'ashley' ? document.getElementById('ashleyCard') : document.getElementById('samCard'));
@@ -1886,8 +1906,10 @@ document.getElementById('addedBotGrid').addEventListener('click', function (e) {
     state.selected = 'ashley';
     caiSaveSelected(localStorage, TENANT, state.selected);
   }
+  if (callActive && callBotId === p.id) endTestCall();
   renderPicker();
   renderAddedBots();
+  renderTestMode();
   toast(p.name + ' removed.');
 });
 
@@ -1993,23 +2015,36 @@ function botById(id) {
   allBots().forEach(function (b) { if (b.id === id) found = b; });
   return found;
 }
-function previewVoice(ownerId, selId) {
-  var bot = botById(ownerId);
-  var botName = bot ? bot.name : 'Sam';
-  if (!('speechSynthesis' in window)) {
-    setVoiceNote(ownerId, 'Voice preview isn’t available in this browser.');
-    return;
-  }
+/* Speak text aloud in a chosen voice style — the one speech path
+   on this screen: the Listen buttons preview through it and the
+   test-call mode talks through it, so a style sounds the same in
+   both. Returns true when speech was handed to the browser.
+   onDone (optional) fires when the line finishes or fails, so a
+   test call can reopen the microphone afterwards. */
+function speakWithSelection(text, selId, onDone) {
+  if (!('speechSynthesis' in window)) return false;
   try {
     var voices = window.speechSynthesis.getVoices() || [];
-    var u = new SpeechSynthesisUtterance(caiGreeting(botName, BRAND_NAME));
+    var u = new SpeechSynthesisUtterance(text);
     var voice = caiPickSpeechVoice(voices, selId);
     if (voice) u.voice = voice;
     var opt = caiVoiceOption(selId);
     if (opt) { u.pitch = opt.pitch; u.rate = opt.rate; }
+    if (onDone) {
+      u.onend = function () { onDone(); };
+      u.onerror = function () { onDone(); };
+    }
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(u);
+    return true;
   } catch (e) {
+    return false;
+  }
+}
+function previewVoice(ownerId, selId) {
+  var bot = botById(ownerId);
+  var botName = bot ? bot.name : 'Sam';
+  if (!speakWithSelection(caiGreeting(botName, BRAND_NAME), selId)) {
     setVoiceNote(ownerId, 'Voice preview isn’t available in this browser.');
   }
 }
@@ -2050,6 +2085,7 @@ function renderTestLog() {
     return;
   }
   log.innerHTML = testLog.map(function (m) {
+    if (m.who === 'note') return '<div class="silence-note">' + esc(m.text) + '</div>';
     if (m.who === 'silence') return '<div class="silence-note">🤫 No reply — ' + esc(m.text) + '</div>';
     if (m.who === 'user') return '<div class="bubble-row user"><div class="bubble user">' + esc(m.text) + '</div></div>';
     /* The reply wears the bot's CURRENT face and name — a rename or
@@ -2064,10 +2100,14 @@ function renderTestLog() {
   }).join('');
   log.scrollTop = log.scrollHeight;
 }
-function runTest() {
-  var input = document.getElementById('testInput');
-  var msg = input.value;
-  if (!msg.trim()) return;
+/* One seller message in, one bot answer out — the single path
+   every test surface uses: typed messages, spoken utterances on a
+   test call, and lines typed during a call all land here, so the
+   guardrails and the knowledge base behave identically in text
+   and on a call. Returns the engine result (or null for a blank
+   message). */
+function testExchange(msg) {
+  if (!String(msg == null ? '' : msg).trim()) return null;
   var bot = selectedBot();
   var res = caiTestReply(msg, {
     faqs: state.faqs,
@@ -2076,17 +2116,212 @@ function runTest() {
     bizName: BRAND_NAME,
     now: new Date(),
   });
-  if (res.type === 'empty') return;
+  if (res.type === 'empty') return null;
   testLog.push({ who: 'user', text: msg });
   if (res.type === 'silence') testLog.push({ who: 'silence', text: res.note });
   else testLog.push({ who: 'bot', botId: bot.id, avatarSel: bot.avatar, name: bot.name, text: res.text });
-  input.value = '';
   renderTestLog();
+  return res;
+}
+function runTest() {
+  var input = document.getElementById('testInput');
+  var msg = input.value;
+  if (!msg.trim()) return;
+  var res = testExchange(msg);
+  if (!res) return;
+  input.value = '';
   input.focus();
+  /* On a live test call the typed line is part of the call — the
+     bot answers it out loud, like a spoken line. */
+  if (callActive && res.type === 'reply') speakTestReply(res.text);
 }
 document.getElementById('btnTestSend').addEventListener('click', runTest);
 document.getElementById('testInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') runTest(); });
 document.getElementById('btnTestClear').addEventListener('click', function () { testLog = []; renderTestLog(); });
+
+/* ---- test panel: voice-call mode ----
+   A browser-only rehearsal of a voice bot. The bot speaks its
+   greeting in the voice style picked for it in the library above
+   (the same speakWithSelection path the Listen buttons use), the
+   visitor talks back through the microphone, and every utterance
+   runs through the very same testExchange the typed test uses —
+   same guardrails: an opt-out or a $500K+ ask is met with
+   silence, never spoken aloud. Replies are spoken AND written to
+   the log, so the call leaves a transcript. Microphone and
+   speakers only — no phone line, nothing leaves this page. */
+var testMode = 'text';
+var callActive = false;
+var callBotId = '';
+var callStartedAt = 0;
+var callTimerId = null;
+var callRecog = null;
+var callRecogBlocked = false;
+var callSpeaking = false;
+
+function speechCtor() {
+  return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+}
+function callBotName() {
+  var b = botById(callBotId);
+  return b ? b.name : 'the bot';
+}
+function setTestVoiceNote(msg) {
+  var el = document.getElementById('testVoiceNote');
+  if (el) el.textContent = msg || '';
+}
+function setCallStatus(text, cls) {
+  var el = document.getElementById('testCallStatus');
+  if (!el) return;
+  el.textContent = text;
+  el.className = 'pill' + (cls ? ' ' + cls : '');
+}
+function renderTestMode() {
+  var textBtn = document.getElementById('btnTestModeText');
+  var voiceBtn = document.getElementById('btnTestModeVoice');
+  var area = document.getElementById('testVoiceArea');
+  if (!textBtn || !voiceBtn || !area) return;
+  textBtn.classList.toggle('active', testMode === 'text');
+  voiceBtn.classList.toggle('active', testMode === 'voice');
+  area.hidden = testMode !== 'voice';
+  if (testMode !== 'voice') return;
+  var bot = selectedBot();
+  var isVoice = !!bot && bot.channel === 'voice';
+  var gate = document.getElementById('testVoiceGate');
+  var controls = document.getElementById('testCallControls');
+  if (gate) gate.hidden = isVoice;
+  if (controls) controls.style.display = isVoice ? '' : 'none';
+  if (!isVoice) { setTestVoiceNote(''); return; }
+  var start = document.getElementById('btnStartCall');
+  if (!('speechSynthesis' in window)) {
+    if (start) start.disabled = true;
+    setTestVoiceNote('Voice isn’t available in this browser — the bot can’t speak here, but text testing below still works.');
+    return;
+  }
+  if (start) start.disabled = false;
+  if (!speechCtor()) {
+    setTestVoiceNote('Voice input isn’t supported in this browser — you can still start a test call to hear ' + bot.name + ', and anything you type in the box below gets a spoken reply.');
+  } else if (!callRecogBlocked) {
+    setTestVoiceNote('');
+  }
+}
+function setTestMode(mode) {
+  var next = mode === 'voice' ? 'voice' : 'text';
+  if (next !== testMode && callActive) endTestCall();
+  testMode = next;
+  renderTestMode();
+}
+function updateCallStatus() {
+  if (!callActive) return;
+  var secs = Math.floor((Date.now() - callStartedAt) / 1000);
+  var clock = Math.floor(secs / 60) + ':' + ('0' + (secs % 60)).slice(-2);
+  setCallStatus('On a test call with ' + callBotName() + (callRecogBlocked ? ' — type to talk' : ' — speak now') + ' · ' + clock, 'green');
+}
+function stopListening() {
+  if (!callRecog) return;
+  var r = callRecog;
+  callRecog = null;
+  try { r.onresult = null; r.onerror = null; r.onend = null; r.stop(); } catch (e) { /* already stopped */ }
+}
+function startListening() {
+  var Ctor = speechCtor();
+  if (!Ctor || !callActive || callRecogBlocked || callSpeaking) return;
+  stopListening();
+  try {
+    var r = new Ctor();
+    r.lang = 'en-US';
+    r.interimResults = false;
+    r.continuous = false;
+    r.onresult = function (ev) {
+      var text = '';
+      for (var i = ev.resultIndex; i < ev.results.length; i++) {
+        if (ev.results[i].isFinal) text += ev.results[i][0].transcript;
+      }
+      text = text.trim();
+      if (text) handleCallUtterance(text);
+    };
+    r.onerror = function (ev) {
+      var err = ev && ev.error;
+      if (err === 'not-allowed' || err === 'service-not-allowed' || err === 'audio-capture') {
+        callRecogBlocked = true;
+        setTestVoiceNote(err === 'audio-capture'
+          ? 'No microphone was found on this device — the call stays open so you can hear the bot, and anything you type in the box below gets a spoken reply.'
+          : 'Microphone access was blocked — the call stays open so you can hear the bot, and anything you type in the box below gets a spoken reply.');
+        updateCallStatus();
+      }
+    };
+    r.onend = function () {
+      if (callRecog === r) callRecog = null;
+      /* Recognition stops on its own after each phrase — reopen
+         it while the call is live and the bot isn't talking. */
+      if (callActive && !callSpeaking && !callRecogBlocked) startListening();
+    };
+    callRecog = r;
+    r.start();
+  } catch (e) { /* recognition refused to start — typed replies on the call still work */ }
+}
+/* Say one bot line on the call, in the bot's own library voice.
+   The microphone closes while the bot talks (so it never hears
+   itself) and reopens when the line ends. */
+function speakTestReply(text) {
+  var bot = botById(callBotId) || selectedBot();
+  if (!bot) return;
+  callSpeaking = true;
+  stopListening();
+  var spoke = speakWithSelection(text, voiceSelectionFor(bot.id), function () {
+    callSpeaking = false;
+    if (callActive) startListening();
+  });
+  if (!spoke) callSpeaking = false;
+}
+function handleCallUtterance(text) {
+  if (!callActive) return;
+  var res = testExchange(text);
+  if (!res) return;
+  if (res.type === 'reply') speakTestReply(res.text);
+  /* Silence results are never spoken — the log note says why. */
+}
+function startTestCall() {
+  var bot = selectedBot();
+  if (!bot || bot.channel !== 'voice') { renderTestMode(); return; }
+  if (!('speechSynthesis' in window)) {
+    setTestVoiceNote('Voice isn’t available in this browser — the bot can’t speak here, but text testing below still works.');
+    return;
+  }
+  if (callActive) endTestCall();
+  callActive = true;
+  callBotId = bot.id;
+  callRecogBlocked = false;
+  callStartedAt = Date.now();
+  testLog.push({ who: 'note', text: '📞 Test call started with ' + bot.name + '.' });
+  renderTestLog();
+  document.getElementById('btnStartCall').hidden = true;
+  document.getElementById('btnEndCall').hidden = false;
+  updateCallStatus();
+  callTimerId = setInterval(updateCallStatus, 500);
+  speakTestReply(caiGreeting(bot.name, BRAND_NAME));
+}
+function endTestCall() {
+  if (callTimerId) { clearInterval(callTimerId); callTimerId = null; }
+  var wasActive = callActive;
+  callActive = false;
+  callSpeaking = false;
+  stopListening();
+  if ('speechSynthesis' in window) { try { window.speechSynthesis.cancel(); } catch (e) { /* nothing playing */ } }
+  var start = document.getElementById('btnStartCall');
+  var end = document.getElementById('btnEndCall');
+  if (start) start.hidden = false;
+  if (end) end.hidden = true;
+  setCallStatus('Not on a call');
+  if (wasActive) {
+    testLog.push({ who: 'note', text: 'Test call ended.' });
+    renderTestLog();
+  }
+  callBotId = '';
+}
+document.getElementById('btnTestModeText').addEventListener('click', function () { setTestMode('text'); });
+document.getElementById('btnTestModeVoice').addEventListener('click', function () { setTestMode('voice'); });
+document.getElementById('btnStartCall').addEventListener('click', startTestCall);
+document.getElementById('btnEndCall').addEventListener('click', function () { endTestCall(); });
 
 function renderAll() {
   renderPicker();
@@ -2101,6 +2336,7 @@ function renderAll() {
   renderBooking();
   renderGuardrails();
   renderTestLog();
+  renderTestMode();
 }
 wireBot('ashley', 'ashley');
 wireBot('sam', 'sam');
