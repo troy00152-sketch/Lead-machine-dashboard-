@@ -17,12 +17,14 @@
 //     INVALID_PROPERTY_DATA when it cannot enrich a property from the
 //     address alone, so the facts are fetched first and sent in the
 //     body (verified live Nov 18, 2026: address-only calls 400ed while
-//     the key itself was accepted). Resideline publishes NO response
-//     sample for this endpoint and the live payload matched none of
-//     the first-guess field names (Nov 18: details 200, facts=none on
-//     every call), so the parser accepts a broad alias set per fact
-//     and searches the payload recursively (depth <= 3, arrays' first
-//     elements included); when it still finds nothing it logs the
+//     the key itself was accepted). Resideline's developer blog
+//     documents the response shape: the facts nest under
+//     `property_info` with the SAME field names the property_value
+//     body takes (beds, baths, sqft_size, subject_year_built,
+//     property_type) — parsePropertyDetails tries that location
+//     first. The parser still accepts a broad alias set per fact and
+//     searches the payload recursively (depth <= 3, arrays' first
+//     elements included); when it finds nothing it logs the
 //     payload's key structure only (details shape=…, keys, never
 //     values) as the evidence trail for the real shape.
 //   Step 2 — POST /v2/api/property_value?enrich_if_missing=true —
@@ -32,10 +34,19 @@
 //     published sample, or nested under data.property_valuation; both
 //     locations are parsed (verified live Nov 18, 2026: a 200 response
 //     carried a valuation with an empty top-level comps read).
-//   Step 3 — POST /v2/api/property_report — 10 credits, ONLY when
-//     Step 2 produced fewer than 3 comps and the facts allow it (this
-//     endpoint requires year_built + property_type). Its comps nest
-//     under property_valuation.comps.
+//   Step 3 — POST /v2/api/property_report — 10 credits on success,
+//     ONLY when Step 2 produced fewer than 3 comps and the facts allow
+//     it (this endpoint requires year_built + property_type). Two
+//     attempts: report(min) sends the required fields only, then
+//     report(full) adds beds/baths/sqft if the minimal body failed.
+//     Failed upstream calls (HTTP >= 400) are not charged, so the
+//     extra attempt is free. Its comps nest under
+//     property_valuation.comps.
+//   Property-type vocabulary differs by endpoint: property_value
+//   takes "Single-family" / "Condo" / "Townhouse", property_report
+//   takes "house" / "condo" / "townhouse" / "multi-family" — the
+//   body builders normalize the stored type into each endpoint's
+//   vocabulary (unknown types pass through unchanged).
 //   The valuation/report responses' own arv_market_value / as_is_value
 //   are VENDOR values: they come back clearly labeled as such
 //   (vendorArv / vendorAsIs and the screen-only avm slot, same
@@ -51,8 +62,9 @@
 const DETAILS_URL = 'https://api.resideline.com/v1/api/property_details';
 const API_URL = 'https://api.resideline.com/v2/api/property_value?enrich_if_missing=true';
 const REPORT_URL = 'https://api.resideline.com/v2/api/property_report';
-// Per-call timeout; the chain is at most 3 calls (details + value +
-// report) and the common path is 2, well under the function limit.
+// Per-call timeout; the chain is at most 4 calls (details + value +
+// report(min) + report(full)) and the common path is 2, well under
+// the function limit.
 const TIMEOUT_MS = 15000;
 
 // Legacy caller bounds: still parsed for input compatibility, but NOT
@@ -183,12 +195,43 @@ function mergeFacts(input, fetched) {
   };
 }
 
+/* ---------------- property-type vocabulary ----------------
+   The two comp endpoints speak different type vocabularies:
+   property_value examples use "Single-family" / "Condo" /
+   "Townhouse"; property_report examples use "house" / "condo" /
+   "townhouse" / "multi-family". A stored type is canonicalized
+   (case-insensitive, spaces / hyphens / underscores ignored) and
+   each body builder emits its endpoint's form. Unknown types pass
+   through unchanged — never invent a mapping. */
+
+const TYPE_VOCAB = {
+  singlefamily: { value: 'Single-family', report: 'house' },
+  house: { value: 'Single-family', report: 'house' },
+  condo: { value: 'Condo', report: 'condo' },
+  townhouse: { value: 'Townhouse', report: 'townhouse' },
+  multifamily: { value: 'Multi-family', report: 'multi-family' },
+};
+function canonicalTypeKey(t) {
+  return String(t == null ? '' : t).toLowerCase().replace(/[\s\-_]+/g, '');
+}
+function typeForValue(t) {
+  if (!t) return t;
+  const v = TYPE_VOCAB[canonicalTypeKey(t)];
+  return v ? v.value : t;
+}
+function typeForReport(t) {
+  if (!t) return t;
+  const v = TYPE_VOCAB[canonicalTypeKey(t)];
+  return v ? v.report : t;
+}
+
 // Builds the upstream property_value body — SPEC-EXACT per
 // resideline.com/resideline-api: only address, beds, baths, sqft_size,
 // subject_year_built, property_type may be sent. Facts ride along when
 // known (caller first, property_details filling gaps) because an
 // address-only call 400s with INVALID_PROPERTY_DATA on properties
-// Resideline cannot enrich from the address alone.
+// Resideline cannot enrich from the address alone. The type is
+// emitted in property_value vocabulary.
 function buildUpstreamBody(input, facts) {
   const f = facts || mergeFacts(input, null);
   const body = { address: input.address };
@@ -196,19 +239,24 @@ function buildUpstreamBody(input, facts) {
   if (f.baths != null) body.baths = f.baths;
   if (f.sqft != null) body.sqft_size = f.sqft;
   if (f.yearBuilt != null) body.subject_year_built = f.yearBuilt;
-  if (f.propertyType) body.property_type = f.propertyType;
+  if (f.propertyType) body.property_type = typeForValue(f.propertyType);
   return body;
 }
 
 // Builds the property_report body. This endpoint REQUIRES year_built +
-// property_type and names its size field `sqft` (not sqft_size).
-function buildReportBody(input, facts) {
+// property_type and names its size field `sqft` (not sqft_size). The
+// type is emitted in property_report vocabulary. With opts.minimal
+// the body carries ONLY the required fields (address, year_built,
+// property_type) — the chain tries that first, since a fuller body
+// gives the endpoint more fields it can reject as invalid data.
+function buildReportBody(input, facts, opts) {
   const f = facts || mergeFacts(input, null);
   const body = {
     address: input.address,
     year_built: f.yearBuilt,
-    property_type: f.propertyType,
+    property_type: typeForReport(f.propertyType),
   };
+  if (opts && opts.minimal) return body;
   if (f.beds != null) body.beds = f.beds;
   if (f.baths != null) body.baths = f.baths;
   if (f.sqft != null) body.sqft = f.sqft;
@@ -227,11 +275,11 @@ function firstVal(rec, keys) {
 
 // Normalizes one property record (any of the shapes Resideline uses)
 // into a facts object, or null when the record carries no facts.
-// Resideline publishes NO property_details response sample, and the
-// live payload (Nov 18, 2026) matched none of the originally guessed
-// field names — so each fact accepts a broad alias set. String numbers
-// parse via numOrNull. Acceptance rule unchanged: any one field
-// present makes the record a facts record.
+// The documented property_info record uses the property_value body
+// field names; the live payload's first deploy matched none of the
+// originally guessed names — so each fact accepts a broad alias set.
+// String numbers parse via numOrNull. Acceptance rule unchanged: any
+// one field present makes the record a facts record.
 const FACT_ALIASES = {
   beds: ['beds', 'bedrooms', 'bed_count', 'num_beds', 'bed'],
   baths: ['baths', 'bathrooms', 'bath_count', 'num_baths', 'total_baths', 'bath'],
@@ -276,13 +324,18 @@ function findFactsRecursive(node, depth) {
 }
 
 // The property_details record may sit at the top level of the response
-// or nested under property_details (possibly inside a data wrapper).
-// The known locations win first; the recursive walk is the fallback
-// for whatever nesting the real payload actually uses.
+// or nested under a wrapper. Resideline's developer blog documents the
+// facts nested under `property_info` (field names matching the
+// property_value body 1:1) — that location is tried FIRST, then the
+// previously known locations (property_details, possibly inside a
+// data wrapper); the recursive walk is the fallback for whatever
+// nesting the real payload actually uses.
 function parsePropertyDetails(data) {
   if (!data || typeof data !== 'object') return null;
   const candidates = [
+    data.property_info,
     data.property_details,
+    data.data && data.data.property_info,
     data.data && data.data.property_details,
     data.data,
     data,
@@ -845,22 +898,33 @@ exports.handler = async (event) => {
       firstError = { status: v.ok ? 502 : v.status, data: v.data };
     }
 
-    // ---- Step 3: full report fallback (10 credits) — only when the
-    // valuation produced < 3 comps (including its 400 case) and the
-    // facts this endpoint requires are known.
+    // ---- Step 3: full report fallback (10 credits on success) —
+    // only when the valuation produced < 3 comps (including its 400
+    // case) and the facts this endpoint requires are known. TWO
+    // attempts: report(min) sends the required fields only
+    // (year_built + property_type in report vocabulary); if that
+    // fails, report(full) adds beds/baths/sqft. Failed calls are
+    // not charged, so the second attempt costs nothing extra; a
+    // success on either attempt ends the step.
     if ((!parsed || parsed.comps.length < 3) && facts.yearBuilt != null && facts.propertyType) {
-      const rep = await callUpstream(REPORT_URL, apiKey, buildReportBody(input, facts));
-      if (rep.ok && rep.data) {
-        const rp = parseValuationPayload(rep.data);
-        console.log('[resideline-comps] report status=200 comps=' + rp.comps.length
-          + ' address=' + input.address);
-        parsed = preferParsed(parsed, rp);
-        if (rp.credits.credits_charged != null || rp.credits.credits_remaining != null) {
-          credits = rp.credits;
+      const attempts = [
+        ['min', buildReportBody(input, facts, { minimal: true })],
+        ['full', buildReportBody(input, facts)],
+      ];
+      for (const [tag, repBody] of attempts) {
+        const rep = await callUpstream(REPORT_URL, apiKey, repBody);
+        if (rep.ok && rep.data) {
+          const rp = parseValuationPayload(rep.data);
+          console.log('[resideline-comps] report(' + tag + ') status=200 comps=' + rp.comps.length
+            + ' address=' + input.address);
+          parsed = preferParsed(parsed, rp);
+          if (rp.credits.credits_charged != null || rp.credits.credits_remaining != null) {
+            credits = rp.credits;
+          }
+          break;
         }
-      } else {
         const det = extractErrorDetail(rep.data);
-        console.log('[resideline-comps] report status=' + rep.status
+        console.log('[resideline-comps] report(' + tag + ') status=' + rep.status
           + (det.code ? ' code=' + det.code : '') + ' address=' + input.address);
         if (!firstError) firstError = { status: rep.ok ? 502 : rep.status, data: rep.data };
       }
@@ -977,6 +1041,8 @@ exports._test = {
   parseAddress,
   parseInput,
   mergeFacts,
+  typeForValue,
+  typeForReport,
   buildUpstreamBody,
   buildReportBody,
   factsFromRecord,
