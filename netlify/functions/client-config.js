@@ -2,10 +2,16 @@
 // White-label multi-tenant client config.
 // Reads the request (Host subdomain, or `x-client-subdomain` header)
 // and returns the matching client's PUBLIC config fields
-// (companyName, logo, primaryColor, subdomain, crmUrl,
+// (companyName, logo, primaryColor, subdomain, accountStatus, crmUrl,
 // ghlWebhookUrl). Resolution lives in lib-client.js, shared with
 // cc-data.js so both functions agree on which client a request
 // belongs to.
+//
+// KILL SWITCH (Nov 19): when the resolved client is suspended
+// (clients/{subdomain}.json sets "active": false), the public config
+// reports accountStatus "suspended" with the CRM link + webhook
+// blanked — the pages render an inactive notice instead of the app.
+// Troy can never be suspended (see isClientSuspended in lib-client).
 //
 // SECURITY: secrets (HighLevel tokens, data provider keys) are NEVER in
 // the client JSON files and NEVER returned by this function. They live
@@ -25,7 +31,7 @@
 const { resolveClient, publicConfig } = require('./lib-client');
 
 exports.handler = async (event) => {
-  const { cfg } = resolveClient(event);
+  const { cfg, suspended } = resolveClient(event);
   if (!cfg) {
     return {
       statusCode: 500,
@@ -40,6 +46,6 @@ exports.handler = async (event) => {
       'Content-Type': 'application/json',
       'Cache-Control': 'public, max-age=300',
     },
-    body: JSON.stringify(publicConfig(cfg)),
+    body: JSON.stringify(publicConfig(cfg, { suspended })),
   };
 };
