@@ -7112,7 +7112,9 @@ function renderExtras(){ renderHitList(); renderContracts(); renderPipelineStrip
    The strip key lives ONLY server-side: the dashboard's own
    pipeline-activity-proxy function reads PIPELINE_STRIP_KEY from Netlify
    env (same value as on the bot site) and forwards the request. The browser
-   never sees the key — no paste field, no localStorage. No key / wrong key
+   never sees the key — no paste field, and the key itself is never stored
+   in the browser (only the strip's own numbers are cached — see below).
+   No key / wrong key
    degrades to a quiet note — the rest of the dashboard never breaks. */
 function pipelineStripUrl(){ return '/.netlify/functions/pipeline-activity-proxy'; }
 function pipelineStripTime(iso){
@@ -7127,29 +7129,47 @@ function pipelineStripConnectNote(msg){
   h += '</div>';
   zone.innerHTML = h;
 }
-async function renderPipelineStrip(){
-  const zone = ccEl('pipelineStripZone'); if(!zone) return;
-  // No browser key: the proxy function holds PIPELINE_STRIP_KEY server-side.
-  zone.innerHTML = '<div class="sec-title">📡 Today\'s Pipeline <span class="badge gray" style="font-size:10px">LOADING…</span></div>';
-  let resp;
+/* Last-good cache (Nov 19, 2026): the upstream feed occasionally answers
+   with a Netlify "Inactivity Timeout" HTML page instead of JSON while its
+   compute spins up, and one bad response used to leave the strip
+   UNAVAILABLE until a manual Retry — even though good numbers existed.
+   Now every good payload is cached locally; a cached strip renders
+   instantly on load, the live fetch retries before giving up, and a
+   failed refresh keeps the last known numbers (labeled as such) instead
+   of blanking. UNAVAILABLE only shows when nothing good was ever seen.
+   Only the strip's own numbers are cached — never the strip key. */
+var PIPELINE_STRIP_CACHE_KEY = 'cc_pipeline_strip_last_good';
+var PIPELINE_STRIP_RETRY_DELAY_MS = 3000;
+function pipelineStripLoadCache(){
   try{
-    resp = await fetch(pipelineStripUrl());
-  }catch(e){
-    zone.innerHTML = '<div class="sec-title">📡 Today\'s Pipeline <span class="badge gray" style="font-size:10px">UNAVAILABLE</span></div>'
-      + '<div class="card" style="margin-bottom:8px"><div style="font-size:13px;color:var(--muted)">Live pipeline is unreachable right now — your saved leads below are unaffected.</div>'
-      + '<div style="margin-top:10px"><button class="btn small" onclick="renderPipelineStrip()">🔄 Retry</button></div></div>';
-    return;
-  }
-  if(resp.status === 401){ pipelineStripConnectNote('The strip key was rejected. Check the strip key in the server settings on this site and the bot site — the values must match.'); return; }
-  if(resp.status === 503){ pipelineStripConnectNote('The pipeline proxy is not configured yet. Add the strip key in the server settings on this site (same value as the bot site), then come back here.'); return; }
-  let d;
+    const raw = localStorage.getItem(PIPELINE_STRIP_CACHE_KEY);
+    if(!raw) return null;
+    const entry = JSON.parse(raw);
+    if(!entry || !entry.payload || (entry.payload.outcome !== 'ok' && entry.payload.outcome !== 'partial')) return null;
+    return entry;
+  }catch(e){ return null; }
+}
+function pipelineStripSaveCache(d){
+  try{ localStorage.setItem(PIPELINE_STRIP_CACHE_KEY, JSON.stringify({ payload: d, savedAt: new Date().toISOString() })); }
+  catch(e){ /* storage blocked/full — the live render still stands */ }
+}
+function pipelineStripUnavailable(zone, msg){
+  zone.innerHTML = '<div class="sec-title">📡 Today\'s Pipeline <span class="badge gray" style="font-size:10px">UNAVAILABLE</span></div>'
+    + '<div class="card" style="margin-bottom:8px"><div style="font-size:13px;color:var(--muted)">' + esc(msg) + '</div>'
+    + '<div style="margin-top:10px"><button class="btn small" onclick="renderPipelineStrip()">🔄 Retry</button></div></div>';
+}
+async function pipelineStripFetchOnce(){
+  let resp;
+  try{ resp = await fetch(pipelineStripUrl()); }
+  catch(e){ return { kind: 'fail', reason: 'unreachable' }; }
+  if(resp.status === 401) return { kind: 'connect', status: 401 };
+  if(resp.status === 503) return { kind: 'connect', status: 503 };
+  let d = null;
   try{ d = await resp.json(); }catch(e){ d = null; }
-  if(!d || (d.outcome !== 'ok' && d.outcome !== 'partial')){
-    zone.innerHTML = '<div class="sec-title">📡 Today\'s Pipeline <span class="badge gray" style="font-size:10px">UNAVAILABLE</span></div>'
-      + '<div class="card" style="margin-bottom:8px"><div style="font-size:13px;color:var(--muted)">Live pipeline returned an unexpected response — your saved leads below are unaffected.</div>'
-      + '<div style="margin-top:10px"><button class="btn small" onclick="renderPipelineStrip()">🔄 Retry</button></div></div>';
-    return;
-  }
+  if(!d || (d.outcome !== 'ok' && d.outcome !== 'partial')) return { kind: 'fail', reason: 'unexpected' };
+  return { kind: 'ok', d: d };
+}
+function pipelineStripRenderData(zone, d, stale){
   const liveBadge = d.partial ? '<span class="badge orange" style="font-size:10px">PARTIAL</span>' : '<span class="badge green" style="font-size:10px">LIVE FROM CRM</span>';
   const num = function(v){ return (v === null || v === undefined) ? '—' : v; };
   let h = '<div class="sec-title">📡 Today\'s Pipeline ' + liveBadge + '</div><div class="cards" style="margin-bottom:8px">';
@@ -7176,7 +7196,47 @@ async function renderPipelineStrip(){
   h += '<div style="display:flex;gap:10px;align-items:center;margin:-2px 0 8px;flex-wrap:wrap"><span style="font-size:11px;color:var(--muted2)">' + foot + '</span>'
     + '<button class="btn small ghost" onclick="renderPipelineStrip()">🔄 Refresh</button>'
     + '</div>';
+  if(stale) h += '<div style="font-size:11px;color:var(--muted);margin:-2px 0 8px">⚠ Live refresh failed — showing the last known numbers as of ' + esc(pipelineStripTime(d.generatedAt) || '') + ' ET.</div>';
   zone.innerHTML = h;
+}
+async function renderPipelineStrip(){
+  const zone = ccEl('pipelineStripZone'); if(!zone) return;
+  // No browser key: the proxy function holds PIPELINE_STRIP_KEY server-side.
+  const cached = pipelineStripLoadCache();
+  if(cached){
+    // Last known numbers render immediately — no LOADING flash — while the
+    // live fetch below refreshes them in the background.
+    pipelineStripRenderData(zone, cached.payload, false);
+  } else {
+    zone.innerHTML = '<div class="sec-title">📡 Today\'s Pipeline <span class="badge gray" style="font-size:10px">LOADING…</span></div>';
+  }
+  // The upstream feed sometimes answers with an "Inactivity Timeout" HTML
+  // page instead of JSON while it spins up; a retry seconds later succeeds.
+  // Try up to 3 times before falling back.
+  let result = null;
+  for(let attempt = 0; attempt < 3; attempt++){
+    if(attempt > 0) await new Promise(function(resolve){ setTimeout(resolve, PIPELINE_STRIP_RETRY_DELAY_MS); });
+    result = await pipelineStripFetchOnce();
+    if(result.kind !== 'fail') break;
+  }
+  if(result.kind === 'connect'){
+    if(result.status === 401) pipelineStripConnectNote('The strip key was rejected. Check the strip key in the server settings on this site and the bot site — the values must match.');
+    else pipelineStripConnectNote('The pipeline proxy is not configured yet. Add the strip key in the server settings on this site (same value as the bot site), then come back here.');
+    return;
+  }
+  if(result.kind === 'ok'){
+    pipelineStripSaveCache(result.d);
+    pipelineStripRenderData(zone, result.d, false);
+    return;
+  }
+  // Every attempt failed: never blank a strip that has known-good numbers.
+  if(cached){
+    pipelineStripRenderData(zone, cached.payload, true);
+    return;
+  }
+  pipelineStripUnavailable(zone, result.reason === 'unexpected'
+    ? 'Live pipeline returned an unexpected response — your saved leads below are unaffected.'
+    : 'Live pipeline is unreachable right now — your saved leads below are unaffected.');
 }
 
 /* ---- Seller Call Coach + Deal Sheet (injected into the lead view) ---- */
