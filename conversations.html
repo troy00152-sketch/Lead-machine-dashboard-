@@ -137,7 +137,7 @@
   <div class="topbar">
     <div>
       <h1>💬 <span>Conversations</span></h1>
-      <small>Seller texts — our own numbers (Telnyx), mirrored from the HighLevel inbox</small>
+      <small>Seller texts — our own numbers, mirrored from the CRM inbox</small>
     </div>
     <button class="btn small" id="refreshBtn" type="button">↻ Refresh</button>
     <button class="btn small" id="notifBtn" type="button">🔔 <span id="notifCount"></span></button>
@@ -467,7 +467,7 @@ function dndSection() {
   return '<div class="dnd-box"><h3>🚫 Do Not Contact</h3>' + pill +
     '<div class="dnd-state">' + esc(line) + '</div>' + rows +
     (actions ? '<div class="dnd-actions">' + actions + '</div>' : '') +
-    '<div class="dnd-state">Same as the DND panel in HighLevel — takes effect right away.</div></div>';
+    '<div class="dnd-state">Same as the DND panel in the CRM — takes effect right away.</div></div>';
 }
 async function setDnd(channels) {
   var t = state.selectedThread;
@@ -490,13 +490,13 @@ function grokSection() {
   if (g.status === 'ok' && g.text) {
     panel = '<div class="grok-result">' + esc(g.text) + '</div>';
   } else if (g.status === 'dormant') {
-    panel = '<div class="grok-note">Grok isn\u2019t funded yet — add the API key / credits in the xAI console and this wakes up on its own.</div>';
+    panel = '<div class="grok-note">AI assist isn\u2019t set up yet — it turns on when the assistant service is configured.</div>';
   } else if (g.status === 'error' && g.text) {
     panel = '<div class="grok-note">' + esc(g.text) + '</div>';
   } else if (g.busy) {
-    panel = '<div class="grok-note">Grok is thinking\u2026</div>';
+    panel = '<div class="grok-note">AI assist is thinking\u2026</div>';
   }
-  return '<div class="grok-box"><h3>\u{1F916} Grok assist</h3>' +
+  return '<div class="grok-box"><h3>\u{1F916} AI assist</h3>' +
     '<div class="grok-actions">' +
     '<button type="button" class="btn small" data-grok-action="summarize"' + busy + '>Summarize thread</button>' +
     '<button type="button" class="btn small" data-grok-action="draft"' + busy + '>Draft follow-up</button>' +
@@ -529,10 +529,10 @@ async function runGrok(action) {
     } else if (data.status === 'not_configured' || data.status === 'no_credit') {
       state.grok = { busy: false, status: 'dormant', text: '' };
     } else {
-      state.grok = { busy: false, status: 'error', text: data.error || 'Grok request failed — try again in a moment.' };
+      state.grok = { busy: false, status: 'error', text: data.error || 'AI assist request failed — try again in a moment.' };
     }
   } catch (e) {
-    state.grok = { busy: false, status: 'error', text: 'Grok request failed — try again in a moment.' };
+    state.grok = { busy: false, status: 'error', text: 'AI assist request failed — try again in a moment.' };
   }
   renderContactPanel();
 }
@@ -757,7 +757,7 @@ async function onCallClick() {
   var cfg = await checkVoiceConfig();
   if (!cfg) {
     btn.dataset.state = 'off';
-    toast("Voice isn't switched on yet — calling turns on when the Telnyx voice app is set up.");
+    toast("Voice isn't switched on yet — calling turns on when the voice app is set up.");
     return;
   }
   btn.disabled = true;

@@ -304,7 +304,7 @@ function renderFlow(){
 
   steps.push(stepShell('⚙️', 'Settings', 'Workflow settings window', `
     ${windowEditor('set', w.settingsWindow || w.window)}
-    <div class="muted small" style="margin-top:6px">Mirrors the HighLevel workflow Settings time window. Both windows are checked — keep them in step.</div>`));
+    <div class="muted small" style="margin-top:6px">Mirrors the CRM workflow Settings time window. Both windows are checked — keep them in step.</div>`));
 
   steps.push(stepShell('🔀', 'If / Else', 'Is Active lead?', `
     <div class="muted small">The contact must carry at least one of these tags or the workflow ends for them (no send):</div>
@@ -314,7 +314,7 @@ function renderFlow(){
   steps.push(stepShell('👥', 'Action', 'Assign (round-robin)', `
     <div class="muted small">${users.length
       ? 'Round-robin across: ' + users.map((u) => esc(u.name)).join(', ')
-      : 'Round-robin assignment from the HighLevel workflow (standalone: the enrollment records the market; assignment happens when the seller engages).'}</div>`));
+      : 'Round-robin assignment from the CRM workflow (standalone: the enrollment records the market; assignment happens when the seller engages).'}</div>`));
 
   steps.push(stepShell('🎲', 'Split', 'Random split A–E', `
     <div class="muted small">Each enrollment is randomly assigned one path: ${esc(splitTxt)}. The path picks which first text they get.</div>`));

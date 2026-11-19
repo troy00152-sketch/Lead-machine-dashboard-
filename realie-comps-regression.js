@@ -271,7 +271,7 @@ const KC = '1619 E 33rd St, Kansas City, MO 64109';
   check('wiring: loadCompsForAddress calls realie-comps', seg.includes("/.netlify/functions/realie-comps?address="));
   check('wiring: Realie subject captured even on thin comps', seg.includes('realieSubject = rj.property'));
   check('wiring: provider-path blanks filled from Realie', seg.includes('Object.assign({}, realieSubject, d.property)'));
-  check('wiring: Realie baths note text present', html.includes('Baths not on the Realie record — showing the count from the existing property record.'));
+  check('wiring: baths note text present (white-labeled)', html.includes('Baths not on the property record — showing the count from the existing property record.'));
   check('wiring: subject card renders APN row', html.includes('APN:</span>') && html.includes('prop.apn'));
   check('wiring: subject card renders legal description row', html.includes('Legal description:</span>') && html.includes('prop.legalDescription'));
   check('wiring: field-audit "Not on record" line present', html.includes('compMissingFieldsHtml') && html.includes('Not on record: '));
