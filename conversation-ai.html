@@ -118,7 +118,7 @@
   .pick-main{ flex:1; min-width:0; }
   .avatar-row{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:12px; }
   .avatar-row .lbl{ font-size:12px; color:var(--muted); font-weight:600; }
-  .avatar-opts{ display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+  .avatar-opts{ display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; max-height:172px; overflow-y:auto; padding:2px; align-content:flex-start; }
   .avatar-opt{ width:46px; height:46px; padding:0; border-radius:50%; border:2px solid var(--line); background:var(--bg); cursor:pointer; overflow:hidden; flex:none; }
   .avatar-opt svg{ width:100%; height:100%; display:block; }
   .avatar-opt:hover{ border-color:var(--accent); }
@@ -896,6 +896,26 @@ var CAI_AVATAR_OPTIONS = [
   { id: 'ava-agent', label: 'Call agent', bg: '#c9e7ff', skin: '#f1c27d', hair: '#4a3226', hairStyle: 'short', shirt: '#20506e', accessory: 'headset' },
   { id: 'ava-noah', label: 'Noah', bg: '#e2f0d9', skin: '#8d5524', hair: '#14100e', hairStyle: 'bald', shirt: '#6a4a2f', accessory: 'glasses' },
   { id: 'ava-sofia', label: 'Sofia', bg: '#ffe8cc', skin: '#c68642', hair: '#5a3825', hairStyle: 'wavy', shirt: '#37505c', accessory: 'none' },
+  { id: 'ava-maya', label: 'Maya', bg: '#d7f0ee', skin: '#5c3a21', hair: '#0f0d0c', hairStyle: 'curly', shirt: '#20605a', accessory: 'none' },
+  { id: 'ava-ethan', label: 'Ethan', bg: '#eef3ff', skin: '#ffdbac', hair: '#d9b380', hairStyle: 'short', shirt: '#2c3e70', accessory: 'none' },
+  { id: 'ava-rosa', label: 'Rosa', bg: '#e6f4d7', skin: '#c68642', hair: '#b3392e', hairStyle: 'wavy', shirt: '#3f6b34', accessory: 'none' },
+  { id: 'ava-henry', label: 'Henry', bg: '#e9e9ee', skin: '#f1c27d', hair: '#c0c0c0', hairStyle: 'short', shirt: '#4c5a68', accessory: 'glasses' },
+  { id: 'ava-amara', label: 'Amara', bg: '#fff0d6', skin: '#6b4423', hair: '#1a1512', hairStyle: 'ponytail', shirt: '#a86f14', accessory: 'none' },
+  { id: 'ava-lucas', label: 'Lucas', bg: '#fde8e8', skin: '#e0ac69', hair: '#6e452a', hairStyle: 'buzz', shirt: '#71343f', accessory: 'none' },
+  { id: 'ava-ella', label: 'Ella', bg: '#f1e8ff', skin: '#ffe0bd', hair: '#e8c268', hairStyle: 'long', shirt: '#6a5a8c', accessory: 'none' },
+  { id: 'ava-diego', label: 'Diego', bg: '#e0f2da', skin: '#a0663a', hair: '#241a17', hairStyle: 'wavy', shirt: '#556b2f', accessory: 'none' },
+  { id: 'ava-grace', label: 'Grace', bg: '#ffe9e2', skin: '#8d5524', hair: '#3a2a1e', hairStyle: 'bun', shirt: '#b5502f', accessory: 'glasses' },
+  { id: 'ava-ben', label: 'Ben', bg: '#dff3f0', skin: '#ffdbac', hair: '#8a8d91', hairStyle: 'bald', shirt: '#1f5f5b', accessory: 'none' },
+  { id: 'ava-zara', label: 'Zara', bg: '#f3e2ff', skin: '#c68642', hair: '#151312', hairStyle: 'long', shirt: '#5e3a6e', accessory: 'none' },
+  { id: 'ava-owen', label: 'Owen', bg: '#e8f6ff', skin: '#f1c27d', hair: '#a34d28', hairStyle: 'curly', shirt: '#40566b', accessory: 'none' },
+  { id: 'ava-nina', label: 'Nina', bg: '#e2f7f1', skin: '#e0ac69', hair: '#2e2019', hairStyle: 'short', shirt: '#17706a', accessory: 'none' },
+  { id: 'ava-samir', label: 'Samir', bg: '#dbeafe', skin: '#8d5524', hair: '#100e0d', hairStyle: 'short', shirt: '#3730a3', accessory: 'headset' },
+  { id: 'ava-claire', label: 'Claire', bg: '#ffeef2', skin: '#ffdbac', hair: '#7a4a21', hairStyle: 'ponytail', shirt: '#9c4356', accessory: 'none' },
+  { id: 'ava-marcus', label: 'Marcus', bg: '#e6f2e6', skin: '#5c3a21', hair: '#0c0a09', hairStyle: 'buzz', shirt: '#2f5233', accessory: 'glasses' },
+  { id: 'ava-isla', label: 'Isla', bg: '#fff4d9', skin: '#f1c27d', hair: '#d96f32', hairStyle: 'wavy', shirt: '#2f5d7d', accessory: 'none' },
+  { id: 'ava-tomas', label: 'Tomas', bg: '#eceff4', skin: '#c68642', hair: '#4a3226', hairStyle: 'short', shirt: '#3a4149', accessory: 'none' },
+  { id: 'ava-leah', label: 'Leah', bg: '#e0f5e9', skin: '#a0663a', hair: '#1d1a17', hairStyle: 'curly', shirt: '#1e6b4f', accessory: 'none' },
+  { id: 'ava-specialist', label: 'Call specialist', bg: '#ffe3c2', skin: '#e0ac69', hair: '#33302e', hairStyle: 'short', shirt: '#7a3b12', accessory: 'headset' },
 ];
 function caiAvatarOption(id) {
   var found = null;
@@ -1104,11 +1124,18 @@ function caiSaveSelected(storage, tenant, sel) {
    device voice is stored as 'browser:' + its name. Preview is a
    config-layer sample only — it never touches any call system. */
 var CAI_VOICE_OPTIONS = [
-  { id: 'female-warm', label: 'Warm female', prefer: 'female', pitch: 1.0, rate: 0.95 },
-  { id: 'female-bright', label: 'Bright female', prefer: 'female', pitch: 1.15, rate: 1.03 },
-  { id: 'male-calm', label: 'Calm male', prefer: 'male', pitch: 0.9, rate: 0.92 },
-  { id: 'male-deep', label: 'Deep male', prefer: 'male', pitch: 0.7, rate: 0.95 },
-  { id: 'neutral', label: 'Neutral', prefer: 'any', pitch: 1.0, rate: 1.0 },
+  { id: 'natural', label: 'Natural', prefer: 'any', pitch: 1.0, rate: 0.98, keys: ['natural', 'neural', 'google', 'microsoft', 'samantha', 'aria', 'jenny', 'guy'] },
+  { id: 'female-warm', label: 'Warm female', prefer: 'female', pitch: 1.0, rate: 0.95, keys: ['samantha', 'aria', 'jenny', 'zira'] },
+  { id: 'female-bright', label: 'Bright female', prefer: 'female', pitch: 1.08, rate: 1.02, keys: ['jenny', 'aria', 'samantha'] },
+  { id: 'female-friendly', label: 'Friendly female', prefer: 'female', pitch: 1.04, rate: 1.0, keys: ['jenny', 'samantha', 'aria'] },
+  { id: 'female-professional', label: 'Professional female', prefer: 'female', pitch: 0.98, rate: 0.97, keys: ['aria', 'jenny', 'samantha'] },
+  { id: 'male-calm', label: 'Calm male', prefer: 'male', pitch: 0.9, rate: 0.92, keys: ['guy', 'christopher', 'eric'] },
+  { id: 'male-deep', label: 'Deep male', prefer: 'male', pitch: 0.9, rate: 0.95, keys: ['guy', 'christopher', 'brian'] },
+  { id: 'male-friendly', label: 'Friendly male', prefer: 'male', pitch: 1.02, rate: 1.0, keys: ['guy', 'eric', 'christopher'] },
+  { id: 'male-professional', label: 'Professional male', prefer: 'male', pitch: 0.95, rate: 0.95, keys: ['christopher', 'guy', 'brian'] },
+  { id: 'female-mature', label: 'Mature female', prefer: 'female', pitch: 0.92, rate: 0.94, keys: ['samantha', 'zira', 'hazel'] },
+  { id: 'male-young', label: 'Young male', prefer: 'male', pitch: 1.08, rate: 1.02, keys: ['guy', 'eric', 'ryan'] },
+  { id: 'neutral', label: 'Neutral', prefer: 'any', pitch: 1.0, rate: 1.0, keys: ['aria', 'jenny', 'guy'] },
 ];
 function caiDefaultVoiceSel() { return CAI_VOICE_OPTIONS[0].id; }
 function caiVoiceOption(id) {
@@ -1148,6 +1175,32 @@ function caiGreeting(botName, bizName) {
 /* Pick the browser voice for a selection: an exact device voice
    for 'browser:' selections, otherwise the closest match to the
    style's preference (gender, then English, then default). */
+/* How human-like a device voice is likely to sound, from its
+   name: natural / neural voices rank highest, then the known
+   high-quality named voices (platform voices from the big speech
+   engines), then the style's own preference keywords. The
+   "Natural" style weights natural/neural names far above
+   everything else — it exists to find the most human voice the
+   device has. */
+function caiVoiceNaturalScore(v, opt) {
+  var n = String((v && v.name) || '').toLowerCase();
+  var naturalStyle = !!(opt && opt.id === 'natural');
+  var score = 0;
+  if (n.indexOf('natural') !== -1) score += naturalStyle ? 150 : 50;
+  if (n.indexOf('neural') !== -1) score += naturalStyle ? 150 : 50;
+  if (n.indexOf('google') !== -1) score += naturalStyle ? 60 : 40;
+  if (n.indexOf('microsoft') !== -1) score += 30;
+  if (n.indexOf('samantha') !== -1) score += 30;
+  if (n.indexOf('aria') !== -1) score += 30;
+  if (n.indexOf('jenny') !== -1) score += 30;
+  if (n.indexOf('guy') !== -1) score += 25;
+  if (opt && opt.keys) {
+    opt.keys.forEach(function (k) { if (k && n.indexOf(k) !== -1) score += 25; });
+  }
+  if (/^en([-_]|$)/i.test(String((v && v.lang) || ''))) score += 10;
+  if (v && v.default) score += 4;
+  return score;
+}
 function caiPickSpeechVoice(voices, sel) {
   var pool = Array.isArray(voices) ? voices : [];
   if (!pool.length) return null;
@@ -1161,25 +1214,29 @@ function caiPickSpeechVoice(voices, sel) {
   }
   var opt = caiVoiceOption(s);
   var prefer = opt ? opt.prefer : 'any';
-  function isEn(v) { return /^en([-_]|$)/i.test(String((v && v.lang) || '')); }
   function gender(v) {
     var n = String((v && v.name) || '').toLowerCase();
     if (/female|woman/.test(n)) return 'female';
     if (/male|\bman\b/.test(n)) return 'male';
     return '';
   }
-  if (prefer === 'female' || prefer === 'male') {
-    var g1 = pool.filter(function (v) { return gender(v) === prefer && isEn(v); });
-    if (g1.length) return g1[0];
-    var g2 = pool.filter(function (v) { return gender(v) === prefer; });
-    if (g2.length) return g2[0];
+  function best(list) {
+    var b = null, bs = -1;
+    list.forEach(function (v) {
+      var sc = caiVoiceNaturalScore(v, opt);
+      if (sc > bs) { bs = sc; b = v; }
+    });
+    return b;
   }
-  var dflt = pool.filter(function (v) { return v && v.default; });
-  if (dflt.length && isEn(dflt[0])) return dflt[0];
-  var en = pool.filter(isEn);
-  if (en.length) return en[0];
-  if (dflt.length) return dflt[0];
-  return pool[0];
+  /* A gendered style first looks among voices of that gender —
+     the most natural-sounding of those wins. With no gendered
+     match (or a gender-free style like Natural), the most
+     natural-sounding voice overall wins. */
+  if (prefer === 'female' || prefer === 'male') {
+    var g = pool.filter(function (v) { return gender(v) === prefer; });
+    if (g.length) return best(g);
+  }
+  return best(pool);
 }
 
 /* ---- Test panel engine ---- */

@@ -452,10 +452,25 @@ function fakeStorage() {
     assert.strictEqual(cleaned.sam, 'Sam', 'blank name on save falls back to the shipped name');
   });
   await check('voice: options are distinct styles, selection sanitizes and persists per tenant', async () => {
-    assert.ok(P.CAI_VOICE_OPTIONS.length >= 4, 'a real list of distinct voices');
+    assert.ok(P.CAI_VOICE_OPTIONS.length >= 12, 'a full library of tone choices');
     const ids = P.CAI_VOICE_OPTIONS.map((o) => o.id);
     assert.strictEqual(new Set(ids).size, ids.length, 'option ids unique');
     assert.ok(P.CAI_VOICE_OPTIONS.every((o) => o.label && typeof o.pitch === 'number' && typeof o.rate === 'number'), 'every style carries a label + preview tuning');
+    for (const o of P.CAI_VOICE_OPTIONS) {
+      assert.ok(o.pitch >= 0.9 && o.pitch <= 1.1, o.id + ' pitch stays in the natural range (no robot/chipmunk extremes)');
+      assert.ok(o.rate >= 0.92 && o.rate <= 1.02, o.id + ' rate stays in the natural range');
+      assert.ok(Array.isArray(o.keys) && o.keys.length, o.id + ' carries voice-preference keywords');
+    }
+    for (const id of ['natural', 'female-warm', 'female-bright', 'female-friendly', 'female-professional', 'male-calm', 'male-deep', 'male-friendly', 'male-professional', 'female-mature', 'male-young', 'neutral']) {
+      assert.ok(P.caiVoiceOption(id), 'tone choice present: ' + id);
+    }
+    const nat = P.CAI_VOICE_OPTIONS[0];
+    assert.strictEqual(nat.id, 'natural', 'Natural is the FIRST tone choice');
+    assert.strictEqual(nat.label, 'Natural');
+    assert.strictEqual(nat.pitch, 1.0, 'Natural pitch is the neutral-natural value');
+    assert.strictEqual(nat.rate, 0.98, 'Natural rate is the neutral-natural value');
+    assert.strictEqual(P.caiDefaultVoiceSel(), 'natural', 'Natural is the default selection for a fresh tenant');
+    assert.strictEqual(P.caiLoadVoice(fakeStorage(), 'brand-new-tenant'), 'natural', 'a tenant with nothing saved gets Natural');
     assert.strictEqual(P.caiSanitizeVoiceSel('male-deep'), 'male-deep');
     assert.strictEqual(P.caiSanitizeVoiceSel('browser:Device Voice One'), 'browser:Device Voice One');
     assert.strictEqual(P.caiSanitizeVoiceSel('browser:'), P.caiDefaultVoiceSel(), 'empty device name refused');
@@ -484,6 +499,22 @@ function fakeStorage() {
     assert.strictEqual(P.caiPickSpeechVoice(null, 'female-warm'), null);
     assert.strictEqual(P.caiPickSpeechVoice(voices, 'neutral').lang.indexOf('en'), 0, 'neutral prefers an English voice');
     assert.strictEqual(P.caiVoiceLabel({ name: 'English Female Voice', lang: 'en-US' }), 'English Female Voice · en-US');
+    const plainVsNatural = [
+      { name: 'Plain Device Voice', lang: 'en-US', default: true },
+      { name: 'Natural Device Voice', lang: 'en-US', default: false },
+    ];
+    assert.strictEqual(P.caiPickSpeechVoice(plainVsNatural, 'natural').name, 'Natural Device Voice', 'the Natural style picks the natural voice over a plain default');
+    assert.strictEqual(P.caiPickSpeechVoice(plainVsNatural, 'female-friendly').name, 'Natural Device Voice', 'natural voices win for the other styles too when no gendered voice exists');
+    const genderedNatural = [
+      { name: 'English Female Voice', lang: 'en-US', default: false },
+      { name: 'Female Natural Voice', lang: 'en-US', default: false },
+    ];
+    assert.strictEqual(P.caiPickSpeechVoice(genderedNatural, 'female-warm').name, 'Female Natural Voice', 'among gender-matching voices the natural one wins');
+    const neuralVsPlain = [
+      { name: 'Standard Voice', lang: 'en-US', default: false },
+      { name: 'Neural Voice', lang: 'en-US', default: false },
+    ];
+    assert.strictEqual(P.caiPickSpeechVoice(neuralVsPlain, 'natural').name, 'Neural Voice', 'neural voices rank at the top for Natural');
   });
   await check('test engine: money parser reads every typed format, ignores phone-like digit runs', async () => {
     assert.strictEqual(P.caiParseMoneyAsk('I want $500,000 for the place'), 500000);
@@ -686,8 +717,8 @@ function fakeStorage() {
   });
 
   console.log('— J. Bot avatars —');
-  await check('avatar options: at least 8 illustrated portraits, unique, fully described, headset + glasses present', async () => {
-    assert.ok(P.CAI_AVATAR_OPTIONS.length >= 8, 'at least 8 built-in illustrated avatars');
+  await check('avatar options: at least 28 illustrated portraits, unique, fully described, headset + glasses present', async () => {
+    assert.ok(P.CAI_AVATAR_OPTIONS.length >= 28, 'a big avatar library (at least 28 built-in illustrated avatars)');
     const ids = P.CAI_AVATAR_OPTIONS.map((o) => o.id);
     assert.strictEqual(new Set(ids).size, ids.length, 'option ids unique');
     P.CAI_AVATAR_OPTIONS.forEach((o) => {
@@ -698,10 +729,16 @@ function fakeStorage() {
       assert.ok(['short', 'long', 'bun', 'buzz', 'ponytail', 'curly', 'wavy', 'bald'].includes(o.hairStyle), o.id + ' hair style is a drawn style');
       assert.ok(['none', 'glasses', 'headset'].includes(o.accessory), o.id + ' accessory is a drawn accessory');
     });
-    assert.ok(P.CAI_AVATAR_OPTIONS.some((o) => o.accessory === 'headset'), 'a headset portrait exists for the voice bot');
-    assert.ok(P.CAI_AVATAR_OPTIONS.some((o) => o.accessory === 'glasses'), 'a glasses portrait exists');
-    assert.ok(new Set(P.CAI_AVATAR_OPTIONS.map((o) => o.skin)).size >= 4, 'portraits span varied skin tones');
+    assert.strictEqual(P.CAI_AVATAR_OPTIONS[0].id, 'ava-aria', 'the original first portrait keeps its place (saved picks stay stable)');
+    assert.strictEqual(P.caiHeadsetAvatarId(), 'ava-agent', 'the original headset portrait keeps its id and stays the voice-bot default');
+    assert.ok(P.CAI_AVATAR_OPTIONS.filter((o) => o.accessory === 'headset').length >= 2, 'more than one headset portrait for voice bots');
+    assert.ok(P.CAI_AVATAR_OPTIONS.filter((o) => o.accessory === 'glasses').length >= 3, 'several glasses portraits');
+    assert.ok(new Set(P.CAI_AVATAR_OPTIONS.map((o) => o.skin)).size >= 6, 'portraits span many skin tones');
+    assert.ok(new Set(P.CAI_AVATAR_OPTIONS.map((o) => o.hair)).size >= 10, 'portraits span many hair colors (black, brown, blond, red, gray/silver, copper)');
     assert.strictEqual(P.CAI_AVATAR_INITIALS, 'initials');
+    const st = fakeStorage();
+    P.caiSaveAvatars(st, 'demo', { ashley: 'ava-kai', sam: 'ava-sofia' });
+    assert.deepStrictEqual(P.caiLoadAvatars(st, 'demo'), { ashley: 'ava-kai', sam: 'ava-sofia' }, 'avatar picks saved before the expansion still resolve to the same faces');
   });
   await check('avatar defaults: text bot = first portrait, voice bot = headset portrait', async () => {
     assert.strictEqual(P.caiDefaultAvatar('ashley'), P.CAI_AVATAR_OPTIONS[0].id);
