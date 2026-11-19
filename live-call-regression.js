@@ -864,7 +864,7 @@ async function section13() {
   check('resolveLookupArv gated blanks lookup-owned', LiveCall.resolveLookupArv(154167, null, true, false), { action: 'blank', value: null });
   check('resolveLookupArv gated blanks on address change', LiveCall.resolveLookupArv(150000, null, false, true), { action: 'blank', value: null });
   check('resolveLookupArv gated keeps hand-typed', LiveCall.resolveLookupArv(150000, null, false, false), { action: 'keep', value: 150000 });
-  check('lookupSourceLabel PropertyReach', LiveCall.lookupSourceLabel('data provider'), 'PropertyReach');
+  check('lookupSourceLabel property data', LiveCall.lookupSourceLabel('data provider'), 'property data');
   check('lookupDeal source rides along', gatlinDeal.source, 'data provider');
   check('lookupDeal bestComps', gatlinDeal.bestComps, [
     { address: '405 Greenview Dr, Greenville, NC 27834', amount: 175000 },
@@ -899,7 +899,7 @@ async function section13() {
   check('E7 Waterbury: year 1913', scE7.val('yearBuilt'), '1913');
   check('E7 Waterbury: gated ARV blank', scE7.val('arv'), '');
   check('E7 Waterbury: status names candidate', scE7.el('lookupStatus').textContent.includes('candidate $495,000'), true);
-  check('E7 Waterbury: status names source', scE7.el('lookupStatus').textContent.includes('via PropertyReach'), true);
+  check('E7 Waterbury: status names source', scE7.el('lookupStatus').textContent.includes('via property data'), true);
   check('E7 Waterbury: no stale MAO $96,000', scE7.html('prepOut').includes('$96,000'), false);
   check('E7 Waterbury: no stale MAO $80,000', scE7.html('prepOut').includes('$80,000'), false);
   check('E7 Waterbury: card shows candidate note', scE7.html('prepOut').includes('ARV candidate $495,000'), true);
@@ -914,7 +914,7 @@ async function section13() {
   check('E7 Gatlin: zip 27834', scE7.val('zip'), '27834');
   check('E7 Gatlin: owner WILLARD D GATLIN', scE7.val('ownerName'), 'WILLARD D GATLIN');
   check('E7 Gatlin: ARV 154167', scE7.val('arv'), '154167');
-  check('E7 Gatlin: status ARV + source', scE7.el('lookupStatus').textContent.includes('ARV $154,167 via PropertyReach'), true);
+  check('E7 Gatlin: status ARV + source', scE7.el('lookupStatus').textContent.includes('ARV $154,167 via property data'), true);
   check('E7 Gatlin: card MAO $99,334', scE7.html('prepOut').includes('$99,334'), true);
   check('E7 Gatlin: card LAO $69,534', scE7.html('prepOut').includes('$69,534'), true);
   check('E7 Gatlin: card lists picked comps', scE7.html('prepOut').includes('405 Greenview Dr') && scE7.html('prepOut').includes('503 Pittman Dr'), true);

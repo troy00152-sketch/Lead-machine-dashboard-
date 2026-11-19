@@ -543,7 +543,7 @@
   // The status line names the source so a number that moves between runs
   // is attributable instead of a mystery.
   function lookupSourceLabel(source) {
-    if (source === 'data provider') return 'PropertyReach';
+    if (source === 'data provider') return 'property data';
     return source || '';
   }
 

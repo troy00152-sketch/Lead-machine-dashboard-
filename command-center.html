@@ -305,7 +305,7 @@ a{color:var(--accent)}
   <a href="/live-call.html">📞 Live Call</a>
   <a href="/index.html" title="Master Buyers lives on the dashboard">📋 Master Buyers</a>
   <a href="/index.html" title="Deal Rooms live on the dashboard">🏘️ Deal Rooms</a>
-  <a href="/bread-hl.html">🍞 Bread HL</a>
+  <a href="/bread-hl.html">🍞 Bread AI</a>
   <button class="mini-btn" onclick="cmdkOpen()" title="Quick search — leads, deals, buyers (Cmd/Ctrl+K)">⌘K Search</button>
 </nav>
 <div id="feedErrors" class="err" style="display:none;padding:12px 28px 0"></div>
@@ -360,7 +360,7 @@ a{color:var(--accent)}
     <!-- HOT LEADS -->
     <div class="panel">
       <h2>🔥 Hot Leads <span class="refresh" onclick="loadOverview()">↻</span></h2>
-      <div style="font-size:12px;color:var(--muted);margin:-8px 0 12px">Ranked hottest first from CRM signals — no property lookup runs on its own. Enrichment costs ~2 PropertyReach credits per lookup and only runs when you tap it. <span id="enrichCount">Enriched this session: 0</span></div>
+      <div style="font-size:12px;color:var(--muted);margin:-8px 0 12px">Ranked hottest first from CRM signals — no property lookup runs on its own. Enrichment costs ~2 data credits per lookup and only runs when you tap it. <span id="enrichCount">Enriched this session: 0</span></div>
       <div style="margin-bottom:12px"><button class="btn" id="enrichAllBtn" onclick="enrichAllLeads()">🔍 Enrich all visible leads</button> <span style="font-size:12px;color:var(--muted)">≈ 2 credits × <span id="enrichAllCount">9</span> leads — asks first, never auto-runs.</span></div>
       <div class="leads-grid" id="leadsGrid"><div class="loading">Loading pipeline leads…</div></div>
     </div>
@@ -629,7 +629,7 @@ function computeKpis(feed){
     return {signal:k,leads:sigCounts[k],spend:null,roi:null};
   });
   return {
-    costPerLead:{value:null,needs:'Needs a marketing spend feed — HL wallet transactions + SMS volume for the same period. No spend data reaches this page today.'},
+    costPerLead:{value:null,needs:'Needs a marketing spend feed — CRM wallet transactions + SMS volume for the same period. No spend data reaches this page today.'},
     costPerDeal:{value:null,needs:'Needs a marketing spend feed + closed deals over the same period. Neither exists on this page yet.'},
     closeRate:{value:closeRate,capped:capped,fetched:fetched,label:capped?('Close Rate · first '+fetched+' opps'):'Close Rate',needs:(!hasFeed?'Opportunity feed did not load.':(totalOpps===0?'Opportunity feed returned no deals.':null))},
     closedVolume:{value:closedVolume,needs:!hasFeed?'Opportunity feed did not load.':null},
@@ -637,7 +637,7 @@ function computeKpis(feed){
     dealsByStage:{isNew:leads,underContract:under,closed:closed,total:totalOpps,fetched:fetched,capped:capped},
     perSource:perSource,
     perRep:{value:null,needs:'Needs per-rep attribution — no owner/rep field exists on opportunities or contacts in the CRM, and the dashboard has no roles/permissions.'},
-    knownCosts:'Known fixed costs (billing facts, not a live feed): PropertyReach Core + API $129/mo. SMS ≈ $0.021/msg. Cost per lead/deal still needs actual spend over a period.'
+    knownCosts:'Known fixed costs (billing facts, not a live feed): Property data service $129/mo. SMS ≈ $0.021/msg. Cost per lead/deal still needs actual spend over a period.'
   };
 }
 function renderKpis(feed){
@@ -775,7 +775,7 @@ function offerCtxForLead(i){
     kind:'lead',index:i,address:addr,stage:lead.stage||'',
     score:lead.score!=null?Math.round(lead.score*10):null,scoreLabel:lead.scoreLabel||'',
     arv:resolved.arv,
-    arvSource:resolved.valueSrc==='hl'?'Written in HighLevel (comp project)':resolved.valueSrc==='property'?'Live property lookup (enriched)':'No ARV on file',
+    arvSource:resolved.valueSrc==='hl'?'Written in CRM (comp project)':resolved.valueSrc==='property'?'Live property lookup (enriched)':'No ARV on file',
     listed:null,comps:null
   };
 }
@@ -1018,13 +1018,13 @@ function openDealSheetLead(i){
   const cache=renderHotLeads._cache||(renderHotLeads._cache=new Map());
   const cached=addr?cache.get(addr.trim().toLowerCase()):null;
   const resolved=resolveLeadValues(lead,cached?cached.arv:null);
-  const mao=(resolved.valueSrc==='hl'&&resolved.mao!=null)?{mao:resolved.mao,lao:resolved.lao,label:'HL values'}:calcMAO(resolved.arv,30000);
+  const mao=(resolved.valueSrc==='hl'&&resolved.mao!=null)?{mao:resolved.mao,lao:resolved.lao,label:'CRM values'}:calcMAO(resolved.arv,30000);
   const comps=dealSheetCompsFor(addr);
   openDealSheetFor({
     address:addr,stage:lead.stage||'',
     score:lead.score!=null?Math.round(lead.score*10):null,scoreLabel:lead.scoreLabel||'',
     arv:resolved.arv,
-    arvSource:resolved.valueSrc==='hl'?'Written in HighLevel (comp project)':resolved.valueSrc==='property'?'Live property lookup (enriched)':'No ARV on file',
+    arvSource:resolved.valueSrc==='hl'?'Written in CRM (comp project)':resolved.valueSrc==='property'?'Live property lookup (enriched)':'No ARV on file',
     mao:mao.mao,lao:mao.lao,maoLabel:mao.label||'',
     repairsLabel:'Medium $30K',
     listed:null,comps:comps||[]
@@ -1213,7 +1213,7 @@ function renderHotLeads(leads){
       +'<div><div class="k">MAO</div><div class="v">'+moneyOrDash(mao.mao)+'</div></div>'
       +'<div><div class="k">LAO</div><div class="v">'+moneyOrDash(mao.lao)+'</div></div>'
       +'</div>'
-      +'<div style="font-size:11px;color:var(--muted)">'+esc(lead.stage||'')+' · '+timeAgo(lead.createdAt)+(scoreSrc==='crm'?' · CRM score':'')+(resolved.valueSrc==='hl'?' · HL values':'')+' · tap to analyze ↓</div>'
+      +'<div style="font-size:11px;color:var(--muted)">'+esc(lead.stage||'')+' · '+timeAgo(lead.createdAt)+(scoreSrc==='crm'?' · CRM score':'')+(resolved.valueSrc==='hl'?' · CRM values':'')+' · tap to analyze ↓</div>'
       +enrichBtn
       +'</div>';
   }).join('');
@@ -1252,7 +1252,7 @@ async function enrichAllLeads(){
   const cache=renderHotLeads._cache||(renderHotLeads._cache=new Map());
   const pending=leads.filter(l=>{const a=(l.address||l.name||'');return a.length>5&&!cache.has(a.trim().toLowerCase());});
   if(!pending.length)return;
-  if(!confirm('Enrich '+pending.length+' lead'+(pending.length===1?'':'s')+' with live property lookups?\n\nCost: ~'+(pending.length*2)+' PropertyReach credits ('+pending.length+' × ~2). Already-enriched leads are skipped and never re-charged.'))return;
+  if(!confirm('Enrich '+pending.length+' lead'+(pending.length===1?'':'s')+' with live property lookups?\n\nCost: ~'+(pending.length*2)+' data credits ('+pending.length+' × ~2). Already-enriched leads are skipped and never re-charged.'))return;
   const btn=document.getElementById('enrichAllBtn');
   if(btn)btn.disabled=true;
   for(let i=0;i<leads.length;i++){await enrichLead(i);}

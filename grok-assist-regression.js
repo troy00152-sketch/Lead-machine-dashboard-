@@ -134,7 +134,7 @@ function noStack(body) {
   const html = fs.readFileSync(path.join(__dirname, 'conversations.html'), 'utf8');
   check('page points at the grok-assist function', html.includes("/.netlify/functions/grok-assist"));
   check('page has Summarize + Draft buttons', html.includes('data-grok-action="summarize"') && html.includes('data-grok-action="draft"'));
-  check('page shows the calm dormant copy', html.includes('funded yet — add the API key / credits'));
+  check('page shows the calm dormant copy', html.includes('assistant service is configured'));
   check('page states drafts-only next to the control', html.includes('nothing sends from here'));
   check('page renders Grok results read-only (no send path)', !/runGrok[\s\S]{0,400}action: 'send'/.test(html));
 

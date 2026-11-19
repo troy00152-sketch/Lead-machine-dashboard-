@@ -545,14 +545,14 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
       <span class="lbl" id="themeLabelSide">Dark mode</span>
     </div>
     <div class="sidebar-foot" style="border-top:none;padding-top:0">
-      <button class="crm-btn crm-btn-sm" data-crm-btn title="Open HighLevel CRM">← Back to CRM</button>
+      <button class="crm-btn crm-btn-sm" data-crm-btn title="Open CRM">← Back to CRM</button>
     </div>
   </aside>
   <div class="main">
     <div class="topbar">
       <div style="display:flex;align-items:center;gap:12px;position:relative">
         <h2 style="margin-bottom:0;flex:1">Where would you like to invest?</h2>
-        <button class="crm-btn" data-crm-btn title="Open HighLevel CRM">← Back to CRM</button>
+        <button class="crm-btn" data-crm-btn title="Open CRM">← Back to CRM</button>
         <button class="theme-toggle" id="themeToggleTop" onclick="cycleTheme()" title="Toggle dark/light mode">🌙</button>
       </div>
       <div class="search-row">
@@ -750,7 +750,7 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
       <div class="tab-page" id="page-myleads">
         <div class="sec-title">📁 My Leads <span class="badge orange" id="leadCountBadge">0</span>
           <button class="btn" style="margin-left:auto" onclick="traceAllLeads()">🔍 Skip Trace All</button>
-          <button class="btn primary" onclick="pushAllToGHL()">📤 Push All to HighLevel</button>
+          <button class="btn primary" onclick="pushAllToGHL()">📤 Push All to CRM</button>
           <button class="btn" onclick="exportLeadsCSV()">📥 Download CSV</button>
         </div>
         <div class="filter-bar">
@@ -864,7 +864,7 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
         <div class="bv-tabs">
           <button class="bv-tab active" id="bvTab-market" onclick="BuyerVaultUI.switchTab('market')">🔍 Market Search</button>
           <button class="bv-tab" id="bvTab-entities" onclick="BuyerVaultUI.switchTab('entities')">🏛️ Entity Linking</button>
-          <button class="bv-tab" id="bvTab-sync" onclick="BuyerVaultUI.switchTab('sync')">🔄 HighLevel Sync <span class="bv-pill amber">OFF</span></button>
+          <button class="bv-tab" id="bvTab-sync" onclick="BuyerVaultUI.switchTab('sync')">🔄 CRM Sync <span class="bv-pill amber">OFF</span></button>
           <button class="bv-tab" id="bvTab-saved" onclick="BuyerVaultUI.switchTab('saved')">⭐ Saved Markets</button>
         </div>
 
@@ -914,7 +914,7 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
               <button class="btn primary" onclick="BuyerVaultUI.syncAttempt()">▶ Preview sync run (dry run)</button>
               <span class="bv-small bv-muted" id="bvSyncUpdated"></span>
             </div>
-            <div class="bv-offernote">Even with settings saved ON, a live sync cannot run from this build: it also needs the Netlify env flag <strong>BUYERVAULT_SYNC_LIVE=1</strong> and the wired HighLevel transport, which ships only after Troy decides the threshold. Likely wholesalers and lender-only entities are excluded by rule [HARD RULE D], and synced contacts only ever receive BuyerVault <strong>bv-*</strong> tags — never a seller tag [HARD RULE I].</div>
+            <div class="bv-offernote">Even with settings saved ON, a live sync cannot run from this build: it also needs the server live-sync setting turned on and the wired CRM transport, which ships only after Troy decides the threshold. Likely wholesalers and lender-only entities are excluded by rule [HARD RULE D], and synced contacts only ever receive BuyerVault <strong>bv-*</strong> tags — never a seller tag [HARD RULE I].</div>
           </div>
           <div class="card" style="margin-bottom:14px">
             <div class="sec-title" style="font-size:15px">Eligibility preview</div>
@@ -938,7 +938,7 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
       <div class="tab-page" id="page-blast">
         <div class="sec-title">📣 Buyer Blast <span class="badge orange" style="font-size:10px">REVIEW REQUIRED — NOTHING SENDS ITSELF</span></div>
         <div class="card" style="margin-bottom:14px">
-          <p style="color:var(--muted);font-size:13px;margin-bottom:12px">Enter the deal — Buyer Blast auto-matches <strong>textable</strong> cash buyers (confirmed mobile, never DNC) from your buyer database, drafts the blast SMS, and stages everything for your review. <strong>The dashboard never sends.</strong> After you approve a blast, you copy the message + phone list into HighLevel and send from your market's buyer-blast number.</p>
+          <p style="color:var(--muted);font-size:13px;margin-bottom:12px">Enter the deal — Buyer Blast auto-matches <strong>textable</strong> cash buyers (confirmed mobile, never DNC) from your buyer database, drafts the blast SMS, and stages everything for your review. <strong>The dashboard never sends.</strong> After you approve a blast, you copy the message + phone list into the CRM and send from your market's buyer-blast number.</p>
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">
             <div><label class="lbl">Market</label><select class="field" id="bbMarket" onchange="bbMarketChanged()">
               <option value="">Select market…</option>
@@ -1058,7 +1058,7 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
         
         <div class="card" style="margin-bottom:14px">
           <div class="sec-title" style="margin-bottom:8px">📵 DNC Check</div>
-          <p style="color:var(--muted);font-size:13px;margin-bottom:0">DNC screening runs in HighLevel before any texts go out. The dashboard no longer runs its own DNC check.</p>
+          <p style="color:var(--muted);font-size:13px;margin-bottom:0">DNC screening runs in the CRM before any texts go out. The dashboard no longer runs its own DNC check.</p>
         </div>
         <div class="sec-title">📜 Trace History</div>
         <div class="tbl-wrap"><table><thead><tr><th>Address</th><th>Hit</th><th>Mobiles</th><th>When</th></tr></thead><tbody id="traceHistoryBody"><tr><td colspan="4" style="text-align:center;color:var(--muted)">No traces yet</td></tr></tbody></table></div>
@@ -1234,7 +1234,7 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
         </div>
         <div class="card">
           <div class="sec-title" style="font-size:14px">⚙️ Import Connection</div>
-          <p style="color:var(--muted);font-size:12px;margin-bottom:12px">Import runs through the dashboard's own server function — the secret lives in Netlify env (CC_IMPORT_SECRET) and never touches this browser. No key to paste here; if imports return Unauthorized, check that env var in Netlify, not this page.</p>
+          <p style="color:var(--muted);font-size:12px;margin-bottom:12px">Import runs through the dashboard's own server function — the secret lives on the server and never touches this browser. No key to paste here; if imports return Unauthorized, check the server setting, not this page.</p>
         </div>
       </div>
 
@@ -1897,7 +1897,7 @@ function renderPropSearchResults(){
       <div id="propDetail${i}" style="display:none">${propDetailHtml(p,i)}</div>
       <div class="lead-status-row">
         <span class="badge orange">Tap card for details</span>
-        <div class="lead-actions"><button class="btn small" onclick="event.stopPropagation();flyToProp(${i})">📍 Map</button> <button class="btn small" onclick="event.stopPropagation();sendPropToGHL(${i})">📤 Send to GHL</button> <button class="btn small primary" onclick="event.stopPropagation();addPropSearchToLeads(${i})">➕ Add to Leads</button></div>
+        <div class="lead-actions"><button class="btn small" onclick="event.stopPropagation();flyToProp(${i})">📍 Map</button> <button class="btn small" onclick="event.stopPropagation();sendPropToGHL(${i})">📤 Send to CRM</button> <button class="btn small primary" onclick="event.stopPropagation();addPropSearchToLeads(${i})">➕ Add to Leads</button></div>
       </div>
     </div>`;
   }).join('');
@@ -2559,7 +2559,7 @@ function renderLeads(){
         <div class="lead-actions">
           <button class="btn small" onclick="event.stopPropagation();getARV('${l.id}')" title="Get ARV">💰</button>
           <button class="btn small" onclick="event.stopPropagation();traceLead('${l.id}')">🔍</button>
-          <button class="btn small primary" onclick="event.stopPropagation();doPushSingle('${l.id}')" title="Send to GHL">📤</button>
+          <button class="btn small primary" onclick="event.stopPropagation();doPushSingle('${l.id}')" title="Send to CRM">📤</button>
           <button class="btn small" onclick="event.stopPropagation();deleteLead('${l.id}')" title="Delete lead" style="color:var(--red)">🗑️</button>
         </div>
       </div>
@@ -3034,7 +3034,7 @@ function openLead(id){
       <button class="btn" onclick="blastLeadToBuyers('${l.id}')">📣 Blast</button>
       <button class="btn" onclick="mailOpenSheet('${l.id}')">✉️ Send Mail</button>
       <button class="btn" onclick="esignOpenSheet('${l.id}')">✍️ Send for Signature</button>
-      <button class="btn ghost" onclick="pushToGHL('${l.id}')">📤 Send to GHL</button>
+      <button class="btn ghost" onclick="pushToGHL('${l.id}')">📤 Send to CRM</button>
     </div>
     <div id="analysisBox"></div>`;
   document.getElementById('leadModal').classList.add('open');
@@ -3373,11 +3373,11 @@ async function pushLeadToGHL(l){
 
 async function doPushSingle(id){
   const l = leads.find(x=>x.id===id); if(!l) return;
-  toast('Pushing '+l.address+' to HighLevel...');
+  toast('Pushing '+l.address+' to CRM...');
   try{
     await pushLeadToGHL(l);
     l.status = 'Pushed to CRM'; saveState(); renderLeads(); renderRecentLeads(); updateStats();
-    toast('✓ Pushed to HighLevel: '+l.address);
+    toast('✓ Pushed to CRM: '+l.address);
   }catch(e){
     toast('✗ Push failed: '+e.message);
   }
@@ -3396,7 +3396,7 @@ async function pushAllToGHL(){
   if(!pending.length){ toast('No unpushed leads'); return; }
   const withPhones = pending.filter(leadHasMobile);
   const without = pending.filter(l=>!leadHasMobile(l));
-  let msg = 'Push '+withPhones.length+' lead(s) with phone numbers to HighLevel?';
+  let msg = 'Push '+withPhones.length+' lead(s) with phone numbers to CRM?';
   if(without.length) msg += '\n('+without.length+' without MOBILE numbers will be SKIPPED — landlines are not pushed)';
   if(!withPhones.length){ toast('No leads with mobile numbers to push — run Skip Trace All first'); return; }
   if(!confirm(msg)) return;
@@ -3524,7 +3524,7 @@ async function runListImport(){
     const csv = await file.text();
     const resp = await fetch(liFuncUrl(), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ market, csv, dryRun }) });
     const rep = await resp.json();
-    if(rep.outcome === 'unauthorized'){ statusEl.innerHTML = '<span style="color:var(--red)">Unauthorized — the server secret (CC_IMPORT_SECRET in Netlify) does not match. No key is stored in this browser.</span>'; return; }
+    if(rep.outcome === 'unauthorized'){ statusEl.innerHTML = '<span style="color:var(--red)">Unauthorized — the server secret does not match. No key is stored in this browser.</span>'; return; }
     if(rep.outcome === 'refused'){ statusEl.innerHTML = '<span style="color:var(--red)">Refused: ' + esc(rep.reason || 'unknown') + (rep.cap ? ' (cap ' + rep.cap + ')' : '') + '</span>'; return; }
     if(rep.outcome !== 'completed'){ statusEl.innerHTML = '<span style="color:var(--red)">Import failed: ' + esc(rep.outcome || 'unknown') + '</span>'; return; }
     const t = rep.totals;
@@ -4621,13 +4621,13 @@ function bbReviewBlast(){
     '<div class="card" style="margin-top:14px;border:2px solid var(--accent)"><div class="sec-title" style="font-size:15px">👁️ Review — read every word before approving</div>' +
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">' +
     '<div><div class="lbl">Deal</div><div style="font-size:13px"><strong>' + esc(d.address) + '</strong><br>' + esc([d.city, d.state, d.zip].filter(Boolean).join(' ')) + (d.price ? '<br>Asking ' + bbMoney(d.price) : '') + '<br>Market: ' + esc(d.market) + (bbRoomLink ? '<br>Room: <a href="' + esc(bbRoomLink) + '" target="_blank" style="color:var(--accent)">buyer link</a> — also in the message below' : '') + '</div></div>' +
-    '<div><div class="lbl">Recipients</div><div style="font-size:13px"><strong>' + sel.length + ' buyers</strong><br>Send-from: <span style="color:var(--muted)">buyer-blast number — chosen in HighLevel at send time</span><br><span style="color:var(--muted)">Only confirmed-mobile, non-DNC numbers. ' + bbExcluded.length + ' excluded buyers stay out.</span></div></div></div>' +
+    '<div><div class="lbl">Recipients</div><div style="font-size:13px"><strong>' + sel.length + ' buyers</strong><br>Send-from: <span style="color:var(--muted)">buyer-blast number — chosen in the CRM at send time</span><br><span style="color:var(--muted)">Only confirmed-mobile, non-DNC numbers. ' + bbExcluded.length + ' excluded buyers stay out.</span></div></div></div>' +
     '<div class="lbl">Exact message — this is what each buyer would receive</div>' +
     '<div style="background:#0d1626;border:1px solid var(--line);border-radius:14px;padding:14px 16px;font-size:14px;line-height:1.55;max-width:420px;margin-bottom:6px">' + esc(msg).replace(/\n/g, '<br>') + '</div>' +
     '<div style="font-size:12px;color:var(--muted);margin-bottom:12px">' + msg.length + ' chars · ' + bbSegCount(msg) + ' segment' + (bbSegCount(msg) > 1 ? 's' : '') + ' per recipient</div>' +
     '<div style="max-height:220px;overflow-y:auto;border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin-bottom:12px;font-size:13px">' +
     sel.map(x => '<div style="padding:4px 0;border-bottom:1px solid var(--line)">' + (x.i + 1) + '. <strong>' + esc(x.b.name) + (x.b.verified ? ' ✅' : '') + '</strong> — 📱 ' + esc(x.b.mobile) + '</div>').join('') + '</div>' +
-    '<label style="display:flex;gap:10px;align-items:flex-start;font-size:13px;cursor:pointer;margin-bottom:14px"><input type="checkbox" id="bbReviewChk" style="width:18px;height:18px;margin-top:2px" /> <span>I reviewed the message word-for-word and the recipient list. I understand <strong>nothing sends from this dashboard</strong> — approving stages this blast for manual send from HighLevel.</span></label>' +
+    '<label style="display:flex;gap:10px;align-items:flex-start;font-size:13px;cursor:pointer;margin-bottom:14px"><input type="checkbox" id="bbReviewChk" style="width:18px;height:18px;margin-top:2px" /> <span>I reviewed the message word-for-word and the recipient list. I understand <strong>nothing sends from this dashboard</strong> — approving stages this blast for manual send from the CRM.</span></label>' +
     '<div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn primary" onclick="bbApproveBlast()">✅ Approve Blast</button><button class="btn ghost" onclick="document.getElementById(\'bbReview\').innerHTML=\'\'">← Back to edit</button></div></div>';
   document.getElementById('bbReview').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
@@ -4651,7 +4651,7 @@ function bbApproveBlast(){
   const phones = blast.recipients.map(r => r.mobile).join('\n');
   document.getElementById('bbReview').innerHTML =
     '<div class="card" style="margin-top:14px;border:2px solid #2ecc71"><div class="sec-title" style="font-size:15px">✅ Blast Approved — <span style="color:var(--muted);font-size:13px;font-weight:400">staged, NOT sent</span></div>' +
-    '<div style="background:#3a2b00;border:1px solid #8a6d1a;border-radius:10px;padding:12px 14px;font-size:13px;margin-bottom:14px">⚠️ <strong>Nothing was sent.</strong> Sending is not wired into the dashboard. To fire this blast: open HighLevel → your market\'s <strong>buyer-blast number</strong> → paste the message below → send to the phone list. Then mark it sent in your records.</div>' +
+    '<div style="background:#3a2b00;border:1px solid #8a6d1a;border-radius:10px;padding:12px 14px;font-size:13px;margin-bottom:14px">⚠️ <strong>Nothing was sent.</strong> Sending is not wired into the dashboard. To fire this blast: open the CRM → your market\'s <strong>buyer-blast number</strong> → paste the message below → send to the phone list. Then mark it sent in your records.</div>' +
     '<div class="lbl">Message</div><div class="field" style="height:auto;white-space:pre-wrap;font-size:14px;margin-bottom:8px">' + esc(msg) + '</div>' +
     '<button class="btn small" onclick="bbCopyText(\'bbMsgFinal\')">📋 Copy message</button>' +
     '<textarea id="bbMsgFinal" style="position:absolute;left:-9999px" aria-hidden="true">' + esc(msg) + '</textarea>' +
@@ -6403,7 +6403,7 @@ async function loadCompsForAddress(retryAttempt){
       const realieBaths = !!(d && d.source === 'realie' && d.bathsFromExisting);
       assumedNoteEl.style.display = (assumedBaths || realieBaths) ? 'block' : 'none';
       if(assumedBaths) assumedNoteEl.textContent = 'Baths not on record — valued as 1 bath (assumed).';
-      else if(realieBaths) assumedNoteEl.textContent = 'Baths not on the Realie record — showing the count from the existing property record.';
+      else if(realieBaths) assumedNoteEl.textContent = 'Baths not on the property record — showing the count from the existing property record.';
     }
     if(!d.matched){ compRows = []; compPicks = []; compLoadedAddr = ''; compSubjectLat = null; compSubjectLng = null; compConfidence = ''; compConfidenceText = ''; compSubjectSqft = null; compSubjectAvm = null; compSubjectBeds = null; compDetailData = null; compStabilityWarns = []; resetCompFilters(); resetCompMortgage(); renderCompSubjectCard(null, addr, ''); if(msg) msg.textContent = 'No ownership records found for this address — type an ARV below to run the math manually.'; renderCompList(); renderCompMortgage(); calcComp(); return; }
     renderCompSubjectCard(d.property || null, addr, d.address || '', null, d.linkedProperties || []);
@@ -6471,7 +6471,7 @@ async function loadCompsForAddress(retryAttempt){
     const next = {};
     rows.forEach(r => { if(compPicks.indexOf(r.address) >= 0 && r.amount != null) next[r.address] = r.amount; });
     compPrevLoads[addr] = next;
-    if(msg) msg.textContent = 'Loaded ' + rows.length + ' verified sale(s) via ' + (compDataSource || 'property records') + ' — best ' + compPicks.length + ' pre-picked.';
+    if(msg) msg.textContent = 'Loaded ' + rows.length + ' verified sale(s) via ' + ((compDataSource === 'Realie' || compDataSource === 'Realie+PR') ? 'verified comps' : (compDataSource || 'property records')) + ' — best ' + compPicks.length + ' pre-picked.';
     const avg = compPickAvg();
     const arvEl = document.getElementById('compARV');
     if(avg && arvEl) arvEl.value = avg;
@@ -6696,7 +6696,7 @@ async function drLoadDeals(){
     drSetStatus('');
     document.getElementById('drList').innerHTML =
       '<div class="card"><p style="color:#f87171;font-size:13px">⚠ ' + drEsc(e.message) + '</p>' +
-      '<p style="color:var(--muted);font-size:12px;margin-top:8px">Deal rooms need the <b>@netlify/blobs</b> dependency deployed (package.json). If you just added it, wait for the Netlify deploy to finish, then reload.</p></div>';
+      '<p style="color:var(--muted);font-size:12px;margin-top:8px">Deal rooms need a server storage update deployed. If you just added it, wait for the system update to finish, then reload.</p></div>';
   }
 }
 function drRenderList(){
@@ -7112,8 +7112,8 @@ async function renderPipelineStrip(){
       + '<div style="margin-top:10px"><button class="btn small" onclick="renderPipelineStrip()">🔄 Retry</button></div></div>';
     return;
   }
-  if(resp.status === 401){ pipelineStripConnectNote('The strip key was rejected. Check PIPELINE_STRIP_KEY in Netlify on this site and the bot site — the values must match.'); return; }
-  if(resp.status === 503){ pipelineStripConnectNote('The pipeline proxy is not configured yet. Add PIPELINE_STRIP_KEY in Netlify on this site (same value as the bot site), redeploy, then come back here.'); return; }
+  if(resp.status === 401){ pipelineStripConnectNote('The strip key was rejected. Check the strip key in the server settings on this site and the bot site — the values must match.'); return; }
+  if(resp.status === 503){ pipelineStripConnectNote('The pipeline proxy is not configured yet. Add the strip key in the server settings on this site (same value as the bot site), then come back here.'); return; }
   let d;
   try{ d = await resp.json(); }catch(e){ d = null; }
   if(!d || (d.outcome !== 'ok' && d.outcome !== 'partial')){
@@ -7122,7 +7122,7 @@ async function renderPipelineStrip(){
       + '<div style="margin-top:10px"><button class="btn small" onclick="renderPipelineStrip()">🔄 Retry</button></div></div>';
     return;
   }
-  const liveBadge = d.partial ? '<span class="badge orange" style="font-size:10px">PARTIAL</span>' : '<span class="badge green" style="font-size:10px">LIVE FROM HIGHLEVEL</span>';
+  const liveBadge = d.partial ? '<span class="badge orange" style="font-size:10px">PARTIAL</span>' : '<span class="badge green" style="font-size:10px">LIVE FROM CRM</span>';
   const num = function(v){ return (v === null || v === undefined) ? '—' : v; };
   let h = '<div class="sec-title">📡 Today\'s Pipeline ' + liveBadge + '</div><div class="cards" style="margin-bottom:8px">';
   h += '<div class="card"><div class="num">' + num(d.repliesToday) + '</div><div class="lbl">💬 Seller replies today</div></div>';

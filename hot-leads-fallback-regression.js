@@ -158,7 +158,7 @@ const fns = ['esc', 'fmtMoney', 'timeAgo', 'scoreClass', 'calcMAO', 'resolveLead
     check('3f comped card shows feed ARV $167,876', html.includes('$167,876'), html.slice(0, 400));
     check('3f comped card shows feed MAO $117,513', html.includes('$117,513'));
     check('3f comped card shows feed LAO $82,259', html.includes('$82,259'));
-    check('3f comped card marked HL values', html.includes('HL values'));
+    check('3f comped card marked CRM values', html.includes('CRM values'));
     check('3f uncomped card still shows dashes, no invented numbers', html.includes('>—<'), html.slice(0, 400));
     check('3f no $0 rendered anywhere', !html.includes('$0'));
   }
