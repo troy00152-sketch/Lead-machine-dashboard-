@@ -477,11 +477,11 @@
     if (banner) {
       banner.className = 'bv-banner ' + (cfg.enabled ? 'on' : 'off');
       banner.innerHTML = cfg.enabled
-        ? '<strong>Sync configuration is ON</strong> — but no live HighLevel write can happen from this build: '
+        ? '<strong>Sync configuration is ON</strong> — but no live CRM write can happen from this build: '
           + esc(c.gate || 'the live transport is not wired while the threshold is undecided.')
-        : '<strong>Sync is OFF.</strong> The score threshold for syncing buyers to HighLevel is still '
+        : '<strong>Sync is OFF.</strong> The score threshold for syncing buyers to the CRM is still '
           + '<strong>Troy\'s undecided call</strong> (the spec recommends 60+ with a verified phone and an evidence buy box). '
-          + 'Until he decides, this panel previews eligibility only — <strong>no buyer has been synced and no HighLevel calls are made.</strong>';
+          + 'Until he decides, this panel previews eligibility only — <strong>no buyer has been synced and no CRM calls are made.</strong>';
     }
     var t = el('bvSyncThreshold'); if (t) t.value = cfg.minScore != null ? cfg.minScore : 60;
     var en = el('bvSyncEnabled'); if (en) en.checked = !!cfg.enabled;
