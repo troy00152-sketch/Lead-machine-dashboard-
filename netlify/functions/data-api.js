@@ -6,9 +6,10 @@
 //   GET /.netlify/functions/data-api?address=<url-encoded full address>
 //
 // Response shape: { matched, address, property, comps } — the shape the
-// Comps page consumes (shared with resideline-comps.js). The page tries
-// Resideline for comps first, then this source; this source also supplies
-// the subject record. (ATTOM fallback removed Nov 18, 2026.)
+// Comps page consumes (shared with realie-comps.js). The page tries
+// Realie for comps first, then this source; this source also supplies
+// the subject record. (ATTOM fallback removed Nov 18, 2026; Resideline
+// was the comp feed Nov 18–19, replaced by Realie Nov 19, 2026.)
 //
 // Costs ~2 API credits per address (1 property + 1 comparables). The
 // comparables call asks for MLS-sourced rows first (Troy's decided

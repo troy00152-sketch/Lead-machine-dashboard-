@@ -35,8 +35,11 @@
 //      nest under property_valuation parses without the report call;
 //      thin results everywhere stay insufficient_comps with the best
 //      vendor values found.
-//   7. index.html wires Resideline as the Comps page's primary comp
-//      source ahead of the data-provider fallback.
+//   7. index.html wiring — updated Nov 19, 2026: the page's primary
+//      comp source is now realie-comps (Realie replaced Resideline);
+//      these checks pin the Realie-first order ahead of the
+//      data-provider fallback. Sections 1–6 still pin the dormant
+//      resideline-comps function's own behavior.
 //   8. Round-2 facts hardening (Nov 18, 2026 — the first live deploy
 //      returned full comps for 4 of 6 addresses, but both Indianapolis
 //      addresses 400ed: property_details returned 200 with facts=none
@@ -427,14 +430,18 @@ function upstreamOk(compCount) {
   const fnEnd = html.indexOf('function openLiveCallForLead', fnStart);
   const seg = html.slice(fnStart, fnEnd > fnStart ? fnEnd : undefined);
   check('loadCompsForAddress found in index.html', fnStart > 0);
-  const rlIdx = seg.indexOf("/.netlify/functions/resideline-comps?address=");
+  // Updated Nov 19, 2026: the Comps page's primary comp feed is now
+  // realie-comps (Realie replaced Resideline). These wiring checks
+  // follow the feed the page actually uses; the resideline-comps
+  // FUNCTION checks above still pin the dormant function's behavior.
+  const rlIdx = seg.indexOf("/.netlify/functions/realie-comps?address=");
   const prIdx = seg.indexOf("if(!d && prData && prData.comps");
-  check('index.html calls resideline-comps', rlIdx > 0);
-  check('Resideline is tried before the data-provider comp fallback', rlIdx > 0 && prIdx > rlIdx, 'rl=' + rlIdx + ' pr=' + prIdx);
+  check('index.html calls realie-comps', rlIdx > 0);
+  check('Realie is tried before the data-provider comp fallback', rlIdx > 0 && prIdx > rlIdx, 'rl=' + rlIdx + ' pr=' + prIdx);
   check('no ATTOM fallback remains in loadCompsForAddress', !seg.includes('/.netlify/functions/attom-lookup'), 'attom-lookup call found in loadCompsForAddress');
-  check('Resideline acceptance requires the 3-comp minimum', seg.includes("(rj.comps.best || []).length >= 3"));
-  check('PR subject merge kept for the Resideline win', seg.includes("compSource = 'Resideline+PR'"));
-  check('no Resideline key material in index.html', !html.includes('RESIDELINE_API_KEY'));
+  check('Realie acceptance requires the 3-comp minimum', seg.includes("(rj.comps.best || []).length >= 3"));
+  check('PR subject merge kept for the Realie win', seg.includes("compSource = 'Realie+PR'"));
+  check('no Realie key material in index.html', !html.includes('REALIE_API_KEY'));
 
   // ---- 8. round-2 facts hardening ----
   // aliases: the exact payload shape the task calls out
@@ -541,8 +548,8 @@ function upstreamOk(compCount) {
   check('value payload property_details (aliases) fills the subject record', b.matched === true && b.property && b.property.sqft === 720 && b.property.beds === 2 && b.property.yearBuilt === 1947 && b.property.propertyType === 'Single Family', JSON.stringify(b.property));
 
   // frontend: subject facts ride into the Resideline call
-  check('index.html passes PR subject facts to resideline-comps', seg.includes('prSubject.beds') && seg.includes('prSubject.baths') && seg.includes('prSubject.sqft') && seg.includes('prSubject.yearBuilt') && seg.includes('prSubject.propertyType'));
-  check('index.html appends facts as query params on the resideline URL', seg.includes("rlUrl += '&' + k + '=' + encodeURIComponent(v)") && seg.includes('fetch(rlUrl)'));
+  check('index.html passes PR subject facts to realie-comps', seg.includes('prSubject.beds') && seg.includes('prSubject.baths') && seg.includes('prSubject.sqft') && seg.includes('prSubject.yearBuilt') && seg.includes('prSubject.propertyType'));
+  check('index.html appends facts as query params on the realie URL', seg.includes("reUrl += '&' + k + '=' + encodeURIComponent(v)") && seg.includes('fetch(reUrl)'));
 
   // ---- 9. round-3: property_info, type vocabulary, report(min)->report(full), lead facts ----
   // property_info-first parsing (the documented blog shape)
@@ -628,7 +635,7 @@ function upstreamOk(compCount) {
   check('seq: thin value -> report(min) rescues to a full set', b.matched === true && repBodies.length === 1 && repBodies[0].sqft === undefined, 'matched=' + b.matched + ' repCalls=' + repBodies.length);
 
   // frontend: lead facts merge (openCompsForLead stash + loadCompsForAddress merge)
-  check('index.html merges lead facts under prSubject in the Resideline params', seg.includes('compLeadFacts.address === addr') && seg.includes('leadFacts ? leadFacts.beds : null') && seg.includes('leadFacts ? leadFacts.propertyType : null'));
+  check('index.html merges lead facts under prSubject in the Realie params', seg.includes('compLeadFacts.address === addr') && seg.includes('leadFacts ? leadFacts.beds : null') && seg.includes('leadFacts ? leadFacts.propertyType : null'));
   const leadStart = html.indexOf('function openCompsForLead');
   const leadEnd = html.indexOf('/* ============ THEME', leadStart);
   const leadSeg = html.slice(leadStart, leadEnd > leadStart ? leadEnd : undefined);
