@@ -39,8 +39,7 @@
   input:focus, select:focus, textarea:focus{ outline:none; border-color:var(--accent); }
   textarea{ width:100%; line-height:1.55; resize:vertical; }
   /* bot cards */
-  .bot-grid{ display:grid; grid-template-columns:1fr 1fr; gap:14px; align-items:start; }
-  @media (max-width:760px){ .bot-grid{ grid-template-columns:1fr; } }
+  .bot-grid{ display:grid; grid-template-columns:1fr; gap:14px; }
   .bot-card{ background:var(--panel2); border:1px solid var(--line); border-radius:12px; padding:14px; }
   .bot-card .bot-head{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
   .bot-card .bot-name{ font-size:16px; font-weight:700; }
@@ -147,7 +146,7 @@
   <div class="card">
     <h2>Your AI bots</h2>
     <p class="muted" style="margin:0 0 12px">
-      Pick a bot to view and edit it below — the test panel at the bottom of this page tests the
+      Pick a bot to view and edit it below — the Test your bot panel under the bot cards tests the
       bot you have selected. Your two original bots can be renamed but not removed; bots you add
       can be removed any time.
     </p>
@@ -246,6 +245,22 @@
     <div class="bot-grid" id="addedBotGrid" style="margin-top:14px" hidden></div>
   </div>
 
+  <!-- ============ TEST YOUR BOT ============ -->
+  <div class="card">
+    <h2>Test your bot</h2>
+    <p class="muted" style="margin:0 0 12px">
+      Preview only — replies come from the knowledge base and settings on this screen, and nothing
+      here is sent anywhere. Type like a seller would and see what the bot says back. You are
+      testing: <b id="testBotLabel"></b> <span class="muted">(switch bots in the picker at the top of this page)</span>
+    </p>
+    <div class="test-log" id="testLog"></div>
+    <div class="test-row">
+      <input type="text" id="testInput" placeholder="Type a seller message — try &quot;Who is this?&quot; or &quot;Can we set up a call?&quot;" autocomplete="off">
+      <button class="btn primary" id="btnTestSend" type="button">Send</button>
+      <button class="btn" id="btnTestClear" type="button">Clear</button>
+    </div>
+  </div>
+
   <!-- ============ KNOWLEDGE BASE ============ -->
   <div class="card">
     <h2>Knowledge Base</h2>
@@ -305,22 +320,6 @@
       closing fact, never a call time — the bot offers near-term call times now.
     </p>
     <div style="margin-top:12px"><button class="btn primary" id="btnSaveBooking" type="button">Save booking rule</button></div>
-  </div>
-
-  <!-- ============ TEST YOUR AI ============ -->
-  <div class="card">
-    <h2>Test your AI</h2>
-    <p class="muted" style="margin:0 0 12px">
-      Preview only — replies come from the knowledge base and settings on this screen, and nothing
-      here is sent anywhere. Type like a seller would and see what the bot says back. You are
-      testing: <b id="testBotLabel"></b> <span class="muted">(switch bots in the picker at the top of this page)</span>
-    </p>
-    <div class="test-log" id="testLog"></div>
-    <div class="test-row">
-      <input type="text" id="testInput" placeholder="Type a seller message — try &quot;Who is this?&quot; or &quot;Can we set up a call?&quot;" autocomplete="off">
-      <button class="btn primary" id="btnTestSend" type="button">Send</button>
-      <button class="btn" id="btnTestClear" type="button">Clear</button>
-    </div>
   </div>
 
   <!-- ============ GUARDRAILS ============ -->
