@@ -75,6 +75,40 @@
   .guard-row .grow{ flex:1; }
   .guard-row .t{ font-weight:700; font-size:14px; }
   .guard-row .d{ color:var(--muted); font-size:12.5px; line-height:1.55; margin-top:3px; }
+  /* bot picker */
+  .pick-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:10px; margin-bottom:12px; }
+  .pick-card{ background:var(--panel2); border:1px solid var(--line); border-radius:12px; padding:12px 14px; cursor:pointer; text-align:left; color:var(--text); font-family:inherit; width:100%; }
+  .pick-card:hover{ border-color:var(--accent); }
+  .pick-card.selected{ border-color:var(--accent); box-shadow:0 0 0 1px var(--accent); }
+  .pick-card .pname{ font-weight:700; font-size:14.5px; display:block; margin-bottom:4px; }
+  .pick-card .prow{ display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+  .add-bot{ border-top:1px solid var(--line); padding-top:12px; }
+  /* bot editor extras */
+  .bot-card.selected{ border-color:var(--accent); box-shadow:0 0 0 1px var(--accent); }
+  .name-row{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:10px; }
+  .name-row .lbl, .voice-row .lbl{ font-size:12px; color:var(--muted); font-weight:600; }
+  .name-row input{ flex:1; min-width:140px; }
+  .voice-row{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:12px; }
+  /* voice library */
+  .voice-list{ margin-top:10px; border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+  .vgroup{ background:var(--bg); color:var(--muted); font-size:11px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; padding:7px 12px; }
+  .voice-scroll{ max-height:264px; overflow-y:auto; }
+  .voice-row{ display:flex; gap:10px; align-items:center; padding:9px 12px; border-top:1px solid var(--line); background:var(--panel2); }
+  .voice-row.active{ background:var(--panel); }
+  .voice-row .grow{ flex:1; min-width:0; }
+  .voice-row .vname{ font-size:13.5px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .voice-row .vsub{ font-size:11.5px; color:var(--muted); }
+  /* test panel */
+  .test-log{ border:1px solid var(--line); border-radius:12px; background:var(--bg); padding:12px; min-height:150px; max-height:340px; overflow-y:auto; margin-bottom:10px; }
+  .bubble-row{ display:flex; margin-bottom:9px; }
+  .bubble-row.user{ justify-content:flex-end; }
+  .bubble{ max-width:82%; border-radius:14px; padding:9px 13px; font-size:13.5px; line-height:1.55; white-space:pre-wrap; word-break:break-word; }
+  .bubble.user{ background:var(--accent); color:#fff; border-bottom-right-radius:4px; }
+  .bubble.bot{ background:var(--panel2); border:1px solid var(--line); border-bottom-left-radius:4px; }
+  .bubble-who{ font-size:11px; color:var(--muted); margin-bottom:3px; font-weight:600; }
+  .silence-note{ text-align:center; color:var(--muted); font-size:12.5px; font-style:italic; margin:10px 0; }
+  .test-row{ display:flex; gap:8px; }
+  .test-row input{ flex:1; }
 </style>
 </head>
 <body>
@@ -88,29 +122,58 @@
   </div>
 
   <p class="muted" style="margin:0 0 14px;line-height:1.6">
-    Your AI conversation team comes pre-configured and ready to work: <b>Ashley</b> handles seller
-    text conversations and <b>Sam</b> answers inbound calls. Review the setup below, adjust the
+    Your AI conversation team comes pre-configured and ready to work: <b data-bot-ref="ashley">Ashley</b> handles seller
+    text conversations and <b data-bot-ref="sam">Sam</b> answers inbound calls. Review the setup below, adjust the
     wording to fit your business, and add your own knowledge — changes save automatically to your
     account on this device.
   </p>
+
+  <!-- ============ BOT PICKER ============ -->
+  <div class="card">
+    <h2>Your AI bots</h2>
+    <p class="muted" style="margin:0 0 12px">
+      Pick a bot to view and edit it below — the test panel at the bottom of this page tests the
+      bot you have selected. Your two original bots can be renamed but not removed; bots you add
+      can be removed any time.
+    </p>
+    <div class="pick-grid" id="pickGrid"></div>
+    <div class="add-bot">
+      <div class="muted" style="font-weight:700;margin-bottom:8px">Add another bot</div>
+      <div class="name-row" style="margin-top:0">
+        <input type="text" id="newBotName" maxlength="40" placeholder="Bot name — e.g. Maria" style="flex:1;min-width:150px">
+        <select id="newBotChannel">
+          <option value="text">💬 Text bot</option>
+          <option value="voice">📞 Voice bot</option>
+        </select>
+        <select id="newBotMode">
+          <option value="auto">Auto-Pilot</option>
+          <option value="suggest">Suggest</option>
+          <option value="off">Off</option>
+        </select>
+        <button class="btn small primary" id="btnAddBot" type="button">Add bot</button>
+      </div>
+    </div>
+  </div>
 
   <!-- ============ BOT STATUS & MODE ============ -->
   <div class="card">
     <h2>Bot status &amp; mode</h2>
     <p class="muted" style="margin:0 0 12px">
       <b>Auto-Pilot</b> — the bot replies on its own. <b>Suggest</b> — the bot drafts replies for
-      your team to approve before anything sends. <b>Off</b> — the bot stays silent.
+      your team to approve before anything sends. <b>Off</b> — the bot stays silent. Rename a bot
+      right on its card — the new name is used everywhere on this screen.
     </p>
+    <div style="margin-bottom:12px"><button class="btn small" id="btnRestoreNames" type="button">Restore default bot names</button></div>
     <div class="bot-grid">
-      <div class="bot-card">
+      <div class="bot-card" id="ashleyCard">
         <div class="bot-head">
-          <span class="bot-name">💬 Ashley</span>
+          <span class="bot-name">💬 <span data-bot-ref="ashley">Ashley</span></span>
           <span class="pill green" id="ashleyState">On · Auto-Pilot</span>
           <span style="margin-left:auto"></span>
           <label class="switch" title="Turn Ashley on or off"><input type="checkbox" id="ashleyOn"><span class="track"></span></label>
           <span class="switch-label" id="ashleyOnLabel">On</span>
         </div>
-        <div class="bot-role">Text-message seller bot. Ashley qualifies sellers over text — motivation, condition, timeframe, price — and books them onto your Seller Calls calendar.</div>
+        <div class="bot-role">Text-message seller bot. <span data-bot-ref="ashley">Ashley</span> qualifies sellers over text — motivation, condition, timeframe, price — and books them onto your Seller Calls calendar.</div>
         <div class="mode-row">
           <span class="lbl">Mode</span>
           <select id="ashleyMode">
@@ -119,16 +182,20 @@
             <option value="off">Off</option>
           </select>
         </div>
+        <div class="name-row">
+          <span class="lbl">Bot name</span>
+          <input type="text" id="ashleyName" maxlength="40" autocomplete="off">
+        </div>
       </div>
-      <div class="bot-card">
+      <div class="bot-card" id="samCard">
         <div class="bot-head">
-          <span class="bot-name">📞 Sam</span>
+          <span class="bot-name">📞 <span data-bot-ref="sam">Sam</span></span>
           <span class="pill green" id="samState">On · Auto-Pilot</span>
           <span style="margin-left:auto"></span>
           <label class="switch" title="Turn Sam on or off"><input type="checkbox" id="samOn"><span class="track"></span></label>
           <span class="switch-label" id="samOnLabel">On</span>
         </div>
-        <div class="bot-role">Inbound voice bot. Sam answers incoming calls only — Sam never places outbound calls — and works from the same knowledge base and booking rules as Ashley.</div>
+        <div class="bot-role">Inbound voice bot. <span data-bot-ref="sam">Sam</span> answers incoming calls only — <span data-bot-ref="sam">Sam</span> never places outbound calls — and works from the same knowledge base and booking rules as <span data-bot-ref="ashley">Ashley</span>.</div>
         <div class="mode-row">
           <span class="lbl">Mode</span>
           <select id="samMode">
@@ -137,8 +204,19 @@
             <option value="off">Off</option>
           </select>
         </div>
+        <div class="name-row">
+          <span class="lbl">Bot name</span>
+          <input type="text" id="samName" maxlength="40" autocomplete="off">
+        </div>
+        <div class="voice-row">
+          <span class="lbl">Voice library</span>
+          <span class="muted" style="font-size:12px">Listen to each voice, then select the one this bot uses.</span>
+        </div>
+        <div class="voice-list" id="samVoices"></div>
+        <div class="muted" id="voiceNote" data-vnote="sam" style="font-size:12px;margin-top:8px">Previews play a short greeting in the chosen voice, right in your browser.</div>
       </div>
     </div>
+    <div class="bot-grid" id="addedBotGrid" style="margin-top:14px" hidden></div>
   </div>
 
   <!-- ============ KNOWLEDGE BASE ============ -->
@@ -147,6 +225,7 @@
     <p class="muted" style="margin:0 0 12px">
       The questions and answers your bots work from. The starter set below ships with your account —
       edit any answer so it sounds like your business, delete what doesn't fit, and add your own.
+      The starter answers use your business name from your account setup. Edit any answer to make it your own.
     </p>
     <div class="filters">
       <input id="kbSearch" type="text" placeholder="Search questions and answers…">
@@ -199,6 +278,22 @@
       closing fact, never a call time — the bot offers near-term call times now.
     </p>
     <div style="margin-top:12px"><button class="btn primary" id="btnSaveBooking" type="button">Save booking rule</button></div>
+  </div>
+
+  <!-- ============ TEST YOUR AI ============ -->
+  <div class="card">
+    <h2>Test your AI</h2>
+    <p class="muted" style="margin:0 0 12px">
+      Preview only — replies come from the knowledge base and settings on this screen, and nothing
+      here is sent anywhere. Type like a seller would and see what the bot says back. You are
+      testing: <b id="testBotLabel"></b> <span class="muted">(switch bots in the picker at the top of this page)</span>
+    </p>
+    <div class="test-log" id="testLog"></div>
+    <div class="test-row">
+      <input type="text" id="testInput" placeholder="Type a seller message — try &quot;Who is this?&quot; or &quot;Can we set up a call?&quot;" autocomplete="off">
+      <button class="btn primary" id="btnTestSend" type="button">Send</button>
+      <button class="btn" id="btnTestClear" type="button">Clear</button>
+    </div>
   </div>
 
   <!-- ============ GUARDRAILS ============ -->
@@ -500,6 +595,29 @@ function caiDefaultFaqs() {
     return { id: f.id, n: f.n, question: f.question, answer: f.answer };
   });
 }
+/* The company name baked into the starter answers above is the
+   OWNER's — CAI_DEFAULT_FAQS is the verbatim source of truth and
+   never changes. Every other account sees the same starter answers
+   with that name swapped for the business name from its OWN account
+   setup (the same name the branding hook loads from the account
+   config), so no account ever carries another account's name and no
+   name is ever guessed: no configured name, no swap. Only the exact
+   company-name strings in ANSWER text are swapped — questions and
+   every other word stay verbatim. Once an account edits and saves
+   its knowledge base, the saved version wins untouched (see
+   caiLoadFaqs): the swap applies to the starter/default set only. */
+var CAI_SOURCE_COMPANY = 'Direct Property Buyers';
+function caiSwapCompanyName(text, name) {
+  var s = String(text == null ? '' : text);
+  var n = String(name || '').trim();
+  if (!n || n === CAI_SOURCE_COMPANY) return s;
+  return s.split(CAI_SOURCE_COMPANY + ' LLC').join(n).split(CAI_SOURCE_COMPANY).join(n);
+}
+function caiStarterFaqs(name) {
+  return caiDefaultFaqs().map(function (f) {
+    return { id: f.id, n: f.n, question: f.question, answer: caiSwapCompanyName(f.answer, name) };
+  });
+}
 function caiSanitizeFaqs(v) {
   if (!Array.isArray(v)) return null;
   var out = [];
@@ -512,9 +630,9 @@ function caiSanitizeFaqs(v) {
   });
   return out;
 }
-function caiLoadFaqs(storage, tenant) {
+function caiLoadFaqs(storage, tenant, name) {
   var stored = caiSanitizeFaqs(caiLoadJson(storage, caiKey(tenant, 'faqs'), null));
-  return stored || caiDefaultFaqs();
+  return stored || caiStarterFaqs(name);
 }
 function caiSaveFaqs(storage, tenant, faqs) {
   var clean = caiSanitizeFaqs(faqs) || [];
@@ -549,8 +667,8 @@ function caiSearchFaqs(faqs, q) {
     return (f.question + ' ' + f.answer).toLowerCase().indexOf(needle) !== -1;
   });
 }
-function caiRestoreFaqs(storage, tenant) {
-  var fresh = caiDefaultFaqs();
+function caiRestoreFaqs(storage, tenant, name) {
+  var fresh = caiStarterFaqs(name);
   caiSaveJson(storage, caiKey(tenant, 'faqs'), fresh);
   return fresh;
 }
@@ -689,6 +807,436 @@ function caiSaveGuardrails(storage, tenant, guards) {
   caiSaveJson(storage, caiKey(tenant, 'guardrails'), map);
   return caiLoadGuardrails(storage, tenant);
 }
+/* ---- Bot names (editable per account) ---- */
+/* The two original bots ship as Ashley (text) and Sam (voice).
+   An account can rename either — the new name is theirs alone,
+   saved with their account, and used everywhere the screen refers
+   to that bot. Names are plain text: tags and angle brackets are
+   stripped, length is capped, and the page always renders them
+   through escaping/textContent, never as markup. */
+var CAI_BOT_NAME_MAX = 40;
+function caiDefaultBotNames() {
+  return { ashley: 'Ashley', sam: 'Sam' };
+}
+function caiSanitizeBotName(v, dflt) {
+  var s = String(v == null ? '' : v)
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/[<>&"']/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!s) return dflt;
+  return s.slice(0, CAI_BOT_NAME_MAX);
+}
+function caiSanitizeBotNames(v) {
+  var d = caiDefaultBotNames();
+  if (!v || typeof v !== 'object') return d;
+  return {
+    ashley: caiSanitizeBotName(v.ashley, d.ashley),
+    sam: caiSanitizeBotName(v.sam, d.sam),
+  };
+}
+function caiLoadBotNames(storage, tenant) {
+  return caiSanitizeBotNames(caiLoadJson(storage, caiKey(tenant, 'names'), null));
+}
+function caiSaveBotNames(storage, tenant, names) {
+  var clean = caiSanitizeBotNames(names);
+  caiSaveJson(storage, caiKey(tenant, 'names'), clean);
+  return clean;
+}
+function caiRestoreBotNames(storage, tenant) {
+  var fresh = caiDefaultBotNames();
+  caiSaveJson(storage, caiKey(tenant, 'names'), fresh);
+  return fresh;
+}
+
+/* ---- Bot profiles: the picker list ---- */
+/* The picker shows the two original bots plus any profiles the
+   account adds. Added profiles live in their own store; the
+   originals are structural — their ids are reserved, so an added
+   profile can never shadow one, and removing only ever touches
+   the added list. Originals can be renamed but never removed. */
+var CAI_RESERVED_BOT_IDS = ['ashley', 'sam'];
+var CAI_CHANNELS = ['text', 'voice'];
+function caiSanitizeProfiles(v) {
+  if (!Array.isArray(v)) return [];
+  var out = [];
+  var seen = {};
+  v.forEach(function (p) {
+    if (!p || typeof p !== 'object') return;
+    var id = String(p.id || '').trim();
+    if (!id || CAI_RESERVED_BOT_IDS.indexOf(id) !== -1 || seen[id]) return;
+    seen[id] = 1;
+    out.push({
+      id: id,
+      name: caiSanitizeBotName(p.name, 'New bot'),
+      channel: p.channel === 'voice' ? 'voice' : 'text',
+      mode: BOT_MODES.indexOf(p.mode) !== -1 ? p.mode : 'auto',
+      on: typeof p.on === 'boolean' ? p.on : true,
+      voice: caiSanitizeVoiceSel(p.voice),
+    });
+  });
+  return out;
+}
+function caiLoadProfiles(storage, tenant) {
+  return caiSanitizeProfiles(caiLoadJson(storage, caiKey(tenant, 'profiles'), null));
+}
+function caiSaveProfiles(storage, tenant, profiles) {
+  var clean = caiSanitizeProfiles(profiles);
+  caiSaveJson(storage, caiKey(tenant, 'profiles'), clean);
+  return clean;
+}
+function caiAddProfile(profiles, data) {
+  data = data || {};
+  var name = caiSanitizeBotName(data.name, '');
+  if (!name) return null;
+  var profile = {
+    id: caiNewId('bot'),
+    name: name,
+    channel: data.channel === 'voice' ? 'voice' : 'text',
+    mode: BOT_MODES.indexOf(data.mode) !== -1 ? data.mode : 'auto',
+    on: true,
+    voice: caiSanitizeVoiceSel(data.voice),
+  };
+  return { profile: profile, profiles: caiSanitizeProfiles(profiles).concat([profile]) };
+}
+function caiUpdateProfile(profiles, id, patch) {
+  patch = patch || {};
+  var found = false;
+  var out = caiSanitizeProfiles(profiles).map(function (p) {
+    if (p.id !== id) return p;
+    found = true;
+    var next = { id: p.id, name: p.name, channel: p.channel, mode: p.mode, on: p.on, voice: p.voice };
+    if (Object.prototype.hasOwnProperty.call(patch, 'name')) next.name = caiSanitizeBotName(patch.name, p.name);
+    if (Object.prototype.hasOwnProperty.call(patch, 'mode') && BOT_MODES.indexOf(patch.mode) !== -1) next.mode = patch.mode;
+    if (Object.prototype.hasOwnProperty.call(patch, 'on')) next.on = !!patch.on;
+    if (Object.prototype.hasOwnProperty.call(patch, 'voice')) next.voice = caiSanitizeVoiceSel(patch.voice);
+    return next;
+  });
+  return found ? out : null;
+}
+function caiRemoveProfile(profiles, id) {
+  if (CAI_RESERVED_BOT_IDS.indexOf(id) !== -1) return caiSanitizeProfiles(profiles);
+  return caiSanitizeProfiles(profiles).filter(function (p) { return p.id !== id; });
+}
+/* One unified list for the picker: originals first (names and
+   on/mode from their own stores), then the added profiles. */
+function caiAllBots(names, bots, profiles) {
+  var n = caiSanitizeBotNames(names);
+  var b = caiSanitizeBots(bots);
+  var list = [
+    { id: 'ashley', name: n.ashley, channel: 'text', on: b.ashley.on, mode: b.ashley.mode, builtin: true },
+    { id: 'sam', name: n.sam, channel: 'voice', on: b.sam.on, mode: b.sam.mode, builtin: true },
+  ];
+  caiSanitizeProfiles(profiles).forEach(function (p) {
+    list.push({ id: p.id, name: p.name, channel: p.channel, on: p.on, mode: p.mode, builtin: false });
+  });
+  return list;
+}
+function caiValidSelected(sel, allBots) {
+  var ids = (allBots || []).map(function (b) { return b.id; });
+  return ids.indexOf(String(sel || '')) !== -1 ? String(sel) : 'ashley';
+}
+function caiLoadSelected(storage, tenant, allBots) {
+  return caiValidSelected(caiLoadJson(storage, caiKey(tenant, 'selected'), null), allBots);
+}
+function caiSaveSelected(storage, tenant, sel) {
+  caiSaveJson(storage, caiKey(tenant, 'selected'), String(sel || 'ashley'));
+  return String(sel || 'ashley');
+}
+
+/* ---- Voice library ---- */
+/* Built-in voice styles (a preference the browser matches to the
+   closest voice it has) plus whatever voices the browser itself
+   exposes on the device. The selection persists per account; a
+   device voice is stored as 'browser:' + its name. Preview is a
+   config-layer sample only — it never touches any call system. */
+var CAI_VOICE_OPTIONS = [
+  { id: 'female-warm', label: 'Warm female', prefer: 'female', pitch: 1.0, rate: 0.95 },
+  { id: 'female-bright', label: 'Bright female', prefer: 'female', pitch: 1.15, rate: 1.03 },
+  { id: 'male-calm', label: 'Calm male', prefer: 'male', pitch: 0.9, rate: 0.92 },
+  { id: 'male-deep', label: 'Deep male', prefer: 'male', pitch: 0.7, rate: 0.95 },
+  { id: 'neutral', label: 'Neutral', prefer: 'any', pitch: 1.0, rate: 1.0 },
+];
+function caiDefaultVoiceSel() { return CAI_VOICE_OPTIONS[0].id; }
+function caiVoiceOption(id) {
+  var found = null;
+  CAI_VOICE_OPTIONS.forEach(function (o) { if (o.id === id) found = o; });
+  return found;
+}
+function caiSanitizeVoiceSel(v) {
+  var s = String(v == null ? '' : v).trim();
+  if (caiVoiceOption(s)) return s;
+  if (s.indexOf('browser:') === 0) {
+    var name = s.slice(8).replace(/[<>&"']/g, '').trim();
+    if (name && name.length <= 120) return 'browser:' + name;
+  }
+  return caiDefaultVoiceSel();
+}
+function caiLoadVoice(storage, tenant) {
+  return caiSanitizeVoiceSel(caiLoadJson(storage, caiKey(tenant, 'voice'), null));
+}
+function caiSaveVoice(storage, tenant, sel) {
+  var clean = caiSanitizeVoiceSel(sel);
+  caiSaveJson(storage, caiKey(tenant, 'voice'), clean);
+  return clean;
+}
+function caiVoiceLabel(v) {
+  if (!v || typeof v !== 'object') return 'Voice';
+  var name = String(v.name || 'Voice');
+  return v.lang ? name + ' · ' + String(v.lang) : name;
+}
+/* The sample line a Listen button speaks: the bot's greeting with
+   its current name and the account's business name. */
+function caiGreeting(botName, bizName) {
+  var n = caiSanitizeBotName(botName, 'Sam');
+  var biz = String(bizName || '').trim();
+  return 'Hi, thanks for calling' + (biz ? ' ' + biz : '') + '! This is ' + n + ' — how can I help you today?';
+}
+/* Pick the browser voice for a selection: an exact device voice
+   for 'browser:' selections, otherwise the closest match to the
+   style's preference (gender, then English, then default). */
+function caiPickSpeechVoice(voices, sel) {
+  var pool = Array.isArray(voices) ? voices : [];
+  if (!pool.length) return null;
+  var s = caiSanitizeVoiceSel(sel);
+  if (s.indexOf('browser:') === 0) {
+    var want = s.slice(8);
+    for (var i = 0; i < pool.length; i++) {
+      if (pool[i] && pool[i].name === want) return pool[i];
+    }
+    return null;
+  }
+  var opt = caiVoiceOption(s);
+  var prefer = opt ? opt.prefer : 'any';
+  function isEn(v) { return /^en([-_]|$)/i.test(String((v && v.lang) || '')); }
+  function gender(v) {
+    var n = String((v && v.name) || '').toLowerCase();
+    if (/female|woman/.test(n)) return 'female';
+    if (/male|\bman\b/.test(n)) return 'male';
+    return '';
+  }
+  if (prefer === 'female' || prefer === 'male') {
+    var g1 = pool.filter(function (v) { return gender(v) === prefer && isEn(v); });
+    if (g1.length) return g1[0];
+    var g2 = pool.filter(function (v) { return gender(v) === prefer; });
+    if (g2.length) return g2[0];
+  }
+  var dflt = pool.filter(function (v) { return v && v.default; });
+  if (dflt.length && isEn(dflt[0])) return dflt[0];
+  var en = pool.filter(isEn);
+  if (en.length) return en[0];
+  if (dflt.length) return dflt[0];
+  return pool[0];
+}
+
+/* ---- Test panel engine ---- */
+/* A self-contained preview of how the bot would answer, driven
+   ONLY by what is on this screen: the account's knowledge base,
+   booking rule, bot name and business name. No network, no send
+   path, no live-bot wiring. Guardrails run first, exactly like
+   the real setup: an opt-out or a $500K+ ask gets silence. */
+function caiNormText(s) {
+  return String(s == null ? '' : s).toLowerCase()
+    .replace(/[’‘]/g, "'")
+    .replace(/[^a-z0-9'\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+var CAI_STOPWORDS = {};
+('a an the is are was were be been am do does did can could would should i you he she it we they me him her us them my your his its our their this that there here of to in on for with at by from or and but if then so as').split(' ').forEach(function (w) { CAI_STOPWORDS[w] = 1; });
+function caiTokens(text) {
+  var seen = {};
+  var out = [];
+  caiNormText(text).split(' ').forEach(function (w) {
+    var t = w.replace(/^'+|'+$/g, '');
+    if (t.length > 3 && t.slice(-1) === 's' && t.slice(-2) !== 'ss') t = t.slice(0, -1);
+    if (!t || CAI_STOPWORDS[t] || seen[t]) return;
+    seen[t] = 1;
+    out.push(t);
+  });
+  return out;
+}
+/* Best knowledge-base match for a seller message: exact/contained
+   question first, then strong keyword overlap (share of the
+   shorter side's key words). Returns the FAQ or null. */
+function caiMatchFaq(faqs, text) {
+  var list = faqs || [];
+  var msg = caiNormText(text);
+  if (!msg) return null;
+  var i, f, q;
+  for (i = 0; i < list.length; i++) {
+    f = list[i];
+    q = caiNormText(f.question);
+    if (q && (q === msg || (msg.length >= 4 && q.indexOf(msg) !== -1) || (q.length >= 4 && msg.indexOf(q) !== -1))) return f;
+  }
+  var mToks = caiTokens(text);
+  if (!mToks.length) return null;
+  var mSet = {};
+  mToks.forEach(function (t) { mSet[t] = 1; });
+  var best = null, bestScore = 0, bestHit = 0;
+  list.forEach(function (f) {
+    var qToks = caiTokens(f.question);
+    if (!qToks.length) return;
+    var hit = 0;
+    qToks.forEach(function (t) { if (mSet[t]) hit += 1; });
+    if (!hit) return;
+    var denom = Math.min(qToks.length, mToks.length);
+    var score = denom ? hit / denom : 0;
+    var ok = (hit >= 2 && score >= 0.6) || (qToks.length <= 2 && hit >= 1 && score >= 0.5);
+    if (ok && (score > bestScore || (score === bestScore && hit > bestHit))) {
+      best = f; bestScore = score; bestHit = hit;
+    }
+  });
+  return best;
+}
+function caiIsOptOut(text) {
+  var s = String(text == null ? '' : text).toLowerCase().replace(/[’‘]/g, "'");
+  /* "stop" counts as the opt-out command when it leads the message
+     or pairs with a contact verb — never for phrases like "stop
+     sign" that merely contain the word. */
+  var stopCommand = /^\s*stop\b/.test(s) || /\bstop\s+(texting|text|texts|calling|calls|messaging|contacting)\b/.test(s);
+  return stopCommand
+    || /\b(unsubscribe|quit|cancel)\b/.test(s)
+    || /\bopt\s*-?\s*out\b/.test(s)
+    || /\b(remove me|leave me alone|do not text|don't text|dont text|never text|never contact|no more texts)\b/.test(s);
+}
+function caiIsBookingIntent(text) {
+  var s = caiNormText(text);
+  if (!s) return false;
+  return /\b(call|appointment|schedule|book|visit|meet|talk|chat|phone)\b/.test(s)
+    || s.indexOf('set up a time') !== -1
+    || s.indexOf('what times') !== -1
+    || s.indexOf('when can') !== -1;
+}
+/* Parse a money amount out of a seller message: $ / commas /
+   cents, k and grand and million suffixes, bare digits, and
+   written-out forms ("five hundred thousand"). Long bare digit
+   runs (8+) with no comma are treated as phone/ID numbers, not
+   money. Returns a number or null. */
+var CAI_NUM_WORDS = { zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90 };
+function caiWordsAmount(s) {
+  if (!/\b(thousand|million)\b/.test(s)) return null;
+  var words = String(s).replace(/[^a-z\s]/g, ' ').split(/\s+/);
+  var total = 0, current = 0, started = false;
+  for (var i = 0; i < words.length; i++) {
+    var w = words[i];
+    if (!w || w === 'and') continue;
+    if (Object.prototype.hasOwnProperty.call(CAI_NUM_WORDS, w)) { current += CAI_NUM_WORDS[w]; started = true; continue; }
+    if (w === 'hundred') { current = (current || 1) * 100; started = true; continue; }
+    if (w === 'thousand') { total += (current || 1) * 1000; current = 0; started = true; continue; }
+    if (w === 'million') { total += (current || 1) * 1000000; current = 0; started = true; continue; }
+    if (started) break;
+  }
+  var val = total + current;
+  return started && val > 0 ? val : null;
+}
+function caiParseMoneyAsk(text) {
+  var s = String(text == null ? '' : text).toLowerCase();
+  var m = s.match(/\$\s*(\d[\d,]*(?:\.\d+)?)\s*(million|grand|k)\b/) || s.match(/\b(\d[\d,]*(?:\.\d+)?)\s*(million|grand|k)\b/);
+  if (m) {
+    var base = parseFloat(m[1].replace(/,/g, ''));
+    if (!isNaN(base)) return m[2] === 'million' ? base * 1000000 : base * 1000;
+  }
+  m = s.match(/\$\s*(\d[\d,]*(?:\.\d{1,2})?)/);
+  if (m) {
+    var dollar = parseFloat(m[1].replace(/,/g, ''));
+    if (!isNaN(dollar)) return dollar;
+  }
+  var nums = s.match(/\d[\d,]*(?:\.\d{1,2})?/g);
+  if (nums) {
+    var mx = 0;
+    nums.forEach(function (tok) {
+      var digits = tok.replace(/[^0-9]/g, '');
+      if (digits.length > 7 && tok.indexOf(',') === -1) return;
+      var val = parseFloat(tok.replace(/,/g, ''));
+      if (!isNaN(val) && val > mx) mx = val;
+    });
+    if (mx > 0) return mx;
+  }
+  return caiWordsAmount(s);
+}
+/* Concrete offer times from the booking rule on this screen:
+   inside the window (days ahead), inside business hours, spaced
+   at least the minimum gap apart. */
+function caiTimeLabel(dt, base) {
+  var days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  var months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  var startOf = function (d) { return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(); };
+  var diff = Math.round((startOf(dt) - startOf(base)) / 86400000);
+  var dayPart = diff === 0 ? 'Today' : diff === 1 ? 'Tomorrow' : days[dt.getDay()] + ', ' + months[dt.getMonth()] + ' ' + dt.getDate();
+  var h = dt.getHours();
+  var ampm = h >= 12 ? 'PM' : 'AM';
+  var h12 = h % 12 || 12;
+  var mm = dt.getMinutes() < 10 ? '0' + dt.getMinutes() : '' + dt.getMinutes();
+  return dayPart + ' at ' + h12 + ':' + mm + ' ' + ampm;
+}
+function caiOfferTimes(booking, now) {
+  var b = caiSanitizeBooking(booking);
+  var base = now instanceof Date ? now : new Date();
+  var sp = b.hoursStart.split(':');
+  var ep = b.hoursEnd.split(':');
+  var startMin = (+sp[0]) * 60 + (+sp[1]);
+  var endMin = (+ep[0]) * 60 + (+ep[1]);
+  var stepMin = Math.max(b.minGapHours * 60, b.callMinutes);
+  var out = [];
+  var last = null;
+  for (var d = 1; d <= b.windowDays && out.length < b.slots; d++) {
+    var day = new Date(base.getFullYear(), base.getMonth(), base.getDate() + d);
+    for (var t = startMin; t + b.callMinutes <= endMin && out.length < b.slots; t += stepMin) {
+      var dt = new Date(day.getFullYear(), day.getMonth(), day.getDate(), Math.floor(t / 60), t % 60);
+      if (last && (dt.getTime() - last.getTime()) < b.minGapHours * 3600000) continue;
+      out.push({ iso: dt.toISOString(), label: caiTimeLabel(dt, base) });
+      last = dt;
+    }
+  }
+  return out;
+}
+function caiBookingReply(booking, now) {
+  var times = caiOfferTimes(booking, now);
+  if (!times.length) return 'I can set up a quick call — what day and time works best for you?';
+  var labels = times.map(function (t) { return t.label; });
+  var list = labels.length > 1 ? labels.slice(0, -1).join(', ') + ', or ' + labels[labels.length - 1] : labels[0];
+  return 'Happy to set up a quick call! Would any of these work — ' + list + '?';
+}
+/* The persona swap for test replies: the bot speaks as itself, so
+   the shipped names in knowledge answers become the tested bot's
+   current name — the same treatment the starter set gets for the
+   business name. Applies to the preview only, never to stored
+   knowledge. */
+function caiSwapPersona(text, currentName) {
+  var s = String(text == null ? '' : text);
+  var n = caiSanitizeBotName(currentName, '');
+  if (!n) return s;
+  return s.replace(/\bAshley\b/g, n).replace(/\bSam\b/g, n);
+}
+function caiDefaultReply(botName, bizName) {
+  var n = caiSanitizeBotName(botName, 'Ashley');
+  var biz = String(bizName || '').trim();
+  return 'Hi there! This is ' + n + (biz ? ' with ' + biz : '') + ' — we work directly with homeowners in the area. Are you the owner of the place? If you might ever consider selling it as-is, I can set up a quick call to talk it over.';
+}
+/* The test-panel brain. ctx: { faqs, booking, botName, bizName,
+   now }. Returns { type: 'reply' | 'silence', text, note, faqId }. */
+function caiTestReply(text, ctx) {
+  ctx = ctx || {};
+  var raw = String(text == null ? '' : text);
+  if (!raw.trim()) return { type: 'empty', text: '', note: '', faqId: '' };
+  var botName = caiSanitizeBotName(ctx.botName, 'Ashley');
+  if (caiIsOptOut(raw)) {
+    return { type: 'silence', text: '', note: 'The AI stays silent on opt-outs.', faqId: '' };
+  }
+  var amt = caiParseMoneyAsk(raw);
+  if (amt !== null && amt >= 500000) {
+    return { type: 'silence', text: '', note: 'The AI stays silent on asks of $500K or more.', faqId: '' };
+  }
+  var faq = caiMatchFaq(ctx.faqs || [], raw);
+  if (faq) {
+    return { type: 'reply', text: caiSwapPersona(faq.answer, botName), note: '', faqId: faq.id };
+  }
+  if (caiIsBookingIntent(raw)) {
+    return { type: 'reply', text: caiBookingReply(ctx.booking || caiDefaultBooking(), ctx.now), note: '', faqId: '' };
+  }
+  return { type: 'reply', text: caiDefaultReply(botName, ctx.bizName), note: '', faqId: '' };
+}
 /* ==/PURE== */
 </script>
 
@@ -707,19 +1255,37 @@ function toast(msg) {
 }
 
 var TENANT = caiTenantFromHost(location.hostname);
+/* This account's business name, resolved from its account config by
+   the branding hook below. Until it resolves (and if it never does)
+   it stays empty and the starter knowledge base renders verbatim —
+   a name is never guessed. */
+var BRAND_NAME = '';
 var state = {
   bots: caiLoadBots(localStorage, TENANT),
+  names: caiLoadBotNames(localStorage, TENANT),
+  profiles: caiLoadProfiles(localStorage, TENANT),
+  selected: 'ashley',
+  voice: caiLoadVoice(localStorage, TENANT),
   faqs: caiLoadFaqs(localStorage, TENANT),
   instructions: caiLoadInstructions(localStorage, TENANT),
   booking: caiLoadBooking(localStorage, TENANT),
   guardrails: caiLoadGuardrails(localStorage, TENANT),
   editingFaqId: '',
 };
+state.selected = caiLoadSelected(localStorage, TENANT, caiAllBots(state.names, state.bots, state.profiles));
+function allBots() { return caiAllBots(state.names, state.bots, state.profiles); }
+function selectedBot() {
+  var list = allBots();
+  var found = null;
+  list.forEach(function (b) { if (b.id === state.selected) found = b; });
+  return found || list[0];
+}
 
 /* ---- branding: tenant name + color from the account config ---- */
 (function () {
   function applyBrand(cfg) {
     var brand = caiBrandFromConfig(cfg);
+    BRAND_NAME = brand.name;
     if (brand.name) {
       document.title = 'Conversation AI — ' + brand.name;
       var el = document.getElementById('brandName');
@@ -744,10 +1310,15 @@ var state = {
       .then(function (cfg) {
         if (cfg && cfg.accountStatus === 'suspended') { showSuspended(); return; }
         var before = TENANT;
+        var nameBefore = BRAND_NAME;
         applyBrand(cfg);
-        if (TENANT !== before) {
+        if (TENANT !== before || BRAND_NAME !== nameBefore) {
           state.bots = caiLoadBots(localStorage, TENANT);
-          state.faqs = caiLoadFaqs(localStorage, TENANT);
+          state.names = caiLoadBotNames(localStorage, TENANT);
+          state.profiles = caiLoadProfiles(localStorage, TENANT);
+          state.selected = caiLoadSelected(localStorage, TENANT, caiAllBots(state.names, state.bots, state.profiles));
+          state.voice = caiLoadVoice(localStorage, TENANT);
+          state.faqs = caiLoadFaqs(localStorage, TENANT, BRAND_NAME);
           state.instructions = caiLoadInstructions(localStorage, TENANT);
           state.booking = caiLoadBooking(localStorage, TENANT);
           state.guardrails = caiLoadGuardrails(localStorage, TENANT);
@@ -775,12 +1346,14 @@ function wireBot(bot, prefix) {
     state.bots[bot].on = e.target.checked;
     state.bots = caiSaveBots(localStorage, TENANT, state.bots);
     renderBots();
-    toast((bot === 'ashley' ? 'Ashley' : 'Sam') + (e.target.checked ? ' is on.' : ' is off.'));
+    renderPicker();
+    toast(state.names[bot] + (e.target.checked ? ' is on.' : ' is off.'));
   });
   document.getElementById(prefix + 'Mode').addEventListener('change', function (e) {
     state.bots[bot].mode = e.target.value;
     state.bots = caiSaveBots(localStorage, TENANT, state.bots);
     renderBots();
+    renderPicker();
     toast('Mode saved.');
   });
 }
@@ -854,7 +1427,7 @@ document.getElementById('btnAddFaq').addEventListener('click', function () {
 });
 document.getElementById('btnRestoreFaqs').addEventListener('click', function () {
   if (!confirm('Restore the original starter set?\n\nThis replaces your current knowledge base with the ' + CAI_DEFAULT_FAQS.length + ' starter questions and answers your account shipped with. Your edits and additions will be removed.')) return;
-  state.faqs = caiRestoreFaqs(localStorage, TENANT);
+  state.faqs = caiRestoreFaqs(localStorage, TENANT, BRAND_NAME);
   state.editingFaqId = '';
   renderFaqs();
   toast('Starter knowledge set restored.');
@@ -932,15 +1505,320 @@ document.getElementById('guardList').addEventListener('change', function (e) {
   toast('Guardrail ' + (cb.checked ? 'on.' : 'off.'));
 });
 
+/* ---- bot names ---- */
+function renderBotNames() {
+  document.querySelectorAll('[data-bot-ref]').forEach(function (el) {
+    el.textContent = state.names[el.dataset.botRef] || el.textContent;
+  });
+  var a = document.getElementById('ashleyName');
+  var s = document.getElementById('samName');
+  if (a && document.activeElement !== a) a.value = state.names.ashley;
+  if (s && document.activeElement !== s) s.value = state.names.sam;
+  renderTestBotLabel();
+}
+function wireBotName(bot, inputId) {
+  document.getElementById(inputId).addEventListener('change', function (e) {
+    var clean = caiSanitizeBotName(e.target.value, caiDefaultBotNames()[bot]);
+    state.names[bot] = clean;
+    state.names = caiSaveBotNames(localStorage, TENANT, state.names);
+    e.target.value = clean;
+    renderBotNames();
+    renderPicker();
+    toast('Bot name saved: ' + clean);
+  });
+}
+document.getElementById('btnRestoreNames').addEventListener('click', function () {
+  if (!confirm('Restore the default bot names?\n\nYour two original bots go back to their shipped names. Bots you added keep their names.')) return;
+  state.names = caiRestoreBotNames(localStorage, TENANT);
+  renderBotNames();
+  renderPicker();
+  toast('Default bot names restored.');
+});
+
+/* ---- bot picker + added profiles ---- */
+function botStatePill(b) {
+  var label = caiBotState(b);
+  var cls = label === 'Off' ? 'red' : (b.mode === 'suggest' ? 'amber' : 'green');
+  return '<span class="pill ' + cls + '">' + esc(label) + '</span>';
+}
+function renderPicker() {
+  var grid = document.getElementById('pickGrid');
+  grid.innerHTML = allBots().map(function (b) {
+    return '<button type="button" class="pick-card' + (b.id === state.selected ? ' selected' : '') + '" data-pick="' + esc(b.id) + '">' +
+      '<span class="pname">' + (b.channel === 'voice' ? '📞 ' : '💬 ') + esc(b.name) + '</span>' +
+      '<span class="prow">' + botStatePill(b) +
+      '<span class="pill">' + (b.channel === 'voice' ? 'Voice' : 'Text') + '</span>' +
+      (b.builtin ? '<span class="pill">Original</span>' : '') +
+      (b.id === state.selected ? '<span class="pill green">Selected</span>' : '') +
+      '</span></button>';
+  }).join('');
+  document.getElementById('ashleyCard').classList.toggle('selected', state.selected === 'ashley');
+  document.getElementById('samCard').classList.toggle('selected', state.selected === 'sam');
+  renderTestBotLabel();
+}
+function selectBot(id, scroll) {
+  state.selected = caiValidSelected(id, allBots());
+  caiSaveSelected(localStorage, TENANT, state.selected);
+  renderPicker();
+  renderAddedBots();
+  if (scroll) {
+    var card = document.querySelector('[data-bot-card="' + state.selected + '"]') ||
+      (state.selected === 'ashley' ? document.getElementById('ashleyCard') : document.getElementById('samCard'));
+    if (card && card.scrollIntoView) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+}
+document.getElementById('pickGrid').addEventListener('click', function (e) {
+  var btn = e.target.closest('[data-pick]');
+  if (btn) selectBot(btn.dataset.pick, true);
+});
+document.getElementById('btnAddBot').addEventListener('click', function () {
+  var res = caiAddProfile(state.profiles, {
+    name: document.getElementById('newBotName').value,
+    channel: document.getElementById('newBotChannel').value,
+    mode: document.getElementById('newBotMode').value,
+  });
+  if (!res) { toast('Give the new bot a name first.'); return; }
+  state.profiles = caiSaveProfiles(localStorage, TENANT, res.profiles);
+  document.getElementById('newBotName').value = '';
+  renderPicker();
+  renderAddedBots();
+  selectBot(res.profile.id, true);
+  toast(res.profile.name + ' added.');
+});
+function renderAddedBots() {
+  var grid = document.getElementById('addedBotGrid');
+  var profiles = caiSanitizeProfiles(state.profiles);
+  grid.hidden = !profiles.length;
+  grid.innerHTML = profiles.map(function (p) {
+    var stateLabel = caiBotState(p);
+    return '<div class="bot-card' + (p.id === state.selected ? ' selected' : '') + '" data-bot-card="' + esc(p.id) + '">' +
+      '<div class="bot-head">' +
+      '<span class="bot-name">' + (p.channel === 'voice' ? '📞 ' : '💬 ') + esc(p.name) + '</span>' +
+      '<span class="pill ' + (stateLabel === 'Off' ? 'red' : (p.mode === 'suggest' ? 'amber' : 'green')) + '">' + esc(stateLabel) + '</span>' +
+      '<span style="margin-left:auto"></span>' +
+      '<label class="switch" title="Turn this bot on or off"><input type="checkbox" data-profile-on="' + esc(p.id) + '"' + (p.on ? ' checked' : '') + '><span class="track"></span></label>' +
+      '<span class="switch-label">' + (p.on ? 'On' : 'Off') + '</span>' +
+      '</div>' +
+      '<div class="bot-role">' + (p.channel === 'voice'
+        ? 'Inbound voice bot you added. Works from the same knowledge base and booking rules on this screen.'
+        : 'Text-message seller bot you added. Works from the same knowledge base and booking rules on this screen.') + '</div>' +
+      '<div class="mode-row"><span class="lbl">Mode</span>' +
+      '<select data-profile-mode="' + esc(p.id) + '">' +
+      '<option value="auto"' + (p.mode === 'auto' ? ' selected' : '') + '>Auto-Pilot</option>' +
+      '<option value="suggest"' + (p.mode === 'suggest' ? ' selected' : '') + '>Suggest</option>' +
+      '<option value="off"' + (p.mode === 'off' ? ' selected' : '') + '>Off</option>' +
+      '</select></div>' +
+      '<div class="name-row"><span class="lbl">Bot name</span>' +
+      '<input type="text" maxlength="40" autocomplete="off" data-profile-name="' + esc(p.id) + '" value="' + esc(p.name) + '"></div>' +
+      (p.channel === 'voice'
+        ? '<div class="voice-row"><span class="lbl">Voice library</span><span class="muted" style="font-size:12px">Listen to each voice, then select the one this bot uses.</span></div>' +
+          '<div class="voice-list" data-voices-for="' + esc(p.id) + '"></div>' +
+          '<div class="muted" data-vnote="' + esc(p.id) + '" style="font-size:12px;margin-top:8px">Previews play a short greeting in the chosen voice, right in your browser.</div>'
+        : '') +
+      '<div style="margin-top:12px"><button class="btn small danger" type="button" data-profile-remove="' + esc(p.id) + '">Remove this bot</button></div>' +
+      '</div>';
+  }).join('');
+  profiles.forEach(function (p) { if (p.channel === 'voice') renderVoiceList(p.id); });
+}
+document.getElementById('addedBotGrid').addEventListener('change', function (e) {
+  var on = e.target.closest('[data-profile-on]');
+  if (on) {
+    var upd = caiUpdateProfile(state.profiles, on.dataset.profileOn, { on: on.checked });
+    if (upd) state.profiles = caiSaveProfiles(localStorage, TENANT, upd);
+    renderPicker();
+    renderAddedBots();
+    return;
+  }
+  var mode = e.target.closest('[data-profile-mode]');
+  if (mode) {
+    var upd2 = caiUpdateProfile(state.profiles, mode.dataset.profileMode, { mode: mode.value });
+    if (upd2) state.profiles = caiSaveProfiles(localStorage, TENANT, upd2);
+    renderPicker();
+    renderAddedBots();
+    toast('Mode saved.');
+    return;
+  }
+  var name = e.target.closest('[data-profile-name]');
+  if (name) {
+    var upd3 = caiUpdateProfile(state.profiles, name.dataset.profileName, { name: name.value });
+    if (upd3) state.profiles = caiSaveProfiles(localStorage, TENANT, upd3);
+    renderPicker();
+    renderAddedBots();
+    toast('Bot name saved.');
+  }
+});
+document.getElementById('addedBotGrid').addEventListener('click', function (e) {
+  var rm = e.target.closest('[data-profile-remove]');
+  if (!rm) return;
+  var p = caiSanitizeProfiles(state.profiles).find(function (x) { return x.id === rm.dataset.profileRemove; });
+  if (!p) return;
+  if (!confirm('Remove ' + p.name + '?\n\nOnly bots you added can be removed — your two original bots always stay.')) return;
+  state.profiles = caiSaveProfiles(localStorage, TENANT, caiRemoveProfile(state.profiles, p.id));
+  if (state.selected === p.id) {
+    state.selected = 'ashley';
+    caiSaveSelected(localStorage, TENANT, state.selected);
+  }
+  renderPicker();
+  renderAddedBots();
+  toast(p.name + ' removed.');
+});
+
+/* ---- voice library ---- */
+var SPEECH_VOICES = [];
+function refreshSpeechVoices() {
+  try {
+    if ('speechSynthesis' in window) SPEECH_VOICES = window.speechSynthesis.getVoices() || [];
+  } catch (e) { SPEECH_VOICES = []; }
+  renderVoiceList('sam');
+  caiSanitizeProfiles(state.profiles).forEach(function (p) { if (p.channel === 'voice') renderVoiceList(p.id); });
+}
+function voiceSelectionFor(ownerId) {
+  if (ownerId === 'sam') return state.voice;
+  var p = caiSanitizeProfiles(state.profiles).find(function (x) { return x.id === ownerId; });
+  return p ? p.voice : caiDefaultVoiceSel();
+}
+function voiceRowHtml(ownerId, selId, label, sub, active) {
+  return '<div class="voice-row' + (active ? ' active' : '') + '">' +
+    '<div class="grow"><div class="vname">' + esc(label) + '</div>' +
+    (sub ? '<div class="vsub">' + esc(sub) + '</div>' : '') + '</div>' +
+    (active
+      ? '<span class="pill green">Active</span>'
+      : '<button class="btn small" type="button" data-vselect="' + esc(selId) + '" data-vowner="' + esc(ownerId) + '">Select</button>') +
+    '<button class="btn small" type="button" data-vlisten="' + esc(selId) + '" data-vowner="' + esc(ownerId) + '">▶ Listen</button>' +
+    '</div>';
+}
+function renderVoiceList(ownerId) {
+  var container = ownerId === 'sam'
+    ? document.getElementById('samVoices')
+    : document.querySelector('[data-voices-for="' + ownerId + '"]');
+  if (!container) return;
+  var sel = voiceSelectionFor(ownerId);
+  var html = '<div class="vgroup">Built-in styles</div>';
+  html += CAI_VOICE_OPTIONS.map(function (o) {
+    return voiceRowHtml(ownerId, o.id, o.label, 'Style — matched to the closest voice on this device', sel === o.id);
+  }).join('');
+  html += '<div class="vgroup">Voices on this device</div>';
+  if (SPEECH_VOICES.length) {
+    html += '<div class="voice-scroll">' + SPEECH_VOICES.map(function (v) {
+      var id = 'browser:' + v.name;
+      return voiceRowHtml(ownerId, id, caiVoiceLabel(v), 'Device voice', sel === id);
+    }).join('') + '</div>';
+  } else {
+    html += '<div class="voice-row"><div class="grow"><div class="vsub">No device voices found in this browser — the built-in styles above still preview.</div></div></div>';
+  }
+  container.innerHTML = html;
+}
+function setVoiceNote(ownerId, msg) {
+  var el = document.querySelector('[data-vnote="' + ownerId + '"]');
+  if (el) el.textContent = msg;
+}
+function botById(id) {
+  var found = null;
+  allBots().forEach(function (b) { if (b.id === id) found = b; });
+  return found;
+}
+function previewVoice(ownerId, selId) {
+  var bot = botById(ownerId);
+  var botName = bot ? bot.name : 'Sam';
+  if (!('speechSynthesis' in window)) {
+    setVoiceNote(ownerId, 'Voice preview isn’t available in this browser.');
+    return;
+  }
+  try {
+    var voices = window.speechSynthesis.getVoices() || [];
+    var u = new SpeechSynthesisUtterance(caiGreeting(botName, BRAND_NAME));
+    var voice = caiPickSpeechVoice(voices, selId);
+    if (voice) u.voice = voice;
+    var opt = caiVoiceOption(selId);
+    if (opt) { u.pitch = opt.pitch; u.rate = opt.rate; }
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(u);
+  } catch (e) {
+    setVoiceNote(ownerId, 'Voice preview isn’t available in this browser.');
+  }
+}
+document.addEventListener('click', function (e) {
+  var listen = e.target.closest('[data-vlisten]');
+  if (listen) { previewVoice(listen.dataset.vowner, listen.dataset.vlisten); return; }
+  var select = e.target.closest('[data-vselect]');
+  if (select) {
+    var owner = select.dataset.vowner;
+    if (owner === 'sam') {
+      state.voice = caiSaveVoice(localStorage, TENANT, select.dataset.vselect);
+    } else {
+      var upd = caiUpdateProfile(state.profiles, owner, { voice: select.dataset.vselect });
+      if (upd) state.profiles = caiSaveProfiles(localStorage, TENANT, upd);
+    }
+    renderVoiceList(owner);
+    toast('Voice saved.');
+  }
+});
+if ('speechSynthesis' in window) {
+  try { window.speechSynthesis.onvoiceschanged = refreshSpeechVoices; } catch (e) { /* preview still works with whatever voices are loaded */ }
+}
+
+/* ---- test panel ---- */
+var testLog = [];
+function renderTestBotLabel() {
+  var el = document.getElementById('testBotLabel');
+  if (!el) return;
+  var b = selectedBot();
+  el.textContent = b.name + (b.channel === 'voice' ? ' (voice bot)' : ' (text bot)');
+}
+function renderTestLog() {
+  var log = document.getElementById('testLog');
+  if (!testLog.length) {
+    log.innerHTML = '<div class="empty">No test messages yet — type like a seller below.</div>';
+    return;
+  }
+  log.innerHTML = testLog.map(function (m) {
+    if (m.who === 'silence') return '<div class="silence-note">🤫 No reply — ' + esc(m.text) + '</div>';
+    if (m.who === 'user') return '<div class="bubble-row user"><div class="bubble user">' + esc(m.text) + '</div></div>';
+    return '<div><div class="bubble-who">' + esc(m.name) + '</div><div class="bubble-row"><div class="bubble bot">' + esc(m.text) + '</div></div></div>';
+  }).join('');
+  log.scrollTop = log.scrollHeight;
+}
+function runTest() {
+  var input = document.getElementById('testInput');
+  var msg = input.value;
+  if (!msg.trim()) return;
+  var bot = selectedBot();
+  var res = caiTestReply(msg, {
+    faqs: state.faqs,
+    booking: state.booking,
+    botName: bot.name,
+    bizName: BRAND_NAME,
+    now: new Date(),
+  });
+  if (res.type === 'empty') return;
+  testLog.push({ who: 'user', text: msg });
+  if (res.type === 'silence') testLog.push({ who: 'silence', text: res.note });
+  else testLog.push({ who: 'bot', name: bot.name, text: res.text });
+  input.value = '';
+  renderTestLog();
+  input.focus();
+}
+document.getElementById('btnTestSend').addEventListener('click', runTest);
+document.getElementById('testInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') runTest(); });
+document.getElementById('btnTestClear').addEventListener('click', function () { testLog = []; renderTestLog(); });
+
 function renderAll() {
+  renderPicker();
   renderBots();
+  renderBotNames();
+  renderAddedBots();
+  renderVoiceList('sam');
   renderFaqs();
   renderInstructions();
   renderBooking();
   renderGuardrails();
+  renderTestLog();
 }
 wireBot('ashley', 'ashley');
 wireBot('sam', 'sam');
+wireBotName('ashley', 'ashleyName');
+wireBotName('sam', 'samName');
+refreshSpeechVoices();
 renderAll();
 </script>
 </body>
