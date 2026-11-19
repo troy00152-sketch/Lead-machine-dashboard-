@@ -12,7 +12,7 @@
 //      trace in the body; a 400 naming credits maps the same way.
 //   4. Funded key: 200 { status: 'ok', result } and the request really
 //      went to api.x.ai/v1/chat/completions as Bearer <key>, model
-//      grok-4.7, with the summarize/draft prompts built from the text.
+//      grok-4.20-0309-non-reasoning, with the summarize/draft prompts built from the text.
 //   5. Upstream 500 -> clean 502, no stack trace leaked.
 //   6. conversations.html carries the Grok assist control: endpoint,
 //      both buttons, and the calm "isn't funded yet" dormant copy.
@@ -99,11 +99,11 @@ function noStack(body) {
   b = JSON.parse(r.body);
   check('funded -> 200', r.statusCode === 200, 'got ' + r.statusCode);
   check('funded -> status ok + result text', b.status === 'ok' && b.result.includes('Next move:'));
-  check('funded -> model reported grok-4.7', b.model === 'grok-4.7');
+  check('funded -> model reported grok-4.20-0309-non-reasoning', b.model === 'grok-4.20-0309-non-reasoning');
   check('request URL is the xAI chat completions endpoint', fetchCalls[0].url === 'https://api.x.ai/v1/chat/completions', fetchCalls[0].url);
   check('request carries Bearer TEST key', fetchCalls[0].opts.headers.Authorization === 'Bearer xai-TEST-FAKE-KEY');
   const sent = JSON.parse(fetchCalls[0].opts.body);
-  check('request model is grok-4.7', sent.model === 'grok-4.7');
+  check('request model is grok-4.20-0309-non-reasoning', sent.model === 'grok-4.20-0309-non-reasoning');
   check('request messages carry the thread text', sent.messages[1].content.includes('asking 90k, firm'));
   check('summarize prompt demands the Next move line', sent.messages[0].content.includes('Next move:'));
   stubFetch(async () => fakeRes(200, JSON.stringify({ choices: [{ message: { content: 'Hi — just checking in.' } }] })));
@@ -111,6 +111,15 @@ function noStack(body) {
   const draftSent = JSON.parse(fetchCalls[0].opts.body);
   check('draft prompt is review-only (never sends)', /never send/i.test(draftSent.messages[0].content));
   check('draft result returned for review', JSON.parse(r.body).result === 'Hi — just checking in.');
+
+  // ---- 4b. self-test route (GET ?selftest=1) ----
+  stubFetch(async () => fakeRes(200, JSON.stringify({ choices: [{ message: { content: 'Seller wants $80,000 and agreed to a 2pm call.\nNext move: call at 2pm.' } }] })));
+  r = await grok.handler({ httpMethod: 'GET', queryStringParameters: { selftest: '1' }, body: '' });
+  b = JSON.parse(r.body);
+  check('selftest -> 200 ok + selftest flag', r.statusCode === 200 && b.status === 'ok' && b.selftest === true, 'got ' + r.statusCode);
+  check('selftest -> ran the fixed sample thread', JSON.parse(fetchCalls[0].opts.body).messages[1].content.includes('123 Main St'));
+  r = await grok.handler({ httpMethod: 'GET', queryStringParameters: {}, body: '' });
+  check('plain GET (no selftest) -> 405', r.statusCode === 405, 'got ' + r.statusCode);
 
   // ---- 5. upstream failure -> clean 502 ----
   stubFetch(async () => fakeRes(500, 'Internal Server Error'));
