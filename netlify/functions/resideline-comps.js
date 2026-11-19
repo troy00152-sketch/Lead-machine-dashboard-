@@ -11,6 +11,16 @@
 //     bounds?: { radiusMiles?, maxAgeDays?, sqftBand?, yearBuiltDiff? } }
 //
 // Upstream chain (no standalone comps endpoint exists):
+//   Step 0 — address normalization (round 5, Nov 18, 2026): an
+//     address that reaches Resideline comma-less and lowercase
+//     ("229 plaza ave waterbury ct 06710") fails upstream —
+//     property_details 400s (facts=none) and property_value returns
+//     ADDRESS_NORMALIZATION_FAILED — while the same address in the
+//     standard "Street, City, ST ZIP" form works end to end. The
+//     Comps page sends addresses exactly as typed, so the handler
+//     runs normalizeAddress once and uses the normalized form for
+//     every upstream call and the response subject. Input that
+//     already contains a comma is left untouched.
 //   Step 1 — POST /v1/api/property_details { address } — 0 credits.
 //     Returns the subject facts (beds / baths / sqft / year built /
 //     type). Resideline's valuation endpoint 400s with
@@ -34,6 +44,26 @@
 //     published sample, or nested under data.property_valuation; both
 //     locations are parsed (verified live Nov 18, 2026: a 200 response
 //     carried a valuation with an empty top-level comps read).
+//   Step 2b — ASSUMED-BATHS RETRY (round 4, Nov 18, 2026; Troy
+//     delegated the design call: "do what you think is best for the
+//     system"). Live evidence: Resideline's own record for some
+//     houses is missing exactly ONE fact and its enrichment will not
+//     fill the hole — 3051 Eastern Ave has beds/sqft/year/type on
+//     record but NO baths, and every call without baths 400ed with
+//     INVALID_PROPERTY_DATA, while the same call WITH baths returned
+//     11 comps. The narrow, disclosed fix: when the first valuation
+//     attempt fails 400 INVALID_PROPERTY_DATA and baths is the ONLY
+//     missing fact among {beds, baths, sqft, yearBuilt,
+//     propertyType}, retry the valuation ONCE with baths = 1 added
+//     (every other body field unchanged). A successful retry (>= 1
+//     comp) is marked in the response as assumedFacts: ["baths"],
+//     and the Comps page discloses it on screen ("Baths not on
+//     record — valued as 1 bath (assumed).") — the assumption is
+//     never silent. NO other fact is EVER assumed: a missing sqft /
+//     beds / year / type (alone or together with baths) gets no
+//     retry and falls through to Step 3 unchanged. Failed calls are
+//     not charged, so the retry costs 2 credits only when it
+//     succeeds.
 //   Step 3 — POST /v2/api/property_report — 10 credits on success,
 //     ONLY when Step 2 produced fewer than 3 comps and the facts allow
 //     it (this endpoint requires year_built + property_type). Two
@@ -62,9 +92,9 @@
 const DETAILS_URL = 'https://api.resideline.com/v1/api/property_details';
 const API_URL = 'https://api.resideline.com/v2/api/property_value?enrich_if_missing=true';
 const REPORT_URL = 'https://api.resideline.com/v2/api/property_report';
-// Per-call timeout; the chain is at most 4 calls (details + value +
-// report(min) + report(full)) and the common path is 2, well under
-// the function limit.
+// Per-call timeout; the chain is at most 5 calls (details + value +
+// assumed-baths retry + report(min) + report(full)) and the common
+// path is 2, well under the function limit.
 const TIMEOUT_MS = 15000;
 
 // Legacy caller bounds: still parsed for input compatibility, but NOT
@@ -146,6 +176,73 @@ function parseAddress(full) {
   }
   out.street = head;
   return out;
+}
+
+/* ---------------- address normalization (round 5) ----------------
+   Resideline rejects a comma-less address (see the Step 0 header
+   note). normalizeAddress rebuilds such an address into the
+   standard "Street, City, ST ZIP" form: it only acts when the
+   input has NO comma and ends in "<2-letter state> <5-digit ZIP>"
+   (optional ZIP+4), splits street from city at the LAST street-
+   suffix token (an optional unit designator + value right after
+   the suffix stays with the street), and title-cases the result.
+   Anything it cannot parse confidently — already-comma'd input,
+   no ZIP tail, no suffix, an empty city — is returned unchanged. */
+
+const STREET_SUFFIXES = new Set([
+  'ave', 'avenue', 'st', 'street', 'rd', 'road', 'dr', 'drive', 'ln',
+  'lane', 'blvd', 'boulevard', 'ct', 'court', 'pl', 'place', 'way',
+  'ter', 'terr', 'terrace', 'cir', 'circle', 'hwy', 'highway',
+  'pkwy', 'parkway', 'trl', 'trail', 'aly', 'alley', 'sq', 'square',
+  'loop', 'run', 'row', 'pass', 'pt', 'point', 'xing', 'crossing',
+]);
+const UNIT_DESIGNATORS = new Set(['apt', 'unit', 'ste', 'suite', '#']);
+const DIRECTIONAL_TOKENS = new Set(['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']);
+
+function titleCaseToken(tok) {
+  const lower = tok.toLowerCase();
+  if (DIRECTIONAL_TOKENS.has(lower)) return lower.toUpperCase();
+  // Capitalize the first letter, lowercase the rest. Numeric and
+  // ordinal tokens ("229", "33rd") pass through unharmed: their
+  // first character is a digit and the rest is already lowercase.
+  return lower.charAt(0).toUpperCase() + lower.slice(1);
+}
+
+function normalizeAddress(addr) {
+  if (addr === null || addr === undefined) return addr;
+  const original = String(addr);
+  const trimmed = original.trim();
+  if (!trimmed || trimmed.includes(',')) return original;
+  const m = trimmed.match(/^(.*?)\s+([A-Za-z]{2})\s+(\d{5})(-\d{4})?\s*$/);
+  if (!m) return original;
+  const tokens = m[1].split(/\s+/).filter(Boolean);
+  // The street/city boundary is the LAST suffix token: a street
+  // name may itself contain an earlier suffix word ("Ave Maria Ln").
+  let suffixIdx = -1;
+  for (let i = 0; i < tokens.length; i++) {
+    if (STREET_SUFFIXES.has(tokens[i].toLowerCase().replace(/\.$/, ''))) suffixIdx = i;
+  }
+  if (suffixIdx < 0) return original;
+  let streetEnd = suffixIdx;
+  // An optional unit designator + its value right after the suffix
+  // ("... St Apt 4", "... St # 4", "... St #4") belongs to the street.
+  const next = tokens[suffixIdx + 1];
+  if (next !== undefined) {
+    if (UNIT_DESIGNATORS.has(next.toLowerCase().replace(/\.$/, ''))
+      && tokens[suffixIdx + 2] !== undefined) {
+      streetEnd = suffixIdx + 2;
+    } else if (next.charAt(0) === '#' && next.length > 1) {
+      streetEnd = suffixIdx + 1;
+    }
+  }
+  const streetTokens = tokens.slice(0, streetEnd + 1);
+  streetTokens[suffixIdx] = streetTokens[suffixIdx].replace(/\.$/, '');
+  const cityTokens = tokens.slice(streetEnd + 1);
+  if (!cityTokens.length) return original;
+  const zip = m[3] + (m[4] || '');
+  return streetTokens.map(titleCaseToken).join(' ')
+    + ', ' + cityTokens.map(titleCaseToken).join(' ')
+    + ', ' + m[2].toUpperCase() + ' ' + zip;
 }
 
 /* ---------------- request shaping ---------------- */
@@ -853,6 +950,16 @@ exports.handler = async (event) => {
     return json(400, corsHeaders, { error: 'missing_address' });
   }
 
+  // ---- Step 0: normalize a comma-less address once (round 5).
+  // Mutating input.address here means the details / value / report
+  // bodies, the logs and the response subject all carry the
+  // normalized form.
+  const normalizedAddress = normalizeAddress(input.address);
+  if (normalizedAddress !== input.address) {
+    console.log('[resideline-comps] normalized address=' + normalizedAddress);
+    input.address = normalizedAddress;
+  }
+
   try {
     // ---- Step 1: subject facts via property_details (0 credits).
     // A failure here is NOT fatal — the valuation may still enrich
@@ -882,6 +989,7 @@ exports.handler = async (event) => {
     let parsed = null;
     let credits = { credits_charged: null, credits_remaining: null };
     let firstError = null;
+    let assumedFacts = null;
     const v = await callUpstream(API_URL, apiKey, buildUpstreamBody(input, facts));
     if (v.ok && v.data) {
       parsed = parseValuationPayload(v.data);
@@ -896,6 +1004,31 @@ exports.handler = async (event) => {
         + (miss ? ' missing=' + miss : '')
         + ' address=' + input.address);
       firstError = { status: v.ok ? 502 : v.status, data: v.data };
+
+      // ---- Step 2b: assumed-baths retry (see header). NARROW
+      // trigger: this exact upstream refusal, and baths the ONLY
+      // missing fact (missingFactsList === 'baths' means the other
+      // four are all present). One retry with baths = 1; every other
+      // body field is the same body builder output. On failure the
+      // chain falls through to Step 3 with firstError untouched —
+      // the ORIGINAL value error stays the mapped error.
+      if (v.status === 400 && det.code === 'INVALID_PROPERTY_DATA' && miss === 'baths') {
+        const retryFacts = Object.assign({}, facts, { baths: 1 });
+        const v2 = await callUpstream(API_URL, apiKey, buildUpstreamBody(input, retryFacts));
+        if (v2.ok && v2.data) {
+          const rp2 = parseValuationPayload(v2.data);
+          console.log('[resideline-comps] value(assumed-baths) status=200 comps=' + rp2.comps.length
+            + ' address=' + input.address);
+          parsed = rp2;
+          credits = rp2.credits;
+          if (rp2.comps.length >= 1) assumedFacts = ['baths'];
+        } else {
+          const det2 = extractErrorDetail(v2.data);
+          console.log('[resideline-comps] value(assumed-baths) status=' + v2.status
+            + (det2.code ? ' code=' + det2.code : '')
+            + ' address=' + input.address);
+        }
+      }
     }
 
     // ---- Step 3: full report fallback (10 credits on success) —
@@ -953,6 +1086,7 @@ exports.handler = async (event) => {
         source: 'resideline',
         error: 'insufficient_comps',
         address: input.address,
+        assumedFacts,
         compsReturned: rawComps.length,
         comps: null,
         vendorArv,
@@ -1003,6 +1137,7 @@ exports.handler = async (event) => {
       matched: true,
       source: 'resideline',
       address: subject.address || input.address,
+      assumedFacts,
       property: shapeProperty(subject, input.address),
       // Screen-only slot, same convention as data-api: the page reads
       // avm.value as a reference marker; it is never an offer basis.
@@ -1039,6 +1174,7 @@ exports._test = {
   parseMoney,
   soldDateToIso,
   parseAddress,
+  normalizeAddress,
   parseInput,
   mergeFacts,
   typeForValue,

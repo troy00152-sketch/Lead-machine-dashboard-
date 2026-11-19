@@ -62,6 +62,17 @@
 //      that pinned the old verbatim type passthrough and the single
 //      full-body report call — they now assert the normalized
 //      vocabulary and the report(min) body.
+//  10. Round-4 (Nov 18, 2026 — Troy delegated the design call):
+//      the assumed-baths retry. When the first property_value attempt
+//      fails 400 INVALID_PROPERTY_DATA and baths is the ONLY missing
+//      fact among {beds, baths, sqft, yearBuilt, propertyType}, the
+//      handler retries ONCE with baths = 1 and marks a successful
+//      retry (>= 1 comp) as assumedFacts: ['baths'] in the response;
+//      index.html discloses it on screen. Any other missing fact
+//      (sqft alone, or baths + sqft together), or any other error
+//      code, gets NO retry; a failed retry falls through to the
+//      report(min) -> report(full) chain with the ORIGINAL value
+//      error still the mapped error when everything fails.
 'use strict';
 
 const fs = require('fs');
@@ -624,6 +635,128 @@ function upstreamOk(compCount) {
   check('openCompsForLead found in index.html', leadStart > 0);
   check('openCompsForLead stashes the lead subject facts (page spellings)', leadSeg.includes('compLeadFacts = { address: addr, facts:') && leadSeg.includes('l.bedrooms') && leadSeg.includes('l.bathrooms') && leadSeg.includes('l.sqft') && leadSeg.includes('l.yearBuilt') && leadSeg.includes('l.propertyType || l.propType'), leadSeg.slice(0, 200));
   check('compLeadFacts global declared', html.includes('let compLeadFacts = null'));
+
+  // ---- 10. round-4: assumed-baths retry (narrow trigger, disclosed) ----
+  // Eastern shape: details (documented property_info) carry every fact
+  // EXCEPT baths; the first value attempt 400s INVALID_PROPERTY_DATA;
+  // the retry with baths=1 succeeds and is marked.
+  let valBodies10 = [];
+  let repCalls10 = 0;
+  stubRoutes({
+    details: async () => fakeRes(200, { address: ADDR, property_info: { beds: 2, sqft_size: 720, subject_year_built: '1947', property_type: 'Single Family' } }),
+    value: async (body) => { valBodies10.push(body); return body.baths === 1 ? fakeRes(200, upstreamOk(5)) : fakeRes(400, { error: 'bad_input', code: 'INVALID_PROPERTY_DATA', suggestion: 'Provide these fields in the body or allow enrichment & scraping' }); },
+    report: async () => { repCalls10++; return fakeRes(400, { error: 'bad_input', code: 'X', suggestion: 'x' }); },
+  });
+  captured = [];
+  console.log = (...args) => { captured.push(args.join(' ')); };
+  try { r = await fn.handler(post({ address: ADDR })); } finally { console.log = realLog; }
+  b = JSON.parse(r.body);
+  check('assumed-baths: Eastern shape rescued by the retry, matched', r.statusCode === 200 && b.matched === true, 'got ' + r.statusCode + ' ' + r.body.slice(0, 160));
+  check('assumed-baths: response marks assumedFacts ["baths"]', Array.isArray(b.assumedFacts) && b.assumedFacts.length === 1 && b.assumedFacts[0] === 'baths', JSON.stringify(b.assumedFacts));
+  check('assumed-baths: exactly two value calls, first without baths, retry with baths:1', valBodies10.length === 2 && valBodies10[0].baths === undefined && valBodies10[1].baths === 1, JSON.stringify(valBodies10));
+  check('assumed-baths: retry body otherwise unchanged', valBodies10[1] && valBodies10[1].beds === 2 && valBodies10[1].sqft_size === 720 && valBodies10[1].subject_year_built === 1947 && valBodies10[1].property_type === 'Single-family', JSON.stringify(valBodies10[1]));
+  check('assumed-baths: report endpoints never called', repCalls10 === 0 && fetchCalls.length === 3 && !fetchCalls.some(c => c.url.includes('property_report')), 'calls=' + fetchCalls.map(c => c.url).join(' | '));
+  check('assumed-baths: retry logged distinctly', captured.some(l => l.includes('value(assumed-baths) status=200 comps=5')), captured.join(' | '));
+
+  // baths AND sqft both missing -> NO assumption retry; the next call
+  // after the failed value attempt is report(min).
+  valBodies10 = [];
+  stubRoutes({
+    details: async () => fakeRes(200, { address: ADDR, property_info: { beds: 2, subject_year_built: '1947', property_type: 'Single Family' } }),
+    value: async (body) => { valBodies10.push(body); return fakeRes(400, { error: 'bad_input', code: 'INVALID_PROPERTY_DATA', suggestion: 'x' }); },
+    report: async () => fakeRes(200, reportOk),
+  });
+  r = await fn.handler(post({ address: ADDR }));
+  b = JSON.parse(r.body);
+  check('no-assumption: baths+sqft missing -> value called exactly once', valBodies10.length === 1, 'valueCalls=' + valBodies10.length);
+  check('no-assumption: next call after value is property_report (report(min))', fetchCalls.length === 3 && fetchCalls[2].url.includes('property_report'), fetchCalls.map(c => c.url).join(' | '));
+  check('no-assumption: report rescue carries no assumedFacts mark', b.matched === true && b.assumedFacts == null, 'matched=' + b.matched + ' assumedFacts=' + JSON.stringify(b.assumedFacts));
+
+  // sqft the ONLY missing fact (421 shape) -> still no retry: sqft is
+  // never assumed.
+  valBodies10 = [];
+  stubRoutes({
+    details: async () => fakeRes(200, { address: ADDR, property_info: { beds: 4, baths: 2, subject_year_built: '1910', property_type: 'Single Family' } }),
+    value: async (body) => { valBodies10.push(body); return fakeRes(400, { error: 'bad_input', code: 'INVALID_PROPERTY_DATA', suggestion: 'x' }); },
+    report: async () => fakeRes(200, reportOk),
+  });
+  r = await fn.handler(post({ address: ADDR }));
+  check('no-assumption: sqft-only missing -> no retry', valBodies10.length === 1, 'valueCalls=' + valBodies10.length);
+
+  // a 400 that is NOT INVALID_PROPERTY_DATA never triggers the retry,
+  // even when baths is the only missing fact.
+  valBodies10 = [];
+  stubRoutes({
+    details: async () => fakeRes(200, { address: ADDR, property_info: { beds: 2, sqft_size: 720, subject_year_built: '1947', property_type: 'Single Family' } }),
+    value: async (body) => { valBodies10.push(body); return fakeRes(400, { error: 'bad_input', code: 'SOME_OTHER_CODE', suggestion: 'other' }); },
+    report: async () => fakeRes(200, reportOk),
+  });
+  r = await fn.handler(post({ address: ADDR }));
+  check('no-assumption: non-INVALID_PROPERTY_DATA 400 -> no retry', valBodies10.length === 1, 'valueCalls=' + valBodies10.length);
+
+  // assumption retry also 400 -> report(min)/report(full) still run;
+  // when everything fails the mapped error is the ORIGINAL value
+  // error — not the retry's, not the reports'.
+  valBodies10 = [];
+  stubRoutes({
+    details: async () => fakeRes(200, { address: ADDR, property_info: { beds: 2, sqft_size: 720, subject_year_built: '1947', property_type: 'Single Family' } }),
+    value: async (body) => { valBodies10.push(body); return body.baths === 1
+      ? fakeRes(400, { error: 'bad_input', code: 'RETRY_CODE', suggestion: 'retry says no' })
+      : fakeRes(400, { error: 'bad_input', code: 'INVALID_PROPERTY_DATA', suggestion: 'value says no' }); },
+    report: async (body) => fakeRes(400, { error: 'bad_input', code: body.sqft != null ? 'REPORT_FULL_CODE' : 'REPORT_MIN_CODE', suggestion: 'report says no' }),
+  });
+  r = await fn.handler(post({ address: ADDR }));
+  b = JSON.parse(r.body);
+  check('assumed-baths fail: retry was attempted (2 value calls, second with baths:1)', valBodies10.length === 2 && valBodies10[1].baths === 1, 'valueCalls=' + valBodies10.length);
+  check('assumed-baths fail: report(min)+report(full) still ran (5 upstream calls)', fetchCalls.length === 5 && fetchCalls.filter(c => c.url.includes('property_report')).length === 2, 'calls=' + fetchCalls.length);
+  check('assumed-baths fail: all-fail keeps the ORIGINAL value error mapping', r.statusCode === 400 && b.error === 'bad_input' && b.code === 'INVALID_PROPERTY_DATA' && b.suggestion === 'value says no', JSON.stringify(b));
+
+  // complete facts: the normal path is untouched — no retry, no mark.
+  valBodies10 = [];
+  stubRoutes({
+    details: async () => fakeRes(200, { address: ADDR, property_info: { beds: 2, baths: 1, sqft_size: 720, subject_year_built: '1947', property_type: 'Single Family' } }),
+    value: async (body) => { valBodies10.push(body); return fakeRes(200, upstreamOk(5)); },
+  });
+  r = await fn.handler(post({ address: ADDR }));
+  b = JSON.parse(r.body);
+  check('complete facts: details+value only, no retry', fetchCalls.length === 2 && valBodies10.length === 1, 'calls=' + fetchCalls.length);
+  check('complete facts: assumedFacts absent/null', b.matched === true && b.assumedFacts == null, 'assumedFacts=' + JSON.stringify(b.assumedFacts));
+
+  // frontend: the assumed-baths disclosure note
+  check('index.html has the assumed-facts note element', html.includes('id="compAssumedNote"'));
+  check('index.html discloses the assumed bath in loadCompsForAddress', seg.includes("d.assumedFacts.indexOf('baths') >= 0") && seg.includes('Baths not on record — valued as 1 bath (assumed).'));
+
+  // ---- 11. round-5: comma-less address normalization ----
+  // Live evidence (Nov 18, 2026): "229 plaza ave waterbury ct 06710"
+  // 400s property_details and property_value
+  // (ADDRESS_NORMALIZATION_FAILED); the formatted form works.
+  check('normalize: worked example — plaza', T.normalizeAddress('229 plaza ave waterbury ct 06710') === '229 Plaza Ave, Waterbury, CT 06710', T.normalizeAddress('229 plaza ave waterbury ct 06710'));
+  check('normalize: worked example — directional + ordinal kept intact', T.normalizeAddress('1619 e 33rd st kansas city mo 64109') === '1619 E 33rd St, Kansas City, MO 64109', T.normalizeAddress('1619 e 33rd st kansas city mo 64109'));
+  check('normalize: worked example — eastern', T.normalizeAddress('3051 eastern ave indianapolis in 46218') === '3051 Eastern Ave, Indianapolis, IN 46218', T.normalizeAddress('3051 eastern ave indianapolis in 46218'));
+  check('normalize: already-formatted input returned unchanged', T.normalizeAddress('229 Plaza Ave, Waterbury, CT 06710') === '229 Plaza Ave, Waterbury, CT 06710', T.normalizeAddress('229 Plaza Ave, Waterbury, CT 06710'));
+  check('normalize: no-ZIP input unchanged', T.normalizeAddress('229 plaza ave waterbury ct') === '229 plaza ave waterbury ct', T.normalizeAddress('229 plaza ave waterbury ct'));
+  check('normalize: no-suffix input unchanged', T.normalizeAddress('229 plaza waterbury ct 06710') === '229 plaza waterbury ct 06710', T.normalizeAddress('229 plaza waterbury ct 06710'));
+
+  // handler: the comma-less lowercase address reaches the details
+  // stub (and the value call) in NORMALIZED form, and the chain
+  // proceeds details -> value to a matched comp set.
+  let detBody11 = null;
+  let valBody11 = null;
+  const okNoSubject11 = upstreamOk(5);
+  delete okNoSubject11.subject;
+  stubRoutes({
+    details: async (body) => { detBody11 = body; return fakeRes(200, { address: '229 Plaza Ave, Waterbury, CT 06710', property_info: { beds: 7, baths: 2.5, sqft_size: 3930, subject_year_built: '1913', property_type: 'Single Family' } }); },
+    value: async (body) => { valBody11 = body; return fakeRes(200, okNoSubject11); },
+  });
+  captured = [];
+  console.log = (...args) => { captured.push(args.join(' ')); };
+  try { r = await fn.handler(post({ address: '229 plaza ave waterbury ct 06710' })); } finally { console.log = realLog; }
+  b = JSON.parse(r.body);
+  check('normalize handler: details called with the NORMALIZED address', detBody11 && detBody11.address === '229 Plaza Ave, Waterbury, CT 06710', JSON.stringify(detBody11));
+  check('normalize handler: value called with the NORMALIZED address', valBody11 && valBody11.address === '229 Plaza Ave, Waterbury, CT 06710', JSON.stringify(valBody11));
+  check('normalize handler: chain proceeds to matched with 3 best comps', r.statusCode === 200 && b.matched === true && (b.comps.best || []).length === 3, 'got ' + r.statusCode + ' ' + r.body.slice(0, 160));
+  check('normalize handler: response subject address is the normalized form', b.address === '229 Plaza Ave, Waterbury, CT 06710', b.address);
+  check('normalize handler: normalization logged', captured.some(l => l.includes('normalized address=229 Plaza Ave, Waterbury, CT 06710')), captured.join(' | '));
 
   global.fetch = realFetch;
   if (realKey === undefined) delete process.env.RESIDELINE_API_KEY;
