@@ -37,6 +37,16 @@
 //      vendor values found.
 //   7. index.html wires Resideline as the Comps page's primary comp
 //      source ahead of the data-provider fallback.
+//   8. Round-2 facts hardening (Nov 18, 2026 — the first live deploy
+//      returned full comps for 4 of 6 addresses, but both Indianapolis
+//      addresses 400ed: property_details returned 200 with facts=none
+//      on every call, so the value call went out address-only and the
+//      report fallback never fired): broadened field aliases,
+//      recursive record search (depth <= 3), the keys-only
+//      details shape= diagnostic (no values ever logged), the
+//      missing= list on a value-step 400, subject facts taken from
+//      the value payload's own property_details, and index.html
+//      passing the data-provider subject facts as query params.
 'use strict';
 
 const fs = require('fs');
@@ -206,7 +216,14 @@ function upstreamOk(compCount) {
   check('engine confidence present', typeof b.comps.confidence === 'string' && b.comps.confidence.length > 0);
 
   // ---- 4. 3-comp minimum ----
-  stubFetch(async () => fakeRes(200, upstreamOk(2)));
+  // Details returns an empty payload: with the recursive facts search,
+  // a valuation-shaped details response would yield its nested subject
+  // facts, so "no facts anywhere" needs a genuinely empty details body.
+  stubRoutes({
+    details: async () => fakeRes(200, {}),
+    value: async () => fakeRes(200, upstreamOk(2)),
+    report: async () => fakeRes(200, upstreamOk(2)),
+  });
   r = await fn.handler(post({ address: ADDR }));
   b = JSON.parse(r.body);
   check('2 comps -> HTTP 200 with insufficient_comps', r.statusCode === 200 && b.error === 'insufficient_comps', 'got ' + r.statusCode + ' ' + (b.error || ''));
@@ -392,6 +409,114 @@ function upstreamOk(compCount) {
   check('Resideline acceptance requires the 3-comp minimum', seg.includes("(rj.comps.best || []).length >= 3"));
   check('PR subject merge kept for the Resideline win', seg.includes("compSource = 'Resideline+PR'"));
   check('no Resideline key material in index.html', !html.includes('RESIDELINE_API_KEY'));
+
+  // ---- 8. round-2 facts hardening ----
+  // aliases: the exact payload shape the task calls out
+  const aliasFacts = T.parsePropertyDetails({ bedrooms: '3', bathrooms: 2, living_area_sqft: '1450', yearBuilt: 1962, type: 'Single Family' });
+  check('aliases: bedrooms/living_area_sqft/yearBuilt/type yield facts (string numbers parse)', aliasFacts && aliasFacts.beds === 3 && aliasFacts.baths === 2 && aliasFacts.sqft === 1450 && aliasFacts.yearBuilt === 1962 && aliasFacts.propertyType === 'Single Family', JSON.stringify(aliasFacts));
+  const aliasFacts2 = T.factsFromRecord({ bed_count: 4, total_baths: '2.5', gross_living_area: 2100, yr_built: 1981, property_class: 'Residential' });
+  check('aliases: bed_count/total_baths/gross_living_area/yr_built/property_class', aliasFacts2 && aliasFacts2.beds === 4 && aliasFacts2.baths === 2.5 && aliasFacts2.sqft === 2100 && aliasFacts2.yearBuilt === 1981 && aliasFacts2.propertyType === 'Residential', JSON.stringify(aliasFacts2));
+  const aliasFacts3 = T.factsFromRecord({ bed: 1, bath: 1, square_feet: 640, built_year: 1938, structure_type: 'Duplex' });
+  check('aliases: bed/bath/square_feet/built_year/structure_type', aliasFacts3 && aliasFacts3.beds === 1 && aliasFacts3.baths === 1 && aliasFacts3.sqft === 640 && aliasFacts3.yearBuilt === 1938 && aliasFacts3.propertyType === 'Duplex', JSON.stringify(aliasFacts3));
+  const aliasFacts4 = T.factsFromRecord({ num_beds: 2, num_baths: 1, living_area: 880, construction_year: 1975, use_type: 'SFR' });
+  check('aliases: num_beds/num_baths/living_area/construction_year/use_type', aliasFacts4 && aliasFacts4.beds === 2 && aliasFacts4.baths === 1 && aliasFacts4.sqft === 880 && aliasFacts4.yearBuilt === 1975 && aliasFacts4.propertyType === 'SFR', JSON.stringify(aliasFacts4));
+  const aliasFacts5 = T.factsFromRecord({ bathroom_count: 3, building_area: 1750 });
+  check('aliases: bath_count-family names are NOT invented (bathroom_count unlisted) but building_area parses', aliasFacts5 && aliasFacts5.baths === null && aliasFacts5.sqft === 1750, JSON.stringify(aliasFacts5));
+  const aliasFacts6 = T.factsFromRecord({ baths: 3, livingArea: 1750 });
+  check('aliases: livingArea (camelCase) parses', aliasFacts6 && aliasFacts6.baths === 3 && aliasFacts6.sqft === 1750, JSON.stringify(aliasFacts6));
+
+  // recursive record search
+  const deepFacts = T.parsePropertyDetails({ result: { property: { bedrooms: 2, baths: 1, living_area: 900, built_year: 1951, use_type: 'SFR' } } });
+  check('recursive search: record nested under result.property (depth 3)', deepFacts && deepFacts.beds === 2 && deepFacts.sqft === 900 && deepFacts.yearBuilt === 1951 && deepFacts.propertyType === 'SFR', JSON.stringify(deepFacts));
+  const arrFacts = T.parsePropertyDetails({ results: [{ bedrooms: 5, bathrooms: 3, living_area_sqft: 2400, year_built: 1999, property_type: 'Single Family' }] });
+  check('recursive search: record inside an array first element', arrFacts && arrFacts.beds === 5 && arrFacts.sqft === 2400 && arrFacts.yearBuilt === 1999, JSON.stringify(arrFacts));
+  const subjFacts = T.parsePropertyDetails({ subject: { bedrooms: 3, living_area_sqft: 1300, yr_built: 1968, type: 'Condo' } });
+  check('recursive search: record under a subject wrapper', subjFacts && subjFacts.beds === 3 && subjFacts.sqft === 1300 && subjFacts.yearBuilt === 1968 && subjFacts.propertyType === 'Condo', JSON.stringify(subjFacts));
+  const tooDeep = T.parsePropertyDetails({ a: { b: { c: { d: { bedrooms: 9 } } } } });
+  check('recursive search: beyond depth 3 stays null', tooDeep === null, JSON.stringify(tooDeep));
+  check('recursive search: fact-free payload stays null', T.parsePropertyDetails({ meta: { request_id: 'x' }, credits_remaining: 5 }) === null);
+
+  // shapeOf: key paths only
+  check('shapeOf renders key paths, arrays as key[0].subkey', T.shapeOf({ a: { b: 1 }, list: [{ c: 2 }], plain: 'x' }) === 'a,a.b,list,list[0].c,plain', T.shapeOf({ a: { b: 1 }, list: [{ c: 2 }], plain: 'x' }));
+  check('shapeOf of empty/garbage is empty', T.shapeOf({}) === '' && T.shapeOf(null) === '');
+
+  // missingFactsList units
+  check('missingFactsList: all missing', T.missingFactsList({ beds: null, baths: null, sqft: null, yearBuilt: null, propertyType: null }) === 'beds,baths,sqft,yearBuilt,propertyType');
+  check('missingFactsList: partial', T.missingFactsList({ beds: 2, baths: 1, sqft: null, yearBuilt: null, propertyType: null }) === 'sqft,yearBuilt,propertyType');
+  check('missingFactsList: none missing -> empty string', T.missingFactsList({ beds: 2, baths: 1, sqft: 720, yearBuilt: 1947, propertyType: 'Single Family' }) === '');
+
+  // handler: unparseable details payload -> keys-only shape log, no values
+  const SENTINEL = 'SENTINEL-VALUE-9f3k';
+  const realLog = console.log;
+  let captured = [];
+  console.log = (...args) => { captured.push(args.join(' ')); };
+  try {
+    stubRoutes({
+      details: async () => fakeRes(200, { meta: { request_id: SENTINEL }, wrapper: { inner: { note: SENTINEL } } }),
+      value: async () => fakeRes(200, upstreamOk(5)),
+    });
+    r = await fn.handler(post({ address: ADDR }));
+  } finally { console.log = realLog; }
+  b = JSON.parse(r.body);
+  const shapeLine = captured.find(l => l.includes('details shape='));
+  check('shape log: fires when details facts parse as none', !!shapeLine, captured.join(' | '));
+  check('shape log: carries recursive key paths', !!shapeLine && shapeLine.includes('meta.request_id') && shapeLine.includes('wrapper.inner.note'), shapeLine || '');
+  check('shape log: no payload values leak into any log line', !captured.join('\n').includes(SENTINEL));
+  check('shape log: request still succeeds via value', r.statusCode === 200 && b.matched === true, 'got ' + r.statusCode);
+
+  // handler: shape log stays silent when facts parse
+  captured = [];
+  console.log = (...args) => { captured.push(args.join(' ')); };
+  try {
+    stubRoutes({
+      details: async () => fakeRes(200, { beds: 2, baths: 1, sqft: 720, year_built: 1947, property_type: 'Single Family' }),
+      value: async () => fakeRes(200, upstreamOk(5)),
+    });
+    r = await fn.handler(post({ address: ADDR }));
+  } finally { console.log = realLog; }
+  check('shape log: silent when facts parse', !captured.some(l => l.includes('details shape=')), captured.join(' | '));
+
+  // handler: value 400 -> missing= names the locally-missing facts
+  captured = [];
+  console.log = (...args) => { captured.push(args.join(' ')); };
+  try {
+    stubRoutes({
+      details: async () => fakeRes(200, {}),
+      value: async () => fakeRes(400, { error: 'bad_input', code: 'INVALID_PROPERTY_DATA', suggestion: 'Provide these fields in the body or allow enrichment & scraping' }),
+    });
+    r = await fn.handler(post({ address: ADDR }));
+  } finally { console.log = realLog; }
+  const vLine = captured.find(l => l.includes('value status=400'));
+  check('missing log: value 400 lists every locally-missing fact', !!vLine && vLine.includes('missing=beds,baths,sqft,yearBuilt,propertyType'), vLine || captured.join(' | '));
+  check('missing log: no facts -> report not attempted, 400 maps to bad_input', r.statusCode === 400 && JSON.parse(r.body).error === 'bad_input' && !fetchCalls.some(c => c.url.includes('property_report')), 'got ' + r.statusCode);
+  captured = [];
+  console.log = (...args) => { captured.push(args.join(' ')); };
+  try {
+    stubRoutes({
+      details: async () => fakeRes(200, {}),
+      value: async () => fakeRes(400, { error: 'bad_input', code: 'INVALID_PROPERTY_DATA', suggestion: 'x' }),
+    });
+    r = await fn.handler(post({ address: ADDR, beds: 2, baths: 1 }));
+  } finally { console.log = realLog; }
+  const vLine2 = captured.find(l => l.includes('value status=400'));
+  check('missing log: partial facts list only the gaps', !!vLine2 && vLine2.includes('missing=sqft,yearBuilt,propertyType'), vLine2 || captured.join(' | '));
+
+  // handler: subject facts from the value payload's own property_details (aliases)
+  const valWithAliasDetails = Object.assign({}, upstreamOk(5), {
+    subject: undefined,
+    property_details: { bedrooms: 2, bathrooms: 1, living_area_sqft: 720, yearBuilt: 1947, type: 'Single Family' },
+  });
+  stubRoutes({
+    details: async () => fakeRes(200, {}),
+    value: async () => fakeRes(200, valWithAliasDetails),
+  });
+  r = await fn.handler(post({ address: ADDR }));
+  b = JSON.parse(r.body);
+  check('value payload property_details (aliases) fills the subject record', b.matched === true && b.property && b.property.sqft === 720 && b.property.beds === 2 && b.property.yearBuilt === 1947 && b.property.propertyType === 'Single Family', JSON.stringify(b.property));
+
+  // frontend: subject facts ride into the Resideline call
+  check('index.html passes PR subject facts to resideline-comps', seg.includes('prSubject.beds') && seg.includes('prSubject.baths') && seg.includes('prSubject.sqft') && seg.includes('prSubject.yearBuilt') && seg.includes('prSubject.propertyType'));
+  check('index.html appends facts as query params on the resideline URL', seg.includes("rlUrl += '&' + k + '=' + encodeURIComponent(v)") && seg.includes('fetch(rlUrl)'));
 
   global.fetch = realFetch;
   if (realKey === undefined) delete process.env.RESIDELINE_API_KEY;
