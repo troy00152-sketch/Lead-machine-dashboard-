@@ -1,0 +1,947 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Conversation AI — Command Center</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#0d1117">
+<link rel="apple-touch-icon" href="/assets/icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<script src="/assets/pwa.js" defer></script>
+<style>
+  :root{ --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --line:#2b3444; --text:#e8eef4; --muted:#9aa7b5; --accent:#ff6b1a; --green:#2ea043; --red:#e5534b; --amber:#e0a53a; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--text); }
+  .wrap{ max-width:1180px; margin:0 auto; padding:18px 14px 60px; }
+  .topbar{ display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
+  .title{ font-size:22px; font-weight:700; }
+  .brand-name{ color:var(--muted); font-size:13px; font-weight:600; }
+  .back{ margin-left:auto; background:var(--panel2); border:1px solid var(--line); color:var(--text); border-radius:24px; padding:9px 16px; font-size:13px; font-weight:600; text-decoration:none; white-space:nowrap; }
+  .back + .back{ margin-left:0; }
+  .back.active{ border-color:var(--accent); color:var(--accent); }
+  .card{ background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:16px; margin-bottom:14px; }
+  .card h2{ margin:0 0 6px; font-size:17px; }
+  .card h3{ margin:16px 0 8px; font-size:14px; }
+  .btn{ background:var(--panel2); color:var(--text); border:1px solid var(--line); border-radius:24px; padding:8px 14px; font-size:13px; font-weight:600; cursor:pointer; }
+  .btn:hover{ border-color:var(--accent); }
+  .btn.primary{ background:var(--accent); border-color:var(--accent); color:#fff; }
+  .btn.danger{ border-color:var(--red); color:#ff9d97; }
+  .btn.small{ padding:5px 11px; font-size:12px; }
+  .pill{ display:inline-block; border:1px solid var(--line); background:var(--panel2); color:var(--muted); border-radius:20px; padding:2px 9px; font-size:11px; font-weight:600; }
+  .pill.green{ border-color:var(--green); color:#7ee2a0; }
+  .pill.red{ border-color:var(--red); color:#ff9d97; }
+  .pill.amber{ border-color:var(--amber); color:#f2cd8a; }
+  .muted{ color:var(--muted); font-size:13px; }
+  .empty{ color:var(--muted); padding:18px 6px; text-align:center; font-size:14px; }
+  .toast{ position:fixed; left:50%; bottom:22px; transform:translateX(-50%); background:var(--panel2); border:1px solid var(--accent); color:var(--text); border-radius:12px; padding:10px 16px; font-size:14px; z-index:90; max-width:92vw; }
+  input, select, textarea{ background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:9px; padding:8px 10px; font-size:13px; font-family:inherit; }
+  input:focus, select:focus, textarea:focus{ outline:none; border-color:var(--accent); }
+  textarea{ width:100%; line-height:1.55; resize:vertical; }
+  /* bot cards */
+  .bot-grid{ display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  @media (max-width:760px){ .bot-grid{ grid-template-columns:1fr; } }
+  .bot-card{ background:var(--panel2); border:1px solid var(--line); border-radius:12px; padding:14px; }
+  .bot-card .bot-head{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .bot-card .bot-name{ font-size:16px; font-weight:700; }
+  .bot-card .bot-role{ color:var(--muted); font-size:12.5px; margin:6px 0 12px; line-height:1.55; }
+  /* toggle switch */
+  .switch{ position:relative; display:inline-block; width:46px; height:26px; flex:none; }
+  .switch input{ opacity:0; width:0; height:0; }
+  .switch .track{ position:absolute; inset:0; background:var(--bg); border:1px solid var(--line); border-radius:99px; cursor:pointer; transition:.15s; }
+  .switch .track:before{ content:''; position:absolute; width:18px; height:18px; left:3px; top:3px; background:var(--muted); border-radius:50%; transition:.15s; }
+  .switch input:checked + .track{ background:var(--accent); border-color:var(--accent); }
+  .switch input:checked + .track:before{ transform:translateX(20px); background:#fff; }
+  .switch-label{ font-size:13px; font-weight:600; }
+  .mode-row{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:4px; }
+  .mode-row .lbl{ font-size:12px; color:var(--muted); font-weight:600; }
+  /* knowledge base */
+  .filters{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:12px; }
+  .filters input[type="text"]{ min-width:220px; flex:1; }
+  .faq-item{ border:1px solid var(--line); border-radius:12px; padding:12px 14px; margin-bottom:10px; background:var(--panel2); }
+  .faq-item .q{ font-weight:700; font-size:14px; margin-bottom:5px; }
+  .faq-item .a{ font-size:13.5px; line-height:1.6; color:var(--text); white-space:pre-wrap; }
+  .faq-item .row-actions{ display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
+  .faq-edit label{ display:block; font-size:11px; color:var(--muted); margin:8px 0 3px; }
+  /* instructions */
+  .instr{ border:1px solid var(--line); border-radius:12px; padding:12px 14px; margin-bottom:10px; background:var(--panel2); }
+  .instr .t{ font-weight:700; font-size:14px; margin-bottom:4px; }
+  .instr .d{ color:var(--muted); font-size:12.5px; margin-bottom:8px; line-height:1.5; }
+  /* booking + guardrails */
+  .field-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:10px; }
+  .field-grid label{ display:block; font-size:11px; color:var(--muted); margin-bottom:3px; }
+  .field-grid input, .field-grid select{ width:100%; }
+  .guard-row{ display:flex; gap:12px; align-items:flex-start; border:1px solid var(--line); border-radius:12px; padding:12px 14px; margin-bottom:10px; background:var(--panel2); }
+  .guard-row .grow{ flex:1; }
+  .guard-row .t{ font-weight:700; font-size:14px; }
+  .guard-row .d{ color:var(--muted); font-size:12.5px; line-height:1.55; margin-top:3px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <div class="title">🤖 Conversation AI</div>
+    <span class="brand-name" id="brandName"></span>
+    <a class="back active" href="/conversation-ai.html">🤖 Conversation AI</a>
+    <a class="back" href="/command-center.html">🎯 Command Center</a>
+    <a class="back" href="/index.html">← Dashboard</a>
+  </div>
+
+  <p class="muted" style="margin:0 0 14px;line-height:1.6">
+    Your AI conversation team comes pre-configured and ready to work: <b>Ashley</b> handles seller
+    text conversations and <b>Sam</b> answers inbound calls. Review the setup below, adjust the
+    wording to fit your business, and add your own knowledge — changes save automatically to your
+    account on this device.
+  </p>
+
+  <!-- ============ BOT STATUS & MODE ============ -->
+  <div class="card">
+    <h2>Bot status &amp; mode</h2>
+    <p class="muted" style="margin:0 0 12px">
+      <b>Auto-Pilot</b> — the bot replies on its own. <b>Suggest</b> — the bot drafts replies for
+      your team to approve before anything sends. <b>Off</b> — the bot stays silent.
+    </p>
+    <div class="bot-grid">
+      <div class="bot-card">
+        <div class="bot-head">
+          <span class="bot-name">💬 Ashley</span>
+          <span class="pill green" id="ashleyState">On · Auto-Pilot</span>
+          <span style="margin-left:auto"></span>
+          <label class="switch" title="Turn Ashley on or off"><input type="checkbox" id="ashleyOn"><span class="track"></span></label>
+          <span class="switch-label" id="ashleyOnLabel">On</span>
+        </div>
+        <div class="bot-role">Text-message seller bot. Ashley qualifies sellers over text — motivation, condition, timeframe, price — and books them onto your Seller Calls calendar.</div>
+        <div class="mode-row">
+          <span class="lbl">Mode</span>
+          <select id="ashleyMode">
+            <option value="auto">Auto-Pilot</option>
+            <option value="suggest">Suggest</option>
+            <option value="off">Off</option>
+          </select>
+        </div>
+      </div>
+      <div class="bot-card">
+        <div class="bot-head">
+          <span class="bot-name">📞 Sam</span>
+          <span class="pill green" id="samState">On · Auto-Pilot</span>
+          <span style="margin-left:auto"></span>
+          <label class="switch" title="Turn Sam on or off"><input type="checkbox" id="samOn"><span class="track"></span></label>
+          <span class="switch-label" id="samOnLabel">On</span>
+        </div>
+        <div class="bot-role">Inbound voice bot. Sam answers incoming calls only — Sam never places outbound calls — and works from the same knowledge base and booking rules as Ashley.</div>
+        <div class="mode-row">
+          <span class="lbl">Mode</span>
+          <select id="samMode">
+            <option value="auto">Auto-Pilot</option>
+            <option value="suggest">Suggest</option>
+            <option value="off">Off</option>
+          </select>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ KNOWLEDGE BASE ============ -->
+  <div class="card">
+    <h2>Knowledge Base</h2>
+    <p class="muted" style="margin:0 0 12px">
+      The questions and answers your bots work from. The starter set below ships with your account —
+      edit any answer so it sounds like your business, delete what doesn't fit, and add your own.
+    </p>
+    <div class="filters">
+      <input id="kbSearch" type="text" placeholder="Search questions and answers…">
+      <button class="btn small" id="btnRestoreFaqs" type="button">Restore starter set</button>
+    </div>
+    <div class="muted" id="kbMeta" style="margin-bottom:10px"></div>
+    <div id="kbList"></div>
+    <h3>Add a question</h3>
+    <div class="faq-edit">
+      <label for="newFaqQ">Question / situation</label>
+      <input id="newFaqQ" type="text" style="width:100%" placeholder="e.g. The seller asks about earnest money">
+      <label for="newFaqA">Answer / how the bot should handle it</label>
+      <textarea id="newFaqA" rows="3" placeholder="How should the bot respond?"></textarea>
+      <div style="margin-top:10px"><button class="btn small primary" id="btnAddFaq" type="button">Add to knowledge base</button></div>
+    </div>
+  </div>
+
+  <!-- ============ BOT INSTRUCTIONS ============ -->
+  <div class="card">
+    <h2>Bot instructions</h2>
+    <p class="muted" style="margin:0 0 12px">
+      The working rules your bots follow in every conversation, in plain language. Edit any section
+      and save — your wording is kept with your account.
+    </p>
+    <div id="instrList"></div>
+    <button class="btn primary" id="btnSaveInstr" type="button">Save instructions</button>
+    <button class="btn" id="btnResetInstr" type="button" style="margin-left:8px">Restore original instructions</button>
+  </div>
+
+  <!-- ============ BOOKING ============ -->
+  <div class="card">
+    <h2>Booking</h2>
+    <p class="muted" style="margin:0 0 12px">
+      When a seller is ready to talk, the bot offers real open times on your <b>Seller Calls</b>
+      calendar using the rule below — always concrete times inside the seller's own stated
+      availability, never a vague "we'll reach out."
+    </p>
+    <div class="field-grid">
+      <div><label for="bkCalendar">Calendar</label><input id="bkCalendar" type="text"></div>
+      <div><label for="bkWindow">Offer window (days ahead)</label><input id="bkWindow" type="number" min="1" max="14" step="1"></div>
+      <div><label for="bkSlots">Times offered per seller</label><input id="bkSlots" type="number" min="1" max="6" step="1"></div>
+      <div><label for="bkGap">Minimum hours between offered times</label><input id="bkGap" type="number" min="0" max="12" step="1"></div>
+      <div><label for="bkStart">Business hours start</label><input id="bkStart" type="time"></div>
+      <div><label for="bkEnd">Business hours end</label><input id="bkEnd" type="time"></div>
+      <div><label for="bkLength">Call length (minutes)</label><input id="bkLength" type="number" min="5" max="120" step="5"></div>
+    </div>
+    <p class="muted" style="margin:12px 0 0">
+      If no open time fits inside the seller's stated window, the bot hands the conversation to you
+      instead of offering times outside it. A month a seller names as their moving timeline is a
+      closing fact, never a call time — the bot offers near-term call times now.
+    </p>
+    <div style="margin-top:12px"><button class="btn primary" id="btnSaveBooking" type="button">Save booking rule</button></div>
+  </div>
+
+  <!-- ============ GUARDRAILS ============ -->
+  <div class="card">
+    <h2>Guardrails</h2>
+    <p class="muted" style="margin:0 0 12px">
+      The hard stops that protect every conversation. These ship on and are shown here so you can
+      see exactly when the bot goes silent or hands off.
+    </p>
+    <div id="guardList"></div>
+  </div>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+
+<script>
+/* ==PURE== */
+/* Pure Conversation AI logic — no DOM access in this block. The page
+   uses these functions directly, and conversation-ai-regression.js
+   extracts and unit-tests them. Storage helpers take any
+   localStorage-shaped object ({ getItem, setItem }) so tests can pass
+   a fake. All state is namespaced per tenant so one account's edits
+   never show on another account. */
+var CAI_PREFIX = 'acc_conv_ai_';
+var BOT_MODES = ['auto', 'suggest', 'off'];
+
+/* Tenant key for this browser, mirroring the server-side host rules:
+   {sub}.leadmachineapp.com -> that subdomain; the bare domain, www
+   and app hosts and local dev -> the owner account ('troy'); anything
+   else -> the neutral account ('_default'). */
+function caiTenantFromHost(host) {
+  var h = String(host || '').split(':')[0].toLowerCase().trim();
+  if (!h) return 'troy';
+  if (h === 'leadmachineapp.com' || h === 'www.leadmachineapp.com' || h === 'app.leadmachineapp.com') return 'troy';
+  if (h === 'localhost' || h === '127.0.0.1' || /\.netlify\.app$/.test(h)) return 'troy';
+  var suffix = '.leadmachineapp.com';
+  if (h.slice(-suffix.length) === suffix) {
+    var sub = h.slice(0, -suffix.length);
+    if (sub && sub.indexOf('.') === -1) return sub;
+  }
+  return '_default';
+}
+function caiKey(tenant, part) {
+  return CAI_PREFIX + String(tenant || '_default') + '_' + part;
+}
+function caiLoadJson(storage, key, fallback) {
+  try {
+    var raw = storage.getItem(key);
+    if (!raw) return fallback;
+    var v = JSON.parse(raw);
+    return v == null ? fallback : v;
+  } catch (e) { return fallback; }
+}
+function caiSaveJson(storage, key, value) {
+  storage.setItem(key, JSON.stringify(value));
+}
+function caiNewId(prefix) {
+  return prefix + '_' + Date.now().toString(36) + '_' + Math.floor(Math.random() * 1e6).toString(36);
+}
+/* Branding from the public account config (the shape the config
+   endpoint returns: companyName / primaryColor / subdomain). Falls
+   back to neutral wording, never another account's name. */
+function caiBrandFromConfig(cfg) {
+  cfg = cfg || {};
+  return {
+    name: String(cfg.companyName || 'Command Center'),
+    color: String(cfg.primaryColor || '#ff6b1a'),
+    subdomain: String(cfg.subdomain || ''),
+  };
+}
+
+/* ---- Bot status & mode ---- */
+function caiDefaultBots() {
+  return {
+    ashley: { on: true, mode: 'auto' },
+    sam: { on: true, mode: 'auto' },
+  };
+}
+function caiSanitizeBot(b, dflt) {
+  var out = { on: dflt.on, mode: dflt.mode };
+  if (b && typeof b === 'object') {
+    if (typeof b.on === 'boolean') out.on = b.on;
+    if (BOT_MODES.indexOf(b.mode) !== -1) out.mode = b.mode;
+  }
+  return out;
+}
+function caiSanitizeBots(v) {
+  var d = caiDefaultBots();
+  if (!v || typeof v !== 'object') return d;
+  return { ashley: caiSanitizeBot(v.ashley, d.ashley), sam: caiSanitizeBot(v.sam, d.sam) };
+}
+function caiLoadBots(storage, tenant) {
+  return caiSanitizeBots(caiLoadJson(storage, caiKey(tenant, 'bots'), null));
+}
+function caiSaveBots(storage, tenant, bots) {
+  var clean = caiSanitizeBots(bots);
+  caiSaveJson(storage, caiKey(tenant, 'bots'), clean);
+  return clean;
+}
+/* Effective state line for a bot card: Off wins over the mode. */
+function caiBotState(bot) {
+  var b = caiSanitizeBot(bot, { on: true, mode: 'auto' });
+  if (!b.on || b.mode === 'off') return 'Off';
+  return b.mode === 'suggest' ? 'On · Suggest' : 'On · Auto-Pilot';
+}
+
+/* ---- Knowledge Base ---- */
+/* The starter set: the real 31 FAQs the bots ship with. */
+var CAI_DEFAULT_FAQS = [
+ {
+  "id": "faq-1",
+  "n": 1,
+  "question": "What company is this? Who are you with?",
+  "answer": "Ashley works with Direct Property Buyers, a local home-buying team that works directly with owners. Keep the identity simple and friendly. Never mention any LLC, parent company, or investment-firm framing. Example reply: \"I'm Ashley with Direct Property Buyers — a local team that works directly with owners around here.\""
+ },
+ {
+  "id": "faq-2",
+  "n": 2,
+  "question": "What do you guys do? How does this work?",
+  "answer": "We look at places directly and can take them as-is — no agents, no showings, no commissions. Keep the process simple in three steps: we check out the place, talk through details on a quick call, then close on a timeline that works for them. Example reply: \"We work directly with owners — no agents, no showings, no commissions. We just check out the place as-is.\""
+ },
+ {
+  "id": "faq-3",
+  "n": 3,
+  "question": "What is your website? Where can I learn more?",
+  "answer": "Only share the website when the seller explicitly asks for it — never drop links unprompted. The site is directpropertybuyersllc.com. Do not mention any other website. Example reply: \"You can check us out at directpropertybuyersllc.com\""
+ },
+ {
+  "id": "faq-4",
+  "n": 4,
+  "question": "How did you get my number?",
+  "answer": "Be honest and brief: owner contact info comes from public county records in areas where the team is looking. Never be evasive about this — a straight answer builds trust. Example reply: \"We pull owner info from public county records in areas we're looking. That's how I found you.\""
+ },
+ {
+  "id": "faq-5",
+  "n": 5,
+  "question": "Are you a realtor? Are you an agent?",
+  "answer": "No — we are not agents and we do not list places. We work directly with owners, with no middleman. Say it plainly and move on; do not over-explain. Example reply: \"Nope, not agents — we work directly with owners, no middleman.\""
+ },
+ {
+  "id": "faq-6",
+  "n": 6,
+  "question": "Is this legit? Is this a scam?",
+  "answer": "Take skepticism seriously and never get defensive. Acknowledge it warmly, note that we are a local team, and let them verify on a quick call or at the website. Example reply: \"Totally fair question — we're a local team, happy to verify on a quick call or at our site.\""
+ },
+ {
+  "id": "faq-7",
+  "n": 7,
+  "question": "The seller says the place is not for sale.",
+  "answer": "Respect it immediately and do not push. Make one light pivot to other places or vacant lots they might consider moving on from. If they are still not interested, thank them and stop. Example reply: \"No worries at all! Any other places or vacant lots nearby you'd ever consider moving on from?\""
+ },
+ {
+  "id": "faq-8",
+  "n": 8,
+  "question": "The seller wants full retail price or says the price is too low.",
+  "answer": "Never argue about price over text — it never wins. Acknowledge their number, then pivot to condition, which is what actually drives the conversation (roof and AC age are the classic pivot). Example reply: \"Makes sense — places at that level are usually fully updated. How old are the roof and AC?\""
+ },
+ {
+  "id": "faq-9",
+  "n": 9,
+  "question": "The seller demands a price or number over text.",
+  "answer": "Never negotiate or throw out numbers over text. Explain briefly that real numbers depend on the condition of the place, and move them toward the quick call where details can actually be discussed. Example reply: \"I can't run exact numbers over text — it depends on the shape of the place. Quick 3-min call work?\""
+ },
+ {
+  "id": "faq-10",
+  "n": 10,
+  "question": "The place needs a lot of work or is in rough shape.",
+  "answer": "That is completely fine and actually expected. We take places as-is — no repairs, cleanup, or cleanout needed on their end. Frame the rough condition as a non-issue, not a problem. Example reply: \"That's no problem at all — we take places as-is. No repairs or cleanout needed on your end.\""
+ },
+ {
+  "id": "faq-11",
+  "n": 11,
+  "question": "The place has tenants or is rented out.",
+  "answer": "A rented place is an ACTIVE lead — never drop it. Acknowledge the rental situation, then ask about the lease: month-to-month or fixed term. Example reply: \"Makes total sense! Is the tenant month-to-month right now, or on a fixed lease?\""
+ },
+ {
+  "id": "faq-12",
+  "n": 12,
+  "question": "Don't contact me / opt out.",
+  "answer": "Stay completely silent. Do not reply, do not acknowledge, do not apologize. Produce zero output."
+ },
+ {
+  "id": "faq-13",
+  "n": 13,
+  "question": "The seller is asking about a vacant lot or vacant land.",
+  "answer": "Yes, we look at vacant lots too. Ask the two key questions: is it cleared, and is there road access to it. One question at a time. Example reply: \"We do look at lots! Is it cleared, and is there road access to it?\""
+ },
+ {
+  "id": "faq-14",
+  "n": 14,
+  "question": "There are title issues, probate, inherited ownership, or multiple heirs.",
+  "answer": "Reassure them — messy title, probate, and multi-heir situations come up all the time and do not stop things. Our title folks handle the complicated paperwork. Keep it confident and simple. Example reply: \"We run into that a lot — messy title, probate, multiple heirs. Our title folks handle it.\""
+ },
+ {
+  "id": "faq-15",
+  "n": 15,
+  "question": "There are back taxes or a tax lien on the place.",
+  "answer": "Back taxes do not stop us from looking at a place. They simply get settled at closing. Ask how far behind it is to keep the conversation moving. Example reply: \"Back taxes don't stop us — they just get settled at closing. How far behind is it?\""
+ },
+ {
+  "id": "faq-16",
+  "n": 16,
+  "question": "The seller owns other places or asks about other areas.",
+  "answer": "Yes — we look at places across the surrounding areas, not just one address. Ask for the address of the other place. One question at a time. Example reply: \"Happy to check out others too — what's the address of the other one?\""
+ },
+ {
+  "id": "faq-17",
+  "n": 17,
+  "question": "Someone wants a referral or finder fee for bringing a lead.",
+  "answer": "Yes, we pay referral fees — typically five hundred to fifteen hundred plus depending on the situation. Get the address of the place and their contact info. Never use a dollar sign in texts; spell amounts out. Example reply: \"Yes, we pay referral fees — usually five hundred to fifteen hundred plus. What's the address?\""
+ },
+ {
+  "id": "faq-18",
+  "n": 18,
+  "question": "The seller asks to be called or says \"call me\".",
+  "answer": "Treat call requests as hot — confirm immediately and stop qualifying. Do not ask more questions; let the team take it from here. Example reply: \"Perfect — someone from our team will give you a quick call shortly.\""
+ },
+ {
+  "id": "faq-19",
+  "n": 19,
+  "question": "The place is already listed or on the market with an agent.",
+  "answer": "Acknowledge it gracefully — a quick \"my mistake\" goes a long way. Do not pitch against their agent. Only continue if they seem open to talking; otherwise leave the door open politely. Example reply: \"Ah, got it — didn't realize it was already on the market. If anything changes, we're around!\""
+ },
+ {
+  "id": "faq-20",
+  "n": 20,
+  "question": "The seller says the place already sold.",
+  "answer": "Congratulate them briefly, thank them, and end politely. Do not pivot or keep selling — the conversation is over. Example reply: \"Congrats on the sale! Thanks for letting me know — take care!\""
+ },
+ {
+  "id": "faq-21",
+  "n": 21,
+  "question": "Wrong number.",
+  "answer": "Apologize briefly and end immediately. No follow-up questions, no pivots — just exit cleanly. Example reply: \"Sorry about that — wrong number on my end. Have a good one!\""
+ },
+ {
+  "id": "faq-22",
+  "n": 22,
+  "question": "The seller says \"don't contact me\" or opts out in any words.",
+  "answer": "ZERO reply — output nothing at all. Do not apologize, acknowledge, or confirm. End the conversation immediately; the backend marks them do-not-contact. This is a hard stop with no exceptions. Example reply: [No reply — stay completely silent.]"
+ },
+ {
+  "id": "faq-23",
+  "n": 23,
+  "question": "The seller asks what the place is worth or wants numbers over text.",
+  "answer": "You cannot give a real number without seeing the place, and guessing destroys credibility. Say so plainly, then frame the quick call as exactly how they get real numbers. Example reply: \"Can't give you a real number without seeing the place — that's exactly what the quick call is for.\""
+ },
+ {
+  "id": "faq-24",
+  "n": 24,
+  "question": "The seller is looking for a new place, wants to downsize, or asks about trading.",
+  "answer": "We are on the other side of it — we take places from owners; we do not sell them and we are not agents. Decline politely, then ask about the place they currently own. Example reply: \"We don't sell places — we're on the other side of it. But happy to check out your current one!\""
+ },
+ {
+  "id": "faq-25",
+  "n": 25,
+  "question": "What kind of vacant land are you looking for?",
+  "answer": "Mostly residential lots and infill parcels in the surrounding areas. Ask about size, road access, and whether it is cleared — one question at a time. Example reply: \"Mostly residential lots around here — how big is it, and is there road access?\""
+ },
+ {
+  "id": "faq-26",
+  "n": 26,
+  "question": "The seller says \"just run the numbers\" or \"give me your number\" over text.",
+  "answer": "Do not negotiate over text, no matter how hard they push. Real numbers need condition details that only come out in conversation. Hold the line warmly and move them to the 3-minute call. Example reply: \"I hear you — but I can't do real numbers over text. A 3-min call is the fastest way.\""
+ },
+ {
+  "id": "faq-27",
+  "n": 27,
+  "question": "Can the seller stay in the place or rent it back after selling?",
+  "answer": "Sometimes that is possible depending on the situation — never promise it outright. Acknowledge the question, keep it open, and make it a topic for the call. Example reply: \"Sometimes that's possible — depends on the situation. Worth bringing up on the call!\""
+ },
+ {
+  "id": "faq-28",
+  "n": 28,
+  "question": "The seller asks for another owner's phone number or contact info.",
+  "answer": "Never share other people's contact information — privacy is absolute. Instead, say you will reach out to that person directly. Example reply: \"I can't share other folks' info — but I can reach out to them directly if you'd like!\""
+ },
+ {
+  "id": "faq-29",
+  "n": 29,
+  "question": "How fast can this happen? What is the timeline?",
+  "answer": "We move quickly, but exact timing depends on their situation and the title work involved. Give a confident general answer, then ask about their ideal timeline to keep them talking. Example reply: \"We move pretty quick — exact timing depends on your situation. What's your ideal timeline?\""
+ },
+ {
+  "id": "faq-30",
+  "n": 30,
+  "question": "Who pays closing costs? Are there any fees?",
+  "answer": "We cover the closing costs and there are no commissions or fees out of their pocket. State it plainly — this is one of the strongest reassurances you can give. Example reply: \"We cover the closing costs — no commissions, no fees out of your pocket.\""
+ },
+ {
+  "id": "faq-31",
+  "n": 31,
+  "question": "Who is this?",
+  "answer": "Identify immediately: Ashley with Direct Property Buyers. Reference the street of the place you reached out about, and state the reason in one breath — no mystery, no games. Example reply: \"This is Ashley with Direct Property Buyers — I reached out about your place on [street] to see if you'd ever consider moving on from it.\""
+ }
+];
+function caiDefaultFaqs() {
+  return CAI_DEFAULT_FAQS.map(function (f) {
+    return { id: f.id, n: f.n, question: f.question, answer: f.answer };
+  });
+}
+function caiSanitizeFaqs(v) {
+  if (!Array.isArray(v)) return null;
+  var out = [];
+  v.forEach(function (f) {
+    if (!f || typeof f !== 'object') return;
+    var q = String(f.question || '').trim();
+    var a = String(f.answer || '').trim();
+    if (!q || !a) return;
+    out.push({ id: String(f.id || caiNewId('faq')), n: typeof f.n === 'number' ? f.n : null, question: q, answer: a });
+  });
+  return out;
+}
+function caiLoadFaqs(storage, tenant) {
+  var stored = caiSanitizeFaqs(caiLoadJson(storage, caiKey(tenant, 'faqs'), null));
+  return stored || caiDefaultFaqs();
+}
+function caiSaveFaqs(storage, tenant, faqs) {
+  var clean = caiSanitizeFaqs(faqs) || [];
+  caiSaveJson(storage, caiKey(tenant, 'faqs'), clean);
+  return clean;
+}
+function caiAddFaq(faqs, question, answer) {
+  var q = String(question || '').trim();
+  var a = String(answer || '').trim();
+  if (!q || !a) return null;
+  var entry = { id: caiNewId('faq'), n: null, question: q, answer: a };
+  return { entry: entry, faqs: (faqs || []).concat([entry]) };
+}
+function caiUpdateFaq(faqs, id, question, answer) {
+  var q = String(question || '').trim();
+  var a = String(answer || '').trim();
+  if (!q || !a) return null;
+  var found = false;
+  var out = (faqs || []).map(function (f) {
+    if (f.id === id) { found = true; return { id: f.id, n: f.n, question: q, answer: a }; }
+    return f;
+  });
+  return found ? out : null;
+}
+function caiDeleteFaq(faqs, id) {
+  return (faqs || []).filter(function (f) { return f.id !== id; });
+}
+function caiSearchFaqs(faqs, q) {
+  var needle = String(q || '').trim().toLowerCase();
+  if (!needle) return (faqs || []).slice();
+  return (faqs || []).filter(function (f) {
+    return (f.question + ' ' + f.answer).toLowerCase().indexOf(needle) !== -1;
+  });
+}
+function caiRestoreFaqs(storage, tenant) {
+  var fresh = caiDefaultFaqs();
+  caiSaveJson(storage, caiKey(tenant, 'faqs'), fresh);
+  return fresh;
+}
+
+/* ---- Bot instructions (plain-language working rules) ---- */
+function caiDefaultInstructions() {
+  return [
+    {
+      id: 'role', title: 'Role & voice',
+      hint: 'Who the bot is and how it sounds.',
+      body: 'Ashley is the acquisitions assistant for the business. She texts with homeowners who might want to sell their place directly. She sounds like a real person texting: warm, brief, natural — one or two sentences per reply, never like a script or a press release. Sam covers inbound calls with the same voice and the same knowledge.',
+    },
+    {
+      id: 'job', title: 'The job: qualify and book',
+      hint: 'What the bot does — and never does.',
+      body: 'The bot QUALIFIES sellers and BOOKS calls. It never negotiates the final number and never closes — the owner owns every live conversation and every close. It never invents facts: not the property address, not a value, not repair costs, not an offer number. If a number is not on the contact record, the bot says so and steers toward booking a call. The property address is already on the record for outbound texts — the bot never asks the seller for it.',
+    },
+    {
+      id: 'flow', title: 'Qualification flow',
+      hint: 'One question at a time, in this order.',
+      body: 'Qualify naturally, one question at a time, in this order: 1) MOTIVATION — why are they thinking of selling? Listen for repairs piling up, inherited property, behind on payments, divorce, tired landlord. 2) CONDITION — what shape is the place in, any major repairs needed? 3) TIMEFRAME — when are they hoping to sell? 4) PRICE — what are they hoping to get? React to each answer before asking the next question. If they go off-track, answer briefly and guide back.',
+    },
+    {
+      id: 'numbers', title: 'Talking numbers',
+      hint: 'Ranges from the record only — never a hard number over text.',
+      body: 'When a seller asks "what can you offer?", the bot may only give the ballpark range from the verified numbers on the contact record (between the low and high figures on file), and only as a range that the owner confirms on a quick call. Never a single hard number over text. If no verified numbers are on the record, the bot says it would rather have the owner give a real number than guess, and offers to set up the call.',
+    },
+    {
+      id: 'walkaway', title: 'Walkaway rule',
+      hint: 'A named price is an opening position, not a rejection.',
+      body: 'A price or terms a seller names — even full retail — is an OPENING position, not a rejection. The bot never sends a walkaway or goodbye message unless BOTH have already happened: (1) the seller has been qualified (motivation, timeline, condition, who else is on title), and (2) a ballpark range was floated and the seller rejected it or held to a number far above it. If a seller simply states a price, acknowledge it, ask a qualifying question, and keep moving toward a call. When in doubt, never walk away — ask one more question.',
+    },
+    {
+      id: 'booking', title: 'Booking the call',
+      hint: 'Concrete times, the seller\u2019s timezone, then confirmation.',
+      body: 'Book onto the Seller Calls calendar (30-minute calls) using the booking rule on this screen. Confirm the day and time in the seller\u2019s own timezone — for sellers in another timezone, state both times. After booking, confirm once ("You\u2019re all set — talk soon!") and stop. If the contact already has a first name on file, use it and never ask for the name again.',
+    },
+    {
+      id: 'optout', title: 'Opt-outs: total silence',
+      hint: 'The most important rule on this page.',
+      body: 'Any message expressing do-not-contact intent is an opt-out, no matter the typos or phrasing: stop, unsubscribe, cancel, quit, opt out, don\u2019t contact, don\u2019t text, remove me, never text again. On an opt-out the bot produces ZERO output — no reply, no apology, no acknowledgment. Complete silence. The same goes for spam, solicitations, hostile or profane replies, and messages that are clearly not from a property owner about selling: no engagement at all. When in doubt whether a message is a rejection, treat it as one.',
+    },
+    {
+      id: 'language', title: 'Spam-safe language',
+      hint: 'Plain words that keep texts deliverable.',
+      body: 'Carrier filters flag salesy trigger words. In every message, avoid: buy, buying, purchase, offer, cash, investor, loan, credit, debt, free, urgent, guarantee, property, homeowner, mortgage, listing, interested. Say it the plain way instead — "we work directly with owners", "the place" or the street address, "a straight number", "open to a chat". The first reply to any new conversation is only: who the bot is (Ashley with the business, a local team that works directly with owners) plus ONE question. Fees and closing costs are only mentioned if the seller asks directly, in one plain sentence.',
+    },
+    {
+      id: 'buyers', title: 'When a buyer replies',
+      hint: 'Buyers are welcomed, never turned away.',
+      body: 'Some people who reply are buyers or investors, not homeowners. If someone says they buy houses, invest, or asks to be added to a buyers list or receive deals, switch to the buyer path: welcome them warmly, explain that new deals are shared with the list first, and ask about their buy box one or two questions at a time — areas or ZIP codes, price range, property types, and how fast they can close. Never turn a buyer away with the "we work directly with owners" line — that line is for homeowner conversations only.',
+    },
+    {
+      id: 'hours', title: 'Hours & manners',
+      hint: 'When the bot engages, and how it leaves.',
+      body: 'Only engage between the business hours on this screen (default 8:00 AM – 9:00 PM Eastern). Outside that window, do not reply. Never be pushy: one gentle follow-up at most if a seller goes quiet mid-conversation, then leave them alone. If a seller is hostile, abusive, or clearly not a fit, exit politely and stop.',
+    },
+  ];
+}
+function caiLoadInstructions(storage, tenant) {
+  var stored = caiLoadJson(storage, caiKey(tenant, 'instructions'), null);
+  var defaults = caiDefaultInstructions();
+  if (!Array.isArray(stored)) return defaults;
+  var byId = {};
+  stored.forEach(function (s) { if (s && s.id) byId[String(s.id)] = String(s.body || ''); });
+  return defaults.map(function (d) {
+    return { id: d.id, title: d.title, hint: d.hint, body: Object.prototype.hasOwnProperty.call(byId, d.id) ? byId[d.id] : d.body };
+  });
+}
+function caiSaveInstructions(storage, tenant, sections) {
+  var defaults = caiDefaultInstructions();
+  var byId = {};
+  (sections || []).forEach(function (s) { if (s && s.id) byId[String(s.id)] = String(s.body || ''); });
+  var clean = defaults.map(function (d) {
+    return { id: d.id, body: Object.prototype.hasOwnProperty.call(byId, d.id) ? byId[d.id] : d.body };
+  });
+  caiSaveJson(storage, caiKey(tenant, 'instructions'), clean);
+  return caiLoadInstructions(storage, tenant);
+}
+
+/* ---- Booking rule ---- */
+function caiDefaultBooking() {
+  return { calendar: 'Seller Calls', windowDays: 3, slots: 3, minGapHours: 3, hoursStart: '08:00', hoursEnd: '21:00', callMinutes: 30 };
+}
+function caiClampInt(v, lo, hi, dflt) {
+  var n = parseInt(v, 10);
+  if (isNaN(n)) return dflt;
+  return Math.min(hi, Math.max(lo, n));
+}
+function caiSanitizeBooking(v) {
+  var d = caiDefaultBooking();
+  if (!v || typeof v !== 'object') return d;
+  var timeOk = function (t, fb) { return /^\d{2}:\d{2}$/.test(String(t || '')) ? String(t) : fb; };
+  return {
+    calendar: String(v.calendar || '').trim() || d.calendar,
+    windowDays: caiClampInt(v.windowDays, 1, 14, d.windowDays),
+    slots: caiClampInt(v.slots, 1, 6, d.slots),
+    minGapHours: caiClampInt(v.minGapHours, 0, 12, d.minGapHours),
+    hoursStart: timeOk(v.hoursStart, d.hoursStart),
+    hoursEnd: timeOk(v.hoursEnd, d.hoursEnd),
+    callMinutes: caiClampInt(v.callMinutes, 5, 120, d.callMinutes),
+  };
+}
+function caiLoadBooking(storage, tenant) {
+  return caiSanitizeBooking(caiLoadJson(storage, caiKey(tenant, 'booking'), null));
+}
+function caiSaveBooking(storage, tenant, booking) {
+  var clean = caiSanitizeBooking(booking);
+  caiSaveJson(storage, caiKey(tenant, 'booking'), clean);
+  return clean;
+}
+
+/* ---- Guardrails ---- */
+function caiDefaultGuardrails() {
+  return [
+    { id: 'optout', title: 'Opt-out = total silence', desc: 'Any do-not-contact wording — stop, remove me, don\u2019t text, in any phrasing — ends the conversation with zero reply. No acknowledgment, no apology, no goodbye.', on: true },
+    { id: 'big-ask', title: '$500K+ ask = silence', desc: 'If a seller\u2019s ask is $500,000 or more — typed any way: with a dollar sign, bare digits, commas, cents, "k", "grand", or written out in words — the bot goes silent and the contact is sealed.', on: true },
+    { id: 'over-mao', title: 'Ask over 2× the max allowable = seal', desc: 'An ask more than twice the max allowable figure on the contact record seals the conversation silently — no debate, no counter over text.', on: true },
+    { id: 'referral', title: 'Owner referral = one short ack', desc: 'When a texter hands over another person\u2019s number and says to talk to them instead, the bot sends ONE short acknowledgment naming the owner, passes the number to the team, and offers no times. A repeat referral gets silence and a flag.', on: true },
+    { id: 'booked', title: 'Booked = silence', desc: 'Once a call is booked, the bot stops messaging that seller. Have-offer and under-contract conversations seal the same way as sold.', on: true },
+    { id: 'listed', title: 'Listed = pass', desc: 'A property listed with a realtor is passed on immediately — no offer, no chase. (An expired listing is not a live listing.)', on: true },
+  ];
+}
+function caiLoadGuardrails(storage, tenant) {
+  var stored = caiLoadJson(storage, caiKey(tenant, 'guardrails'), null);
+  var defaults = caiDefaultGuardrails();
+  if (!stored || typeof stored !== 'object') return defaults;
+  return defaults.map(function (d) {
+    var on = Object.prototype.hasOwnProperty.call(stored, d.id) ? !!stored[d.id] : d.on;
+    return { id: d.id, title: d.title, desc: d.desc, on: on };
+  });
+}
+function caiSaveGuardrails(storage, tenant, guards) {
+  var map = {};
+  (guards || []).forEach(function (g) { if (g && g.id) map[String(g.id)] = !!g.on; });
+  caiSaveJson(storage, caiKey(tenant, 'guardrails'), map);
+  return caiLoadGuardrails(storage, tenant);
+}
+/* ==/PURE== */
+</script>
+
+<script>
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+function toast(msg) {
+  var t = document.getElementById('toast');
+  t.textContent = msg;
+  t.hidden = false;
+  clearTimeout(toast._h);
+  toast._h = setTimeout(function () { t.hidden = true; }, 3600);
+}
+
+var TENANT = caiTenantFromHost(location.hostname);
+var state = {
+  bots: caiLoadBots(localStorage, TENANT),
+  faqs: caiLoadFaqs(localStorage, TENANT),
+  instructions: caiLoadInstructions(localStorage, TENANT),
+  booking: caiLoadBooking(localStorage, TENANT),
+  guardrails: caiLoadGuardrails(localStorage, TENANT),
+  editingFaqId: '',
+};
+
+/* ---- branding: tenant name + color from the account config ---- */
+(function () {
+  function applyBrand(cfg) {
+    var brand = caiBrandFromConfig(cfg);
+    if (brand.name) {
+      document.title = 'Conversation AI — ' + brand.name;
+      var el = document.getElementById('brandName');
+      if (el) el.textContent = brand.name;
+    }
+    if (brand.color) document.documentElement.style.setProperty('--accent', brand.color);
+    if (brand.subdomain) TENANT = brand.subdomain;
+  }
+  function showSuspended() {
+    window.LM_SUSPENDED = true;
+    document.title = 'Account Inactive';
+    document.body.innerHTML =
+      '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0d1117;color:#e8edf5;font-family:Arial,Helvetica,sans-serif;padding:24px;box-sizing:border-box">' +
+      '<div style="max-width:520px;width:100%;text-align:center;background:#161e2b;border:1px solid #26314a;border-radius:12px;padding:44px 34px;box-sizing:border-box">' +
+      '<h1 style="font-size:22px;margin:0 0 14px;font-weight:600">Account Inactive</h1>' +
+      '<p style="font-size:15px;line-height:1.65;color:#8b96ad;margin:0">This account is currently inactive. Please contact your provider to restore service.</p>' +
+      '</div></div>';
+  }
+  try {
+    fetch('/.netlify/functions/client-config', { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
+      .then(function (cfg) {
+        if (cfg && cfg.accountStatus === 'suspended') { showSuspended(); return; }
+        var before = TENANT;
+        applyBrand(cfg);
+        if (TENANT !== before) {
+          state.bots = caiLoadBots(localStorage, TENANT);
+          state.faqs = caiLoadFaqs(localStorage, TENANT);
+          state.instructions = caiLoadInstructions(localStorage, TENANT);
+          state.booking = caiLoadBooking(localStorage, TENANT);
+          state.guardrails = caiLoadGuardrails(localStorage, TENANT);
+          renderAll();
+        }
+      })
+      .catch(function () { /* keep host-derived tenant + default accent */ });
+  } catch (e) { /* branding must never break the page */ }
+})();
+
+/* ---- bots ---- */
+function renderBot(bot, prefix) {
+  var b = state.bots[bot];
+  document.getElementById(prefix + 'On').checked = !!b.on;
+  document.getElementById(prefix + 'OnLabel').textContent = b.on ? 'On' : 'Off';
+  document.getElementById(prefix + 'Mode').value = b.mode;
+  var pill = document.getElementById(prefix + 'State');
+  var label = caiBotState(b);
+  pill.textContent = label;
+  pill.className = 'pill ' + (label === 'Off' ? 'red' : (b.mode === 'suggest' ? 'amber' : 'green'));
+}
+function renderBots() { renderBot('ashley', 'ashley'); renderBot('sam', 'sam'); }
+function wireBot(bot, prefix) {
+  document.getElementById(prefix + 'On').addEventListener('change', function (e) {
+    state.bots[bot].on = e.target.checked;
+    state.bots = caiSaveBots(localStorage, TENANT, state.bots);
+    renderBots();
+    toast((bot === 'ashley' ? 'Ashley' : 'Sam') + (e.target.checked ? ' is on.' : ' is off.'));
+  });
+  document.getElementById(prefix + 'Mode').addEventListener('change', function (e) {
+    state.bots[bot].mode = e.target.value;
+    state.bots = caiSaveBots(localStorage, TENANT, state.bots);
+    renderBots();
+    toast('Mode saved.');
+  });
+}
+
+/* ---- knowledge base ---- */
+function renderFaqs() {
+  var q = document.getElementById('kbSearch').value;
+  var shown = caiSearchFaqs(state.faqs, q);
+  var list = document.getElementById('kbList');
+  document.getElementById('kbMeta').textContent =
+    'Showing ' + shown.length + ' of ' + state.faqs.length + ' knowledge entries';
+  if (!shown.length) {
+    list.innerHTML = '<div class="empty">' + (state.faqs.length ? 'No entries match your search.' : 'Your knowledge base is empty — add a question below, or restore the starter set.') + '</div>';
+    return;
+  }
+  list.innerHTML = shown.map(function (f) {
+    if (state.editingFaqId === f.id) {
+      return '<div class="faq-item faq-edit" data-faq="' + esc(f.id) + '">' +
+        '<label>Question / situation</label>' +
+        '<input type="text" id="editFaqQ" style="width:100%" value="' + esc(f.question) + '">' +
+        '<label>Answer / how the bot should handle it</label>' +
+        '<textarea id="editFaqA" rows="4">' + esc(f.answer) + '</textarea>' +
+        '<div class="row-actions">' +
+        '<button class="btn small primary" type="button" data-faq-save="' + esc(f.id) + '">Save</button>' +
+        '<button class="btn small" type="button" data-faq-cancel="1">Cancel</button>' +
+        '</div></div>';
+    }
+    return '<div class="faq-item" data-faq="' + esc(f.id) + '">' +
+      '<div class="q">' + (f.n ? esc(f.n) + '. ' : '') + esc(f.question) + '</div>' +
+      '<div class="a">' + esc(f.answer) + '</div>' +
+      '<div class="row-actions">' +
+      '<button class="btn small" type="button" data-faq-edit="' + esc(f.id) + '">Edit</button>' +
+      '<button class="btn small danger" type="button" data-faq-del="' + esc(f.id) + '">Delete</button>' +
+      '</div></div>';
+  }).join('');
+}
+document.getElementById('kbSearch').addEventListener('input', renderFaqs);
+document.getElementById('kbList').addEventListener('click', function (e) {
+  var edit = e.target.closest('[data-faq-edit]');
+  if (edit) { state.editingFaqId = edit.dataset.faqEdit; renderFaqs(); return; }
+  if (e.target.closest('[data-faq-cancel]')) { state.editingFaqId = ''; renderFaqs(); return; }
+  var save = e.target.closest('[data-faq-save]');
+  if (save) {
+    var updated = caiUpdateFaq(state.faqs, save.dataset.faqSave,
+      document.getElementById('editFaqQ').value, document.getElementById('editFaqA').value);
+    if (!updated) { toast('Question and answer are both required.'); return; }
+    state.faqs = caiSaveFaqs(localStorage, TENANT, updated);
+    state.editingFaqId = '';
+    renderFaqs();
+    toast('Knowledge entry saved.');
+    return;
+  }
+  var del = e.target.closest('[data-faq-del]');
+  if (del) {
+    var f = state.faqs.find(function (x) { return x.id === del.dataset.faqDel; });
+    if (!confirm('Delete this knowledge entry?\n\n' + (f ? f.question : ''))) return;
+    state.faqs = caiSaveFaqs(localStorage, TENANT, caiDeleteFaq(state.faqs, del.dataset.faqDel));
+    renderFaqs();
+    toast('Knowledge entry deleted.');
+  }
+});
+document.getElementById('btnAddFaq').addEventListener('click', function () {
+  var res = caiAddFaq(state.faqs,
+    document.getElementById('newFaqQ').value, document.getElementById('newFaqA').value);
+  if (!res) { toast('Type both a question and an answer first.'); return; }
+  state.faqs = caiSaveFaqs(localStorage, TENANT, res.faqs);
+  document.getElementById('newFaqQ').value = '';
+  document.getElementById('newFaqA').value = '';
+  renderFaqs();
+  toast('Added to the knowledge base.');
+});
+document.getElementById('btnRestoreFaqs').addEventListener('click', function () {
+  if (!confirm('Restore the original starter set?\n\nThis replaces your current knowledge base with the ' + CAI_DEFAULT_FAQS.length + ' starter questions and answers your account shipped with. Your edits and additions will be removed.')) return;
+  state.faqs = caiRestoreFaqs(localStorage, TENANT);
+  state.editingFaqId = '';
+  renderFaqs();
+  toast('Starter knowledge set restored.');
+});
+
+/* ---- instructions ---- */
+function renderInstructions() {
+  document.getElementById('instrList').innerHTML = state.instructions.map(function (s) {
+    return '<div class="instr">' +
+      '<div class="t">' + esc(s.title) + '</div>' +
+      '<div class="d">' + esc(s.hint) + '</div>' +
+      '<textarea rows="5" data-instr="' + esc(s.id) + '">' + esc(s.body) + '</textarea>' +
+      '</div>';
+  }).join('');
+}
+document.getElementById('btnSaveInstr').addEventListener('click', function () {
+  var sections = [];
+  document.querySelectorAll('[data-instr]').forEach(function (ta) {
+    sections.push({ id: ta.dataset.instr, body: ta.value });
+  });
+  state.instructions = caiSaveInstructions(localStorage, TENANT, sections);
+  renderInstructions();
+  toast('Instructions saved.');
+});
+document.getElementById('btnResetInstr').addEventListener('click', function () {
+  if (!confirm('Restore the original bot instructions?\n\nYour edited sections will be replaced with the wording your account shipped with.')) return;
+  localStorage.removeItem(caiKey(TENANT, 'instructions'));
+  state.instructions = caiLoadInstructions(localStorage, TENANT);
+  renderInstructions();
+  toast('Original instructions restored.');
+});
+
+/* ---- booking ---- */
+function renderBooking() {
+  var b = state.booking;
+  document.getElementById('bkCalendar').value = b.calendar;
+  document.getElementById('bkWindow').value = b.windowDays;
+  document.getElementById('bkSlots').value = b.slots;
+  document.getElementById('bkGap').value = b.minGapHours;
+  document.getElementById('bkStart').value = b.hoursStart;
+  document.getElementById('bkEnd').value = b.hoursEnd;
+  document.getElementById('bkLength').value = b.callMinutes;
+}
+document.getElementById('btnSaveBooking').addEventListener('click', function () {
+  state.booking = caiSaveBooking(localStorage, TENANT, {
+    calendar: document.getElementById('bkCalendar').value,
+    windowDays: document.getElementById('bkWindow').value,
+    slots: document.getElementById('bkSlots').value,
+    minGapHours: document.getElementById('bkGap').value,
+    hoursStart: document.getElementById('bkStart').value,
+    hoursEnd: document.getElementById('bkEnd').value,
+    callMinutes: document.getElementById('bkLength').value,
+  });
+  renderBooking();
+  toast('Booking rule saved.');
+});
+
+/* ---- guardrails ---- */
+function renderGuardrails() {
+  document.getElementById('guardList').innerHTML = state.guardrails.map(function (g) {
+    return '<div class="guard-row">' +
+      '<label class="switch" title="Toggle this guardrail"><input type="checkbox" data-guard="' + esc(g.id) + '"' + (g.on ? ' checked' : '') + '><span class="track"></span></label>' +
+      '<div class="grow"><div class="t">' + esc(g.title) + '</div>' +
+      '<div class="d">' + esc(g.desc) + '</div></div>' +
+      '<span class="pill ' + (g.on ? 'green' : 'red') + '">' + (g.on ? 'On' : 'Off') + '</span>' +
+      '</div>';
+  }).join('');
+}
+document.getElementById('guardList').addEventListener('change', function (e) {
+  var cb = e.target.closest('[data-guard]');
+  if (!cb) return;
+  state.guardrails.forEach(function (g) { if (g.id === cb.dataset.guard) g.on = cb.checked; });
+  state.guardrails = caiSaveGuardrails(localStorage, TENANT, state.guardrails);
+  renderGuardrails();
+  toast('Guardrail ' + (cb.checked ? 'on.' : 'off.'));
+});
+
+function renderAll() {
+  renderBots();
+  renderFaqs();
+  renderInstructions();
+  renderBooking();
+  renderGuardrails();
+}
+wireBot('ashley', 'ashley');
+wireBot('sam', 'sam');
+renderAll();
+</script>
+</body>
+</html>

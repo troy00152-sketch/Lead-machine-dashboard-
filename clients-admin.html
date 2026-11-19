@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="holographic">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Resale Clients — Command Center</title>
+<style>
+  :root{
+    --bg:#050a14; --bg2:rgba(10,18,38,.88); --panel:rgba(13,25,48,.55); --panel2:rgba(20,35,65,.45);
+    --ink:#e8f4ff; --ink-dim:#8fb0d0; --accent:#00d4ff; --accent2:#0090ff;
+    --border:rgba(0,212,255,.25); --glow:0 0 18px rgba(0,212,255,.25);
+    --good:#2fe08a; --bad:#ff5d73;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{min-height:100%}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    background:radial-gradient(ellipse at 15% -5%, rgba(0,212,255,.06), transparent 55%), var(--bg);
+    color:var(--ink);
+  }
+  header{
+    padding:14px 18px; border-bottom:1px solid var(--border);
+    background:linear-gradient(135deg, rgba(5,15,35,.92), rgba(10,25,55,.88));
+    display:flex; align-items:center; gap:12px;
+  }
+  header .logo{font-size:26px}
+  header h1{font-size:18px; font-weight:700; text-shadow:0 0 22px rgba(0,212,255,.45)}
+  header h1 span{color:var(--accent); text-shadow:0 0 18px rgba(0,212,255,.8)}
+  header .sub{font-size:11px; color:var(--ink-dim); margin-top:2px}
+  header .back{margin-left:auto; color:var(--ink-dim); font-size:13px; text-decoration:none; white-space:nowrap}
+  header .back:hover{color:var(--accent)}
+  main{max-width:860px; margin:0 auto; padding:22px 18px 40px}
+  .intro{font-size:13.5px; color:var(--ink-dim); line-height:1.6; margin-bottom:18px}
+  .card{
+    background:var(--panel); border:1px solid var(--border); border-radius:14px;
+    padding:16px 18px; margin-bottom:12px; backdrop-filter:blur(6px);
+    display:flex; align-items:center; gap:14px; flex-wrap:wrap;
+  }
+  .card .who{flex:1 1 220px; min-width:200px}
+  .card .name{font-size:16px; font-weight:700}
+  .card .sub2{font-size:12px; color:var(--ink-dim); margin-top:3px}
+  .card .src{font-size:11.5px; color:var(--ink-dim); margin-top:5px}
+  .pill{
+    display:inline-block; padding:4px 11px; border-radius:999px; font-size:12px; font-weight:700;
+    letter-spacing:.02em; white-space:nowrap;
+  }
+  .pill.active{background:rgba(47,224,138,.14); color:var(--good); border:1px solid rgba(47,224,138,.45)}
+  .pill.suspended{background:rgba(255,93,115,.13); color:var(--bad); border:1px solid rgba(255,93,115,.45)}
+  .pill.owner{background:rgba(0,212,255,.12); color:var(--accent); border:1px solid var(--border)}
+  .btn{
+    appearance:none; border:1px solid var(--border); background:var(--panel2); color:var(--ink);
+    padding:8px 14px; border-radius:9px; font-size:13px; font-weight:600; cursor:pointer;
+  }
+  .btn:hover{border-color:var(--accent); box-shadow:var(--glow)}
+  .btn:disabled{opacity:.45; cursor:default; box-shadow:none}
+  .btn.danger{border-color:rgba(255,93,115,.5); color:var(--bad)}
+  .btn.restore{border-color:rgba(47,224,138,.5); color:var(--good)}
+  .btn.ghost{font-weight:500; color:var(--ink-dim)}
+  .msg{
+    display:none; border-radius:10px; padding:12px 14px; font-size:13.5px; line-height:1.55; margin-bottom:16px;
+    background:rgba(255,93,115,.1); border:1px solid rgba(255,93,115,.4); color:#ffd7dc;
+  }
+  .msg.warn{background:rgba(255,190,80,.1); border-color:rgba(255,190,80,.4); color:#ffe4b0}
+  .toast{font-size:13px; color:var(--good); min-height:18px; margin-bottom:10px}
+  .empty{color:var(--ink-dim); font-size:14px; padding:26px 0; text-align:center}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">🏢</div>
+  <div>
+    <h1>Resale <span>Clients</span></h1>
+    <div class="sub">White-label client accounts · suspend or restore service live</div>
+  </div>
+  <a class="back" href="/command-center.html">🎯 Command Center</a>
+  <a class="back" href="/index.html">← Dashboard</a>
+</header>
+<main>
+  <p class="intro">
+    Every white-label client running on this system is listed here. <strong>Suspend</strong> cuts a client off
+    instantly — their Command Center shows an inactive notice and stops loading data — and <strong>Restore</strong>
+    brings them straight back. No redeploy, no file edits: the change takes effect on their next page load.
+    A client's account default still applies whenever no live override is set.
+  </p>
+  <div class="msg" id="msgBox"></div>
+  <div class="toast" id="toast"></div>
+  <div id="clientList"><div class="empty">Loading clients…</div></div>
+</main>
+<script>
+(function () {
+  var API = '/.netlify/functions/client-admin';
+  var listEl = document.getElementById('clientList');
+  var msgEl = document.getElementById('msgBox');
+  var toastEl = document.getElementById('toast');
+  var storeOk = true;
+  var busy = false;
+
+  function showMsg(text, warn) {
+    msgEl.textContent = text;
+    msgEl.className = warn ? 'msg warn' : 'msg';
+    msgEl.style.display = 'block';
+  }
+  function hideMsg() { msgEl.style.display = 'none'; }
+  function toast(text) { toastEl.textContent = text || ''; }
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  function fmtAt(at) {
+    if (!at) return '';
+    try { return new Date(at).toLocaleString(); } catch (e) { return ''; }
+  }
+
+  function rowHtml(c) {
+    var pill, actions = '', src;
+    if (c.owner) {
+      pill = '<span class="pill owner">Owner</span>';
+      src = 'Your own account — it can never be suspended.';
+    } else if (c.effectiveStatus === 'suspended') {
+      pill = '<span class="pill suspended">Suspended</span>';
+      actions = '<button class="btn restore" data-act="set" data-active="true" data-sub="' + esc(c.subdomain) + '" data-name="' + esc(c.companyName) + '">Restore service</button>';
+    } else {
+      pill = '<span class="pill active">Active</span>';
+      actions = '<button class="btn danger" data-act="set" data-active="false" data-sub="' + esc(c.subdomain) + '" data-name="' + esc(c.companyName) + '">Suspend</button>';
+    }
+    if (!c.owner) {
+      if (c.override) {
+        src = 'Live override — set ' + fmtAt(c.override.at) + '.';
+        actions += ' <button class="btn ghost" data-act="clear" data-sub="' + esc(c.subdomain) + '" data-name="' + esc(c.companyName) + '">Use account default</button>';
+      } else {
+        src = 'Account default: ' + (c.configActive ? 'active' : 'suspended') + ' (no live override set).';
+      }
+    }
+    return '<div class="card">' +
+      '<div class="who"><div class="name">' + esc(c.companyName) + '</div>' +
+      '<div class="sub2">' + esc(c.subdomain) + '</div>' +
+      '<div class="src">' + esc(src) + '</div></div>' +
+      '<div>' + pill + '</div>' +
+      '<div>' + actions + '</div>' +
+      '</div>';
+  }
+
+  function render(data) {
+    storeOk = data.storeOk !== false;
+    if (!storeOk) {
+      showMsg('The live status store is unreachable right now. This list is showing account defaults only, and Suspend / Restore is paused until the store recovers.', true);
+    } else {
+      hideMsg();
+    }
+    var clients = data.clients || [];
+    if (!clients.length) {
+      listEl.innerHTML = '<div class="empty">No white-label clients yet. A client appears here as soon as their account is set up.</div>';
+      return;
+    }
+    listEl.innerHTML = clients.map(rowHtml).join('');
+    if (!storeOk) {
+      var btns = listEl.querySelectorAll('button');
+      for (var i = 0; i < btns.length; i++) btns[i].disabled = true;
+    }
+  }
+
+  function load() {
+    return fetch(API + '?action=list', { cache: 'no-store' })
+      .then(function (r) {
+        if (r.status === 401) {
+          listEl.innerHTML = '';
+          showMsg('You are not signed in as the dashboard owner. Open the dashboard, sign in, then come back to this screen.');
+          return null;
+        }
+        return r.json();
+      })
+      .then(function (data) { if (data) render(data); })
+      .catch(function () { showMsg('Could not load the client list. Check your connection and refresh the page.'); });
+  }
+
+  function post(body) {
+    return fetch(API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then(function (r) {
+      return r.json().then(function (data) {
+        if (!r.ok) throw new Error((data && data.error) || 'Request failed.');
+        return data;
+      });
+    });
+  }
+
+  listEl.addEventListener('click', function (ev) {
+    var btn = ev.target.closest ? ev.target.closest('button[data-act]') : null;
+    if (!btn || busy) return;
+    var sub = btn.getAttribute('data-sub');
+    var name = btn.getAttribute('data-name') || sub;
+    var act = btn.getAttribute('data-act');
+    var makeActive = btn.getAttribute('data-active') === 'true';
+    if (act === 'set' && !makeActive) {
+      if (!confirm('Suspend ' + name + '?\n\nTheir Command Center will show an inactive notice and stop loading data until you restore them.')) return;
+    }
+    if (act === 'set' && makeActive) {
+      if (!confirm('Restore service for ' + name + '?\n\nTheir Command Center goes live again right away.')) return;
+    }
+    if (act === 'clear') {
+      if (!confirm('Remove the live override for ' + name + '?\n\nThey will follow their account default instead.')) return;
+    }
+    busy = true;
+    btn.disabled = true;
+    toast('');
+    var payload = act === 'set' ? { action: 'set', subdomain: sub, active: makeActive } : { action: 'clear', subdomain: sub };
+    post(payload)
+      .then(function () {
+        toast(act === 'clear' ? name + ' is back on its account default.' : (makeActive ? name + ' is live again.' : name + ' is suspended.'));
+        return load();
+      })
+      .catch(function (e) { showMsg('That change did not go through: ' + e.message); })
+      .then(function () { busy = false; });
+  });
+
+  load();
+})();
+</script>
+</body>
+</html>
