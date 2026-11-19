@@ -321,6 +321,12 @@ function fakeStorage() {
       assert.ok(!html.toLowerCase().includes(banned), 'page must not reference ' + banned);
     }
   });
+  await check('layout: bot editor cards size to their own content (no equal-height stretch, no blank card bottoms)', async () => {
+    const m = html.match(/\.bot-grid\{([^}]*)\}/);
+    assert.ok(m, 'bot-grid rule present');
+    assert.ok(/align-items\s*:\s*start/.test(m[1]), 'bot-grid must carry align-items:start so a shorter card never stretches to the tallest card in the row');
+    assert.ok(html.includes('class="bot-grid" id="addedBotGrid"'), 'added-bot grid uses the same bot-grid class and inherits the no-stretch rule');
+  });
 
   console.log('— E. White-label scrub —');
   await check('no vendor/provider names anywhere in the page (outside the config endpoint path)', async () => {
