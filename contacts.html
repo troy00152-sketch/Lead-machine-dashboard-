@@ -227,6 +227,21 @@ function ctSaveJson(storage, key, value) {
   storage.setItem(key, JSON.stringify(value));
 }
 
+/* A My Leads owner in display form. index.html stores the owner as
+   an OBJECT — { names: [...], mailingAddress: {...} } (its own
+   getOwnerName reads owner.names) — so a raw String(lead.owner)
+   renders "[object Object]". Mirror getOwnerName, with fallbacks
+   for legacy string owners and the flat ownerName fields. */
+function leadOwnerName(lead) {
+  var o = lead && lead.owner;
+  if (typeof o === 'string') return o;
+  if (o && typeof o === 'object') {
+    if (Array.isArray(o.names) && o.names.length) return o.names.map(String).join(', ');
+    if (o.name) return String(o.name);
+  }
+  return String((lead && (lead.ownerName || lead.owner1Name)) || '');
+}
+
 /* A My Leads row (index.html acc_leads) in Contacts-table shape. */
 function contactFromLead(lead) {
   lead = lead || {};
@@ -243,7 +258,7 @@ function contactFromLead(lead) {
     key: '',
     leadId: lead.id || '',
     phone: phone,
-    name: String(lead.owner || ''),
+    name: leadOwnerName(lead),
     firstName: '',
     email: String(lead.email || ''),
     address1: String(lead.address || ''),
@@ -1073,7 +1088,10 @@ async function saveDetailFields() {
   var okSave = false;
   if (r.source === 'lead') {
     okSave = mutateLead(r.leadId, function (lead) {
-      lead.owner = fields.name;
+      // index.html reads the owner as an object ({names:[...]}) —
+      // keep that shape (and any mailingAddress) when saving a name.
+      var prevOwner = (lead.owner && typeof lead.owner === 'object') ? lead.owner : {};
+      lead.owner = Object.assign({}, prevOwner, { names: fields.name ? [fields.name] : [] });
       lead.email = fields.email;
       lead.address = fields.address1;
       lead.city = fields.city;

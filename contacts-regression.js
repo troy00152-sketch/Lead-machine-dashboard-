@@ -266,6 +266,17 @@ const readPage = (name) => fs.readFileSync(path.join(__dirname, name), 'utf8');
     assert.strictEqual(r.signal, 'Tax Lien');
     assert.strictEqual(r.stage, 'Skip Traced');
   });
+  await check('contactFromLead: production owner-object shape (index.html writes {names:[...]})', async () => {
+    const prod = { id: 'L9', owner: { names: ['Dave Dole', 'Dana Dole'], mailingAddress: { addressLine1: '2647 Denver Ave' } }, address: '2647 Denver Ave', city: 'Indianapolis', state: 'IN', zip: '46204', market: 'Indianapolis', status: 'New Lead', phones: [{ number: '(317) 555-0144', type: 'Mobile' }], addedAt: '2026-11-03T00:00:00Z' };
+    const r = P.contactFromLead(prod);
+    assert.strictEqual(r.name, 'Dave Dole, Dana Dole');
+    assert.ok(!/\[object/.test(r.name), 'name must never render as [object Object]');
+    assert.strictEqual(r.phone, '(317) 555-0144');
+    const noOwner = P.contactFromLead({ id: 'L10', owner: null, address: '1600 Pennsylvania Ave', phones: [] });
+    assert.strictEqual(noOwner.name, '');
+    const legacy = P.contactFromLead({ id: 'L11', owner: 'Legacy String', phones: [] });
+    assert.strictEqual(legacy.name, 'Legacy String');
+  });
   await check('mergeContacts dedupes by phone — CRM wins, marked both', async () => {
     const merged = P.mergeContacts(crmRows, leadRows);
     assert.strictEqual(merged.length, 3);
