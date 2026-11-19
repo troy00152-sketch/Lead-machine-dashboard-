@@ -155,13 +155,16 @@ function headerSubdomain(event) {
 }
 
 // ACCOUNT STATUS / KILL SWITCH (Nov 19): a white-label client's
-// config may carry "active": false — the operator flips that ONE
-// field in clients/{subdomain}.json (and redeploys) to disconnect a
-// non-paying client: the public config then reports the account as
-// suspended (the pages render an inactive notice instead of the app),
-// and resolveClientData returns null so NO CRM data flows to them.
+// config may carry "active": false — that flag is the client's
+// DEFAULT status, set at deploy time, to disconnect a non-paying
+// client: the public config then reports the account as suspended
+// (the pages render an inactive notice instead of the app), and
+// resolveClientData returns null so NO CRM data flows to them.
 // Flipping it back to true restores everything. A MISSING field means
 // active, so every config written before this switch keeps working.
+// V2 (same day): Troy flips clients LIVE from his Command Center —
+// the dynamic override in effectiveSuspended below wins over this
+// flag whenever the caller consulted the status store.
 // HARD SAFETY: Troy's own client (isTroy) can NEVER be suspended by
 // this flag — the flag is ignored for Troy in every layer, so a stray
 // edit to troy.json cannot lock Troy out of his own system. The
@@ -172,13 +175,39 @@ function isClientSuspended(cfg, isTroy) {
   return cfg.active === false;
 }
 
+// LIVE STATUS OVERRIDE (kill switch v2, Nov 19): the config flag
+// above is the DEFAULT, set at deploy time. Troy can also flip a
+// client LIVE from his own Command Center (Resale Clients screen ->
+// client-admin.js), which writes an override entry
+// { active: bool, at, by } to the dynamic status store
+// (lib-client-status.js). When a caller has consulted the store it
+// passes the entry here: a boolean override WINS over the config
+// flag in both directions (suspend an active-config client, or
+// restore a config-suspended one). No override (null/undefined —
+// including when the store could not be read) falls back to the
+// config flag, so a store outage can neither fail open for a
+// config-suspended client nor suspend anyone on its own. The Troy
+// hard safety applies at this layer too: an override can never
+// suspend Troy.
+function effectiveSuspended(cfg, isTroy, override) {
+  if (isTroy) return false; // HARD SAFETY: Troy is unsuspendable.
+  if (!cfg) return false;
+  if (override && typeof override.active === 'boolean') return !override.active;
+  return cfg.active === false;
+}
+
 // Resolve the request to a client config. Never throws.
 // Returns { cfg, subdomain, isTroy, isNeutral, suspended } — cfg is
 // the neutral config when nothing else resolves, so callers can
 // always brand the page; callers that need CRM data must check
 // isNeutral / locationId. `suspended` is true only for a real
 // (non-Troy, non-neutral) client whose config sets "active": false.
-function resolveClient(event) {
+// The optional `override` argument is the live status override the
+// caller read from the dynamic store (lib-client-status.js); when
+// provided (non-undefined) it decides suspension via
+// effectiveSuspended instead of the config flag alone. Callers that
+// never consult the store omit it and get the v1 config behavior.
+function resolveClient(event, override) {
   const headerSub = headerSubdomain(event);
   const host = (event && event.headers && (event.headers.host || event.headers.Host)) || '';
   let subdomain = headerSub || subdomainFromHost(host);
@@ -186,7 +215,10 @@ function resolveClient(event) {
     const cfg = loadClient(subdomain);
     if (cfg) {
       const isTroy = subdomain === TROY_SUBDOMAIN;
-      return { cfg, subdomain, isTroy, isNeutral: false, suspended: isClientSuspended(cfg, isTroy) };
+      const suspended = override !== undefined
+        ? effectiveSuspended(cfg, isTroy, override)
+        : isClientSuspended(cfg, isTroy);
+      return { cfg, subdomain, isTroy, isNeutral: false, suspended };
     }
   }
   // Unknown subdomain, or a header naming a client file that does not
@@ -206,8 +238,8 @@ function resolveClient(event) {
 // the caller must answer with an honest error, NEVER fall back to
 // Troy's location: serving Troy's live CRM data to a stranger's
 // subdomain would be a data leak, not a fallback.
-function resolveClientData(event) {
-  const resolved = resolveClient(event);
+function resolveClientData(event, override) {
+  const resolved = resolveClient(event, override);
   // Kill switch: a suspended client gets NO CRM data, exactly like a
   // client with no location configured. (Never true for Troy — see
   // isClientSuspended.)
@@ -291,6 +323,7 @@ module.exports = {
   subdomainFromHost,
   headerSubdomain,
   isClientSuspended,
+  effectiveSuspended,
   resolveClient,
   resolveClientData,
   publicConfig,
