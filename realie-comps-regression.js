@@ -45,6 +45,14 @@
 //      blanks are filled from Realie, APN + legal rows render on the
 //      subject card, the field-audit "Not on record" line exists, the
 //      Realie baths note exists, and no key material is in the page.
+//   9. ARV accuracy screens (Nov 19, 2026, county-audit fix): a
+//      transfer Realie's own sales history flags distressedSale:
+//      true or armsLength: false on the MATCHING sale is excluded
+//      with the flag named (3220 N Keystone Ave — county Valid=N);
+//      flags on older sales of the same parcel do not leak. A
+//      fact-less comp (no sqft AND no beds — 3808 E 31st St) cannot
+//      anchor the best 3 while 3+ factual candidates survive, may
+//      fill a thin set, and caps confidence at MEDIUM when it does.
 'use strict';
 
 const fs = require('fs');
@@ -155,17 +163,48 @@ const KC = '1619 E 33rd St, Kansas City, MO 64109';
   check('haversine: identical points = 0', T.haversineMiles(39.81, -86.11, 39.81, -86.11) === 0);
   check('haversine: missing coords -> null', T.haversineMiles(null, -86.11, 39.81, -86.11) === null);
 
+  // ---- 4b. sale flags + fact-less identification (ARV accuracy screens) ----
+  check('saleFlags: Keystone matching sale carries distressedSale: true', JSON.stringify(ec.saleFlags) === JSON.stringify(['distressedSale: true']), JSON.stringify(ec.saleFlags));
+  const rural = easternCompsBody.comparables.find((c) => c.transferPrice === 71500);
+  const rc = T.mapRealieComp(rural, em.lat, em.lon);
+  check('saleFlags: flags on OLDER sales do not leak (Rural had a distressed 2025 sale; its 2026 transfer is clean)', JSON.stringify(rc.saleFlags) === JSON.stringify([]), JSON.stringify(rc.saleFlags));
+  check('saleFlags: armsLength: false on the matching sale is captured', JSON.stringify(T.saleFlagsFor({ transferPrice: 50000, transferDateObject: '2026-01-10', property: { salesHistory: [{ saleDate: '2026-01-10', salePrice: 50000, armsLength: false }] } }, 50000, '2026-01-10')) === JSON.stringify(['armsLength: false']));
+  const e31Row = T.mapRealieComp(easternCompsBody.comparables.find((c) => c.transferPrice === 62000), em.lat, em.lon);
+  check('fact-less: E 31st (0 bd / 0 sqft) is fact-less; Keystone is not', T.isFactLessComp(e31Row) === true && T.isFactLessComp(ec) === false);
+
   // ---- 5. selection engine on the real fixtures ----
   const eRows = easternCompsBody.comparables.map((c) => T.mapRealieComp(c, em.lat, em.lon));
   const eShaped = T.shapeCompsResult(T.analyzeComps(em.subject, eRows), eRows.length);
-  check('engine (Eastern): best 3 are the screened set', JSON.stringify(eShaped.best.map((c) => c.amount).sort((a, b) => a - b)) === JSON.stringify([62000, 73600, 96143]), JSON.stringify(eShaped.best.map((c) => c.amount)));
-  check('engine (Eastern): indication + confidence', eShaped.indication === 77248 && eShaped.confidence === 'MEDIUM', eShaped.indication + ' ' + eShaped.confidence);
+  check('engine (Eastern): best 3 are the screened set', JSON.stringify(eShaped.best.map((c) => c.amount).sort((a, b) => a - b)) === JSON.stringify([71500, 72000, 73600]), JSON.stringify(eShaped.best.map((c) => c.amount)));
+  check('engine (Eastern): indication + confidence', eShaped.indication === 72367 && eShaped.indication >= 72000 && eShaped.indication <= 77000 && eShaped.confidence === 'MEDIUM', eShaped.indication + ' ' + eShaped.confidence);
   check('engine (Eastern): $250K excluded as above-pocket outlier', eShaped.excluded.some((c) => c.amount === 250000 && /outlier above pocket/.test(c.reason)), JSON.stringify(eShaped.excluded));
+  check('engine (Eastern): Keystone $96,143 excluded — Realie flags its sale distressedSale: true (county Valid=N)', eShaped.excluded.some((c) => c.amount === 96143 && /distressedSale: true/.test(c.reason)) && !eShaped.best.some((c) => c.amount === 96143), JSON.stringify(eShaped.excluded));
+  check('engine (Eastern): fact-less E 31st $62,000 stays a candidate but cannot anchor the best 3', !eShaped.best.some((c) => c.amount === 62000) && eShaped.candidateCount === 8, 'candidates=' + eShaped.candidateCount);
   check('engine (Eastern): best comps carry APN + legal through shaping', eShaped.best.every((c) => !!c.apn && !!c.legalDescription));
   const kRows = kcCompsBody.comparables.map((c) => T.mapRealieComp(c, km.lat, km.lon));
   const kShaped = T.shapeCompsResult(T.analyzeComps(km.subject, kRows), kRows.length);
   check('engine (KC): nominal $2,355/$2,898 transfers screened out', kShaped.excluded.some((c) => c.amount === 2355 && /nominal/.test(c.reason)) && kShaped.excluded.some((c) => c.amount === 2898) && !kShaped.best.some((c) => c.amount < 5000), JSON.stringify(kShaped.excluded.map((c) => c.amount)));
-  check('engine (KC): low outliers excluded, best 3 + indication', JSON.stringify(kShaped.best.map((c) => c.amount).sort((a, b) => a - b)) === JSON.stringify([33000, 44100, 75000]) && kShaped.indication === 50700, JSON.stringify(kShaped.best.map((c) => c.amount)));
+  check('engine (KC): distressed-flagged sales excluded with the flag named (Agnes/Garfield/Paseo)', [44100, 143500, 200000].every((a) => kShaped.excluded.some((c) => c.amount === a && /distressedSale: true/.test(c.reason))), JSON.stringify(kShaped.excluded));
+  check('engine (KC): low outliers still excluded; thin best 2 + LOW once flagged sales are out', JSON.stringify(kShaped.best.map((c) => c.amount).sort((a, b) => a - b)) === JSON.stringify([33000, 75000]) && kShaped.indication === 54000 && kShaped.confidence === 'LOW', JSON.stringify(kShaped.best.map((c) => c.amount)) + ' ' + kShaped.indication + ' ' + kShaped.confidence);
+
+  // ---- 5b. fact-less rule mechanics (synthetic rows, fixed "today") ----
+  const FT = { y: 2026, mo: 11, d: 19 };
+  const mkRow = (amount, sqft, beds, dist) => ({
+    address: amount + ' Synthetic St', amount, date: '2026-09-15',
+    dateParts: { y: 2026, mo: 9, d: 15, iso: '2026-09-15' },
+    ppsf: sqft ? amount / sqft : null, sqft, beds, baths: 1,
+    distance: dist, latitude: null, longitude: null, similarityScore: null, apn: null, legalDescription: null,
+  });
+  const barSubj = { address: 'S', beds: 2, baths: 1, sqft: 1000, yearBuilt: 1950, propertyType: 'Single Family' };
+  const barFactless = mkRow(101000, 0, 0, 0.1);
+  const barRes = T.analyzeComps(barSubj, [mkRow(100000, 2000, 2, 0.5), mkRow(102000, 2100, 2, 0.6), mkRow(98000, 1900, 3, 0.7), barFactless], FT);
+  check('fact-less rule: barred from best 3 while 3+ factual candidates survive (stays a candidate)', barRes.best.length === 3 && !barRes.best.includes(barFactless) && barRes.candidates.length === 4, JSON.stringify(barRes.best.map((c) => c.amount)));
+  const fillSubj = { address: 'S', beds: null, baths: null, sqft: null, yearBuilt: null, propertyType: '' };
+  const fillFactless = mkRow(101000, 0, 0, 0.4);
+  const fillRes = T.analyzeComps(fillSubj, [mkRow(100000, 1000, 2, 0.5), mkRow(102000, 1100, 2, 0.6), fillFactless], FT);
+  check('fact-less rule: fills a thin set (<3 factual) and caps confidence at MEDIUM', fillRes.best.length === 3 && fillRes.best.includes(fillFactless) && fillRes.confidence === 'MEDIUM' && /fact-less/.test(fillRes.confidenceText), fillRes.confidence + ' ' + fillRes.confidenceText);
+  const ctrlRes = T.analyzeComps(fillSubj, [mkRow(100000, 1000, 2, 0.5), mkRow(102000, 1100, 2, 0.6), mkRow(101000, 1050, 2, 0.4)], FT);
+  check('fact-less rule: control set (3 factual, clean) still earns HIGH', ctrlRes.confidence === 'HIGH', ctrlRes.confidence);
 
   // ---- 6. handler end-to-end + cache ----
   process.env.REALIE_API_KEY = FAKE_KEY;
@@ -179,7 +218,7 @@ const KC = '1619 E 33rd St, Kansas City, MO 64109';
   check('handler: Eastern matched end-to-end', r.statusCode === 200 && b.matched === true && b.source === 'realie', r.statusCode + ' ' + (b.error || ''));
   check('handler: subject carries APN + legal', b.property.apn === '49-07-20-115-077.000-101' && b.property.legalDescription === 'TACOMA VILLAGE L140');
   check('handler: caller baths rescue surfaced', b.bathsFromExisting === true && b.property.baths === 1 && b.fieldAudit.baths === 'from-existing-record', JSON.stringify({ f: b.bathsFromExisting, fa: b.fieldAudit && b.fieldAudit.baths }));
-  check('handler: vendor valuation reference-only (vendorArv/avm, indication differs)', b.vendorArv === 98920 && b.avm && b.avm.value === 98920 && b.comps.indication === 77248, JSON.stringify({ v: b.vendorArv, ind: b.comps && b.comps.indication }));
+  check('handler: vendor valuation reference-only (vendorArv/avm, indication differs)', b.vendorArv === 98920 && b.avm && b.avm.value === 98920 && b.comps.indication === 72367, JSON.stringify({ v: b.vendorArv, ind: b.comps && b.comps.indication }));
   check('handler: tokens spent = 2 (subject + comps)', b.tokensSpent === 2 && fetchCalls.length === 2, 'calls=' + fetchCalls.length);
   check('handler: auth header is the raw env key', fetchCalls[0].opts.headers.Authorization === FAKE_KEY);
   check('handler: comps URL used subject lat/lon + full=true', fetchCalls[1].url.includes('latitude=39.81224175') && fetchCalls[1].url.includes('full=true'), fetchCalls[1].url);

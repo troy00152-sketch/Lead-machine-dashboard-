@@ -65,6 +65,17 @@
 // nominal-transfer rule (amount < $5,000 is not sales evidence —
 // the Nov 19 Kansas City test set's $2,355 / $2,898 transfers are
 // excluded by it) plus its median-outlier rules.
+//
+// ARV ACCURACY SCREENS (Nov 19, 2026, Troy's hard lock — born of
+// the county audit of this very fixture set): (1) a transfer that
+// Realie's own sales history flags distressed (distressedSale:
+// true) or non-arm's-length (armsLength: false) is excluded with
+// the flag named — the audit found 3220 N Keystone Ave ($96,143,
+// county Valid=N) anchoring the best-3 on exactly such a flag;
+// (2) a fact-less comp (no sqft AND no beds on record — 3808 E
+// 31st St, a parcel with no building facts) may not enter the
+// best-3 while 3+ factual candidates survive, and caps the
+// confidence at MEDIUM when it has to fill a thin set.
 'use strict';
 
 const SUBJECT_URL = 'https://app.realie.ai/api/public/property/address';
@@ -506,6 +517,24 @@ function buildFieldAudit(property, bathsFromExisting) {
 
 /* ---------------- comp mapping: Realie comparable -> engine row ---------------- */
 
+// The sale that makes a row a comp is the salesHistory entry whose
+// date AND price match the transfer (the history also carries older
+// sales, whose flags describe THOSE sales, not this one). Realie
+// flags the matching entry when the sale was distressed
+// (distressedSale: true) or non-arm's-length (armsLength: false).
+// A field absent on the matching entry means not flagged.
+function saleFlagsFor(c, amount, date) {
+  const nested = (c && c.property) || {};
+  const hist = Array.isArray(nested.salesHistory) ? nested.salesHistory : [];
+  if (amount == null || !date) return [];
+  const entry = hist.find(s => s && isoDateOf(s.saleDate) === date && numOrNull(s.salePrice) === amount);
+  if (!entry) return [];
+  const flags = [];
+  if (entry.distressedSale === true) flags.push('distressedSale: true');
+  if (entry.armsLength === false) flags.push('armsLength: false');
+  return flags;
+}
+
 function mapRealieComp(c, subjLat, subjLon) {
   const nested = (c && c.property) || {};
   const nLoc = nested.propertyLocation || {};
@@ -541,6 +570,7 @@ function mapRealieComp(c, subjLat, subjLon) {
     similarityScore: null,
     apn: (c && c.parcelId) || nested.parcelId || null,
     legalDescription: (nested.legalInformation && nested.legalInformation.legalDescription) || null,
+    saleFlags: saleFlagsFor(c, amount, date),
   };
 }
 
@@ -549,7 +579,19 @@ function mapRealieComp(c, subjLat, subjLon) {
    with logged reasons, similarity scoring, hard similarity rules,
    deterministic best-3, plain confidence label. Realie rows are
    recorded sales it selected against the radius/timeframe we sent;
-   the amount/outlier filters below are what guard the set. */
+   the amount/outlier filters below are what guard the set. Two
+   Realie-only screens sit on top (Nov 19, 2026 ARV accuracy lock):
+   transfers Realie itself flags distressed / non-arm's-length are
+   excluded before every other screen, and fact-less comps (no sqft
+   and no beds) cannot anchor the best-3 while factual candidates
+   survive. */
+
+// A comp is fact-less when Realie carries neither a living area nor
+// a bed count for the parcel (both missing/zero) — e.g. a land-only
+// parcel record with a real sale price but no building facts.
+function isFactLessComp(c) {
+  return !(Number(c && c.sqft) > 0) && !(Number(c && c.beds) > 0);
+}
 
 function analyzeComps(subj, comps, today) {
   today = today || todayParts();
@@ -559,6 +601,10 @@ function analyzeComps(subj, comps, today) {
   const med = priced.length ? median(priced.map(c => c.amount)) : null;
 
   for (const c of comps) {
+    if (Array.isArray(c.saleFlags) && c.saleFlags.length) {
+      excluded.push({ comp: c, reason: `flagged transfer (${c.saleFlags.join(' + ')}) — distressed/non-arm's-length sale per Realie sales history, not arm's-length sales evidence` });
+      continue;
+    }
     if (!c.amount || c.amount < 5000) {
       excluded.push({ comp: c, reason: 'nominal/zero-amount transfer — not sales evidence' });
       continue;
@@ -641,8 +687,23 @@ function analyzeComps(subj, comps, today) {
     if (r.length) hardFailing.push({ comp: c, reason: 'hard rule: ' + r.join('; ') });
     else hardPassing.push(c);
   }
+  // FACT-LESS RULE (Realie feed only, Nov 19, 2026): a comp with no
+  // sqft AND no beds on record may not anchor the best-3 while 3+
+  // factual candidates survive the screens — it stays a candidate
+  // (pocket / as-is evidence) but cannot set the number. With fewer
+  // than 3 factual candidates it may fill the set (thin-set
+  // behavior), and the confidence cap below then applies.
+  const factualCandidates = candidates.filter(c => !isFactLessComp(c));
   let best;
-  if (hardPassing.length >= 3) {
+  if (factualCandidates.length >= 3) {
+    const factualHard = hardPassing.filter(c => !isFactLessComp(c));
+    if (factualHard.length >= 3) {
+      best = factualHard.slice(0, 3);
+      for (const h of hardFailing) excluded.push(h);
+    } else {
+      best = factualCandidates.slice(0, 3);
+    }
+  } else if (hardPassing.length >= 3) {
     best = hardPassing.slice(0, 3);
     for (const h of hardFailing) excluded.push(h);
   } else {
@@ -671,6 +732,13 @@ function analyzeComps(subj, comps, today) {
     } else {
       result.confidence = 'LOW';
       result.confidenceText = 'LOW — fewer than 3 usable comps, do not lock a number on this set';
+    }
+    // A best set that had to lean on a fact-less comp (no sqft, no
+    // beds on record) is never HIGH confidence, however clean the
+    // rest of the set looks.
+    if (best.some(c => isFactLessComp(c)) && result.confidence === 'HIGH') {
+      result.confidence = 'MEDIUM';
+      result.confidenceText = 'MEDIUM — best set includes a comp with no sqft/beds on record (fact-less); confidence capped at MEDIUM';
     }
     const candPpsfs = candidates.filter(c => c.ppsf).map(c => c.ppsf);
     if (candPpsfs.length >= 3) {
@@ -912,6 +980,8 @@ exports._test = {
   mapRealieSubject,
   buildFieldAudit,
   mapRealieComp,
+  saleFlagsFor,
+  isFactLessComp,
   analyzeComps,
   shapeCompsResult,
   mapUpstreamError,
