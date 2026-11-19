@@ -4708,7 +4708,7 @@ function compTierLabel(arv){
   return '84.9% tier ($400K+)';
 }
 /* Verified-comps state on the Comps page. Rows are live recorded sales from the
-   live comp lookups (Resideline / data provider); nothing here is sample data. */
+   live comp lookups (Realie / data provider); nothing here is sample data. */
 let compRows = [];
 let compPicks = [];
 let compLoadedAddr = '';
@@ -6112,6 +6112,19 @@ function compGalleryThumb(gid, idx) {
     if (t) t.style.borderColor = (i === idx ? 'var(--cyan)' : 'var(--line)');
   });
 }
+/* Field-audit line for the subject card (Nov 19, Troy's rule): when
+   the winning feed's response carried a fieldAudit (realie-comps),
+   name every audited field that is missing from the record instead
+   of letting a blank pass silently. No audit on the response (other
+   feeds) -> no line. */
+function compMissingFieldsHtml(prop){
+  const fa = prop && prop.fieldAudit;
+  if(!fa) return '';
+  const labels = { beds:'Beds', baths:'Baths', sqft:'Sq ft', yearBuilt:'Year built', propertyType:'Type', apn:'APN', legalDescription:'Legal description', owner:'Owner', lastSale:'Last sale' };
+  const missing = Object.keys(labels).filter(k => fa[k] === 'missing').map(k => labels[k]);
+  if(!missing.length) return '';
+  return '<div style="grid-column:1/-1;font-size:12px;color:#d97706">⚠️ Not on record: ' + esc(missing.join(' · ')) + '</div>';
+}
 function renderCompSubjectCard(prop, typedAddr, matchedAddr, unavailable, linkedProperties){
   const el = document.getElementById('compSubjectCard'); if(!el) return;
   el.style.display = 'block';
@@ -6198,6 +6211,9 @@ function renderCompSubjectCard(prop, typedAddr, matchedAddr, unavailable, linked
     + '<div><span style="color:var(--muted)">Lot size:</span> <strong>' + esc(lot) + '</strong></div>'
     + '<div style="grid-column:1/-1"><span style="color:var(--muted)">Owner:</span> <strong>' + esc(owners || '—') + '</strong></div>'
     + '<div style="grid-column:1/-1"><span style="color:var(--muted)">Last sale:</span> <strong>' + esc(sale) + '</strong></div>'
+    + '<div style="grid-column:1/-1"><span style="color:var(--muted)">APN:</span> <strong>' + esc(prop.apn || '—') + '</strong></div>'
+    + '<div style="grid-column:1/-1"><span style="color:var(--muted)">Legal description:</span> <strong>' + esc(prop.legalDescription || '—') + '</strong></div>'
+    + compMissingFieldsHtml(prop)
     + compDistressRow(prop)
     + '</div>'
     + renderLinkedProperties(linkedProperties);
@@ -6268,19 +6284,24 @@ async function loadCompsForAddress(retryAttempt){
   if(!addr){ if(msg) msg.textContent = 'Enter the property address first.'; return; }
   if(!retryAttempt && msg) msg.textContent = 'Loading verified comps…';
   try{
-    /* Comp source priority (Nov 18, Troy): Resideline is the primary comp
-       feed — its sold comps run through our own selection engine inside
-       resideline-comps. The data provider still supplies the subject
-       record (owner, recorded mortgage, lat/lng, distress/equity/title)
-       and merges over whichever comp source wins. Comp fallback order:
-       Resideline -> data provider. (ATTOM was removed Nov 18, 2026 —
-       cut off and replaced by Resideline.) A Resideline set under the
-       3-comp minimum (or a dormant Resideline key) simply falls through
-       to the data provider. */
+    /* Comp source priority (Nov 19, Troy): Realie is the property-data
+       + comp feed — its subject record (APN, legal description, owner,
+       facts, last sale) and its sold comps run through our own
+       selection engine inside realie-comps. The data provider still
+       supplies its subject record (recorded mortgage detail,
+       distress/equity/title) and merges over whichever comp source
+       wins, with Realie filling any field the provider leaves blank —
+       APN and legal description above all. Comp fallback order:
+       Realie -> data provider. (ATTOM was removed Nov 18, 2026;
+       Resideline was the Nov 18–19 feed and was replaced by Realie on
+       Nov 19.) A Realie set under the 3-comp minimum (or a dormant
+       Realie key) simply falls through to the data provider, and the
+       Realie subject still fills the page's blank subject fields. */
     let d = null;
     let compSource = '';
     let prSubject = null;
     let prData = null;
+    let realieSubject = null;
     try{
       const prResp = await fetch('/.netlify/functions/data-api?address=' + encodeURIComponent(addr));
       if(prResp.ok){
@@ -6292,16 +6313,17 @@ async function loadCompsForAddress(retryAttempt){
       }
     }catch(e){ /* fall through */ }
     try{
-      /* Carry subject facts into the Resideline call: its valuation
-         endpoint 400s (INVALID_PROPERTY_DATA) on properties it
-         cannot enrich from the address alone, and the caller's facts
-         are the function's first-choice source. Param names match
-         resideline-comps parseInput exactly; only non-null facts are
-         appended. Facts source: the data-provider subject wins
+      /* Carry the existing subject facts into the Realie call. Realie
+         is queried by address alone; the facts serve exactly one
+         purpose — when Realie's own record has no bath count (its
+         0-baths gap), realie-comps keeps the existing record's count
+         and flags it instead of showing a wrong zero. Param names
+         match realie-comps parseInput exactly; only non-null facts
+         are appended. Facts source: the data-provider subject wins
          per-field; the current lead's stashed facts (openCompsForLead,
          matched by the exact address) fill any gaps — including the
          whole set when the provider is down and prSubject is null. */
-      let rlUrl = '/.netlify/functions/resideline-comps?address=' + encodeURIComponent(addr);
+      let reUrl = '/.netlify/functions/realie-comps?address=' + encodeURIComponent(addr);
       const leadFacts = (compLeadFacts && compLeadFacts.address === addr) ? compLeadFacts.facts : null;
       const gapFill = (pv, lv) => (pv != null && pv !== '' ? pv : lv);
       const factParams = [
@@ -6311,15 +6333,29 @@ async function loadCompsForAddress(retryAttempt){
         ['yearBuilt', gapFill(prSubject ? prSubject.yearBuilt : null, leadFacts ? leadFacts.yearBuilt : null)],
         ['propertyType', gapFill(prSubject ? prSubject.propertyType : null, leadFacts ? leadFacts.propertyType : null)]
       ];
-      factParams.forEach(([k, v]) => { if(v != null && v !== '') rlUrl += '&' + k + '=' + encodeURIComponent(v); });
-      const rlResp = await fetch(rlUrl);
-      if(rlResp.ok){
-        const rj = await rlResp.json();
+      factParams.forEach(([k, v]) => { if(v != null && v !== '') reUrl += '&' + k + '=' + encodeURIComponent(v); });
+      const reResp = await fetch(reUrl);
+      if(reResp.ok){
+        const rj = await reResp.json();
+        if(rj && rj.property){
+          // Realie matched the subject even if its comp set turns out
+          // thin — keep the record so its APN / legal / owner / facts
+          // can fill the page's blanks on the provider path below.
+          realieSubject = rj.property;
+          if(rj.fieldAudit) realieSubject.fieldAudit = rj.fieldAudit;
+        }
         if(rj && rj.matched && rj.comps && (rj.comps.best || []).length >= 3){
-          d = rj; compSource = 'Resideline';
+          d = rj; compSource = 'Realie';
           if(prSubject){
-            d.property = Object.assign({}, d.property || {}, prSubject);
-            compSource = 'Resideline+PR';
+            const merged = Object.assign({}, d.property || {}, prSubject);
+            // Realie is the APN/legal source: any field the provider
+            // record leaves blank keeps the Realie value.
+            Object.keys(d.property || {}).forEach(k => {
+              if((merged[k] == null || merged[k] === '') && d.property[k] != null && d.property[k] !== '') merged[k] = d.property[k];
+            });
+            if(rj.fieldAudit) merged.fieldAudit = rj.fieldAudit;
+            d.property = merged;
+            compSource = 'Realie+PR';
           }
         }
       }
@@ -6340,17 +6376,33 @@ async function loadCompsForAddress(retryAttempt){
       // ("No ownership records found…"), same as before.
       d = { matched: false };
     }
+    if(d && d.matched && realieSubject && compSource !== 'Realie' && compSource !== 'Realie+PR' && d.property){
+      // Provider path won (or supplied the subject): fill any blank
+      // subject fields from the Realie record — APN, legal
+      // description, owner, facts, last sale — so they still land.
+      const filled = Object.assign({}, realieSubject, d.property);
+      Object.keys(realieSubject).forEach(k => {
+        if((filled[k] == null || filled[k] === '') && realieSubject[k] != null && realieSubject[k] !== '') filled[k] = realieSubject[k];
+      });
+      if(realieSubject.fieldAudit && !filled.fieldAudit) filled.fieldAudit = realieSubject.fieldAudit;
+      d.property = filled;
+    }
+    if(d && d.property && d.fieldAudit && !d.property.fieldAudit) d.property.fieldAudit = d.fieldAudit;
     compDataSource = compSource;
-    /* Assumed-facts disclosure (round 4): when the winning Resideline
-       response valued the subject with an assumed bath count
-       (assumedFacts: ['baths'] from resideline-comps), say so on
-       screen — the assumption is never silent. Any other outcome
-       (provider win, no assumption, no match) hides the note. */
+    /* Bath-count disclosure: when the winning response's bath count
+       did not come from the feed's own record, say so on screen — it
+       is never silent. Two cases: the legacy assumed-baths path
+       (assumedFacts: ['baths']) and the Realie path, where Realie's
+       record had no bath count and realie-comps kept the existing
+       property record's count (bathsFromExisting). Any other outcome
+       (no rescue, no match) hides the note. */
     const assumedNoteEl = document.getElementById('compAssumedNote');
     if(assumedNoteEl){
       const assumedBaths = !!(d && Array.isArray(d.assumedFacts) && d.assumedFacts.indexOf('baths') >= 0);
-      assumedNoteEl.style.display = assumedBaths ? 'block' : 'none';
+      const realieBaths = !!(d && d.source === 'realie' && d.bathsFromExisting);
+      assumedNoteEl.style.display = (assumedBaths || realieBaths) ? 'block' : 'none';
       if(assumedBaths) assumedNoteEl.textContent = 'Baths not on record — valued as 1 bath (assumed).';
+      else if(realieBaths) assumedNoteEl.textContent = 'Baths not on the Realie record — showing the count from the existing property record.';
     }
     if(!d.matched){ compRows = []; compPicks = []; compLoadedAddr = ''; compSubjectLat = null; compSubjectLng = null; compConfidence = ''; compConfidenceText = ''; compSubjectSqft = null; compSubjectAvm = null; compSubjectBeds = null; compDetailData = null; compStabilityWarns = []; resetCompFilters(); resetCompMortgage(); renderCompSubjectCard(null, addr, ''); if(msg) msg.textContent = 'No ownership records found for this address — type an ARV below to run the math manually.'; renderCompList(); renderCompMortgage(); calcComp(); return; }
     renderCompSubjectCard(d.property || null, addr, d.address || '', null, d.linkedProperties || []);
@@ -6453,7 +6505,7 @@ function openCompsForLead(id){
   const addr = [l.address, l.city, l.state, l.zip].filter(Boolean).join(', ');
   const addrEl = document.getElementById('compListAddr'); if(addrEl) addrEl.value = addr;
   /* Stash the lead's own subject facts for loadCompsForAddress: its
-     Resideline call merges them UNDER the data-provider subject
+     Realie call merges them UNDER the data-provider subject
      (provider wins per-field, lead fills gaps) — the rescue path when
      the provider is down and returns no subject at all. Keyed to the
      exact address composed here, so a later search for a different
