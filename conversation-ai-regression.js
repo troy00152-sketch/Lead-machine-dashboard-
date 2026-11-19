@@ -321,11 +321,14 @@ function fakeStorage() {
       assert.ok(!html.toLowerCase().includes(banned), 'page must not reference ' + banned);
     }
   });
-  await check('layout: bot editor cards size to their own content (no equal-height stretch, no blank card bottoms)', async () => {
-    const m = html.match(/\.bot-grid\{([^}]*)\}/);
-    assert.ok(m, 'bot-grid rule present');
-    assert.ok(/align-items\s*:\s*start/.test(m[1]), 'bot-grid must carry align-items:start so a shorter card never stretches to the tallest card in the row');
-    assert.ok(html.includes('class="bot-grid" id="addedBotGrid"'), 'added-bot grid uses the same bot-grid class and inherits the no-stretch rule');
+  await check('layout: bot editor cards stack in a single column (no side-by-side columns, no blank space beside the shorter card)', async () => {
+    const rules = html.match(/\.bot-grid\{[^}]*\}/g) || [];
+    assert.ok(rules.length >= 1, 'bot-grid rule present');
+    for (const r of rules) {
+      assert.ok(!/1fr\s+1fr/.test(r), 'no bot-grid rule places editor cards side by side (the shorter card leaves a blank column): ' + r);
+    }
+    assert.ok(/grid-template-columns\s*:\s*1fr\s*;/.test(rules[0]), 'bot-grid is single-column so each editor card spans full width at its natural height');
+    assert.ok(html.includes('class="bot-grid" id="addedBotGrid"'), 'added-bot grid uses the same bot-grid class and inherits the stacked layout');
   });
 
   console.log('— E. White-label scrub —');
@@ -709,11 +712,20 @@ function fakeStorage() {
     assert.ok(html.includes("'speechSynthesis' in window"), 'preview is feature-detected, never assumed');
   });
   await check('page wiring: test panel — preview label, log, input, engine call with the selected bot', async () => {
-    for (const needle of ['Test your AI', 'id="testLog"', 'id="testInput"', 'id="btnTestSend"', 'id="btnTestClear"', 'id="testBotLabel"',
+    for (const needle of ['Test your bot', 'id="testLog"', 'id="testInput"', 'id="btnTestSend"', 'id="btnTestClear"', 'id="testBotLabel"',
       'Preview only — replies come from the knowledge base and settings on this screen',
       'caiTestReply(msg, {', 'botName: bot.name', 'bizName: BRAND_NAME', 'selectedBot()', 'No reply — ']) {
       assert.ok(html.includes(needle), 'missing ' + needle);
     }
+  });
+  await check('page wiring: test panel sits right after the bot cards and before the Knowledge Base, titled "Test your bot"', async () => {
+    const botsAt = html.indexOf('Bot status &amp; mode');
+    const testAt = html.indexOf('<h2>Test your bot</h2>');
+    const kbAt = html.indexOf('<h2>Knowledge Base</h2>');
+    assert.ok(testAt > -1, 'test section heading reads "Test your bot"');
+    assert.ok(!html.includes('<h2>Test your AI</h2>'), 'the old "Test your AI" heading is gone');
+    assert.ok(botsAt > -1 && testAt > botsAt, 'test section comes after the Bot status & mode section (the bot cards)');
+    assert.ok(kbAt > -1 && testAt < kbAt, 'test section comes before the Knowledge Base section — no longer buried at the bottom of the page');
   });
 
   console.log('— J. Bot avatars —');
