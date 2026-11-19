@@ -4712,6 +4712,7 @@ let compRows = [];
 let compPicks = [];
 let compLoadedAddr = '';
 let compListingAddr = ''; /* last address the listing auto-fill fired for (once per search; retry re-runs loadCompsForAddress) */
+let compLeadFacts = null; /* { address, facts } stashed by openCompsForLead — the lead's own subject facts, merged UNDER the data-provider subject in loadCompsForAddress (address-keyed so a different search never inherits them) */
 /* Comp correctness gates (Oct 28): confidence, subject sqft, and price
    stability are load-derived state, cleared with everything else on
    address change. compPrevLoads is page-session memory keyed by address. */
@@ -6290,17 +6291,26 @@ async function loadCompsForAddress(retryAttempt){
       }
     }catch(e){ /* fall through */ }
     try{
-      /* Carry the data-provider subject facts into the Resideline call:
-         its valuation endpoint 400s (INVALID_PROPERTY_DATA) on
-         properties it cannot enrich from the address alone, and the
-         caller's facts are the function's first-choice source. Param
-         names match resideline-comps parseInput exactly; only
-         non-null facts are appended. */
+      /* Carry subject facts into the Resideline call: its valuation
+         endpoint 400s (INVALID_PROPERTY_DATA) on properties it
+         cannot enrich from the address alone, and the caller's facts
+         are the function's first-choice source. Param names match
+         resideline-comps parseInput exactly; only non-null facts are
+         appended. Facts source: the data-provider subject wins
+         per-field; the current lead's stashed facts (openCompsForLead,
+         matched by the exact address) fill any gaps — including the
+         whole set when the provider is down and prSubject is null. */
       let rlUrl = '/.netlify/functions/resideline-comps?address=' + encodeURIComponent(addr);
-      if(prSubject){
-        const factParams = [['beds', prSubject.beds], ['baths', prSubject.baths], ['sqft', prSubject.sqft], ['yearBuilt', prSubject.yearBuilt], ['propertyType', prSubject.propertyType]];
-        factParams.forEach(([k, v]) => { if(v != null && v !== '') rlUrl += '&' + k + '=' + encodeURIComponent(v); });
-      }
+      const leadFacts = (compLeadFacts && compLeadFacts.address === addr) ? compLeadFacts.facts : null;
+      const gapFill = (pv, lv) => (pv != null && pv !== '' ? pv : lv);
+      const factParams = [
+        ['beds', gapFill(prSubject ? prSubject.beds : null, leadFacts ? leadFacts.beds : null)],
+        ['baths', gapFill(prSubject ? prSubject.baths : null, leadFacts ? leadFacts.baths : null)],
+        ['sqft', gapFill(prSubject ? prSubject.sqft : null, leadFacts ? leadFacts.sqft : null)],
+        ['yearBuilt', gapFill(prSubject ? prSubject.yearBuilt : null, leadFacts ? leadFacts.yearBuilt : null)],
+        ['propertyType', gapFill(prSubject ? prSubject.propertyType : null, leadFacts ? leadFacts.propertyType : null)]
+      ];
+      factParams.forEach(([k, v]) => { if(v != null && v !== '') rlUrl += '&' + k + '=' + encodeURIComponent(v); });
       const rlResp = await fetch(rlUrl);
       if(rlResp.ok){
         const rj = await rlResp.json();
@@ -6428,6 +6438,20 @@ function openCompsForLead(id){
   showPage('comps');
   const addr = [l.address, l.city, l.state, l.zip].filter(Boolean).join(', ');
   const addrEl = document.getElementById('compListAddr'); if(addrEl) addrEl.value = addr;
+  /* Stash the lead's own subject facts for loadCompsForAddress: its
+     Resideline call merges them UNDER the data-provider subject
+     (provider wins per-field, lead fills gaps) — the rescue path when
+     the provider is down and returns no subject at all. Keyed to the
+     exact address composed here, so a later search for a different
+     address never inherits them. Lead field spellings are the page's
+     own (bedrooms/bathrooms/sqft/yearBuilt/propertyType|propType). */
+  compLeadFacts = { address: addr, facts: {
+    beds: (l.bedrooms != null ? l.bedrooms : (l.beds != null ? l.beds : null)),
+    baths: (l.bathrooms != null ? l.bathrooms : (l.baths != null ? l.baths : null)),
+    sqft: (l.sqft != null ? l.sqft : null),
+    yearBuilt: (l.yearBuilt != null ? l.yearBuilt : null),
+    propertyType: l.propertyType || l.propType || null
+  } };
   /* A lead's listing set is carried ONLY as a whole: no status means no
      price/DOM/agent either — never numbers without a status. The lead stores
      the old binary status; 'listed' maps to the new 'active' value. The new
