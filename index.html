@@ -6266,25 +6266,44 @@ async function loadCompsForAddress(retryAttempt){
   if(!addr){ if(msg) msg.textContent = 'Enter the property address first.'; return; }
   if(!retryAttempt && msg) msg.textContent = 'Loading verified comps…';
   try{
-    /* Comp source priority: data provider first (MLS + public-record comps,
-       recorded mortgage, lat/lng, distress/equity/title), ATTOM as fallback.
-       If PR matches the subject but has no comps, keep the PR subject
-       (distress badges etc.) and fill comps from ATTOM. */
+    /* Comp source priority (Nov 18, Troy): Resideline is the primary comp
+       feed — its sold comps run through our own selection engine inside
+       resideline-comps. The data provider still supplies the subject
+       record (owner, recorded mortgage, lat/lng, distress/equity/title)
+       and merges over whichever comp source wins, the same merge the old
+       ATTOM+PR path used. Comp fallback order: Resideline -> data
+       provider -> ATTOM. A Resideline set under the 3-comp minimum (or a
+       dormant Resideline key) simply falls through to the next source. */
     let d = null;
     let compSource = '';
     let prSubject = null;
+    let prData = null;
     try{
       const prResp = await fetch('/.netlify/functions/data-api?address=' + encodeURIComponent(addr));
       if(prResp.ok){
         const pj = await prResp.json();
         if(pj && pj.matched){
           prSubject = pj.property || null;
-          if(pj.comps && (pj.comps.best || []).length){
-            d = pj; compSource = 'data provider';
+          prData = pj;
+        }
+      }
+    }catch(e){ /* fall through */ }
+    try{
+      const rlResp = await fetch('/.netlify/functions/resideline-comps?address=' + encodeURIComponent(addr));
+      if(rlResp.ok){
+        const rj = await rlResp.json();
+        if(rj && rj.matched && rj.comps && (rj.comps.best || []).length >= 3){
+          d = rj; compSource = 'Resideline';
+          if(prSubject){
+            d.property = Object.assign({}, d.property || {}, prSubject);
+            compSource = 'Resideline+PR';
           }
         }
       }
-    }catch(e){ /* fall through to ATTOM */ }
+    }catch(e){ /* fall through to data provider / ATTOM */ }
+    if(!d && prData && prData.comps && (prData.comps.best || []).length){
+      d = prData; compSource = 'data provider';
+    }
     if(!d){
       const resp = await fetch('/.netlify/functions/attom-lookup?address=' + encodeURIComponent(addr));
       if(!resp.ok) throw new Error('HTTP ' + resp.status);
