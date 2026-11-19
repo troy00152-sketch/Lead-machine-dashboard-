@@ -6290,7 +6290,18 @@ async function loadCompsForAddress(retryAttempt){
       }
     }catch(e){ /* fall through */ }
     try{
-      const rlResp = await fetch('/.netlify/functions/resideline-comps?address=' + encodeURIComponent(addr));
+      /* Carry the data-provider subject facts into the Resideline call:
+         its valuation endpoint 400s (INVALID_PROPERTY_DATA) on
+         properties it cannot enrich from the address alone, and the
+         caller's facts are the function's first-choice source. Param
+         names match resideline-comps parseInput exactly; only
+         non-null facts are appended. */
+      let rlUrl = '/.netlify/functions/resideline-comps?address=' + encodeURIComponent(addr);
+      if(prSubject){
+        const factParams = [['beds', prSubject.beds], ['baths', prSubject.baths], ['sqft', prSubject.sqft], ['yearBuilt', prSubject.yearBuilt], ['propertyType', prSubject.propertyType]];
+        factParams.forEach(([k, v]) => { if(v != null && v !== '') rlUrl += '&' + k + '=' + encodeURIComponent(v); });
+      }
+      const rlResp = await fetch(rlUrl);
       if(rlResp.ok){
         const rj = await rlResp.json();
         if(rj && rj.matched && rj.comps && (rj.comps.best || []).length >= 3){
