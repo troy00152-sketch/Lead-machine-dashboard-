@@ -1,0 +1,1295 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Contacts — Lead Machine</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#0d1117">
+<link rel="apple-touch-icon" href="/assets/icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<script src="/assets/pwa.js" defer></script>
+<style>
+  :root{ --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --line:#2b3444; --text:#e8eef4; --muted:#9aa7b5; --accent:#ff6b1a; --green:#2ea043; --red:#e5534b; --amber:#e0a53a; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--text); }
+  .wrap{ max-width:1180px; margin:0 auto; padding:18px 14px 60px; }
+  .topbar{ display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
+  .title{ font-size:22px; font-weight:700; }
+  .back{ margin-left:auto; background:var(--panel2); border:1px solid var(--line); color:var(--text); border-radius:24px; padding:9px 16px; font-size:13px; font-weight:600; text-decoration:none; white-space:nowrap; }
+  .back + .back{ margin-left:0; }
+  .back.active{ border-color:var(--accent); color:var(--accent); }
+  .auth-banner{ display:none; background:#3a1414; border:1px solid var(--red); color:#ffb4ae; border-radius:10px; padding:8px 12px; font-size:13px; }
+  .auth-banner.show{ display:block; }
+  .card{ background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:16px; margin-bottom:14px; }
+  .card h2{ margin:0 0 10px; font-size:17px; }
+  .btn{ background:var(--panel2); color:var(--text); border:1px solid var(--line); border-radius:24px; padding:8px 14px; font-size:13px; font-weight:600; cursor:pointer; }
+  .btn:hover{ border-color:var(--accent); }
+  .btn.primary{ background:var(--accent); border-color:var(--accent); color:#fff; }
+  .btn.danger{ border-color:var(--red); color:#ff9d97; }
+  .btn.small{ padding:5px 11px; font-size:12px; }
+  .btn[disabled]{ opacity:.5; cursor:default; }
+  .pill{ display:inline-block; border:1px solid var(--line); background:var(--panel2); color:var(--muted); border-radius:20px; padding:2px 9px; font-size:11px; font-weight:600; }
+  .pill.green{ border-color:var(--green); color:#7ee2a0; }
+  .pill.red{ border-color:var(--red); color:#ff9d97; }
+  .pill.amber{ border-color:var(--amber); color:#f2cd8a; }
+  .pill.sealed{ border-color:var(--red); color:#ff9d97; }
+  .pill.partial{ border-color:var(--amber); color:#f2cd8a; }
+  .muted{ color:var(--muted); font-size:13px; }
+  .empty{ color:var(--muted); padding:18px 6px; text-align:center; font-size:14px; }
+  .toast{ position:fixed; left:50%; bottom:22px; transform:translateX(-50%); background:var(--panel2); border:1px solid var(--accent); color:var(--text); border-radius:12px; padding:10px 16px; font-size:14px; z-index:90; max-width:92vw; }
+  input, select, textarea{ background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:9px; padding:8px 10px; font-size:13px; font-family:inherit; }
+  input:focus, select:focus, textarea:focus{ outline:none; border-color:var(--accent); }
+  /* tabs */
+  .tabs{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
+  .tab{ background:var(--panel); border:1px solid var(--line); color:var(--muted); border-radius:24px; padding:8px 16px; font-size:13px; font-weight:700; cursor:pointer; }
+  .tab.active{ color:var(--accent); border-color:var(--accent); }
+  /* smart list chips */
+  .smart-chips{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px; align-items:center; }
+  .smart-chip{ display:inline-flex; align-items:center; gap:7px; background:var(--panel2); border:1px solid var(--line); border-radius:20px; padding:5px 8px 5px 12px; font-size:12px; font-weight:600; cursor:pointer; }
+  .smart-chip:hover{ border-color:var(--accent); }
+  .smart-chip.active{ border-color:var(--accent); color:var(--accent); }
+  .smart-chip .x{ background:none; border:none; color:var(--muted); cursor:pointer; font-size:14px; padding:0 2px; }
+  /* filters + bulk bar */
+  .filters{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:12px; }
+  .filters input[type="text"]{ min-width:220px; flex:1; }
+  .bulk-bar{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; background:var(--panel2); border:1px solid var(--accent); border-radius:12px; padding:10px 12px; margin-bottom:12px; }
+  .bulk-bar .count{ font-weight:700; font-size:13px; }
+  .bulk-bar input{ width:130px; }
+  /* table */
+  .tbl-wrap{ overflow-x:auto; }
+  table.tbl{ width:100%; border-collapse:collapse; font-size:13px; }
+  .tbl th{ text-align:left; color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.05em; padding:8px; border-bottom:1px solid var(--line); white-space:nowrap; }
+  .tbl td{ padding:9px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  .tbl tbody tr{ cursor:pointer; }
+  .tbl tbody tr:hover td{ background:var(--panel2); }
+  .tbl .name{ font-weight:700; }
+  .tagchip{ display:inline-block; background:var(--panel2); border:1px solid var(--line); border-radius:14px; padding:1px 8px; font-size:11px; margin:0 4px 3px 0; white-space:nowrap; }
+  .tagchip .x{ background:none; border:none; color:var(--muted); cursor:pointer; font-size:12px; padding:0 0 0 4px; }
+  /* drawer */
+  .overlay{ position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:60; }
+  .drawer{ position:fixed; top:0; right:0; bottom:0; width:min(480px, 96vw); background:var(--panel); border-left:1px solid var(--line); z-index:61; overflow-y:auto; padding:18px; }
+  .drawer h2{ margin:0 0 4px; font-size:19px; }
+  .drawer h3{ margin:18px 0 8px; font-size:14px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); }
+  .drawer .close-x{ position:absolute; top:12px; right:14px; background:var(--panel2); border:1px solid var(--line); color:var(--text); border-radius:50%; width:30px; height:30px; cursor:pointer; font-size:15px; }
+  .field-grid{ display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .field-grid label{ display:block; font-size:11px; color:var(--muted); margin-bottom:3px; }
+  .field-grid input{ width:100%; }
+  .field-grid .full{ grid-column:1 / -1; }
+  /* DND — mirrors conversations.html */
+  .dnd-box{ background:var(--panel2); border:1px solid var(--line); border-radius:12px; padding:12px; }
+  .dnd-box h3{ margin:0 0 8px; color:var(--text); text-transform:none; letter-spacing:0; font-size:14px; }
+  .dnd-row{ display:block; padding:5px 0; font-size:13px; cursor:pointer; }
+  .dnd-state{ color:var(--muted); font-size:12px; margin:6px 0; }
+  .dnd-actions{ display:flex; gap:8px; margin-top:8px; flex-wrap:wrap; }
+  .note-item{ border-bottom:1px solid var(--line); padding:7px 0; font-size:13px; }
+  .note-item .when{ color:var(--muted); font-size:11px; }
+  .task-item{ display:flex; gap:9px; align-items:flex-start; padding:8px 0; border-bottom:1px solid var(--line); font-size:13px; }
+  .task-item .grow{ flex:1; }
+  .task-item .due{ color:var(--muted); font-size:12px; }
+  .task-item .due.overdue{ color:#ff9d97; font-weight:700; }
+  .task-item.done .t-title{ text-decoration:line-through; color:var(--muted); }
+  .kv{ font-size:13px; padding:3px 0; }
+  .kv b{ color:var(--muted); font-weight:600; display:inline-block; min-width:110px; }
+  @media (max-width:640px){ .field-grid{ grid-template-columns:1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <div class="title">👥 Contacts</div>
+    <span id="authBanner" class="auth-banner"></span>
+    <a class="back active" href="/contacts.html">👥 Contacts</a>
+    <a class="back" href="/index.html">← Dashboard</a>
+  </div>
+
+  <div class="tabs">
+    <button class="tab active" data-tab="contacts" type="button">Contacts</button>
+    <button class="tab" data-tab="smart" type="button">Smart Lists</button>
+    <button class="tab" data-tab="fields" type="button">Custom Fields</button>
+    <button class="tab" data-tab="tasks" type="button">Tasks</button>
+  </div>
+
+  <!-- ============ CONTACTS TAB ============ -->
+  <section id="tab-contacts">
+    <div class="smart-chips" id="smartChips"></div>
+    <div class="card">
+      <div class="filters">
+        <input id="fSearch" type="text" placeholder="Search name, phone, email, address…">
+        <select id="fMarket"><option value="">All markets</option></select>
+        <select id="fTag"><option value="">All tags</option></select>
+        <select id="fStage"><option value="">All stages</option></select>
+        <select id="fDnd">
+          <option value="">DND: any</option>
+          <option value="on">On DND</option>
+          <option value="off">Not on DND</option>
+        </select>
+        <input id="smartName" type="text" placeholder="Smart list name" style="width:150px;flex:none">
+        <button class="btn small" id="btnSaveSmart" type="button">Save as Smart List</button>
+        <button class="btn small" id="btnClearFilters" type="button">Clear filters</button>
+      </div>
+      <div id="bulkBar" class="bulk-bar" hidden>
+        <span class="count" id="bulkCount"></span>
+        <input id="bulkTagInput" type="text" placeholder="Tag name">
+        <button class="btn small" id="bulkAddTag" type="button">Add tag</button>
+        <button class="btn small" id="bulkRemoveTag" type="button">Remove tag</button>
+        <select id="bulkWorkflow"><option value="">Choose workflow…</option></select>
+        <button class="btn small" id="bulkAddWorkflow" type="button">Add to workflow</button>
+        <button class="btn small" id="bulkExport" type="button">Export CSV</button>
+        <button class="btn small danger" id="bulkDelete" type="button">Delete</button>
+        <button class="btn small" id="bulkClear" type="button">Clear</button>
+      </div>
+      <div class="muted" id="listMeta" style="margin-bottom:8px">Loading contacts…</div>
+      <div class="tbl-wrap">
+        <table class="tbl" id="contactsTable">
+          <thead><tr>
+            <th><input type="checkbox" id="selectAll"></th>
+            <th>Name</th><th>Phone</th><th>Email</th><th>Address</th>
+            <th>Tags</th><th>Market</th><th>Stage</th><th>DND</th><th>Added</th>
+          </tr></thead>
+          <tbody id="contactsBody"></tbody>
+        </table>
+      </div>
+      <div id="listEmpty" class="empty" hidden></div>
+    </div>
+    <p class="muted">Sources: Command Center contacts (workflow enrollments — the same records the bots and workflows read) merged with My Leads from the Dashboard. Rows marked “Lead only” are not in the CRM yet; tag and field edits on those save to the lead, and “Add to workflow” enrolls them for real. Delete removes the Command Center record only — it never deletes the HighLevel contact.</p>
+  </section>
+
+  <!-- ============ SMART LISTS TAB ============ -->
+  <section id="tab-smart" hidden>
+    <div class="card">
+      <h2>Smart Lists</h2>
+      <div id="smartListBody"><div class="empty">No smart lists saved yet. Set filters on the Contacts tab and use “Save as Smart List”.</div></div>
+      <p class="muted">A smart list is a saved filter set (search, market, tag, stage, DND). Click one to re-apply it to the Contacts tab. Smart lists are saved in this browser, like the Dashboard's other list settings.</p>
+    </div>
+  </section>
+
+  <!-- ============ CUSTOM FIELDS TAB ============ -->
+  <section id="tab-fields" hidden>
+    <div class="card">
+      <h2>Custom Fields — HighLevel</h2>
+      <div id="fieldsBody"><div class="empty">Open this tab to load the field list.</div></div>
+      <p class="muted">Field definitions (name + type) come live from HighLevel. Each contact's values show in the contact detail under “HighLevel record”. Field definitions are managed in HighLevel, so this list is read-only here.</p>
+    </div>
+  </section>
+
+  <!-- ============ TASKS TAB ============ -->
+  <section id="tab-tasks" hidden>
+    <div class="card">
+      <h2>Tasks</h2>
+      <div class="filters">
+        <select id="taskContact"><option value="">Choose a contact…</option></select>
+        <input id="taskTitle" type="text" placeholder="Task title">
+        <input id="taskDue" type="date">
+        <button class="btn small primary" id="btnAddTask" type="button">Add task</button>
+      </div>
+      <div id="taskList"></div>
+      <p class="muted">Tasks are saved in this browser (the Command Center has no task backend yet) — they show here and on each contact's detail view.</p>
+    </div>
+  </section>
+</div>
+
+<!-- ============ CONTACT DETAIL DRAWER ============ -->
+<div id="drawerOverlay" class="overlay" hidden></div>
+<aside id="drawer" class="drawer" hidden>
+  <button class="close-x" id="drawerClose" type="button" title="Close">✕</button>
+  <div id="drawerBody"></div>
+</aside>
+
+<div id="toast" class="toast" hidden></div>
+
+<script>
+/* ==PURE== */
+/* Pure contact logic — no DOM access in this block. The page uses
+   these functions directly, and contacts-regression.js extracts and
+   unit-tests them. Storage helpers take any localStorage-shaped
+   object ({ getItem, setItem }) so tests can pass a fake. */
+var SMART_KEY = 'acc_smart_lists';
+var TASK_KEY = 'acc_contact_tasks';
+var LEADS_KEY = 'acc_leads';
+
+function ctDigits10(v) {
+  var d = String(v == null ? '' : v).replace(/\D/g, '');
+  return d.length > 10 ? d.slice(-10) : d;
+}
+function ctNewId(prefix) {
+  return prefix + '_' + Date.now().toString(36) + '_' + Math.floor(Math.random() * 1e6).toString(36);
+}
+function ctLoadJson(storage, key, fallback) {
+  try {
+    var raw = storage.getItem(key);
+    if (!raw) return fallback;
+    var v = JSON.parse(raw);
+    return v == null ? fallback : v;
+  } catch (e) { return fallback; }
+}
+function ctSaveJson(storage, key, value) {
+  storage.setItem(key, JSON.stringify(value));
+}
+
+/* A My Leads row (index.html acc_leads) in Contacts-table shape. */
+function contactFromLead(lead) {
+  lead = lead || {};
+  var phones = Array.isArray(lead.phones) ? lead.phones : [];
+  var phone = '';
+  for (var i = 0; i < phones.length; i++) {
+    var p = phones[i];
+    var n = p && typeof p === 'object' ? (p.number || p.phone || '') : p;
+    if (n) { phone = String(n); break; }
+  }
+  return {
+    id: 'lead:' + String(lead.id || ''),
+    source: 'lead',
+    key: '',
+    leadId: lead.id || '',
+    phone: phone,
+    name: String(lead.owner || ''),
+    firstName: '',
+    email: String(lead.email || ''),
+    address1: String(lead.address || ''),
+    city: String(lead.city || ''),
+    state: String(lead.state || ''),
+    postalCode: String(lead.zip || ''),
+    tags: Array.isArray(lead.tags) ? lead.tags.map(String) : [],
+    signal: String(lead.distressSignal || ''),
+    market: String(lead.market || ''),
+    stage: String(lead.status || ''),
+    enrolledAt: lead.addedAt ? (Date.parse(lead.addedAt) || 0) : 0,
+    pricing: null,
+    notes: Array.isArray(lead.notes) ? lead.notes : [],
+    dnd: null,
+  };
+}
+
+/* Merge CRM contacts (cc-enroll-api list) with My Leads. Deduped by
+   phone digits — the CRM record wins and is marked source 'both'
+   with its lead id attached. */
+function mergeContacts(crmRows, leadRows) {
+  var out = [];
+  var byPhone = {};
+  (crmRows || []).forEach(function (r) {
+    var row = Object.assign({}, r, { id: 'crm:' + r.key, source: r.source || 'crm' });
+    out.push(row);
+    var d = ctDigits10(row.phone);
+    if (d) byPhone[d] = row;
+  });
+  (leadRows || []).forEach(function (lead) {
+    var row = contactFromLead(lead);
+    var d = ctDigits10(row.phone);
+    if (d && byPhone[d]) {
+      byPhone[d].source = 'both';
+      byPhone[d].leadId = lead.id || '';
+      return;
+    }
+    out.push(row);
+  });
+  return out;
+}
+
+/* f = { q, market, tag, stage, dnd: '' | 'on' | 'off' } */
+function applyFilters(list, f) {
+  f = f || {};
+  var q = String(f.q || '').trim().toLowerCase();
+  var qd = ctDigits10(f.q || '');
+  return (list || []).filter(function (r) {
+    if (f.market && r.market !== f.market) return false;
+    if (f.stage && r.stage !== f.stage) return false;
+    if (f.tag) {
+      var want = String(f.tag).toLowerCase();
+      var has = (r.tags || []).some(function (t) { return String(t).toLowerCase() === want; });
+      if (!has) return false;
+    }
+    if (f.dnd === 'on' && !(r.dnd && r.dnd.anyOn)) return false;
+    if (f.dnd === 'off' && !(r.dnd && !r.dnd.anyOn)) return false;
+    if (q) {
+      var hay = [r.name, r.phone, r.email, r.address1, r.city, r.state, r.postalCode, r.market, r.stage]
+        .join(' ').toLowerCase();
+      var phoneHit = qd && ctDigits10(r.phone).indexOf(qd) !== -1;
+      if (hay.indexOf(q) === -1 && !phoneHit) return false;
+    }
+    return true;
+  });
+}
+
+function ctCsvCell(v) {
+  var s = String(v == null ? '' : v);
+  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+function contactsToCsv(rows) {
+  var head = ['Name', 'Phone', 'Email', 'Address', 'City', 'State', 'ZIP', 'Tags', 'Market', 'Stage', 'Source'];
+  var lines = [head.join(',')];
+  (rows || []).forEach(function (r) {
+    lines.push([
+      r.name, r.phone, r.email, r.address1, r.city, r.state, r.postalCode,
+      (r.tags || []).join('; '), r.market, r.stage, r.source,
+    ].map(ctCsvCell).join(','));
+  });
+  return lines.join('\n');
+}
+
+/* ---- Smart Lists (localStorage) ---- */
+function loadSmartLists(storage) {
+  var v = ctLoadJson(storage, SMART_KEY, []);
+  return Array.isArray(v) ? v : [];
+}
+function addSmartList(storage, name, filters) {
+  name = String(name || '').trim();
+  if (!name) return null;
+  var lists = loadSmartLists(storage);
+  var entry = {
+    id: ctNewId('sl'), name: name, createdAt: Date.now(),
+    filters: {
+      q: String((filters && filters.q) || ''), market: String((filters && filters.market) || ''),
+      tag: String((filters && filters.tag) || ''), stage: String((filters && filters.stage) || ''),
+      dnd: String((filters && filters.dnd) || ''),
+    },
+  };
+  lists.unshift(entry);
+  ctSaveJson(storage, SMART_KEY, lists.slice(0, 50));
+  return entry;
+}
+function removeSmartList(storage, id) {
+  var lists = loadSmartLists(storage).filter(function (l) { return l.id !== id; });
+  ctSaveJson(storage, SMART_KEY, lists);
+  return lists;
+}
+
+/* ---- Tasks (localStorage — no task backend exists) ---- */
+function loadTasks(storage) {
+  var v = ctLoadJson(storage, TASK_KEY, []);
+  return Array.isArray(v) ? v : [];
+}
+function addTask(storage, t) {
+  t = t || {};
+  var title = String(t.title || '').trim();
+  if (!title) return null;
+  var task = {
+    id: ctNewId('task'),
+    contactId: String(t.contactId || ''),
+    contactName: String(t.contactName || ''),
+    title: title,
+    due: String(t.due || ''),
+    done: false,
+    createdAt: Date.now(),
+  };
+  var tasks = loadTasks(storage);
+  tasks.push(task);
+  ctSaveJson(storage, TASK_KEY, tasks);
+  return task;
+}
+function setTaskDone(storage, id, done) {
+  var tasks = loadTasks(storage);
+  var found = null;
+  tasks.forEach(function (t) {
+    if (t.id === id) { t.done = !!done; t.doneAt = done ? Date.now() : null; found = t; }
+  });
+  ctSaveJson(storage, TASK_KEY, tasks);
+  return found;
+}
+function removeTask(storage, id) {
+  var tasks = loadTasks(storage).filter(function (t) { return t.id !== id; });
+  ctSaveJson(storage, TASK_KEY, tasks);
+  return tasks;
+}
+/* ==/PURE== */
+</script>
+
+<script>
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+function toast(msg) {
+  var t = document.getElementById('toast');
+  t.textContent = msg;
+  t.hidden = false;
+  clearTimeout(toast._h);
+  toast._h = setTimeout(function () { t.hidden = true; }, 4200);
+}
+function showAuth(msg) {
+  var b = document.getElementById('authBanner');
+  b.textContent = msg;
+  b.classList.add('show');
+}
+async function api(path, opts) {
+  var res = await fetch('/.netlify/functions/' + path, Object.assign({ credentials: 'include' }, opts || {}));
+  var data = null;
+  try { data = await res.json(); } catch (e) { /* non-JSON */ }
+  if (res.status === 401 || res.status === 403) {
+    showAuth('Sign in as admin to use Contacts — this browser session is not authorized.');
+    var err = new Error('auth');
+    err.auth = true;
+    throw err;
+  }
+  return { status: res.status, data: data || {} };
+}
+function enrollGet(action) { return api('cc-enroll-api?action=' + encodeURIComponent(action)); }
+function enrollPost(body) {
+  return api('cc-enroll-api', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+}
+function convPost(body) {
+  return api('cc-conversations-api', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+}
+function dataGet(action, extra) {
+  return api('cc-data?action=' + encodeURIComponent(action) + (extra || ''));
+}
+async function wfList() {
+  var r = await api('cc-workflows-api?action=list');
+  return (r.data && r.data.workflows) || [];
+}
+
+var state = {
+  contacts: [],
+  filtered: [],
+  selected: new Set(),
+  workflows: [],
+  activeSmartId: '',
+  fieldsLoaded: false,
+  fieldDefs: [],
+  detail: null,
+  detailDnd: null,
+};
+
+function readLeads() {
+  try { return JSON.parse(localStorage.getItem(LEADS_KEY) || '[]') || []; } catch (e) { return []; }
+}
+function writeLeads(leads) {
+  localStorage.setItem(LEADS_KEY, JSON.stringify(leads));
+}
+function currentFilters() {
+  return {
+    q: document.getElementById('fSearch').value,
+    market: document.getElementById('fMarket').value,
+    tag: document.getElementById('fTag').value,
+    stage: document.getElementById('fStage').value,
+    dnd: document.getElementById('fDnd').value,
+  };
+}
+function setFilters(f) {
+  document.getElementById('fSearch').value = f.q || '';
+  document.getElementById('fMarket').value = f.market || '';
+  document.getElementById('fTag').value = f.tag || '';
+  document.getElementById('fStage').value = f.stage || '';
+  document.getElementById('fDnd').value = f.dnd || '';
+}
+function workflowName(id) {
+  var w = state.workflows.find(function (x) { return x.id === id; });
+  return w ? w.name : (id || '');
+}
+function fmtDate(ms) {
+  if (!ms) return '—';
+  var d = new Date(ms);
+  return isNaN(d.getTime()) ? '—' : d.toLocaleDateString();
+}
+function dndPill(r) {
+  if (!r.dnd) return '<span class="muted">—</span>';
+  if (r.dnd.allOn) return '<span class="pill sealed">Sealed</span>';
+  if (r.dnd.anyOn) return '<span class="pill partial">Partial</span>';
+  return '<span class="pill">Open</span>';
+}
+function addressOf(r) {
+  var parts = [r.address1, r.city, r.state, r.postalCode].filter(Boolean);
+  return parts.length ? esc(parts.join(', ')) : '<span class="muted">—</span>';
+}
+
+async function loadContacts() {
+  var crm = [];
+  try {
+    var r = await enrollGet('list');
+    crm = (r.data && r.data.contacts) || [];
+  } catch (e) {
+    if (!e.auth) document.getElementById('listMeta').textContent = 'Could not load Command Center contacts.';
+  }
+  state.contacts = mergeContacts(crm, readLeads());
+  populateFilterOptions();
+  populateTaskContacts();
+  renderSmartChips();
+  renderList();
+}
+
+function populateFilterOptions() {
+  var markets = {}, tags = {}, stages = {};
+  state.contacts.forEach(function (r) {
+    if (r.market) markets[r.market] = true;
+    (r.tags || []).forEach(function (t) { tags[t] = true; });
+    if (r.stage) stages[r.stage] = true;
+  });
+  state.workflows.forEach(function (w) { markets[w.id] = true; });
+  function fill(id, values, label) {
+    var sel = document.getElementById(id);
+    var cur = sel.value;
+    sel.innerHTML = '<option value="">' + label + '</option>' + values.map(function (v) {
+      return '<option value="' + esc(v) + '">' + esc(v) + '</option>';
+    }).join('');
+    sel.value = cur;
+  }
+  var mSel = document.getElementById('fMarket');
+  var mCur = mSel.value;
+  mSel.innerHTML = '<option value="">All markets</option>' + Object.keys(markets).sort().map(function (m) {
+    return '<option value="' + esc(m) + '">' + esc(workflowName(m) || m) + '</option>';
+  }).join('');
+  mSel.value = mCur;
+  fill('fTag', Object.keys(tags).sort(), 'All tags');
+  fill('fStage', Object.keys(stages).sort(), 'All stages');
+  var bw = document.getElementById('bulkWorkflow');
+  var bwCur = bw.value;
+  bw.innerHTML = '<option value="">Choose workflow…</option>' + state.workflows.map(function (w) {
+    return '<option value="' + esc(w.id) + '">' + esc(w.name) + (w.status === 'draft' ? ' (draft)' : '') + '</option>';
+  }).join('');
+  bw.value = bwCur;
+}
+
+function renderList() {
+  var f = currentFilters();
+  state.filtered = applyFilters(state.contacts, f);
+  var body = document.getElementById('contactsBody');
+  body.innerHTML = state.filtered.map(function (r) {
+    var checked = state.selected.has(r.id) ? ' checked' : '';
+    var tagHtml = (r.tags || []).map(function (t) { return '<span class="tagchip">' + esc(t) + '</span>'; }).join('');
+    if (r.signal) tagHtml += '<span class="tagchip">' + esc(r.signal) + '</span>';
+    if (r.source === 'lead') tagHtml += '<span class="tagchip">Lead only</span>';
+    return '<tr data-open="' + esc(r.id) + '">' +
+      '<td><input type="checkbox" data-select="' + esc(r.id) + '"' + checked + '></td>' +
+      '<td class="name">' + esc(r.name || '—') + '</td>' +
+      '<td>' + esc(r.phone || '—') + '</td>' +
+      '<td>' + esc(r.email || '—') + '</td>' +
+      '<td>' + addressOf(r) + '</td>' +
+      '<td>' + (tagHtml || '<span class="muted">—</span>') + '</td>' +
+      '<td>' + esc(workflowName(r.market) || '—') + '</td>' +
+      '<td>' + esc(r.stage || '—') + '</td>' +
+      '<td>' + dndPill(r) + '</td>' +
+      '<td>' + fmtDate(r.enrolledAt) + '</td></tr>';
+  }).join('');
+  var empty = document.getElementById('listEmpty');
+  if (!state.filtered.length) {
+    empty.hidden = false;
+    empty.textContent = state.contacts.length
+      ? 'No contacts match these filters.'
+      : 'No contacts yet. Contacts appear here when leads are enrolled in a workflow or added on the Dashboard.';
+  } else {
+    empty.hidden = true;
+  }
+  document.getElementById('listMeta').textContent =
+    'Showing ' + state.filtered.length + ' of ' + state.contacts.length + ' contacts';
+  renderBulkBar();
+}
+
+function renderBulkBar() {
+  var bar = document.getElementById('bulkBar');
+  var n = state.selected.size;
+  bar.hidden = n === 0;
+  document.getElementById('bulkCount').textContent = n + ' selected';
+}
+function selectedRows() {
+  return state.contacts.filter(function (r) { return state.selected.has(r.id); });
+}
+
+/* ---- tabs ---- */
+document.querySelectorAll('.tab').forEach(function (btn) {
+  btn.addEventListener('click', function () {
+    document.querySelectorAll('.tab').forEach(function (b) { b.classList.toggle('active', b === btn); });
+    ['contacts', 'smart', 'fields', 'tasks'].forEach(function (t) {
+      document.getElementById('tab-' + t).hidden = t !== btn.dataset.tab;
+    });
+    if (btn.dataset.tab === 'fields') loadFields();
+    if (btn.dataset.tab === 'smart') renderSmartListTab();
+    if (btn.dataset.tab === 'tasks') renderTasks();
+  });
+});
+function showTab(name) {
+  document.querySelector('.tab[data-tab="' + name + '"]').click();
+}
+
+/* ---- filters ---- */
+['fSearch', 'fMarket', 'fTag', 'fStage', 'fDnd'].forEach(function (id) {
+  var el = document.getElementById(id);
+  el.addEventListener('input', function () { state.activeSmartId = ''; renderSmartChips(); renderList(); });
+  el.addEventListener('change', function () { state.activeSmartId = ''; renderSmartChips(); renderList(); });
+});
+document.getElementById('btnClearFilters').addEventListener('click', function () {
+  setFilters({});
+  state.activeSmartId = '';
+  renderSmartChips();
+  renderList();
+});
+
+/* ---- selection ---- */
+document.getElementById('contactsBody').addEventListener('change', function (e) {
+  var cb = e.target.closest('[data-select]');
+  if (!cb) return;
+  if (cb.checked) state.selected.add(cb.dataset.select);
+  else state.selected.delete(cb.dataset.select);
+  renderBulkBar();
+});
+document.getElementById('selectAll').addEventListener('change', function (e) {
+  if (e.target.checked) state.filtered.forEach(function (r) { state.selected.add(r.id); });
+  else state.filtered.forEach(function (r) { state.selected.delete(r.id); });
+  renderList();
+});
+document.getElementById('bulkClear').addEventListener('click', function () {
+  state.selected.clear();
+  document.getElementById('selectAll').checked = false;
+  renderList();
+});
+
+/* ---- smart lists UI ---- */
+function renderSmartChips() {
+  var lists = loadSmartLists(localStorage);
+  var wrap = document.getElementById('smartChips');
+  if (!lists.length) { wrap.innerHTML = ''; return; }
+  wrap.innerHTML = '<span class="muted">Smart lists:</span>' + lists.map(function (l) {
+    return '<span class="smart-chip' + (state.activeSmartId === l.id ? ' active' : '') + '" data-smart="' + esc(l.id) + '">' +
+      esc(l.name) + '<button class="x" type="button" data-smart-del="' + esc(l.id) + '" title="Delete smart list">×</button></span>';
+  }).join('');
+}
+function renderSmartListTab() {
+  var lists = loadSmartLists(localStorage);
+  var body = document.getElementById('smartListBody');
+  if (!lists.length) {
+    body.innerHTML = '<div class="empty">No smart lists saved yet. Set filters on the Contacts tab and use “Save as Smart List”.</div>';
+    return;
+  }
+  body.innerHTML = lists.map(function (l) {
+    var f = l.filters || {};
+    var bits = [];
+    if (f.q) bits.push('search “' + f.q + '”');
+    if (f.market) bits.push('market: ' + workflowName(f.market));
+    if (f.tag) bits.push('tag: ' + f.tag);
+    if (f.stage) bits.push('stage: ' + f.stage);
+    if (f.dnd) bits.push('DND: ' + f.dnd);
+    return '<div class="task-item"><div class="grow"><b>' + esc(l.name) + '</b>' +
+      '<div class="due">' + esc(bits.join(' · ') || 'no filters') + ' · saved ' + fmtDate(l.createdAt) + '</div></div>' +
+      '<button class="btn small" type="button" data-smart="' + esc(l.id) + '">Apply</button>' +
+      '<button class="btn small danger" type="button" data-smart-del="' + esc(l.id) + '">Delete</button></div>';
+  }).join('');
+}
+function applySmartList(id) {
+  var l = loadSmartLists(localStorage).find(function (x) { return x.id === id; });
+  if (!l) return;
+  setFilters(l.filters || {});
+  state.activeSmartId = id;
+  renderSmartChips();
+  renderList();
+  showTab('contacts');
+}
+document.getElementById('btnSaveSmart').addEventListener('click', function () {
+  var name = document.getElementById('smartName').value.trim();
+  if (!name) { toast('Type a name for the smart list first.'); return; }
+  var entry = addSmartList(localStorage, name, currentFilters());
+  if (!entry) { toast('Could not save the smart list.'); return; }
+  document.getElementById('smartName').value = '';
+  state.activeSmartId = entry.id;
+  renderSmartChips();
+  toast('Smart list “' + entry.name + '” saved.');
+});
+document.addEventListener('click', function (e) {
+  var del = e.target.closest('[data-smart-del]');
+  if (del) {
+    e.stopPropagation();
+    removeSmartList(localStorage, del.dataset.smartDel);
+    if (state.activeSmartId === del.dataset.smartDel) state.activeSmartId = '';
+    renderSmartChips();
+    renderSmartListTab();
+    toast('Smart list deleted.');
+    return;
+  }
+  var chip = e.target.closest('[data-smart]');
+  if (chip) applySmartList(chip.dataset.smart);
+});
+</script>
+
+<script>
+/* ---- lead-record writes (lead-only contacts live in acc_leads) ---- */
+function mutateLead(leadId, fn) {
+  var leads = readLeads();
+  var lead = leads.find(function (l) { return String(l.id) === String(leadId); });
+  if (!lead) return false;
+  fn(lead);
+  writeLeads(leads);
+  return true;
+}
+function leadAddTags(row, tags) {
+  return mutateLead(row.leadId, function (lead) {
+    var cur = Array.isArray(lead.tags) ? lead.tags.map(String) : [];
+    tags.forEach(function (t) {
+      if (!cur.some(function (x) { return x.toLowerCase() === t.toLowerCase(); })) cur.push(t);
+    });
+    lead.tags = cur;
+  });
+}
+function leadRemoveTags(row, tags) {
+  var lower = tags.map(function (t) { return t.toLowerCase(); });
+  return mutateLead(row.leadId, function (lead) {
+    lead.tags = (Array.isArray(lead.tags) ? lead.tags : []).filter(function (t) {
+      return lower.indexOf(String(t).toLowerCase()) === -1;
+    });
+  });
+}
+
+/* Tag write for one row: CRM records go through cc-enroll-api (the
+   store the engine reads); lead-only rows update the local lead. */
+async function tagRow(row, add, remove) {
+  if (row.source === 'lead') {
+    var ok = true;
+    if (add.length) ok = leadAddTags(row, add) && ok;
+    if (remove.length) ok = leadRemoveTags(row, remove) && ok;
+    return ok;
+  }
+  var r = await enrollPost({ action: 'tag', phone: row.phone, add: add, remove: remove });
+  return r.status === 200 && r.data && r.data.ok;
+}
+
+async function bulkTag(addMode) {
+  var tag = document.getElementById('bulkTagInput').value.trim();
+  if (!tag) { toast('Type a tag name first.'); return; }
+  var rows = selectedRows();
+  if (!rows.length) return;
+  var ok = 0, fail = 0;
+  for (var i = 0; i < rows.length; i++) {
+    try {
+      var good = await tagRow(rows[i], addMode ? [tag] : [], addMode ? [] : [tag]);
+      if (good) ok++; else fail++;
+    } catch (e) { fail++; if (e.auth) break; }
+  }
+  toast((addMode ? 'Tag “' + tag + '” added to ' : 'Tag “' + tag + '” removed from ') + ok + ' contact' + (ok === 1 ? '' : 's') + (fail ? ' — ' + fail + ' failed' : '') + '.');
+  document.getElementById('bulkTagInput').value = '';
+  await loadContacts();
+}
+document.getElementById('bulkAddTag').addEventListener('click', function () { bulkTag(true); });
+document.getElementById('bulkRemoveTag').addEventListener('click', function () { bulkTag(false); });
+
+/* Enroll one row into a workflow through the existing enroll action.
+   The workflow's trigger tag rides along so the engine accepts it;
+   drafts refuse (the engine's own rule) and the reason is reported. */
+async function enrollRow(row, wf) {
+  if (!row.phone) return { ok: false, reason: 'no phone number' };
+  var tags = (row.tags || []).slice();
+  if (wf.tag && !tags.some(function (t) { return t.toLowerCase() === wf.tag.toLowerCase(); })) tags.push(wf.tag);
+  var r = await enrollPost({
+    action: 'enroll',
+    contact: {
+      phone: row.phone, name: row.name, firstName: row.firstName, email: row.email,
+      address1: row.address1, city: row.city, state: row.state, postalCode: row.postalCode,
+      market: wf.id, tags: tags,
+    },
+  });
+  var d = r.data || {};
+  if (d.enrolled) return { ok: true };
+  if (Array.isArray(d.results) && d.results[0]) {
+    return d.results[0].ok ? { ok: true } : { ok: false, reason: d.results[0].reason || 'refused' };
+  }
+  return { ok: false, reason: d.error || ('HTTP ' + r.status) };
+}
+async function bulkAddToWorkflow() {
+  var wfId = document.getElementById('bulkWorkflow').value;
+  var wf = state.workflows.find(function (w) { return w.id === wfId; });
+  if (!wf) { toast('Choose a workflow first.'); return; }
+  var rows = selectedRows();
+  if (!rows.length) return;
+  var ok = 0, reasons = {};
+  for (var i = 0; i < rows.length; i++) {
+    try {
+      var res = await enrollRow(rows[i], wf);
+      if (res.ok) {
+        ok++;
+        if (rows[i].source === 'lead' && wf.tag) leadAddTags(rows[i], [wf.tag]);
+      } else {
+        reasons[res.reason] = (reasons[res.reason] || 0) + 1;
+      }
+    } catch (e) { reasons['request failed'] = (reasons['request failed'] || 0) + 1; if (e.auth) break; }
+  }
+  var why = Object.keys(reasons).map(function (k) { return reasons[k] + ' × ' + k; }).join('; ');
+  toast('Added ' + ok + ' of ' + rows.length + ' to ' + wf.name + (why ? ' — skipped: ' + why : '') + '.');
+  await loadContacts();
+}
+document.getElementById('bulkAddWorkflow').addEventListener('click', bulkAddToWorkflow);
+
+document.getElementById('bulkExport').addEventListener('click', function () {
+  var rows = selectedRows();
+  if (!rows.length) { toast('Select at least one contact to export.'); return; }
+  var blob = new Blob([contactsToCsv(rows)], { type: 'text/csv' });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'contacts-export.csv';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
+  toast('Exported ' + rows.length + ' contact' + (rows.length === 1 ? '' : 's') + ' to CSV.');
+});
+
+async function deleteRow(row) {
+  if (row.source === 'lead') {
+    var leads = readLeads().filter(function (l) { return String(l.id) !== String(row.leadId); });
+    writeLeads(leads);
+    return true;
+  }
+  var r = await enrollPost({ action: 'delete', phone: row.phone });
+  return r.status === 200 && r.data && r.data.ok;
+}
+document.getElementById('bulkDelete').addEventListener('click', async function () {
+  var rows = selectedRows();
+  if (!rows.length) return;
+  if (!confirm('Delete ' + rows.length + ' contact' + (rows.length === 1 ? '' : 's') + ' from the Command Center?\n\nThis removes the standalone record (or local lead). It does NOT delete the HighLevel contact.')) return;
+  var ok = 0, fail = 0;
+  for (var i = 0; i < rows.length; i++) {
+    try { if (await deleteRow(rows[i])) ok++; else fail++; } catch (e) { fail++; if (e.auth) break; }
+  }
+  state.selected.clear();
+  toast('Deleted ' + ok + ' contact' + (ok === 1 ? '' : 's') + (fail ? ' — ' + fail + ' failed' : '') + '.');
+  await loadContacts();
+});
+</script>
+
+<script>
+/* ================= CONTACT DETAIL ================= */
+/* DND panel mirrors conversations.html: same channels, same labels,
+   same cc-conversations-api dnd-set write. State comes from the
+   server-derived record (cc-dnd), never inferred in the browser. */
+var DND_CHANNELS = [
+  { id: 'sms', label: 'Text Messages' },
+  { id: 'email', label: 'Email' },
+  { id: 'call', label: 'Calls & voicemail' },
+];
+function dndSectionHtml() {
+  var d = state.detailDnd;
+  var r = state.detail;
+  if (!r || r.source === 'lead') {
+    return '<div class="dnd-box"><h3>🚫 Do Not Contact</h3>' +
+      '<div class="dnd-state">This lead is not in the CRM yet, so there is no DND record. Add it to a workflow first — DND then lives on the CRM contact, same as HighLevel.</div></div>';
+  }
+  if (!d || !d.channels) return '<div class="dnd-box"><h3>🚫 Do Not Contact</h3><div class="dnd-state">Loading…</div></div>';
+  var ch = d.channels;
+  var pill, line;
+  if (d.allOn) {
+    pill = '<span class="pill sealed">DND — Sealed</span>';
+    line = 'Sealed on every channel. The bot and the workflows will not contact this seller.';
+  } else if (d.anyOn) {
+    var off = DND_CHANNELS.filter(function (c) { return ch[c.id]; }).map(function (c) { return c.label; });
+    pill = '<span class="pill partial">DND — Partial</span>';
+    line = 'Off-limits: ' + off.join(', ') + '.';
+  } else {
+    pill = '<span class="pill">Not on DND</span>';
+    line = 'All channels open.';
+  }
+  var rows = DND_CHANNELS.map(function (c) {
+    return '<label class="dnd-row"><input type="checkbox" data-dnd-channel="' + c.id + '"' +
+      (ch[c.id] ? ' checked' : '') + '> ' + esc(c.label) + '</label>';
+  }).join('');
+  var actions = '';
+  if (!d.allOn) actions += '<button type="button" class="btn small danger" data-dnd-action="all">DNC this contact</button>';
+  if (d.anyOn) actions += '<button type="button" class="btn small" data-dnd-action="none">Remove DND</button>';
+  return '<div class="dnd-box"><h3>🚫 Do Not Contact</h3>' + pill +
+    '<div class="dnd-state">' + esc(line) + '</div>' + rows +
+    (actions ? '<div class="dnd-actions">' + actions + '</div>' : '') +
+    '<div class="dnd-state">Same as the DND panel in HighLevel — takes effect right away.</div></div>';
+}
+async function setDnd(channels) {
+  var r = state.detail;
+  if (!r || !r.phone) return;
+  try {
+    var res = await convPost({ action: 'dnd-set', phone: r.phone, channels: channels });
+    if (res.data && res.data.dnd) {
+      state.detailDnd = res.data.dnd;
+      var row = state.contacts.find(function (x) { return x.id === r.id; });
+      if (row) row.dnd = res.data.dnd;
+    }
+    renderDrawer();
+    renderList();
+    toast('DND updated.');
+  } catch (e) {
+    if (!e.auth) toast('Could not update DND.');
+  }
+}
+
+function fieldInput(id, label, value, full) {
+  return '<div' + (full ? ' class="full"' : '') + '><label for="' + id + '">' + label + '</label>' +
+    '<input id="' + id + '" type="text" value="' + esc(value || '') + '"></div>';
+}
+function renderDrawer() {
+  var r = state.detail;
+  if (!r) return;
+  var body = document.getElementById('drawerBody');
+  var pills = '';
+  if (r.market) pills += ' <span class="pill">' + esc(workflowName(r.market)) + '</span>';
+  if (r.stage) pills += ' <span class="pill">' + esc(r.stage) + '</span>';
+  pills += r.source === 'lead'
+    ? ' <span class="pill amber">Lead only — not in CRM</span>'
+    : ' <span class="pill green">CRM contact</span>';
+  var tagChips = (r.tags || []).map(function (t) {
+    return '<span class="tagchip">' + esc(t) + '<button class="x" type="button" data-untag="' + esc(t) + '" title="Remove tag">×</button></span>';
+  }).join('') || '<span class="muted">No tags</span>';
+  var pricing = '';
+  if (r.pricing && (r.pricing.arv || r.pricing.mao || r.pricing.lao)) {
+    pricing = '<h3>Pricing</h3>' +
+      '<div class="kv"><b>ARV</b>' + esc(r.pricing.arv || '—') + '</div>' +
+      '<div class="kv"><b>MAO</b>' + esc(r.pricing.mao || '—') + '</div>' +
+      '<div class="kv"><b>LAO</b>' + esc(r.pricing.lao || '—') + '</div>';
+  }
+  var wfOptions = state.workflows.map(function (w) {
+    return '<option value="' + esc(w.id) + '">' + esc(w.name) + (w.status === 'draft' ? ' (draft)' : '') + '</option>';
+  }).join('');
+  var inWf = r.market
+    ? '<div class="kv"><b>Workflow</b>' + esc(workflowName(r.market)) + '</div>' +
+      '<div class="kv"><b>Stage</b>' + esc(r.stage || '—') + '</div>' +
+      (r.path ? '<div class="kv"><b>Path</b>' + esc(r.path) + '</div>' : '') +
+      '<div class="kv"><b>Enrolled</b>' + fmtDate(r.enrolledAt) + '</div>'
+    : '<div class="muted">Not enrolled in any workflow.</div>';
+  var notes = (r.notes || []).map(function (n) {
+    return '<div class="note-item">' + esc(n.body || '') +
+      '<div class="when">' + (n.at ? new Date(n.at).toLocaleString() : '') + '</div></div>';
+  }).join('') || '<div class="muted">No notes yet.</div>';
+  body.innerHTML =
+    '<h2>' + esc(r.name || '(no name)') + '</h2>' +
+    '<div>' + pills + '</div>' +
+    '<h3>Contact details</h3>' +
+    '<div class="field-grid">' +
+      fieldInput('dName', 'Name', r.name, true) +
+      fieldInput('dPhone', 'Phone', r.phone) +
+      fieldInput('dEmail', 'Email', r.email) +
+      fieldInput('dAddress', 'Address', r.address1, true) +
+      fieldInput('dCity', 'City', r.city) +
+      fieldInput('dState', 'State', r.state) +
+      fieldInput('dZip', 'ZIP', r.postalCode) +
+      fieldInput('dFirst', 'First name', r.firstName) +
+    '</div>' +
+    '<div style="margin-top:10px"><button class="btn small primary" id="btnSaveFields" type="button">Save details</button></div>' +
+    '<h3>Tags</h3><div id="detailTags">' + tagChips + '</div>' +
+    '<div class="filters" style="margin-top:8px"><input id="dTagInput" type="text" placeholder="New tag" style="flex:1">' +
+    '<button class="btn small" id="btnAddTagDetail" type="button">Add tag</button></div>' +
+    '<h3>Do Not Contact</h3><div id="dndBox">' + dndSectionHtml() + '</div>' +
+    '<h3>Workflows / Campaigns</h3>' + inWf +
+    '<div class="filters" style="margin-top:8px"><select id="dWorkflow">' + wfOptions + '</select>' +
+    '<button class="btn small" id="btnAddWfDetail" type="button">Add to workflow</button></div>' +
+    '<h3>Appointments</h3><div id="apptBox"><div class="muted">Loading…</div></div>' +
+    pricing +
+    '<h3>HighLevel record</h3><div id="hlBox"><div class="muted">Loading…</div></div>' +
+    '<h3>Notes</h3><div id="notesList">' + notes + '</div>' +
+    '<div class="filters" style="margin-top:8px"><input id="dNoteInput" type="text" placeholder="Add a note…" style="flex:1">' +
+    '<button class="btn small" id="btnAddNote" type="button">Add note</button></div>' +
+    '<h3>Tasks</h3><div id="detailTasks"></div>' +
+    '<div class="filters" style="margin-top:8px"><input id="dTaskTitle" type="text" placeholder="New task for this contact" style="flex:1">' +
+    '<input id="dTaskDue" type="date"><button class="btn small" id="btnAddTaskDetail" type="button">Add</button></div>' +
+    '<h3>Danger zone</h3>' +
+    '<button class="btn small danger" id="btnDeleteDetail" type="button">Delete this contact</button>' +
+    '<div class="muted" style="margin-top:6px">Removes the Command Center record only — never the HighLevel contact.</div>';
+  document.getElementById('dPhone').disabled = true;
+  wireDrawer();
+  renderDetailTasks();
+  loadDetailAppointments();
+  loadDetailHl();
+}
+function wireDrawer() {
+  var r = state.detail;
+  document.getElementById('btnSaveFields').addEventListener('click', saveDetailFields);
+  document.getElementById('btnAddTagDetail').addEventListener('click', async function () {
+    var t = document.getElementById('dTagInput').value.trim();
+    if (!t) return;
+    if (await tagRow(r, [t], [])) { toast('Tag added.'); await refreshDetail(); }
+    else toast('Could not add the tag.');
+  });
+  document.getElementById('detailTags').addEventListener('click', async function (e) {
+    var btn = e.target.closest('[data-untag]');
+    if (!btn) return;
+    if (await tagRow(r, [], [btn.dataset.untag])) { toast('Tag removed.'); await refreshDetail(); }
+    else toast('Could not remove the tag.');
+  });
+  var dndBox = document.getElementById('dndBox');
+  dndBox.addEventListener('change', function (e) {
+    var cb = e.target.closest('[data-dnd-channel]');
+    if (!cb) return;
+    var channels = {};
+    dndBox.querySelectorAll('[data-dnd-channel]').forEach(function (x) { channels[x.dataset.dndChannel] = x.checked; });
+    setDnd(channels);
+  });
+  dndBox.addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-dnd-action]');
+    if (!btn) return;
+    var on = btn.dataset.dndAction === 'all';
+    setDnd({ sms: on, email: on, call: on });
+  });
+  document.getElementById('btnAddWfDetail').addEventListener('click', async function () {
+    var wf = state.workflows.find(function (w) { return w.id === document.getElementById('dWorkflow').value; });
+    if (!wf) return;
+    var res = await enrollRow(r, wf);
+    if (res.ok) {
+      if (r.source === 'lead' && wf.tag) leadAddTags(r, [wf.tag]);
+      toast('Added to ' + wf.name + '.');
+      await refreshDetail();
+    } else {
+      toast('Not enrolled: ' + res.reason + '.');
+    }
+  });
+  document.getElementById('btnAddNote').addEventListener('click', async function () {
+    var text = document.getElementById('dNoteInput').value.trim();
+    if (!text) return;
+    var okNote = false;
+    if (r.source === 'lead') {
+      okNote = mutateLead(r.leadId, function (lead) {
+        lead.notes = Array.isArray(lead.notes) ? lead.notes : [];
+        lead.notes.push({ body: text, at: Date.now() });
+      });
+    } else {
+      var res = await enrollPost({ action: 'note', phone: r.phone, body: text });
+      okNote = res.status === 200 && res.data && res.data.ok;
+    }
+    if (okNote) { toast('Note added.'); await refreshDetail(); }
+    else toast('Could not add the note.');
+  });
+  document.getElementById('btnAddTaskDetail').addEventListener('click', function () {
+    var title = document.getElementById('dTaskTitle').value.trim();
+    if (!title) { toast('Type a task title first.'); return; }
+    addTask(localStorage, {
+      contactId: r.id, contactName: r.name || r.phone || '',
+      title: title, due: document.getElementById('dTaskDue').value,
+    });
+    renderDetailTasks();
+    toast('Task added.');
+  });
+  document.getElementById('btnDeleteDetail').addEventListener('click', async function () {
+    if (!confirm('Delete this contact from the Command Center?\n\nThis removes the standalone record (or local lead). It does NOT delete the HighLevel contact.')) return;
+    if (await deleteRow(r)) {
+      state.selected.delete(r.id);
+      closeDetail();
+      toast('Contact deleted.');
+      await loadContacts();
+    } else {
+      toast('Could not delete the contact.');
+    }
+  });
+}
+async function saveDetailFields() {
+  var r = state.detail;
+  var fields = {
+    name: document.getElementById('dName').value,
+    firstName: document.getElementById('dFirst').value,
+    email: document.getElementById('dEmail').value,
+    address1: document.getElementById('dAddress').value,
+    city: document.getElementById('dCity').value,
+    state: document.getElementById('dState').value,
+    postalCode: document.getElementById('dZip').value,
+  };
+  var okSave = false;
+  if (r.source === 'lead') {
+    okSave = mutateLead(r.leadId, function (lead) {
+      lead.owner = fields.name;
+      lead.email = fields.email;
+      lead.address = fields.address1;
+      lead.city = fields.city;
+      lead.state = fields.state;
+      lead.zip = fields.postalCode;
+    });
+  } else {
+    var res = await enrollPost({ action: 'update', phone: r.phone, fields: fields });
+    okSave = res.status === 200 && res.data && res.data.ok;
+  }
+  if (okSave) { toast('Details saved.'); await refreshDetail(); }
+  else toast('Could not save the details.');
+}
+async function refreshDetail() {
+  var id = state.detail && state.detail.id;
+  await loadContacts();
+  if (!id) return;
+  var row = state.contacts.find(function (x) { return x.id === id; });
+  if (row) {
+    state.detail = row;
+    state.detailDnd = row.dnd || state.detailDnd;
+    renderDrawer();
+  }
+}
+function openDetail(id) {
+  var row = state.contacts.find(function (x) { return x.id === id; });
+  if (!row) return;
+  state.detail = row;
+  state.detailDnd = row.dnd || null;
+  document.getElementById('drawer').hidden = false;
+  document.getElementById('drawerOverlay').hidden = false;
+  renderDrawer();
+}
+function closeDetail() {
+  state.detail = null;
+  document.getElementById('drawer').hidden = true;
+  document.getElementById('drawerOverlay').hidden = true;
+}
+document.getElementById('drawerClose').addEventListener('click', closeDetail);
+document.getElementById('drawerOverlay').addEventListener('click', closeDetail);
+document.getElementById('contactsBody').addEventListener('click', function (e) {
+  if (e.target.closest('[data-select]')) return;
+  var tr = e.target.closest('[data-open]');
+  if (tr) openDetail(tr.dataset.open);
+});
+
+/* Appointments for this contact — the standalone calendar
+   (cc-calendar-api), filtered to the contact's phone. */
+async function loadDetailAppointments() {
+  var box = document.getElementById('apptBox');
+  var r = state.detail;
+  if (!box || !r) return;
+  if (!r.phone) { box.innerHTML = '<div class="muted">No phone number — no appointments to show.</div>'; return; }
+  try {
+    var now = Date.now();
+    var res = await api('cc-calendar-api?action=list&from=' + (now - 180 * 864e5) + '&to=' + (now + 365 * 864e5));
+    var all = (res.data && res.data.appointments) || [];
+    var mine = all.filter(function (a) { return ctDigits10(a.phone) === ctDigits10(r.phone); });
+    if (state.detail !== r) return;
+    box.innerHTML = mine.length ? mine.map(function (a) {
+      return '<div class="kv"><b>' + esc(new Date(a.startISO).toLocaleString()) + '</b>' + esc(a.title || 'Appointment') +
+        (a.status ? ' <span class="pill">' + esc(a.status) + '</span>' : '') + '</div>';
+    }).join('') : '<div class="muted">No appointments on the Command Center calendar for this contact.</div>';
+  } catch (e) {
+    box.innerHTML = '<div class="muted">Appointments could not be loaded.</div>';
+  }
+}
+
+/* HighLevel record (read-only): identity, tags, DND settings and
+   custom-field VALUES via cc-data contactlookup. Labels for values
+   come from the field definitions when they're loaded. */
+async function loadDetailHl() {
+  var box = document.getElementById('hlBox');
+  var r = state.detail;
+  if (!box || !r) return;
+  var q = r.phone || r.email || r.name;
+  if (!q) { box.innerHTML = '<div class="muted">Nothing to look up — this contact has no phone, email or name.</div>'; return; }
+  try {
+    var res = await dataGet('contactlookup', '&query=' + encodeURIComponent(q));
+    if (state.detail !== r) return;
+    var c = res.data && res.data.contact;
+    if (!res.data || res.data.ok === false) {
+      box.innerHTML = '<div class="muted">HighLevel lookup unavailable: ' + esc((res.data && res.data.error) || 'no response') + '</div>';
+      return;
+    }
+    if (!c || !c.found) {
+      box.innerHTML = '<div class="muted">No matching contact found in HighLevel for this phone/name.</div>';
+      return;
+    }
+    var defs = {};
+    state.fieldDefs.forEach(function (d) { defs[d.id] = d.name; });
+    var dndBits = DND_CHANNELS.filter(function (ch) { return c.dndChannels && c.dndChannels[ch.id]; })
+      .map(function (ch) { return ch.label; });
+    var html = '<div class="kv"><b>HL name</b>' + esc(c.name || '—') + '</div>' +
+      '<div class="kv"><b>HL phone</b>' + esc(c.phone || '—') + '</div>' +
+      '<div class="kv"><b>HL email</b>' + esc(c.email || '—') + '</div>' +
+      '<div class="kv"><b>HL tags</b>' + ((c.tags || []).map(function (t) { return '<span class="tagchip">' + esc(t) + '</span>'; }).join('') || '—') + '</div>' +
+      '<div class="kv"><b>HL DND</b>' + (dndBits.length ? 'On for: ' + esc(dndBits.join(', ')) : (c.dnd ? 'Master DND on' : 'Not on DND')) + '</div>';
+    if ((c.customFields || []).length) {
+      html += '<h3>Custom field values</h3>' + c.customFields.map(function (f) {
+        var label = f.name || defs[f.id] || f.id || '(field)';
+        return '<div class="kv"><b>' + esc(label) + '</b>' + esc(f.value || '—') + '</div>';
+      }).join('');
+    }
+    box.innerHTML = html;
+  } catch (e) {
+    box.innerHTML = '<div class="muted">HighLevel lookup failed.</div>';
+  }
+}
+
+/* ================= CUSTOM FIELDS TAB ================= */
+async function loadFields() {
+  if (state.fieldsLoaded) return;
+  var body = document.getElementById('fieldsBody');
+  body.innerHTML = '<div class="empty">Loading field definitions from HighLevel…</div>';
+  try {
+    var res = await dataGet('customfields');
+    if (!res.data || res.data.ok === false) {
+      body.innerHTML = '<div class="empty">Could not load custom fields: ' + esc((res.data && res.data.error) || 'no response') + '</div>';
+      return;
+    }
+    state.fieldDefs = res.data.fields || [];
+    state.fieldsLoaded = true;
+    if (!state.fieldDefs.length) {
+      body.innerHTML = '<div class="empty">HighLevel returned no custom field definitions for this location.</div>';
+      return;
+    }
+    body.innerHTML = '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Field</th><th>Type</th><th>Field ID</th></tr></thead><tbody>' +
+      state.fieldDefs.map(function (f) {
+        return '<tr><td class="name">' + esc(f.name) + '</td><td>' + esc(f.type || '—') + '</td><td class="muted">' + esc(f.id) + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+  } catch (e) {
+    body.innerHTML = '<div class="empty">Could not load custom fields.</div>';
+  }
+}
+
+/* ================= TASKS ================= */
+function populateTaskContacts() {
+  var sel = document.getElementById('taskContact');
+  var cur = sel.value;
+  sel.innerHTML = '<option value="">Choose a contact…</option>' + state.contacts.map(function (r) {
+    return '<option value="' + esc(r.id) + '">' + esc((r.name || '(no name)') + (r.phone ? ' — ' + r.phone : '')) + '</option>';
+  }).join('');
+  sel.value = cur;
+}
+function taskItemHtml(t, showContact) {
+  var overdue = t.due && !t.done && t.due < new Date().toISOString().slice(0, 10);
+  return '<div class="task-item' + (t.done ? ' done' : '') + '">' +
+    '<input type="checkbox" data-task-toggle="' + esc(t.id) + '"' + (t.done ? ' checked' : '') + '>' +
+    '<div class="grow"><span class="t-title">' + esc(t.title) + '</span>' +
+    '<div class="due' + (overdue ? ' overdue' : '') + '">' +
+    (showContact && t.contactName ? esc(t.contactName) + ' · ' : '') +
+    (t.due ? 'Due ' + esc(t.due) + (overdue ? ' — overdue' : '') : 'No due date') + '</div></div>' +
+    '<button class="btn small danger" type="button" data-task-del="' + esc(t.id) + '">Delete</button></div>';
+}
+function renderTasks() {
+  var tasks = loadTasks(localStorage);
+  var list = document.getElementById('taskList');
+  if (!tasks.length) {
+    list.innerHTML = '<div class="empty">No tasks yet. Add one above, or from a contact\'s detail view.</div>';
+    return;
+  }
+  var open = tasks.filter(function (t) { return !t.done; })
+    .sort(function (a, b) { return String(a.due || '9999') < String(b.due || '9999') ? -1 : 1; });
+  var done = tasks.filter(function (t) { return t.done; });
+  list.innerHTML =
+    (open.length ? open.map(function (t) { return taskItemHtml(t, true); }).join('') : '<div class="empty">No open tasks.</div>') +
+    (done.length ? '<h3 style="margin:14px 0 4px;font-size:13px;color:var(--muted)">Completed</h3>' + done.map(function (t) { return taskItemHtml(t, true); }).join('') : '');
+}
+function renderDetailTasks() {
+  var r = state.detail;
+  var box = document.getElementById('detailTasks');
+  if (!box || !r) return;
+  var mine = loadTasks(localStorage).filter(function (t) { return t.contactId === r.id; });
+  box.innerHTML = mine.length
+    ? mine.map(function (t) { return taskItemHtml(t, false); }).join('')
+    : '<div class="muted">No tasks for this contact.</div>';
+}
+document.getElementById('btnAddTask').addEventListener('click', function () {
+  var sel = document.getElementById('taskContact');
+  var title = document.getElementById('taskTitle').value.trim();
+  if (!sel.value) { toast('Choose a contact for the task.'); return; }
+  if (!title) { toast('Type a task title first.'); return; }
+  var row = state.contacts.find(function (x) { return x.id === sel.value; });
+  var t = addTask(localStorage, {
+    contactId: sel.value,
+    contactName: row ? (row.name || row.phone || '') : '',
+    title: title,
+    due: document.getElementById('taskDue').value,
+  });
+  if (!t) { toast('Could not add the task.'); return; }
+  document.getElementById('taskTitle').value = '';
+  renderTasks();
+  toast('Task added.');
+});
+document.addEventListener('change', function (e) {
+  var tg = e.target.closest('[data-task-toggle]');
+  if (!tg) return;
+  setTaskDone(localStorage, tg.dataset.taskToggle, tg.checked);
+  renderTasks();
+  renderDetailTasks();
+});
+document.addEventListener('click', function (e) {
+  var del = e.target.closest('[data-task-del]');
+  if (!del) return;
+  removeTask(localStorage, del.dataset.taskDel);
+  renderTasks();
+  renderDetailTasks();
+});
+
+/* ================= BOOT ================= */
+(async function init() {
+  try { state.workflows = await wfList(); } catch (e) { state.workflows = []; }
+  await loadContacts();
+  renderTasks();
+})();
+</script>
+</body>
+</html>
