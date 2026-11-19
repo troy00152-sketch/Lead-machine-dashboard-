@@ -16,10 +16,23 @@
 'use strict';
 
 const API_URL = 'https://api.x.ai/v1/chat/completions';
-const MODEL = 'grok-4.7';
+// Non-reasoning on purpose: grok-4.7 is xAI's flagship REASONING model
+// (default effort high), and a live call on Nov 18, 2026 sat past this
+// function's 25s timeout without answering (function log: "This operation
+// was aborted", duration 25012 ms). Summarize/draft work needs seconds,
+// not deep reasoning — the non-reasoning 4.20 answers fast and costs
+// less ($1.25 in / $2.50 out per M tokens).
+const MODEL = 'grok-4.20-0309-non-reasoning';
 const TIMEOUT_MS = 25000;
 const MAX_TOKENS = 500;
 const MAX_TEXT_CHARS = 12000; // a full thread transcript fits; runaway bodies don't
+// Fixed sample for the GET ?selftest=1 verification route (see handler).
+const SELFTEST_TEXT = [
+  'Us: Hi, are you thinking of selling 123 Main St?',
+  'Seller: Yes, I want $80,000 and I can show it this week.',
+  'Us: Got it, can we call tomorrow at 2pm?',
+  'Seller: Yes, 2pm works.',
+].join('\n');
 
 const ACTIONS = {
   summarize: {
@@ -76,7 +89,12 @@ exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') {
     return { statusCode: 204, headers: corsHeaders, body: '' };
   }
-  if (event.httpMethod !== 'POST') {
+  // Self-test: GET ?selftest=1 runs a summarize over a fixed sample thread
+  // so the wiring can be verified from a plain browser visit — the request
+  // still passes the site's sign-in gate. No other GET is allowed.
+  const isSelftest = event.httpMethod === 'GET'
+    && !!(event.queryStringParameters && event.queryStringParameters.selftest === '1');
+  if (event.httpMethod !== 'POST' && !isSelftest) {
     return json(405, corsHeaders, { status: 'error', error: 'Method Not Allowed' });
   }
 
@@ -89,19 +107,26 @@ exports.handler = async (event) => {
     });
   }
 
-  let body;
-  try {
-    body = JSON.parse(event.body || '{}');
-  } catch (e) {
-    return json(400, corsHeaders, { status: 'error', error: 'Bad JSON body' });
-  }
-  const action = String(body.action || '');
-  const text = String(body.text || '').slice(0, MAX_TEXT_CHARS);
-  if (!ACTIONS[action]) {
-    return json(400, corsHeaders, { status: 'error', error: 'Body needs action: "summarize" or "draft"' });
-  }
-  if (!text.trim()) {
-    return json(400, corsHeaders, { status: 'error', error: 'Body needs the conversation text' });
+  let action;
+  let text;
+  if (isSelftest) {
+    action = 'summarize';
+    text = SELFTEST_TEXT;
+  } else {
+    let body;
+    try {
+      body = JSON.parse(event.body || '{}');
+    } catch (e) {
+      return json(400, corsHeaders, { status: 'error', error: 'Bad JSON body' });
+    }
+    action = String(body.action || '');
+    text = String(body.text || '').slice(0, MAX_TEXT_CHARS);
+    if (!ACTIONS[action]) {
+      return json(400, corsHeaders, { status: 'error', error: 'Body needs action: "summarize" or "draft"' });
+    }
+    if (!text.trim()) {
+      return json(400, corsHeaders, { status: 'error', error: 'Body needs the conversation text' });
+    }
   }
 
   try {
@@ -144,7 +169,9 @@ exports.handler = async (event) => {
     if (!content) {
       return json(502, corsHeaders, { status: 'error', error: 'Grok came back empty — try again.' });
     }
-    return json(200, corsHeaders, { status: 'ok', action, model: MODEL, result: content });
+    const okBody = { status: 'ok', action, model: MODEL, result: content };
+    if (isSelftest) okBody.selftest = true;
+    return json(200, corsHeaders, okBody);
   } catch (err) {
     console.error('[grok-assist]', err.message);
     return json(502, corsHeaders, { status: 'error', error: 'Grok request failed — try again in a moment.' });
@@ -152,4 +179,4 @@ exports.handler = async (event) => {
 };
 
 // Offline checks (no network): node -e "const g=require('./grok-assist.js'); console.log(Object.keys(g._test.ACTIONS))"
-exports._test = { ACTIONS, MODEL, API_URL, buildMessages, isBillingError, MAX_TEXT_CHARS };
+exports._test = { ACTIONS, MODEL, API_URL, buildMessages, isBillingError, MAX_TEXT_CHARS, SELFTEST_TEXT };
