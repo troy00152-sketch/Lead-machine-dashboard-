@@ -17,7 +17,14 @@
 //     INVALID_PROPERTY_DATA when it cannot enrich a property from the
 //     address alone, so the facts are fetched first and sent in the
 //     body (verified live Nov 18, 2026: address-only calls 400ed while
-//     the key itself was accepted).
+//     the key itself was accepted). Resideline publishes NO response
+//     sample for this endpoint and the live payload matched none of
+//     the first-guess field names (Nov 18: details 200, facts=none on
+//     every call), so the parser accepts a broad alias set per fact
+//     and searches the payload recursively (depth <= 3, arrays' first
+//     elements included); when it still finds nothing it logs the
+//     payload's key structure only (details shape=…, keys, never
+//     values) as the evidence trail for the real shape.
 //   Step 2 — POST /v2/api/property_value?enrich_if_missing=true —
 //     2 credits. Spec-exact body only: address, beds, baths, sqft_size,
 //     subject_year_built, property_type. The sold comps ride inside the
@@ -210,25 +217,68 @@ function buildReportBody(input, facts) {
 
 /* ---------------- property_details facts parsing ---------------- */
 
+// First non-null value among a record's alias keys, in priority order.
+function firstVal(rec, keys) {
+  for (const k of keys) {
+    if (rec[k] != null) return rec[k];
+  }
+  return null;
+}
+
 // Normalizes one property record (any of the shapes Resideline uses)
 // into a facts object, or null when the record carries no facts.
-// Accepts sqft or sqft_size, and year_built or subject_year_built.
+// Resideline publishes NO property_details response sample, and the
+// live payload (Nov 18, 2026) matched none of the originally guessed
+// field names — so each fact accepts a broad alias set. String numbers
+// parse via numOrNull. Acceptance rule unchanged: any one field
+// present makes the record a facts record.
+const FACT_ALIASES = {
+  beds: ['beds', 'bedrooms', 'bed_count', 'num_beds', 'bed'],
+  baths: ['baths', 'bathrooms', 'bath_count', 'num_baths', 'total_baths', 'bath'],
+  sqft: ['sqft', 'sqft_size', 'living_area', 'living_area_sqft', 'livingArea', 'building_area', 'gross_living_area', 'square_feet', 'size_sqft'],
+  yearBuilt: ['yearBuilt', 'year_built', 'subject_year_built', 'yr_built', 'construction_year', 'built_year'],
+  propertyType: ['propertyType', 'property_type', 'type', 'property_class', 'use_type', 'structure_type'],
+};
 function factsFromRecord(rec) {
   if (!rec || typeof rec !== 'object' || Array.isArray(rec)) return null;
   const facts = {
-    beds: numOrNull(rec.beds),
-    baths: numOrNull(rec.baths),
-    sqft: numOrNull(rec.sqft != null ? rec.sqft : rec.sqft_size),
-    yearBuilt: numOrNull(rec.year_built != null ? rec.year_built : rec.subject_year_built),
-    propertyType: rec.property_type || rec.propertyType || null,
+    beds: numOrNull(firstVal(rec, FACT_ALIASES.beds)),
+    baths: numOrNull(firstVal(rec, FACT_ALIASES.baths)),
+    sqft: numOrNull(firstVal(rec, FACT_ALIASES.sqft)),
+    yearBuilt: numOrNull(firstVal(rec, FACT_ALIASES.yearBuilt)),
+    propertyType: firstVal(rec, FACT_ALIASES.propertyType) || null,
   };
   const any = facts.beds != null || facts.baths != null || facts.sqft != null
     || facts.yearBuilt != null || facts.propertyType;
   return any ? facts : null;
 }
 
+// Depth-limited recursive search for a facts-bearing record: the
+// record may hide under wrapper keys (property / result / record /
+// subject / data / …) or inside an array's first element. The payload
+// itself is depth 1; records are checked down to depth 3.
+function findFactsRecursive(node, depth) {
+  if (!node || typeof node !== 'object' || depth > 3) return null;
+  if (Array.isArray(node)) {
+    return node.length ? findFactsRecursive(node[0], depth + 1) : null;
+  }
+  const f = factsFromRecord(node);
+  if (f) return f;
+  if (depth >= 3) return null;
+  for (const k of Object.keys(node)) {
+    const v = node[k];
+    if (v && typeof v === 'object') {
+      const r = findFactsRecursive(v, depth + 1);
+      if (r) return r;
+    }
+  }
+  return null;
+}
+
 // The property_details record may sit at the top level of the response
 // or nested under property_details (possibly inside a data wrapper).
+// The known locations win first; the recursive walk is the fallback
+// for whatever nesting the real payload actually uses.
 function parsePropertyDetails(data) {
   if (!data || typeof data !== 'object') return null;
   const candidates = [
@@ -241,7 +291,44 @@ function parsePropertyDetails(data) {
     const f = factsFromRecord(c);
     if (f) return f;
   }
-  return null;
+  return findFactsRecursive(data, 1);
+}
+
+// Diagnostic: the payload's KEY STRUCTURE only — recursive key paths
+// to depth 3 (objects as key.subkey, arrays as key[0].subkey). Values
+// are never included, so nothing about the property or the key can
+// leak into logs; this is the evidence trail for the real
+// property_details shape when the parser still finds no facts.
+function shapeOf(data) {
+  const paths = [];
+  const walk = (node, prefix, depth) => {
+    if (!node || typeof node !== 'object' || depth > 3 || paths.length >= 200) return;
+    if (Array.isArray(node)) {
+      if (node.length) walk(node[0], prefix + '[0]', depth + 1);
+      return;
+    }
+    for (const k of Object.keys(node)) {
+      const p = prefix ? prefix + '.' + k : k;
+      paths.push(p);
+      const v = node[k];
+      if (v && typeof v === 'object') walk(v, p, depth + 1);
+      if (paths.length >= 200) return;
+    }
+  };
+  walk(data, '', 1);
+  return paths.join(',');
+}
+
+// Comma list of the facts still null in a merged facts object — the
+// fields a 400ing valuation call was missing locally.
+function missingFactsList(f) {
+  const m = [];
+  if (!f || f.beds == null) m.push('beds');
+  if (!f || f.baths == null) m.push('baths');
+  if (!f || f.sqft == null) m.push('sqft');
+  if (!f || f.yearBuilt == null) m.push('yearBuilt');
+  if (!f || !f.propertyType) m.push('propertyType');
+  return m.join(',');
 }
 
 // Merged facts -> a subject record in upstream field names, for
@@ -719,15 +806,23 @@ exports.handler = async (event) => {
     // from the address or the caller may have supplied the facts.
     let fetched = null;
     let detailsStatus = 'error';
+    let detailsData = null;
     try {
       const d = await callUpstream(DETAILS_URL, apiKey, { address: input.address });
       detailsStatus = d.status;
+      detailsData = d.data;
       if (d.ok && d.data) fetched = parsePropertyDetails(d.data);
     } catch (e) {
       detailsStatus = 'error';
     }
     console.log('[resideline-comps] details status=' + detailsStatus
       + ' facts=' + factsSummary(fetched) + ' address=' + input.address);
+    if (!fetched && detailsData) {
+      // No facts parsed — log the payload's key structure (keys only,
+      // never values) so the real shape is on record for the next fix.
+      console.log('[resideline-comps] details shape=' + shapeOf(detailsData)
+        + ' address=' + input.address);
+    }
     const facts = mergeFacts(input, fetched);
 
     // ---- Step 2: valuation (2 credits), spec-exact body.
@@ -742,8 +837,11 @@ exports.handler = async (event) => {
         + ' address=' + input.address);
     } else {
       const det = extractErrorDetail(v.data);
+      const miss = v.status === 400 ? missingFactsList(facts) : '';
       console.log('[resideline-comps] value status=' + v.status
-        + (det.code ? ' code=' + det.code : '') + ' address=' + input.address);
+        + (det.code ? ' code=' + det.code : '')
+        + (miss ? ' missing=' + miss : '')
+        + ' address=' + input.address);
       firstError = { status: v.ok ? 502 : v.status, data: v.data };
     }
 
@@ -804,13 +902,32 @@ exports.handler = async (event) => {
       });
     }
 
-    const subject = mapSubject(parsed.subject)
-      || mapSubject(factsToSubjectRecord(facts, input.address))
-      || {
-        address: input.address,
-        beds: null, baths: null, sqft: null,
-        yearBuilt: null, propertyType: '',
+    // Subject record: the valuation/report payload's own subject
+    // (subject / property_details) may carry facts under any of the
+    // alias names — normalize it through factsFromRecord and let its
+    // fields win, with the chain facts filling gaps, before falling
+    // back to the raw record and then the chain facts alone.
+    let subject = null;
+    const psFacts = parsed.subject ? factsFromRecord(parsed.subject) : null;
+    if (psFacts) {
+      const mergedSubjectFacts = {
+        beds: psFacts.beds != null ? psFacts.beds : facts.beds,
+        baths: psFacts.baths != null ? psFacts.baths : facts.baths,
+        sqft: psFacts.sqft != null ? psFacts.sqft : facts.sqft,
+        yearBuilt: psFacts.yearBuilt != null ? psFacts.yearBuilt : facts.yearBuilt,
+        propertyType: psFacts.propertyType || facts.propertyType || null,
       };
+      subject = mapSubject(factsToSubjectRecord(mergedSubjectFacts, input.address));
+    }
+    if (!subject) {
+      subject = mapSubject(parsed.subject)
+        || mapSubject(factsToSubjectRecord(facts, input.address))
+        || {
+          address: input.address,
+          beds: null, baths: null, sqft: null,
+          yearBuilt: null, propertyType: '',
+        };
+    }
     const rows = rawComps.map(mapComp);
     const analyzed = analyzeComps(subject, rows, todayParts());
     const comps = shapeCompsResult(analyzed, parsed.searchCriteria, rows.length);
@@ -864,6 +981,9 @@ exports._test = {
   buildReportBody,
   factsFromRecord,
   parsePropertyDetails,
+  findFactsRecursive,
+  shapeOf,
+  missingFactsList,
   factsToSubjectRecord,
   factsSummary,
   parseValuationPayload,
