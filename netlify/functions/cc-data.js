@@ -675,11 +675,104 @@ function extractAddress(opp) {
   return opp.name || '';
 }
 
+// ---- Contacts page support (Nov 19) ----
+// Two read-only actions for contacts.html, same hlFetch / per-client
+// pattern as the overview:
+//   action=customfields  the location's custom-field DEFINITIONS
+//                        (name + type) for the Custom Fields tab.
+//   action=contactlookup&query=<phone|name|email>
+//                        the best-matching HL contact with its
+//                        custom-field VALUES + DND settings, for the
+//                        contact detail view.
+// HL reads only — no credits, no writes.
+
+// Field definitions: HL returns { customFields: [{ id, name,
+// fieldType|dataType, ... }] } (older payloads nest under data).
+function normalizeCustomFieldDefs(data) {
+  const list = (data && (data.customFields || data.data)) || [];
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter((f) => f && (f.id || f.name))
+    .map((f) => ({
+      id: String(f.id || ''),
+      name: String(f.name || f.key || f.id || ''),
+      type: String(f.fieldType || f.dataType || f.type || ''),
+    }));
+}
+
+// HL dndSettings arrive keyed by channel ('SMS'/'Call'/'Email', any
+// case) with { status: 'active' } or a plain boolean. Normalize to
+// the dashboard's { sms, email, call } booleans — 'active' = ON.
+function normalizeDndSettings(ds) {
+  const out = { sms: false, email: false, call: false };
+  if (!ds || typeof ds !== 'object') return out;
+  const on = (v) => v === true || (v && typeof v === 'object' && String(v.status || '').toLowerCase() === 'active');
+  for (const [k, v] of Object.entries(ds)) {
+    const key = String(k).toLowerCase();
+    if (key === 'sms' || key === 'text' || key === 'text messages') out.sms = on(v);
+    else if (key === 'email') out.email = on(v);
+    else if (key === 'call' || key === 'calls' || key === 'calls & voicemail') out.call = on(v);
+  }
+  return out;
+}
+
+function digitsOf(v) {
+  return String(v || '').replace(/\D/g, '').slice(-10);
+}
+
+// Pick the best contact out of a /contacts/ search page: an exact
+// phone-digits match wins; otherwise the first row. Returns the
+// detail-view shape, or { found:false } for an empty page.
+function normalizeContactLookup(data, query) {
+  const list = (data && (data.contacts || data.data)) || [];
+  if (!Array.isArray(list) || !list.length) return { found: false };
+  const qd = digitsOf(query);
+  let c = null;
+  if (qd) c = list.find((x) => x && digitsOf(x.phone) === qd) || null;
+  if (!c) c = list[0];
+  if (!c) return { found: false };
+  const cfs = Array.isArray(c.customFields) ? c.customFields : (Array.isArray(c.customField) ? c.customField : []);
+  return {
+    found: true,
+    id: String(c.id || ''),
+    name: String(c.contactName || c.name || ''),
+    phone: String(c.phone || ''),
+    email: String(c.email || ''),
+    tags: Array.isArray(c.tags) ? c.tags.map((t) => String(t)) : [],
+    dnd: c.dnd === true,
+    dndChannels: normalizeDndSettings(c.dndSettings),
+    customFields: cfs
+      .filter((f) => f && typeof f === 'object')
+      .map((f) => ({
+        id: String(f.id || f.customFieldId || f.fieldId || ''),
+        name: String(f.name || f.key || ''),
+        value: f.fieldValue != null ? String(f.fieldValue) : (f.value != null ? String(f.value) : ''),
+      })),
+  };
+}
+
+async function getCustomFieldDefs(ctx) {
+  const data = await hlFetch(
+    `/locations/${ctx.locationId}/customFields`,
+    'GET', null, HL_VERSION_OPPORTUNITIES, ctx && ctx.token
+  );
+  return normalizeCustomFieldDefs(data);
+}
+
+async function lookupContact(ctx, query) {
+  const data = await hlFetch(
+    `/contacts/?locationId=${encodeURIComponent(ctx.locationId)}&query=${encodeURIComponent(query)}&limit=5`,
+    'GET', null, HL_VERSION_OPPORTUNITIES, ctx && ctx.token
+  );
+  return normalizeContactLookup(data, query);
+}
+
 // Test-only export: lets node verify crmScoreFor / enrichHotLeads
 // directly without a live HL call. Harmless in production — the
 // Netlify handler is unchanged.
 exports._test = {
   crmScoreFor, scoreLabel, isHotTrigger, parseMoneyValue, valuesFromCustomFields,
+  normalizeCustomFieldDefs, normalizeDndSettings, normalizeContactLookup,
   enrichHotLeads, cheapScoreFor, mapWithConcurrency,
   bookedTodayWindowMs, filterBookedTodayEvents,
   getStageMap, searchOppsPage, getOpportunities,
@@ -766,6 +859,22 @@ exports.handler = async (event) => {
         headers: corsHeaders,
         body: JSON.stringify(body),
       };
+    }
+    if (action === 'customfields' || action === 'contactlookup') {
+      const ctx = resolveClientData(event);
+      if (!ctx) {
+        return { statusCode: 400, headers: corsHeaders, body: JSON.stringify({ ok: false, error: 'unknown client — no HighLevel location configured for this subdomain' }) };
+      }
+      if (action === 'customfields') {
+        const fields = await getCustomFieldDefs(ctx);
+        return { statusCode: 200, headers: corsHeaders, body: JSON.stringify({ ok: true, fields, count: fields.length }) };
+      }
+      const q = String((event.queryStringParameters && event.queryStringParameters.query) || '').trim();
+      if (!q) {
+        return { statusCode: 400, headers: corsHeaders, body: JSON.stringify({ ok: false, error: 'Missing query' }) };
+      }
+      const contact = await lookupContact(ctx, q);
+      return { statusCode: 200, headers: corsHeaders, body: JSON.stringify({ ok: true, contact }) };
     }
     return { statusCode: 400, headers: corsHeaders, body: JSON.stringify({ error: 'Unknown action' }) };
   } catch (err) {
