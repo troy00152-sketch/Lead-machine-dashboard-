@@ -39,7 +39,7 @@
 // Charlotte — Charlotte/Harry Marsh is manual-only, no tag.)
 //
 // CREDIT NOTES: Blobs only, no Netlify Database. No lookups of any kind —
-// this function never calls PropertyReach, ATTOM, or DealMachine.
+// this function never calls any property-data provider.
 'use strict';
 
 const crypto = require('crypto');
@@ -60,9 +60,9 @@ const COOKIE_NAME = 'lm_auth';
 const TITLE_COMPANIES = {
   indianapolis: {
     market: 'Indianapolis, IN',
-    company: 'Hocker Title (Hocker & Associates)',
+    company: 'Momentum Title Agency (formerly Hocker Title)',
     phone: '(317) 578-1630',
-    emailOrders: 'contracts@hockerlaw.com',
+    emailOrders: 'ci.orders@momentumclosings.com',
   },
   cleveland: {
     market: 'Cleveland, OH',
@@ -82,15 +82,20 @@ const TITLE_COMPANIES = {
     phone: '336-793-1953',
     emailOrders: 'orders@innovativeclosingsolutions.com',
   },
-  // Jacksonville: NO default — Title Company of Florida removed 2026-11-14
-  // on Troy's order (wholesale only over $400K sales price; never use).
-  // Mockingbird Title + Marina Title emailed 2026-11-14; first clean yes
-  // becomes the default. Until then Jacksonville deals resolve to TBD.
+  jacksonville: {
+    market: 'Jacksonville, FL',
+    company: 'Mockingbird Title Agency LLC',
+    phone: '973-800-4818',
+    emailOrders: 'francesca@mockingbirdtitlellc.com',
+  },
+  // Jacksonville default set 2026-11-16: Mockingbird Title replied with a
+  // clean yes (assignments + double closings, no price floor) — the first
+  // clean yes after Title Company of Florida was removed 2026-11-14.
   dayton: {
     market: 'Dayton, OH',
     company: 'CLOSED Title',
     phone: '800-405-7150',
-    emailOrders: 'order@closedtitle.com',
+    emailOrders: 'orders@closedtitle.com',
   },
   charlotte: {
     market: 'Charlotte, NC',

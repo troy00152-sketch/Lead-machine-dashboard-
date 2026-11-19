@@ -5,9 +5,10 @@
 // Dashboard calls:
 //   GET /.netlify/functions/data-api?address=<url-encoded full address>
 //
-// Response shape mirrors attom-lookup.js so the Comps page consumes it
-// unchanged: { matched, address, property, comps }. The page tries this
-// source first and falls back to ATTOM when it fails or returns no comps.
+// Response shape: { matched, address, property, comps } — the shape the
+// Comps page consumes (shared with resideline-comps.js). The page tries
+// Resideline for comps first, then this source; this source also supplies
+// the subject record. (ATTOM fallback removed Nov 18, 2026.)
 //
 // Costs ~2 API credits per address (1 property + 1 comparables). The
 // comparables call asks for MLS-sourced rows first (Troy's decided
@@ -23,7 +24,7 @@
 // identifiers (endpoint host, env var name) must stay real.
 const API_BASE = 'https://api.propertyreach.com/v1';
 
-/* ---------------- helpers (mirrors attom-lookup) ---------------- */
+/* ---------------- helpers ---------------- */
 
 function median(nums) {
   if (!nums.length) return null;
@@ -589,7 +590,7 @@ exports.handler = async (event) => {
         unverified: (res.unverified || []).map(compOut),
       };
     }
-    // else: comps stays null -> page falls back to ATTOM
+    // else: comps stays null -> page shows the subject with no comps
 
     // --- 3. linked properties: other properties owned by the same owner ---
     // (Nov 4, Troy: "some sellers mite have more then one house")

@@ -6,8 +6,8 @@
 // Covers: the comparables request carries comparableSource "MLS" first;
 // a sufficient MLS set stops there (no extra credit); a thin MLS set
 // falls back once to "Both" and merges deduped; an MLS failure falls
-// back to "Both"; total failure leaves comps null (page falls back to
-// ATTOM); the ±20% sqft hard filter still keeps out-of-band rows out
+// back to "Both"; total failure leaves comps null (the page then shows
+// the subject with no comps); the ±20% sqft hard filter still keeps out-of-band rows out
 // of the best-3 when 3 in-band comps exist.
 'use strict';
 
@@ -146,7 +146,7 @@ async function run(address) {
   {
     stubFetch(() => apiFail(500));
     const out = await run();
-    t('E: total comparables failure -> comps null (ATTOM fallback path intact)',
+    t('E: total comparables failure -> comps null (subject still renders)',
       out.matched === true && out.comps === null, JSON.stringify({ matched: out.matched, comps: out.comps }));
   }
 

@@ -1177,12 +1177,12 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
           </div>
           <div id="compInsights" style="margin-bottom:12px"></div>
           <div class="sec-title" style="font-size:14px">🏦 Mortgage — does the seller owe on the home?</div>
-          <p style="color:var(--muted);font-size:12px;margin:0 0 10px">Fills itself automatically when verified comps load — no typing needed. A $0 amount means free &amp; clear. The backup load below is only for when property records carry nothing.</p>
+          <p style="color:var(--muted);font-size:12px;margin:0 0 10px">Fills itself automatically when verified comps load — no typing needed. A $0 amount means free &amp; clear. The manual load below is only for when property records carry nothing.</p>
           <div id="compMortManualWrap" style="display:none;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px">
             <div><label class="lbl">Mortgage amount owed ($) — last resort, by hand only</label><input class="field" id="compMortAmt" type="number" placeholder="0 = free &amp; clear" oninput="compMortManual()" /></div>
             <div><label class="lbl">Lender — last resort, by hand only</label><input class="field" id="compMortLender" placeholder="Lender name" oninput="compMortManual()" /></div>
           </div>
-          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px"><button class="btn" id="compMortBtn" onclick="loadCompMortgage()">🏦 Load mortgage data — backup only</button><span id="compMortMsg" style="font-size:12px;color:var(--muted)"></span></div>
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px"><button class="btn" id="compMortBtn" onclick="loadCompMortgage()">🏦 Load mortgage data</button><span id="compMortMsg" style="font-size:12px;color:var(--muted)"></span></div>
           <div id="compMortgageBox" style="margin-bottom:12px"><p style="color:var(--muted);font-size:13px">No mortgage data yet — it fills automatically when verified comps load.</p></div>
           <div class="sec-title" style="font-size:14px">🏘️ Verified Comps</div>
           <p style="color:var(--muted);font-size:12px;margin:0 0 10px">Live recorded sales for the address above. Pick your best 3 — ARV follows your picks. Listed properties show comps reference-only.</p>
@@ -3020,7 +3020,7 @@ function openLead(id){
     ${propIntelHtml(l)}
     <div class="sec-title" style="font-size:14px;margin-top:14px">🏦 Mortgage Info</div>
     <div id="mortgageInfoBox"><p style="color:var(--muted);font-size:13px">Loading mortgage data…</p></div>
-    <div id="attomBox"></div>
+    <div id="propertyRecordsBox"></div>
     <div class="sec-title" style="font-size:14px;margin-top:14px">📱 Phone Numbers</div>
     ${phones}
     <div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap">
@@ -3039,11 +3039,11 @@ function openLead(id){
   renderImgFrame(l);
   renderListingGate(l);
   loadMortgageInfo(l);
-  loadAttomPanel(l);
+  loadPropertyRecordsPanel(l);
 }
 /* ============ LISTING GATE — listed-first hard lock (Troy, Oct 28, 2026) ============ */
 /* The photo above the gate is the house (street view). Listing status is NOT in the
-   data provider API or ATTOM — it comes from the Zillow listing page, checked
+   data provider API — it comes from the Zillow listing page, checked
    by hand (free view) and set here. A realtor listing = PASS, enforced everywhere comp
    math runs (this gate, the Comp Calculator, Analyze Deal, and the Verified Comps panel). */
 function listingPassBanner(l){
@@ -3160,8 +3160,8 @@ function mortgageInfoHtml(d){
     + '';
 }
 /* ============ PROPERTY RECORDS & VERIFIED COMPS (via Netlify function) ============ */
-async function loadAttomPanel(l){
-  const box = document.getElementById('attomBox');
+async function loadPropertyRecordsPanel(l){
+  const box = document.getElementById('propertyRecordsBox');
   if(!box) return;
   const title = '<div class="sec-title" style="font-size:14px;margin-top:14px">📋 Property Records</div>';
   box.innerHTML = title + '<p style="color:var(--muted);font-size:13px">Loading ownership records & verified comps…</p>';
@@ -3171,19 +3171,19 @@ async function loadAttomPanel(l){
     return;
   }
   try{
-    const resp = await fetch('/.netlify/functions/attom-lookup?address=' + encodeURIComponent(fullAddr));
+    const resp = await fetch('/.netlify/functions/data-api?address=' + encodeURIComponent(fullAddr));
     if(!resp.ok) throw new Error('HTTP ' + resp.status);
     const d = await resp.json();
     if(!d.matched){
       box.innerHTML = title + listingPassBanner(l) + '<p style="color:var(--muted);font-size:13px">No ownership records found for this address.</p>';
       return;
     }
-    box.innerHTML = listingPassBanner(l) + attomPanelHtml(d, l);
+    box.innerHTML = listingPassBanner(l) + propertyRecordsPanelHtml(d, l);
   }catch(e){
     box.innerHTML = title + '<p style="color:var(--muted);font-size:13px">Ownership records unavailable right now.</p>';
   }
 }
-function attomPanelHtml(d, l){
+function propertyRecordsPanelHtml(d, l){
   const p = d.property || {};
   const chip = (k,v)=>'<div class="prop-chip"><span class="k">'+k+'</span><span class="v">'+(v==null||v===''?'—':v)+'</span></div>';
   const owner = [p.owner1, p.owner2].filter(Boolean).join(' & ');
@@ -4707,7 +4707,7 @@ function compTierLabel(arv){
   return '84.9% tier ($400K+)';
 }
 /* Verified-comps state on the Comps page. Rows are live recorded sales from the
-   same attom-lookup endpoint the lead modal uses; nothing here is sample data. */
+   live comp lookups (Resideline / data provider); nothing here is sample data. */
 let compRows = [];
 let compPicks = [];
 let compLoadedAddr = '';
@@ -4718,7 +4718,7 @@ let compListingAddr = ''; /* last address the listing auto-fill fired for (once 
 let compConfidence = '';
 let compConfidenceText = '';
 let compSubjectSqft = null;
-let compSubjectAvm = null; // AVM value from the comps lookup (ATTOM screen-only, or PR market value) — reference for the panel's above/below when no ARV is picked; never an offer basis.
+let compSubjectAvm = null; // AVM value from the comps lookup (provider market value — screen only) — reference for the panel's above/below when no ARV is picked; never an offer basis.
 let compSubjectBeds = null;
 let compStabilityWarns = [];
 let compPrevLoads = {};
@@ -5108,19 +5108,19 @@ function detailCollapseAll(){ document.querySelectorAll('#compInsights details[d
 function detailExpandAll(){ document.querySelectorAll('#compInsights details[data-detail-section]').forEach(function(d){ d.open = true; }); }
 /* ---- Mortgage block on the Comps page: fills itself from the comps lookup
    (property records already carry mortgage data at zero extra cost); the
-   backup lookup covers records gaps; hand entry is a labeled last resort
-   shown only when both automatic sources come back empty. Nothing is
+   separate mortgage lookup covers records gaps; hand entry is a labeled
+   last resort shown only when both automatic sources come back empty. Nothing is
    invented: empty means no data yet, never free & clear. ---- */
 let compMortFreeClear = false;
 let compMortLoadedAddr = '';
-let compMortSource = ''; // '', 'attom', 'lead', 'lookup', 'manual', 'attom-none', 'lookup-none', 'none'
+let compMortSource = ''; // '', 'records', 'lead', 'lookup', 'manual', 'records-none', 'lookup-none', 'none'
 let compMortDetail = null; // {lender, amount, loanType, termMonths, dueDate, recordedDate}
 let compMortManualMode = false; // manual inputs visible only as a last resort
-let compMortAttomTried = false;
-let compMortAttomEmpty = false;
+let compMortRecordsTried = false;
+let compMortRecordsEmpty = false;
 function resetCompMortgage(){
   compMortFreeClear = false; compMortLoadedAddr = ''; compMortSource = ''; compMortDetail = null;
-  compMortManualMode = false; compMortAttomTried = false; compMortAttomEmpty = false;
+  compMortManualMode = false; compMortRecordsTried = false; compMortRecordsEmpty = false;
   const ma = document.getElementById('compMortAmt'); if(ma) ma.value = '';
   const ml = document.getElementById('compMortLender'); if(ml) ml.value = '';
 }
@@ -5193,8 +5193,8 @@ function renderCompMortgage(){
   if(amt != null || lender || compMortDetail){
     const d = compMortDetail || {};
     const term = d.termMonths != null ? (d.termMonths + ' mo' + (d.termMonths % 12 === 0 && d.termMonths > 0 ? ' (' + (d.termMonths/12) + ' yr)' : '')) : '';
-    const srcNote = compMortSource === 'attom' ? ' <span style="color:var(--muted);font-weight:400;font-size:12px">(filled automatically from property records)</span>'
-      : compMortSource === 'lookup' ? ' <span style="color:var(--muted);font-weight:400;font-size:12px">(filled automatically from backup lookup)</span>'
+    const srcNote = compMortSource === 'records' ? ' <span style="color:var(--muted);font-weight:400;font-size:12px">(filled automatically from property records)</span>'
+      : compMortSource === 'lookup' ? ' <span style="color:var(--muted);font-weight:400;font-size:12px">(filled automatically from mortgage lookup)</span>'
       : compMortSource === 'lead' ? ' <span style="color:var(--muted);font-weight:400;font-size:12px">(from saved lead record)</span>' : '';
     box.innerHTML = '<div style="font-weight:700;font-size:13px;margin-bottom:6px">Mortgage on record' + srcNote + '</div><div class="prop-grid">'
       + chip('Amount owed', amt != null ? '$' + amt.toLocaleString() : '')
@@ -5209,11 +5209,11 @@ function renderCompMortgage(){
     return;
   }
   if(compMortSource === 'none'){
-    box.innerHTML = '<p style="color:var(--muted);font-size:13px">No mortgage data found — property records and the backup lookup both came back empty. Nothing invented. Enter the amount and lender by hand below as a last resort.</p>' + compMortTakeHtml();
-  } else if(compMortSource === 'attom-none'){
-    box.innerHTML = '<p style="color:var(--muted);font-size:13px">No mortgage data in property records for this address. Use the backup load below — if that also finds nothing, hand entry opens as a last resort.</p>' + compMortTakeHtml();
+    box.innerHTML = '<p style="color:var(--muted);font-size:13px">No mortgage data found — property records and the mortgage lookup both came back empty. Nothing invented. Enter the amount and lender by hand below as a last resort.</p>' + compMortTakeHtml();
+  } else if(compMortSource === 'records-none'){
+    box.innerHTML = '<p style="color:var(--muted);font-size:13px">No mortgage data in property records for this address. Use the mortgage load below — if that also finds nothing, hand entry opens as a last resort.</p>' + compMortTakeHtml();
   } else if(compMortSource === 'lookup-none'){
-    box.innerHTML = '<p style="color:var(--muted);font-size:13px">Backup lookup found nothing for this address. Load verified comps so property records can fill the mortgage block.</p>' + compMortTakeHtml();
+    box.innerHTML = '<p style="color:var(--muted);font-size:13px">Mortgage lookup found nothing for this address. Load verified comps so property records can fill the mortgage block.</p>' + compMortTakeHtml();
   } else {
     box.innerHTML = '<p style="color:var(--muted);font-size:13px">No mortgage data yet — it fills automatically when verified comps load.</p>' + compMortTakeHtml();
   }
@@ -5222,37 +5222,37 @@ function renderCompMortgage(){
    already carries freeAndClear + mortgage (lender, amount, loan type, term,
    due date, recorded date), so this costs nothing extra. Runs on every
    successful comps load, before the comp list renders. */
-function applyCompMortgageFromAttom(prop, addr){
+function applyCompMortgageFromRecords(prop, addr){
   compMortLoadedAddr = addr || '';
-  compMortAttomTried = true;
+  compMortRecordsTried = true;
   compMortManualMode = false;
   const amtEl = document.getElementById('compMortAmt');
   const lenEl = document.getElementById('compMortLender');
   const msg = document.getElementById('compMortMsg');
   if(!prop){
-    compMortAttomEmpty = true; compMortSource = 'attom-none'; compMortDetail = null; compMortFreeClear = false;
+    compMortRecordsEmpty = true; compMortSource = 'records-none'; compMortDetail = null; compMortFreeClear = false;
     if(amtEl) amtEl.value = ''; if(lenEl) lenEl.value = '';
     if(msg) msg.textContent = 'No mortgage data in property records.';
     renderCompMortgage(); return;
   }
   if(prop.freeAndClear){
-    compMortAttomEmpty = false; compMortFreeClear = true; compMortDetail = null; compMortSource = 'attom';
+    compMortRecordsEmpty = false; compMortFreeClear = true; compMortDetail = null; compMortSource = 'records';
     if(amtEl) amtEl.value = 0; if(lenEl) lenEl.value = '';
     if(msg) msg.textContent = 'Free & clear — no mortgage on record (property records).';
     renderCompMortgage(); return;
   }
   const m = prop.mortgage;
   if(m && (m.amount != null || m.lender)){
-    compMortAttomEmpty = false; compMortFreeClear = false; compMortSource = 'attom';
+    compMortRecordsEmpty = false; compMortFreeClear = false; compMortSource = 'records';
     compMortDetail = { lender: m.lender || null, amount: m.amount != null ? m.amount : null, loanType: m.loanType || null, termMonths: m.termMonths != null ? m.termMonths : null, dueDate: m.dueDate || null, recordedDate: m.recordedDate || null };
     if(amtEl && m.amount != null) amtEl.value = Math.round(m.amount);
     if(lenEl) lenEl.value = m.lender || '';
     if(msg) msg.textContent = 'Mortgage filled automatically from property records.';
     renderCompMortgage(); return;
   }
-  compMortAttomEmpty = true; compMortFreeClear = false; compMortDetail = null; compMortSource = 'attom-none';
+  compMortRecordsEmpty = true; compMortFreeClear = false; compMortDetail = null; compMortSource = 'records-none';
   if(amtEl) amtEl.value = ''; if(lenEl) lenEl.value = '';
-  if(msg) msg.textContent = 'No mortgage data in property records — backup load below.';
+  if(msg) msg.textContent = 'No mortgage data in property records — manual load below.';
   renderCompMortgage();
 }
 async function loadCompMortgage(){
@@ -5261,13 +5261,13 @@ async function loadCompMortgage(){
   const addr = addrEl ? addrEl.value.trim() : '';
   if(!addr){ if(msg) msg.textContent = 'Enter the property address first.'; return; }
   if(msg) msg.textContent = 'Loading mortgage data…';
-  const backupEmpty = ()=>{
-    if(compMortAttomTried && compMortAttomEmpty){
+  const lookupEmpty = ()=>{
+    if(compMortRecordsTried && compMortRecordsEmpty){
       compMortSource = 'none'; compMortManualMode = true;
-      if(msg) msg.textContent = 'No mortgage data found — property records and backup both empty.';
+      if(msg) msg.textContent = 'No mortgage data found — property records and mortgage lookup both empty.';
     } else {
       compMortSource = 'lookup-none'; compMortManualMode = false;
-      if(msg) msg.textContent = 'Backup lookup found nothing — load verified comps for the property-records check.';
+      if(msg) msg.textContent = 'Mortgage lookup found nothing — load verified comps for the property-records check.';
     }
     renderCompMortgage();
   };
@@ -5277,7 +5277,7 @@ async function loadCompMortgage(){
     const pj = await resp.json();
     if(!pj.matched || !pj.property){
       compMortLoadedAddr = '';
-      backupEmpty(); return;
+      lookupEmpty(); return;
     }
     const p = pj.property;
     compMortLoadedAddr = addr;
@@ -5297,7 +5297,7 @@ async function loadCompMortgage(){
     const a = document.getElementById('compMortAmt'); if(a && bal != null) a.value = Math.round(bal);
     const l = document.getElementById('compMortLender'); if(l && m.lender) l.value = m.lender;
     if(bal == null && !m.lender){
-      backupEmpty();
+      lookupEmpty();
     } else {
       compMortDetail = { lender: m.lender || null, amount: bal != null ? Math.round(bal) : null, loanType: null, termMonths: null, dueDate: null, recordedDate: m.recordingDate || null };
       compMortSource = 'lookup';
@@ -5305,7 +5305,7 @@ async function loadCompMortgage(){
       renderCompMortgage();
     }
   }catch(e){
-    if(msg) msg.textContent = 'Mortgage backup lookup unavailable right now — try again.';
+    if(msg) msg.textContent = 'Mortgage lookup unavailable right now — try again.';
   }
 }
 function renderCompTierTable(){
@@ -5404,7 +5404,7 @@ function downloadCompReport(){
       mortHtml += kv('Equity vs ARV', '$' + eq.toLocaleString() + ' (' + Math.round(eq/arv*100) + '%)');
     }
   } else if(compMortSource === 'none'){
-    mortHtml = '<p>No mortgage data found — property records and the backup lookup both came back empty.</p>';
+    mortHtml = '<p>No mortgage data found — property records and the mortgage lookup both came back empty.</p>';
   } else {
     mortHtml = '<p>No mortgage data on file for this address.</p>';
   }
@@ -5682,10 +5682,10 @@ function calcComp(){
   // ⚡ Quick Offer: refresh the summary card live
   if(typeof updateQuickOfferResult === 'function') updateQuickOfferResult();
 }
-/* ---- Verified comps on the Comps page: same attom-lookup endpoint the lead
-   modal's Verified Comps panel uses, driven by the typed address. ATTOM rows are
-   recorded closed sales, so status is Sold and source is Public Record; ATTOM
-   supplies no DOM, so DOM renders as — (never invented). ---- */
+/* ---- Verified comps on the Comps page: driven by the typed address.
+   Comp rows are recorded closed sales, so status is Sold and source is
+   Public Record; the feeds supply no DOM, so DOM renders as — (never
+   invented). ---- */
 /* ---- Comp correctness gates: a pick is a filter-best row only. Excluded
    (upper-pocket / as-is anchor / arm's-length-unverified) rows are display
    only and can never enter the average, the count, or the offer math. ---- */
@@ -6003,7 +6003,7 @@ function openCompsForAddress(addr){
   loadCompsForAddress();
 }
 /* SUBJECT PROPERTY CARD: shows the property the user actually searched,
-   built ONLY from the property record the attom-lookup call already
+   built ONLY from the property record the comp lookup call already
    returns (the same response that fills mortgage + sqft + map coords).
    Zero new lookups, zero new cost. Any field the record does not carry
    shows as "—" — never invented, never guessed. The response carries NO
@@ -6021,7 +6021,7 @@ function compField(v){
   return (v != null && v !== '') ? v : '—';
 }
 /* data provider distress/equity/title row — renders only when the source
-   supplied the fields (ATTOM-sourced cards are unchanged). */
+   supplied the fields (cards from sources without these fields are unchanged). */
 function compDistressRow(prop){
   if(!prop) return '';
   const b = (txt, color)=>'<span style="display:inline-block;background:'+color+';color:#fff;border-radius:6px;padding:2px 8px;font-size:11px;font-weight:700;margin:0 4px 4px 0">'+esc(txt)+'</span>';
@@ -6229,7 +6229,7 @@ async function runCountyVerify(){
   try{
     const picks = (typeof compRows !== 'undefined' ? compRows : []).filter(r => (typeof compPicks !== 'undefined' ? compPicks : []).indexOf(r.address) >= 0);
     if(!picks.length) return;
-    // Subject state decides coverage — comp rows (esp. ATTOM) often omit
+    // Subject state decides coverage — comp rows often omit
     // the state from their address string, so checking each comp's address
     // for ", OH" silently skips everything. Comps are nearby the subject,
     // so subject-in-OH means comps-in-OH.
@@ -6270,10 +6270,11 @@ async function loadCompsForAddress(retryAttempt){
        feed — its sold comps run through our own selection engine inside
        resideline-comps. The data provider still supplies the subject
        record (owner, recorded mortgage, lat/lng, distress/equity/title)
-       and merges over whichever comp source wins, the same merge the old
-       ATTOM+PR path used. Comp fallback order: Resideline -> data
-       provider -> ATTOM. A Resideline set under the 3-comp minimum (or a
-       dormant Resideline key) simply falls through to the next source. */
+       and merges over whichever comp source wins. Comp fallback order:
+       Resideline -> data provider. (ATTOM was removed Nov 18, 2026 —
+       cut off and replaced by Resideline.) A Resideline set under the
+       3-comp minimum (or a dormant Resideline key) simply falls through
+       to the data provider. */
     let d = null;
     let compSource = '';
     let prSubject = null;
@@ -6300,27 +6301,27 @@ async function loadCompsForAddress(retryAttempt){
           }
         }
       }
-    }catch(e){ /* fall through to data provider / ATTOM */ }
+    }catch(e){ /* fall through to data provider */ }
     if(!d && prData && prData.comps && (prData.comps.best || []).length){
       d = prData; compSource = 'data provider';
     }
+    if(!d && prData){
+      // PR matched the property but had no usable comps: keep the subject
+      // record (owner/mortgage/map) with comps empty — the same handling
+      // the old last-resort merge produced. (Fix 2026-11-02: PR comps=null
+      // was causing "not found" despite PR having the property.)
+      d = prData; compSource = 'data provider';
+      if(!d.matched) d.matched = true;
+    }
     if(!d){
-      const resp = await fetch('/.netlify/functions/attom-lookup?address=' + encodeURIComponent(addr));
-      if(!resp.ok) throw new Error('HTTP ' + resp.status);
-      d = await resp.json();
-      compSource = 'ATTOM';
-      if(prSubject){
-        d.property = Object.assign({}, d.property || {}, prSubject);
-        compSource = 'ATTOM+PR';
-        // If PR matched the property, we have a subject even if ATTOM didn't match
-        // (Fix 2026-11-02: PR comps=null was causing "not found" despite PR having the property)
-        if(!d.matched) d.matched = true;
-      }
+      // No source matched — fall into the not-matched handling below
+      // ("No ownership records found…"), same as before.
+      d = { matched: false };
     }
     compDataSource = compSource;
     if(!d.matched){ compRows = []; compPicks = []; compLoadedAddr = ''; compSubjectLat = null; compSubjectLng = null; compConfidence = ''; compConfidenceText = ''; compSubjectSqft = null; compSubjectAvm = null; compSubjectBeds = null; compDetailData = null; compStabilityWarns = []; resetCompFilters(); resetCompMortgage(); renderCompSubjectCard(null, addr, ''); if(msg) msg.textContent = 'No ownership records found for this address — type an ARV below to run the math manually.'; renderCompList(); renderCompMortgage(); calcComp(); return; }
     renderCompSubjectCard(d.property || null, addr, d.address || '', null, d.linkedProperties || []);
-    applyCompMortgageFromAttom(d.property || null, addr);
+    applyCompMortgageFromRecords(d.property || null, addr);
     compConfidence = (d.comps && d.comps.confidence) || '';
     compConfidenceText = (d.comps && d.comps.confidenceText) || '';
     compSubjectSqft = (d.property && d.property.sqft) ? Number(d.property.sqft) : null;
@@ -6333,7 +6334,7 @@ async function loadCompsForAddress(retryAttempt){
        overwriting Troy's hand entries. It MUST run here, right after
        the subject match — the old spot sat after the no-comps
        early-return, so it never ran for thin-feed addresses like
-       Charday (PR pool 0 + ATTOM no comps = "No verified sales found
+       Charday (PR pool 0 + no comps = "No verified sales found
        on two attempts" before the fetch line). Pass the MATCHED full
        address (state + ZIP), not the raw search text — RentCast
        returns nothing for a partial address. Fires once per address
@@ -6384,7 +6385,7 @@ async function loadCompsForAddress(retryAttempt){
     const next = {};
     rows.forEach(r => { if(compPicks.indexOf(r.address) >= 0 && r.amount != null) next[r.address] = r.amount; });
     compPrevLoads[addr] = next;
-    if(msg) msg.textContent = 'Loaded ' + rows.length + ' verified sale(s) via ' + (compDataSource || 'ATTOM') + ' — best ' + compPicks.length + ' pre-picked.';
+    if(msg) msg.textContent = 'Loaded ' + rows.length + ' verified sale(s) via ' + (compDataSource || 'property records') + ' — best ' + compPicks.length + ' pre-picked.';
     const avg = compPickAvg();
     const arvEl = document.getElementById('compARV');
     if(avg && arvEl) arvEl.value = avg;

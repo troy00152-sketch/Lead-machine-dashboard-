@@ -6,7 +6,6 @@
 'use strict';
 
 const dataApi = require('./netlify/functions/data-api.js')._test;
-const attom = require('./netlify/functions/attom-lookup.js')._test;
 const ai = require('./netlify/functions/dashboard-ai.js')._test;
 
 const cases = [
@@ -26,7 +25,7 @@ const cases = [
 ];
 
 let failures = 0;
-for (const [name, mod] of [['data-api', dataApi], ['attom-lookup', attom], ['dashboard-ai', ai]]) {
+for (const [name, mod] of [['data-api', dataApi], ['dashboard-ai', ai]]) {
   if (typeof mod.parseAddress !== 'function') { console.log(`FAIL ${name}: parseAddress not exported`); failures++; continue; }
   for (const [input, expected] of cases) {
     const got = mod.parseAddress(input);

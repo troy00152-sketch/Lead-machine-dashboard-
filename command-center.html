@@ -1316,8 +1316,7 @@ document.addEventListener('click',e=>{
    Same lock as the Comps page: listed with a realtor = PASS immediately
    — no MAO, no LAO, no offer. The listing check reads the fields the
    data provider returns (onMarket boolean + listingStatus string);
-   the backup source carries neither, so an unknown status is labelled
-   as unconfirmed rather than guessed. ARV is a 3-comp indication ONLY:
+   an unknown status is labelled as unconfirmed rather than guessed. ARV is a 3-comp indication ONLY:
    with fewer than 3 comps the market value is an AVM screen — never
    presented as ARV, and no MAO/LAO is derived from it. */
 function isListedProperty(p){
@@ -1355,10 +1354,8 @@ async function analyzeSubject(){
   btn.disabled=true;btn.textContent='Analyzing…';
   out.innerHTML='<div class="loading">Pulling property data, comps, and owner portfolio…</div>';
   try{
-    // Subject lookup with backup-source fallback (mirrors the Comps page
-    // hybrid): data provider first; when it fails or its quota is out, the
-    // backup source supplies the property record, value estimate and comps.
-    // No data-provider API call is made on the fallback path.
+    // Subject lookup (subject-lookup.js): the data provider is the only
+    // source — one call, no fallback (backup source removed Nov 18, 2026).
     // This is an EXPLICIT user action (Analyze button / lead-card tap) —
     // the only place on this page a lookup runs without a separate
     // confirmation.
@@ -1385,7 +1382,6 @@ async function analyzeSubject(){
 function renderSubjectAnalysis(d,addr){
   const out=document.getElementById('subjResult');
   const p=d.property;
-  const viaBackup=d.source==='backup';
   const comps=(d.comps&&d.comps.best)||[];
   const compCount=comps.length;
   const listed=isListedProperty(p);
@@ -1407,7 +1403,6 @@ function renderSubjectAnalysis(d,addr){
   let html='<img class="subj-photo" src="'+esc(photo)+'" onerror="this.style.display=\'none\'" alt="Property photo">';
   html+='<div style="margin-bottom:12px"><strong style="font-size:16px">'+esc(p.address||addr)+'</strong> '
     +' <span class="score-badge '+scoreClass(ws.label)+'">🎯 '+ws.score+' · '+ws.label+'</span>'
-    +(viaBackup?' <span style="font-size:11px;color:var(--muted)">· via backup source</span>':'')
     +'<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap"><button class="mini-btn" onclick="openOfferModeSubject()">💰 Offer Mode</button><button class="mini-btn" onclick="openDealSheetSubject()">🖨️ Deal Sheet</button></div></div>';
   if(listed){
     html+='<div style="background:#3d0d0d;border:1px solid #ff4d4d;border-radius:10px;padding:12px;font-size:13px;font-weight:800;color:#ff8080;margin-bottom:12px">⛔ PASS — Listed with a realtor — no MAO, no LAO, no offer</div>';

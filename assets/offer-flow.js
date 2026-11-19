@@ -98,7 +98,7 @@ function renderLead() {
     ? Math.round(l.comps_of_record.reduce((a, c) => a + c.amount, 0) / l.comps_of_record.length) : null;
   const eng = l.engine_recheck;
   const engHtml = eng ? `<div class="src" style="border-top:1px solid var(--line);padding-top:10px">
-      <b style="color:var(--txt)">Engine re-check (independent ATTOM run):</b>
+      <b style="color:var(--txt)">Engine re-check (independent second run):</b>
       status ${eng.status}${eng.arv ? `, ARV ${money(eng.arv)}` : ' — no ARV (insufficient usable comps in that feed)'}.
       A re-check is shown for transparency; it never blends into the price of record.</div>` : '';
   $('compsCard').innerHTML = `<h2>Comps behind the ARV</h2>
