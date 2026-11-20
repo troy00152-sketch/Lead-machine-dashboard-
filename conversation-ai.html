@@ -2208,6 +2208,18 @@ function setTestMode(mode) {
   var next = mode === 'voice' ? 'voice' : 'text';
   if (next !== testMode && callActive) endTestCall();
   testMode = next;
+  if (next === 'voice') {
+    /* Voice-call testing only works on a voice bot, and the page
+       otherwise just hides the Start button behind a note telling
+       the user to go back up to the picker — in practice that reads
+       as "not working." Switching to Voice call selects the first
+       voice bot (Sam) for them, so the Start button is right there. */
+    var bot = selectedBot();
+    if (!bot || bot.channel !== 'voice') {
+      var voiceBots = allBots().filter(function (b) { return b.channel === 'voice'; });
+      if (voiceBots.length) { selectBot(voiceBots[0].id, false); return; }
+    }
+  }
   renderTestMode();
 }
 function updateCallStatus() {
