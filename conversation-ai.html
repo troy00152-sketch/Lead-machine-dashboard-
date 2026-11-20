@@ -1308,24 +1308,40 @@ function caiSaveVoice(storage, tenant, sel) {
   caiSaveJson(storage, caiKey(tenant, 'voice'), clean);
   return clean;
 }
-/* Voice depth (Troy, Nov 19): how heavy the active voice sounds —
-   Light / Medium / Deep, per bot, default Medium. Applied as a
-   playback-rate shift on real-voice audio (pitch follows) and as
-   a pitch multiplier on device voices. */
+/* Voice depth (Troy, Nov 19; per-voice Nov 20): how heavy a voice
+   sounds — Light / Medium / Deep, set on EVERY voice row and saved
+   per voice, so a voice keeps its depth when it gets Selected.
+   Default Medium. Applied as a playback-rate shift on real-voice
+   audio (pitch follows) and as a pitch multiplier on device voices.
+   Storage: voiceDepth = { ownerId: { selId: depth } }; a legacy
+   per-bot string value still reads as that bot's fallback depth. */
 var CAI_DEPTHS = ['light', 'medium', 'deep'];
 function caiDepthRate(d) { return d === 'light' ? 1.12 : d === 'deep' ? 0.88 : 1; }
 function caiDepthMap() {
   var m = caiLoadJson(localStorage, caiKey(TENANT, 'voiceDepth'), null);
   return m && typeof m === 'object' ? m : {};
 }
-function depthFor(ownerId) {
-  var d = caiDepthMap()[ownerId];
+function depthForVoice(ownerId, selId) {
+  var entry = caiDepthMap()[ownerId];
+  var d = null;
+  if (entry && typeof entry === 'object') d = entry[selId];
+  else if (typeof entry === 'string') d = entry;
   return CAI_DEPTHS.indexOf(d) >= 0 ? d : 'medium';
 }
-function setDepth(ownerId, d) {
+function depthFor(ownerId) {
+  return depthForVoice(ownerId, voiceSelectionFor(ownerId));
+}
+function setDepthForVoice(ownerId, selId, d) {
   if (CAI_DEPTHS.indexOf(d) < 0) return;
   var m = caiDepthMap();
-  m[ownerId] = d;
+  var entry = m[ownerId];
+  var obj = {};
+  if (entry && typeof entry === 'object') obj = entry;
+  else if (typeof entry === 'string') {
+    try { obj[voiceSelectionFor(ownerId)] = entry; } catch (e) {}
+  }
+  obj[selId] = d;
+  m[ownerId] = obj;
   caiSaveJson(localStorage, caiKey(TENANT, 'voiceDepth'), m);
 }
 function caiVoiceLabel(v) {
@@ -2161,14 +2177,12 @@ function voiceRowHtml(ownerId, selId, label, sub, active) {
       : '<button class="btn small" type="button" data-vselect="' + esc(selId) + '" data-vowner="' + esc(ownerId) + '">Select</button>') +
     '<button class="btn small" type="button" data-vlisten="' + esc(selId) + '" data-vowner="' + esc(ownerId) + '">▶ Listen</button>' +
     '</div>';
-  if (active) {
-    var d = depthFor(ownerId);
-    row += '<div class="voice-depth"><span class="lbl">Voice depth</span>' +
-      CAI_DEPTHS.map(function (k) {
-        return '<button class="btn small vdepth' + (d === k ? ' on' : '') + '" type="button" data-vdepth="' + k + '" data-vowner="' + esc(ownerId) + '">' + k.charAt(0).toUpperCase() + k.slice(1) + '</button>';
-      }).join('') +
-      '<span class="muted" style="font-size:11.5px">How heavy the voice sounds</span></div>';
-  }
+  var d = depthForVoice(ownerId, selId);
+  row += '<div class="voice-depth"><span class="lbl">Voice depth</span>' +
+    CAI_DEPTHS.map(function (k) {
+      return '<button class="btn small vdepth' + (d === k ? ' on' : '') + '" type="button" data-vdepth="' + k + '" data-vowner="' + esc(ownerId) + '" data-vsel="' + esc(selId) + '">' + k.charAt(0).toUpperCase() + k.slice(1) + '</button>';
+    }).join('') +
+    '<span class="muted" style="font-size:11.5px">How heavy the voice sounds</span></div>';
   return row;
 }
 function renderVoiceList(ownerId) {
@@ -2305,7 +2319,7 @@ function previewVoice(ownerId, selId) {
     var so = caiVoiceOption(selId);
     if (so && so.name) line = 'Hi, this is ' + botName + ' in the ' + so.name + ' style — thanks for calling' + biz + '. How can I help you today?';
   }
-  if (!speakWithSelection(line, selId, null, depthFor(ownerId))) {
+  if (!speakWithSelection(line, selId, null, depthForVoice(ownerId, selId))) {
     setVoiceNote(ownerId, 'Voice preview isn’t available in this browser.');
   }
 }
@@ -2316,9 +2330,9 @@ document.addEventListener('click', function (e) {
   if (listen) { previewVoice(listen.dataset.vowner, listen.dataset.vlisten); return; }
   var dep = e.target.closest('[data-vdepth]');
   if (dep) {
-    setDepth(dep.dataset.vowner, dep.dataset.vdepth);
+    setDepthForVoice(dep.dataset.vowner, dep.dataset.vsel, dep.dataset.vdepth);
     renderVoiceList(dep.dataset.vowner);
-    previewVoice(dep.dataset.vowner, voiceSelectionFor(dep.dataset.vowner));
+    previewVoice(dep.dataset.vowner, dep.dataset.vsel);
     return;
   }
   var select = e.target.closest('[data-vselect]');
