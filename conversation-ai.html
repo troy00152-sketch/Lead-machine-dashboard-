@@ -991,9 +991,9 @@ function caiPhotoAvatar(id) {
   return found;
 }
 function caiAvatarOption(id) {
-  var found = null;
-  CAI_AVATAR_OPTIONS.forEach(function (o) { if (o.id === id) found = o; });
-  return found || caiPhotoAvatar(id);
+  /* Photos only (Troy, Nov 19): illustrated ids no longer validate,
+     so an old saved drawing pick falls back to the photo default. */
+  return caiPhotoAvatar(id);
 }
 function caiHeadsetAvatarId() {
   var found = null;
@@ -1012,7 +1012,7 @@ function caiSanitizeAvatarSel(v, dflt) {
   if (s === CAI_AVATAR_INITIALS || caiAvatarOption(s)) return s;
   var d = String(dflt == null ? '' : dflt).trim();
   if (d === CAI_AVATAR_INITIALS || caiAvatarOption(d)) return d;
-  return CAI_AVATAR_OPTIONS[0].id;
+  return 'ph-ashley';
 }
 function caiDefaultAvatars() {
   return { ashley: caiDefaultAvatar('ashley'), sam: caiDefaultAvatar('sam') };
@@ -1047,7 +1047,7 @@ function caiAvatarInitial(name) {
    the result is markup-safe to inject. */
 var caiClipSeq = 0;
 function caiAvatarSvg(sel, name, accent) {
-  var s = caiSanitizeAvatarSel(sel, CAI_AVATAR_OPTIONS[0].id);
+  var s = caiSanitizeAvatarSel(sel, 'ph-ashley');
   if (s === CAI_AVATAR_INITIALS) {
     var fill = /^#[0-9a-fA-F]{6}$/.test(String(accent || '')) ? String(accent) : '#ff6b1a';
     return '<svg viewBox="0 0 64 64" class="cai-avatar" data-avatar="initials" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">'
@@ -1062,7 +1062,8 @@ function caiAvatarSvg(sel, name, accent) {
       + '<defs><clipPath id="' + cid + '"><circle cx="32" cy="32" r="32"/></clipPath></defs>'
       + '<image href="' + po.photo + '" x="0" y="0" width="64" height="64" preserveAspectRatio="xMidYMid slice" clip-path="url(#' + cid + ')"/></svg>';
   }
-  var o = caiAvatarOption(s) || CAI_AVATAR_OPTIONS[0];
+  var o = caiAvatarOption(s);
+  if (!o || typeof o.bg !== 'string') return caiAvatarSvg('ph-ashley', name, accent);
   var p = '<circle cx="32" cy="32" r="32" fill="' + o.bg + '"/>';
   /* hair that falls behind the head (long styles, ponytail) */
   if (o.hairStyle === 'long') p += '<rect x="17" y="20" width="30" height="30" rx="10" fill="' + o.hair + '"/>';
@@ -2097,11 +2098,9 @@ function avatarOptsHtml(bot) {
   function btn(o) {
     return '<button type="button" class="avatar-opt' + (bot.avatar === o.id ? ' active' : '') + '" data-avatar-pick="' + esc(o.id) + '" data-avatar-owner="' + esc(bot.id) + '" title="' + esc(o.label) + '" aria-label="' + esc(o.label) + '">' + caiAvatarSvg(o.id, bot.name, ACCENT) + '</button>';
   }
-  var women = CAI_AVATAR_OPTIONS.filter(function (o) { return o.gender === 'female'; });
-  var men = CAI_AVATAR_OPTIONS.filter(function (o) { return o.gender !== 'female'; });
+  /* Photos only (Troy, Nov 19): the illustrated faces are gone from
+     the picker — every avatar is a photo face (or Initials). */
   var html = '<div class="avatar-group">Photo faces</div>' + CAI_PHOTO_AVATARS.map(btn).join('');
-  html += '<div class="avatar-group">Illustrated — Women</div>' + women.map(btn).join('');
-  html += '<div class="avatar-group">Illustrated — Men</div>' + men.map(btn).join('');
   html += '<div class="avatar-group">Or</div>' + btn({ id: CAI_AVATAR_INITIALS, label: 'Initials' });
   return html;
 }
