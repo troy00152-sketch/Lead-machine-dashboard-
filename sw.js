@@ -5,13 +5,16 @@
  *   fresh; function responses are never read from or written to any cache.
  * - Page navigations / HTML -> NETWORK-FIRST. The fresh page wins whenever
  *   the network answers; the cached copy is only an offline fallback.
- * - Static assets (CSS/JS/images/fonts/manifest) -> CACHE-FIRST, populated
- *   from the network on first use. These are versioned by deploy + the
- *   cache name below.
+ * - Code assets (JS/CSS) -> NETWORK-FIRST (Nov 19 fix): a code deploy
+ *   must land the moment it publishes. Cache-first JS masked the
+ *   Nov 19 ai-assistant.js deploy — clients kept the old cached file
+ *   (and the assistant's old face) indefinitely.
+ * - Other static assets (images/fonts/manifest) -> CACHE-FIRST,
+ *   populated from the network on first use.
  *
  * Bump CACHE_NAME on any strategy change: activate deletes every old cache.
  */
-var CACHE_NAME = 'leadmachine-pwa-v5';
+var CACHE_NAME = 'leadmachine-pwa-v6';
 
 var PRECACHE_URLS = [
   '/manifest.webmanifest',
@@ -75,6 +78,23 @@ self.addEventListener('fetch', function (event) {
   // the cache is only an offline fallback.
   if (url.origin === self.location.origin
     && (url.pathname === '/assets/master-buyers.js' || url.pathname === '/assets/buyervault.js')) {
+    event.respondWith(
+      fetch(request).then(function (response) {
+        if (response && response.ok) {
+          var copy = response.clone();
+          caches.open(CACHE_NAME).then(function (cache) { cache.put(request, copy); });
+        }
+        return response;
+      }).catch(function () {
+        return caches.match(request);
+      })
+    );
+    return;
+  }
+
+  // Code assets (JS/CSS): network-first so a deploy is never masked
+  // by a stale cached copy; the cache is only an offline fallback.
+  if (url.origin === self.location.origin && /\.(?:css|js|mjs)$/i.test(url.pathname)) {
     event.respondWith(
       fetch(request).then(function (response) {
         if (response && response.ok) {
