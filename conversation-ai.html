@@ -97,6 +97,9 @@
   .voice-row .grow{ flex:1; min-width:0; }
   .voice-row .vname{ font-size:13.5px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .voice-row .vsub{ font-size:11.5px; color:var(--muted); }
+  .voice-depth{ display:flex; gap:6px; align-items:center; padding:7px 12px 9px; border-top:1px dashed var(--line); background:var(--panel); flex-wrap:wrap; }
+  .voice-depth .lbl{ font-size:12px; color:var(--muted); font-weight:600; margin-right:2px; }
+  .voice-depth .vdepth.on{ background:#2e7d32; color:#fff; border-color:#2e7d32; }
   /* test panel */
   .test-log{ border:1px solid var(--line); border-radius:12px; background:var(--bg); padding:12px; min-height:150px; max-height:340px; overflow-y:auto; margin-bottom:10px; }
   .bubble-row{ display:flex; margin-bottom:9px; }
@@ -954,20 +957,55 @@ var CAI_AVATAR_OPTIONS = [
   { id: 'ava-silas', label: 'Silas', gender: 'male', bg: '#fff0d6', skin: '#f1c27d', hair: '#6e452a', hairStyle: 'long', shirt: '#6a4a2f', accessory: 'none', beard: 'goatee' },
   { id: 'ava-kofi', label: 'Kofi', gender: 'male', bg: '#fff4d9', skin: '#5c3a21', hair: '#0f0d0c', hairStyle: 'buzz', shirt: '#7a3b12', accessory: 'none' },
 ];
+/* Photo faces (Troy's pick, Nov 19): a generated photo headshot
+   matched to each real voice, plus Ashley's own. Files live in
+   /avatars/<name>.webp (256px). An option with a `photo` renders
+   the image clipped to the avatar circle instead of a drawn face. */
+var CAI_PHOTO_AVATARS = [
+  { id: 'ph-ashley', label: 'Ashley', gender: 'female', photo: '/avatars/ashley.webp' },
+  { id: 'ph-sarah', label: 'Sarah', gender: 'female', photo: '/avatars/sarah.webp' },
+  { id: 'ph-bella', label: 'Bella', gender: 'female', photo: '/avatars/bella.webp' },
+  { id: 'ph-jessica', label: 'Jessica', gender: 'female', photo: '/avatars/jessica.webp' },
+  { id: 'ph-matilda', label: 'Matilda', gender: 'female', photo: '/avatars/matilda.webp' },
+  { id: 'ph-laura', label: 'Laura', gender: 'female', photo: '/avatars/laura.webp' },
+  { id: 'ph-alice', label: 'Alice', gender: 'female', photo: '/avatars/alice.webp' },
+  { id: 'ph-lily', label: 'Lily', gender: 'female', photo: '/avatars/lily.webp' },
+  { id: 'ph-roger', label: 'Roger', gender: 'male', photo: '/avatars/roger.webp' },
+  { id: 'ph-eric', label: 'Eric', gender: 'male', photo: '/avatars/eric.webp' },
+  { id: 'ph-brian', label: 'Brian', gender: 'male', photo: '/avatars/brian.webp' },
+  { id: 'ph-chris', label: 'Chris', gender: 'male', photo: '/avatars/chris.webp' },
+  { id: 'ph-will', label: 'Will', gender: 'male', photo: '/avatars/will.webp' },
+  { id: 'ph-liam', label: 'Liam', gender: 'male', photo: '/avatars/liam.webp' },
+  { id: 'ph-adam', label: 'Adam', gender: 'male', photo: '/avatars/adam.webp' },
+  { id: 'ph-bill', label: 'Bill', gender: 'male', photo: '/avatars/bill.webp' },
+  { id: 'ph-callum', label: 'Callum', gender: 'male', photo: '/avatars/callum.webp' },
+  { id: 'ph-harry', label: 'Harry', gender: 'male', photo: '/avatars/harry.webp' },
+  { id: 'ph-charlie', label: 'Charlie', gender: 'male', photo: '/avatars/charlie.webp' },
+  { id: 'ph-george', label: 'George', gender: 'male', photo: '/avatars/george.webp' },
+  { id: 'ph-daniel', label: 'Daniel', gender: 'male', photo: '/avatars/daniel.webp' },
+  { id: 'ph-river', label: 'River', gender: 'neutral', photo: '/avatars/river.webp' },
+];
+function caiPhotoAvatar(id) {
+  var found = null;
+  CAI_PHOTO_AVATARS.forEach(function (o) { if (o.id === id) found = o; });
+  return found;
+}
 function caiAvatarOption(id) {
   var found = null;
   CAI_AVATAR_OPTIONS.forEach(function (o) { if (o.id === id) found = o; });
-  return found;
+  return found || caiPhotoAvatar(id);
 }
 function caiHeadsetAvatarId() {
   var found = null;
   CAI_AVATAR_OPTIONS.forEach(function (o) { if (!found && o.accessory === 'headset') found = o; });
   return found ? found.id : CAI_AVATAR_OPTIONS[0].id;
 }
-/* Shipped faces: the text bot gets the first portrait, the voice
-   bot gets the headset portrait. Anything else gets the first. */
+/* Shipped faces (photo style, Troy's pick Nov 19): the voice bot
+   wears Roger's photo — the face that matches his voice — and the
+   text bot wears Ashley's photo. Saved picks always win; these
+   are only the out-of-the-box faces. */
 function caiDefaultAvatar(botId) {
-  return botId === 'sam' ? caiHeadsetAvatarId() : CAI_AVATAR_OPTIONS[0].id;
+  return botId === 'sam' ? 'ph-roger' : 'ph-ashley';
 }
 function caiSanitizeAvatarSel(v, dflt) {
   var s = String(v == null ? '' : v).trim();
@@ -1007,6 +1045,7 @@ function caiAvatarInitial(name) {
    the Initials disc in the account accent color. Pure string
    building from internal constants + one safe initial letter —
    the result is markup-safe to inject. */
+var caiClipSeq = 0;
 function caiAvatarSvg(sel, name, accent) {
   var s = caiSanitizeAvatarSel(sel, CAI_AVATAR_OPTIONS[0].id);
   if (s === CAI_AVATAR_INITIALS) {
@@ -1014,6 +1053,14 @@ function caiAvatarSvg(sel, name, accent) {
     return '<svg viewBox="0 0 64 64" class="cai-avatar" data-avatar="initials" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">'
       + '<circle cx="32" cy="32" r="32" fill="' + fill + '"/>'
       + '<text x="32" y="43" text-anchor="middle" font-size="30" font-weight="700" fill="#ffffff" font-family="system-ui,sans-serif">' + caiAvatarInitial(name) + '</text></svg>';
+  }
+  var po = caiPhotoAvatar(s);
+  if (po) {
+    caiClipSeq += 1;
+    var cid = 'cai-clip-' + caiClipSeq;
+    return '<svg viewBox="0 0 64 64" class="cai-avatar" data-avatar="' + po.id + '" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">'
+      + '<defs><clipPath id="' + cid + '"><circle cx="32" cy="32" r="32"/></clipPath></defs>'
+      + '<image href="' + po.photo + '" x="0" y="0" width="64" height="64" preserveAspectRatio="xMidYMid slice" clip-path="url(#' + cid + ')"/></svg>';
   }
   var o = caiAvatarOption(s) || CAI_AVATAR_OPTIONS[0];
   var p = '<circle cx="32" cy="32" r="32" fill="' + o.bg + '"/>';
@@ -1259,6 +1306,26 @@ function caiSaveVoice(storage, tenant, sel) {
   var clean = caiSanitizeVoiceSel(sel);
   caiSaveJson(storage, caiKey(tenant, 'voice'), clean);
   return clean;
+}
+/* Voice depth (Troy, Nov 19): how heavy the active voice sounds —
+   Light / Medium / Deep, per bot, default Medium. Applied as a
+   playback-rate shift on real-voice audio (pitch follows) and as
+   a pitch multiplier on device voices. */
+var CAI_DEPTHS = ['light', 'medium', 'deep'];
+function caiDepthRate(d) { return d === 'light' ? 1.12 : d === 'deep' ? 0.88 : 1; }
+function caiDepthMap() {
+  var m = caiLoadJson(localStorage, caiKey(TENANT, 'voiceDepth'), null);
+  return m && typeof m === 'object' ? m : {};
+}
+function depthFor(ownerId) {
+  var d = caiDepthMap()[ownerId];
+  return CAI_DEPTHS.indexOf(d) >= 0 ? d : 'medium';
+}
+function setDepth(ownerId, d) {
+  if (CAI_DEPTHS.indexOf(d) < 0) return;
+  var m = caiDepthMap();
+  m[ownerId] = d;
+  caiSaveJson(localStorage, caiKey(TENANT, 'voiceDepth'), m);
 }
 function caiVoiceLabel(v) {
   if (!v || typeof v !== 'object') return 'Voice';
@@ -2032,8 +2099,9 @@ function avatarOptsHtml(bot) {
   }
   var women = CAI_AVATAR_OPTIONS.filter(function (o) { return o.gender === 'female'; });
   var men = CAI_AVATAR_OPTIONS.filter(function (o) { return o.gender !== 'female'; });
-  var html = '<div class="avatar-group">Women</div>' + women.map(btn).join('');
-  html += '<div class="avatar-group">Men</div>' + men.map(btn).join('');
+  var html = '<div class="avatar-group">Photo faces</div>' + CAI_PHOTO_AVATARS.map(btn).join('');
+  html += '<div class="avatar-group">Illustrated — Women</div>' + women.map(btn).join('');
+  html += '<div class="avatar-group">Illustrated — Men</div>' + men.map(btn).join('');
   html += '<div class="avatar-group">Or</div>' + btn({ id: CAI_AVATAR_INITIALS, label: 'Initials' });
   return html;
 }
@@ -2086,7 +2154,7 @@ function voiceSelectionFor(ownerId) {
   return p ? p.voice : caiDefaultVoiceSel();
 }
 function voiceRowHtml(ownerId, selId, label, sub, active) {
-  return '<div class="voice-row' + (active ? ' active' : '') + '">' +
+  var row = '<div class="voice-row' + (active ? ' active' : '') + '">' +
     '<div class="grow"><div class="vname">' + esc(label) + '</div>' +
     (sub ? '<div class="vsub">' + esc(sub) + '</div>' : '') + '</div>' +
     (active
@@ -2094,6 +2162,15 @@ function voiceRowHtml(ownerId, selId, label, sub, active) {
       : '<button class="btn small" type="button" data-vselect="' + esc(selId) + '" data-vowner="' + esc(ownerId) + '">Select</button>') +
     '<button class="btn small" type="button" data-vlisten="' + esc(selId) + '" data-vowner="' + esc(ownerId) + '">▶ Listen</button>' +
     '</div>';
+  if (active) {
+    var d = depthFor(ownerId);
+    row += '<div class="voice-depth"><span class="lbl">Voice depth</span>' +
+      CAI_DEPTHS.map(function (k) {
+        return '<button class="btn small vdepth' + (d === k ? ' on' : '') + '" type="button" data-vdepth="' + k + '" data-vowner="' + esc(ownerId) + '">' + k.charAt(0).toUpperCase() + k.slice(1) + '</button>';
+      }).join('') +
+      '<span class="muted" style="font-size:11.5px">How heavy the voice sounds</span></div>';
+  }
+  return row;
 }
 function renderVoiceList(ownerId) {
   var container = ownerId === 'sam'
@@ -2150,15 +2227,15 @@ function botById(id) {
    onDone (optional) fires when the line finishes or fails, so a
    test call can reopen the microphone afterwards. */
 var caiCurrentAudio = null;
-function speakWithSelection(text, selId, onDone) {
+function speakWithSelection(text, selId, onDone, depth) {
   var s = caiSanitizeVoiceSel(selId);
-  if (s.indexOf('el:') === 0) return speakWithElVoice(text, s.slice(3), onDone);
-  return speakWithDevice(text, s, onDone);
+  if (s.indexOf('el:') === 0) return speakWithElVoice(text, s.slice(3), onDone, depth);
+  return speakWithDevice(text, s, onDone, depth);
 }
 /* Speak through the real-voice service. On any failure (service
    not connected yet, offline) fall back to the device path with
    the matching built-in style so a preview never goes silent. */
-function speakWithElVoice(text, voiceId, onDone) {
+function speakWithElVoice(text, voiceId, onDone, depth) {
   var done = false;
   function finish() { if (!done) { done = true; if (onDone) onDone(); } }
   try {
@@ -2173,6 +2250,7 @@ function speakWithElVoice(text, voiceId, onDone) {
       var url = URL.createObjectURL(blob);
       var audio = new Audio(url);
       caiCurrentAudio = audio;
+      try { audio.preservesPitch = false; audio.playbackRate = caiDepthRate(depth); } catch (e) {}
       audio.onended = function () { URL.revokeObjectURL(url); finish(); };
       audio.onerror = function () { URL.revokeObjectURL(url); finish(); };
       var p = audio.play();
@@ -2180,14 +2258,14 @@ function speakWithElVoice(text, voiceId, onDone) {
     }).catch(function () {
       var v = caiElVoice('el:' + voiceId);
       var style = v && v.gender === 'female' ? 'female-warm' : v && v.gender === 'neutral' ? 'neutral' : 'male-friendly';
-      if (!speakWithDevice(text, style, onDone)) finish();
+      if (!speakWithDevice(text, style, onDone, depth)) finish();
     });
     return true;
   } catch (e) {
     return false;
   }
 }
-function speakWithDevice(text, selId, onDone) {
+function speakWithDevice(text, selId, onDone, depth) {
   if (!('speechSynthesis' in window)) return false;
   try {
     var voices = window.speechSynthesis.getVoices() || [];
@@ -2196,6 +2274,7 @@ function speakWithDevice(text, selId, onDone) {
     if (voice) u.voice = voice;
     var opt = caiVoiceOption(selId);
     if (opt) { u.pitch = opt.pitch; u.rate = opt.rate; }
+    if (depth && depth !== 'medium') { u.pitch = Math.max(0.5, Math.min(2, (u.pitch || 1) * caiDepthRate(depth))); }
     if (onDone) {
       u.onend = function () { onDone(); };
       u.onerror = function () { onDone(); };
@@ -2210,7 +2289,24 @@ function speakWithDevice(text, selId, onDone) {
 function previewVoice(ownerId, selId) {
   var bot = botById(ownerId);
   var botName = bot ? bot.name : 'Sam';
-  if (!speakWithSelection(caiGreeting(botName, BRAND_NAME), selId)) {
+  /* The Listen audition names the VOICE being heard, not the bot:
+     every voice saying "This is Sam" made them indistinguishable
+     (Troy, Nov 19). The bot still introduces itself as Sam in the
+     test panel and on real calls — only the audition line names
+     the voice. */
+  var line = caiGreeting(botName, BRAND_NAME);
+  var biz = BRAND_NAME ? ' ' + BRAND_NAME : '';
+  if (String(selId).indexOf('el:') === 0) {
+    var ev = caiElVoice(selId);
+    if (ev && ev.name) line = 'Hi, this is ' + ev.name + ' — thanks for calling' + biz + '. How can I help you today?';
+  } else if (String(selId).indexOf('browser:') === 0) {
+    var dv = String(selId).slice(8).trim();
+    if (dv) line = 'Hi, this is ' + dv + ' — thanks for calling' + biz + '. How can I help you today?';
+  } else {
+    var so = caiVoiceOption(selId);
+    if (so && so.name) line = 'Hi, this is ' + botName + ' in the ' + so.name + ' style — thanks for calling' + biz + '. How can I help you today?';
+  }
+  if (!speakWithSelection(line, selId, null, depthFor(ownerId))) {
     setVoiceNote(ownerId, 'Voice preview isn’t available in this browser.');
   }
 }
@@ -2219,6 +2315,13 @@ document.addEventListener('click', function (e) {
   if (avPick) { setBotAvatar(avPick.dataset.avatarOwner, avPick.dataset.avatarPick); return; }
   var listen = e.target.closest('[data-vlisten]');
   if (listen) { previewVoice(listen.dataset.vowner, listen.dataset.vlisten); return; }
+  var dep = e.target.closest('[data-vdepth]');
+  if (dep) {
+    setDepth(dep.dataset.vowner, dep.dataset.vdepth);
+    renderVoiceList(dep.dataset.vowner);
+    previewVoice(dep.dataset.vowner, voiceSelectionFor(dep.dataset.vowner));
+    return;
+  }
   var select = e.target.closest('[data-vselect]');
   if (select) {
     var owner = select.dataset.vowner;
@@ -2448,7 +2551,7 @@ function speakTestReply(text) {
   var spoke = speakWithSelection(text, voiceSelectionFor(bot.id), function () {
     callSpeaking = false;
     if (callActive) startListening();
-  });
+  }, depthFor(bot.id));
   if (!spoke) callSpeaking = false;
 }
 function handleCallUtterance(text) {
