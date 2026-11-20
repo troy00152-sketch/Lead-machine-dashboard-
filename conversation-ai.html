@@ -1230,10 +1230,27 @@ function caiPickSpeechVoice(voices, sel) {
   }
   var opt = caiVoiceOption(s);
   var prefer = opt ? opt.prefer : 'any';
+  /* Gender of a device voice. Almost no real voice is named
+     "Female"/"Male" — they carry first names (Microsoft Aria,
+     Microsoft Guy, Samantha, Daniel…) — so classify by the known
+     voice names, token by token, plus any explicit gender word.
+     The old check only looked for the literal words female/male,
+     matched almost nothing on a real device, and every style —
+     female and male alike — fell back to the same single voice. */
+  var FEMALE_NAMES = { samantha: 1, aria: 1, jenny: 1, zira: 1, karen: 1, moira: 1, tessa: 1, fiona: 1, victoria: 1, allison: 1, ava: 1, susan: 1, catherine: 1, linda: 1, heather: 1, emma: 1, olivia: 1, sophia: 1, amelia: 1, hazel: 1, serena: 1, amy: 1, joanna: 1, joana: 1, salli: 1, kimberly: 1, kendra: 1, ivy: 1, ruth: 1, michelle: 1, neerja: 1, veena: 1, lekha: 1, ananya: 1, swara: 1, sara: 1, laura: 1, elena: 1, lucia: 1, bianca: 1, penelope: 1, carmen: 1, conchita: 1, marlene: 1, vicki: 1, nicky: 1, yuna: 1, kyoko: 1, sayaka: 1, mizuki: 1, yuki: 1, xiaoxiao: 1, xiaoyi: 1, yaoyao: 1, huihui: 1 };
+  var MALE_NAMES = { guy: 1, christopher: 1, eric: 1, brian: 1, ryan: 1, daniel: 1, alex: 1, david: 1, mark: 1, george: 1, james: 1, fred: 1, tom: 1, aaron: 1, arthur: 1, albert: 1, bruce: 1, carlos: 1, diego: 1, jorge: 1, juan: 1, pedro: 1, hiroshi: 1, kenji: 1, ichiro: 1, liang: 1, wei: 1, stefan: 1, kasper: 1, roger: 1, brandon: 1, jacob: 1, tony: 1, kevin: 1 };
   function gender(v) {
     var n = String((v && v.name) || '').toLowerCase();
-    if (/female|woman/.test(n)) return 'female';
-    if (/male|\bman\b/.test(n)) return 'male';
+    if (/female|woman|femenina/.test(n)) return 'female';
+    if (/male|\bman\b|masculino/.test(n)) return 'male';
+    var toks = n.split(/[^a-z]+/);
+    var f = false, m = false;
+    toks.forEach(function (t) {
+      if (FEMALE_NAMES[t]) f = true;
+      if (MALE_NAMES[t]) m = true;
+    });
+    if (f && !m) return 'female';
+    if (m && !f) return 'male';
     return '';
   }
   function best(list) {
@@ -1244,13 +1261,18 @@ function caiPickSpeechVoice(voices, sel) {
     });
     return b;
   }
-  /* A gendered style first looks among voices of that gender —
-     the most natural-sounding of those wins. With no gendered
-     match (or a gender-free style like Natural), the most
-     natural-sounding voice overall wins. */
+  /* A gendered style picks among voices of that gender — the
+     most natural-sounding of those wins. With no gendered match
+     it takes an unclassified voice next; a voice known to be the
+     OTHER gender is only ever the last resort, so a female style
+     never previews in a man's voice while a woman's (or an
+     unclassified) voice exists on the device. Gender-free styles
+     (Natural, Neutral) take the most natural voice overall. */
   if (prefer === 'female' || prefer === 'male') {
     var g = pool.filter(function (v) { return gender(v) === prefer; });
     if (g.length) return best(g);
+    var u = pool.filter(function (v) { return gender(v) === ''; });
+    if (u.length) return best(u);
   }
   return best(pool);
 }
