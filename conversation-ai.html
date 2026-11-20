@@ -125,6 +125,7 @@
   .avatar-opt svg{ width:100%; height:100%; display:block; }
   .avatar-opt:hover{ border-color:var(--accent); }
   .avatar-opt.active{ border-color:var(--accent); box-shadow:0 0 0 2px var(--accent); }
+  .avatar-group{ flex:0 0 100%; font-size:11px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:#8a8f98; margin:6px 0 0; }
   .bubble-row.bot-row{ align-items:flex-start; gap:8px; }
 </style>
 </head>
@@ -902,36 +903,56 @@ function caiRestoreBotNames(storage, tenant) {
    added profiles carry theirs on the profile (like voice). */
 var CAI_AVATAR_INITIALS = 'initials';
 var CAI_AVATAR_OPTIONS = [
-  { id: 'ava-aria', label: 'Aria', bg: '#ffd9c0', skin: '#8d5524', hair: '#1d1a17', hairStyle: 'long', shirt: '#2f6f6a', accessory: 'none' },
-  { id: 'ava-mateo', label: 'Mateo', bg: '#cfe8ff', skin: '#c68642', hair: '#3b2a20', hairStyle: 'short', shirt: '#31517d', accessory: 'none' },
-  { id: 'ava-june', label: 'June', bg: '#ffeef5', skin: '#f1c27d', hair: '#8a4b2a', hairStyle: 'bun', shirt: '#7d3c5e', accessory: 'none' },
-  { id: 'ava-omar', label: 'Omar', bg: '#d9f2e2', skin: '#6b4423', hair: '#12100e', hairStyle: 'buzz', shirt: '#274156', accessory: 'none' },
-  { id: 'ava-lena', label: 'Lena', bg: '#e8e2ff', skin: '#ffdbac', hair: '#e0a83f', hairStyle: 'ponytail', shirt: '#44546a', accessory: 'glasses' },
-  { id: 'ava-kai', label: 'Kai', bg: '#fff3c9', skin: '#e0ac69', hair: '#23262b', hairStyle: 'curly', shirt: '#5b7553', accessory: 'none' },
-  { id: 'ava-priya', label: 'Priya', bg: '#ffd6dd', skin: '#a0663a', hair: '#241a17', hairStyle: 'long', shirt: '#8c3b54', accessory: 'none' },
-  { id: 'ava-agent', label: 'Call agent', bg: '#c9e7ff', skin: '#f1c27d', hair: '#4a3226', hairStyle: 'short', shirt: '#20506e', accessory: 'headset' },
-  { id: 'ava-noah', label: 'Noah', bg: '#e2f0d9', skin: '#8d5524', hair: '#14100e', hairStyle: 'bald', shirt: '#6a4a2f', accessory: 'glasses' },
-  { id: 'ava-sofia', label: 'Sofia', bg: '#ffe8cc', skin: '#c68642', hair: '#5a3825', hairStyle: 'wavy', shirt: '#37505c', accessory: 'none' },
-  { id: 'ava-maya', label: 'Maya', bg: '#d7f0ee', skin: '#5c3a21', hair: '#0f0d0c', hairStyle: 'curly', shirt: '#20605a', accessory: 'none' },
-  { id: 'ava-ethan', label: 'Ethan', bg: '#eef3ff', skin: '#ffdbac', hair: '#d9b380', hairStyle: 'short', shirt: '#2c3e70', accessory: 'none' },
-  { id: 'ava-rosa', label: 'Rosa', bg: '#e6f4d7', skin: '#c68642', hair: '#b3392e', hairStyle: 'wavy', shirt: '#3f6b34', accessory: 'none' },
-  { id: 'ava-henry', label: 'Henry', bg: '#e9e9ee', skin: '#f1c27d', hair: '#c0c0c0', hairStyle: 'short', shirt: '#4c5a68', accessory: 'glasses' },
-  { id: 'ava-amara', label: 'Amara', bg: '#fff0d6', skin: '#6b4423', hair: '#1a1512', hairStyle: 'ponytail', shirt: '#a86f14', accessory: 'none' },
-  { id: 'ava-lucas', label: 'Lucas', bg: '#fde8e8', skin: '#e0ac69', hair: '#6e452a', hairStyle: 'buzz', shirt: '#71343f', accessory: 'none' },
-  { id: 'ava-ella', label: 'Ella', bg: '#f1e8ff', skin: '#ffe0bd', hair: '#e8c268', hairStyle: 'long', shirt: '#6a5a8c', accessory: 'none' },
-  { id: 'ava-diego', label: 'Diego', bg: '#e0f2da', skin: '#a0663a', hair: '#241a17', hairStyle: 'wavy', shirt: '#556b2f', accessory: 'none' },
-  { id: 'ava-grace', label: 'Grace', bg: '#ffe9e2', skin: '#8d5524', hair: '#3a2a1e', hairStyle: 'bun', shirt: '#b5502f', accessory: 'glasses' },
-  { id: 'ava-ben', label: 'Ben', bg: '#dff3f0', skin: '#ffdbac', hair: '#8a8d91', hairStyle: 'bald', shirt: '#1f5f5b', accessory: 'none' },
-  { id: 'ava-zara', label: 'Zara', bg: '#f3e2ff', skin: '#c68642', hair: '#151312', hairStyle: 'long', shirt: '#5e3a6e', accessory: 'none' },
-  { id: 'ava-owen', label: 'Owen', bg: '#e8f6ff', skin: '#f1c27d', hair: '#a34d28', hairStyle: 'curly', shirt: '#40566b', accessory: 'none' },
-  { id: 'ava-nina', label: 'Nina', bg: '#e2f7f1', skin: '#e0ac69', hair: '#2e2019', hairStyle: 'short', shirt: '#17706a', accessory: 'none' },
-  { id: 'ava-samir', label: 'Samir', bg: '#dbeafe', skin: '#8d5524', hair: '#100e0d', hairStyle: 'short', shirt: '#3730a3', accessory: 'headset' },
-  { id: 'ava-claire', label: 'Claire', bg: '#ffeef2', skin: '#ffdbac', hair: '#7a4a21', hairStyle: 'ponytail', shirt: '#9c4356', accessory: 'none' },
-  { id: 'ava-marcus', label: 'Marcus', bg: '#e6f2e6', skin: '#5c3a21', hair: '#0c0a09', hairStyle: 'buzz', shirt: '#2f5233', accessory: 'glasses' },
-  { id: 'ava-isla', label: 'Isla', bg: '#fff4d9', skin: '#f1c27d', hair: '#d96f32', hairStyle: 'wavy', shirt: '#2f5d7d', accessory: 'none' },
-  { id: 'ava-tomas', label: 'Tomas', bg: '#eceff4', skin: '#c68642', hair: '#4a3226', hairStyle: 'short', shirt: '#3a4149', accessory: 'none' },
-  { id: 'ava-leah', label: 'Leah', bg: '#e0f5e9', skin: '#a0663a', hair: '#1d1a17', hairStyle: 'curly', shirt: '#1e6b4f', accessory: 'none' },
-  { id: 'ava-specialist', label: 'Call specialist', bg: '#ffe3c2', skin: '#e0ac69', hair: '#33302e', hairStyle: 'short', shirt: '#7a3b12', accessory: 'headset' },
+  { id: 'ava-aria', label: 'Aria', gender: 'female', bg: '#ffd9c0', skin: '#8d5524', hair: '#1d1a17', hairStyle: 'long', shirt: '#2f6f6a', accessory: 'none' },
+  { id: 'ava-mateo', label: 'Mateo', gender: 'male', bg: '#cfe8ff', skin: '#c68642', hair: '#3b2a20', hairStyle: 'short', shirt: '#31517d', accessory: 'none' },
+  { id: 'ava-june', label: 'June', gender: 'female', bg: '#ffeef5', skin: '#f1c27d', hair: '#8a4b2a', hairStyle: 'bun', shirt: '#7d3c5e', accessory: 'none' },
+  { id: 'ava-omar', label: 'Omar', gender: 'male', bg: '#d9f2e2', skin: '#6b4423', hair: '#12100e', hairStyle: 'buzz', shirt: '#274156', accessory: 'none' },
+  { id: 'ava-lena', label: 'Lena', gender: 'female', bg: '#e8e2ff', skin: '#ffdbac', hair: '#e0a83f', hairStyle: 'ponytail', shirt: '#44546a', accessory: 'glasses' },
+  { id: 'ava-kai', label: 'Kai', gender: 'male', bg: '#fff3c9', skin: '#e0ac69', hair: '#23262b', hairStyle: 'curly', shirt: '#5b7553', accessory: 'none' },
+  { id: 'ava-priya', label: 'Priya', gender: 'female', bg: '#ffd6dd', skin: '#a0663a', hair: '#241a17', hairStyle: 'long', shirt: '#8c3b54', accessory: 'none' },
+  { id: 'ava-agent', label: 'Call agent', gender: 'male', bg: '#c9e7ff', skin: '#f1c27d', hair: '#4a3226', hairStyle: 'short', shirt: '#20506e', accessory: 'headset' },
+  { id: 'ava-noah', label: 'Noah', gender: 'male', bg: '#e2f0d9', skin: '#8d5524', hair: '#14100e', hairStyle: 'bald', shirt: '#6a4a2f', accessory: 'glasses' },
+  { id: 'ava-sofia', label: 'Sofia', gender: 'female', bg: '#ffe8cc', skin: '#c68642', hair: '#5a3825', hairStyle: 'wavy', shirt: '#37505c', accessory: 'none' },
+  { id: 'ava-maya', label: 'Maya', gender: 'female', bg: '#d7f0ee', skin: '#5c3a21', hair: '#0f0d0c', hairStyle: 'curly', shirt: '#20605a', accessory: 'none' },
+  { id: 'ava-ethan', label: 'Ethan', gender: 'male', bg: '#eef3ff', skin: '#ffdbac', hair: '#d9b380', hairStyle: 'short', shirt: '#2c3e70', accessory: 'none' },
+  { id: 'ava-rosa', label: 'Rosa', gender: 'female', bg: '#e6f4d7', skin: '#c68642', hair: '#b3392e', hairStyle: 'wavy', shirt: '#3f6b34', accessory: 'none' },
+  { id: 'ava-henry', label: 'Henry', gender: 'male', bg: '#e9e9ee', skin: '#f1c27d', hair: '#c0c0c0', hairStyle: 'short', shirt: '#4c5a68', accessory: 'glasses' },
+  { id: 'ava-amara', label: 'Amara', gender: 'female', bg: '#fff0d6', skin: '#6b4423', hair: '#1a1512', hairStyle: 'ponytail', shirt: '#a86f14', accessory: 'none' },
+  { id: 'ava-lucas', label: 'Lucas', gender: 'male', bg: '#fde8e8', skin: '#e0ac69', hair: '#6e452a', hairStyle: 'buzz', shirt: '#71343f', accessory: 'none' },
+  { id: 'ava-ella', label: 'Ella', gender: 'female', bg: '#f1e8ff', skin: '#ffe0bd', hair: '#e8c268', hairStyle: 'long', shirt: '#6a5a8c', accessory: 'none' },
+  { id: 'ava-diego', label: 'Diego', gender: 'male', bg: '#e0f2da', skin: '#a0663a', hair: '#241a17', hairStyle: 'wavy', shirt: '#556b2f', accessory: 'none' },
+  { id: 'ava-grace', label: 'Grace', gender: 'female', bg: '#ffe9e2', skin: '#8d5524', hair: '#3a2a1e', hairStyle: 'bun', shirt: '#b5502f', accessory: 'glasses' },
+  { id: 'ava-ben', label: 'Ben', gender: 'male', bg: '#dff3f0', skin: '#ffdbac', hair: '#8a8d91', hairStyle: 'bald', shirt: '#1f5f5b', accessory: 'none' },
+  { id: 'ava-zara', label: 'Zara', gender: 'female', bg: '#f3e2ff', skin: '#c68642', hair: '#151312', hairStyle: 'long', shirt: '#5e3a6e', accessory: 'none' },
+  { id: 'ava-owen', label: 'Owen', gender: 'male', bg: '#e8f6ff', skin: '#f1c27d', hair: '#a34d28', hairStyle: 'curly', shirt: '#40566b', accessory: 'none' },
+  { id: 'ava-nina', label: 'Nina', gender: 'female', bg: '#e2f7f1', skin: '#e0ac69', hair: '#2e2019', hairStyle: 'short', shirt: '#17706a', accessory: 'none' },
+  { id: 'ava-samir', label: 'Samir', gender: 'male', bg: '#dbeafe', skin: '#8d5524', hair: '#100e0d', hairStyle: 'short', shirt: '#3730a3', accessory: 'headset' },
+  { id: 'ava-claire', label: 'Claire', gender: 'female', bg: '#ffeef2', skin: '#ffdbac', hair: '#7a4a21', hairStyle: 'ponytail', shirt: '#9c4356', accessory: 'none' },
+  { id: 'ava-marcus', label: 'Marcus', gender: 'male', bg: '#e6f2e6', skin: '#5c3a21', hair: '#0c0a09', hairStyle: 'buzz', shirt: '#2f5233', accessory: 'glasses' },
+  { id: 'ava-isla', label: 'Isla', gender: 'female', bg: '#fff4d9', skin: '#f1c27d', hair: '#d96f32', hairStyle: 'wavy', shirt: '#2f5d7d', accessory: 'none' },
+  { id: 'ava-tomas', label: 'Tomas', gender: 'male', bg: '#eceff4', skin: '#c68642', hair: '#4a3226', hairStyle: 'short', shirt: '#3a4149', accessory: 'none' },
+  { id: 'ava-leah', label: 'Leah', gender: 'female', bg: '#e0f5e9', skin: '#a0663a', hair: '#1d1a17', hairStyle: 'curly', shirt: '#1e6b4f', accessory: 'none' },
+  { id: 'ava-specialist', label: 'Call specialist', gender: 'male', bg: '#ffe3c2', skin: '#e0ac69', hair: '#33302e', hairStyle: 'short', shirt: '#7a3b12', accessory: 'headset' },
+  { id: 'ava-ruby', label: 'Ruby', gender: 'female', bg: '#e8e2ff', skin: '#f1c27d', hair: '#d8d8d8', hairStyle: 'bun', shirt: '#5e3a6e', accessory: 'glasses' },
+  { id: 'ava-tara', label: 'Tara', gender: 'female', bg: '#ffe3c2', skin: '#5c3a21', hair: '#0f0d0c', hairStyle: 'short', shirt: '#20506e', accessory: 'earrings' },
+  { id: 'ava-wren', label: 'Wren', gender: 'female', bg: '#d7f0ee', skin: '#ffdbac', hair: '#7a4a21', hairStyle: 'bob', shirt: '#7d3c5e', accessory: 'none' },
+  { id: 'ava-cleo', label: 'Cleo', gender: 'female', bg: '#fff3c9', skin: '#8d5524', hair: '#1d1a17', hairStyle: 'long', shirt: '#a86f14', accessory: 'earrings' },
+  { id: 'ava-jade', label: 'Jade', gender: 'female', bg: '#e6f4d7', skin: '#e0ac69', hair: '#23262b', hairStyle: 'ponytail', shirt: '#2f5233', accessory: 'none' },
+  { id: 'ava-mona', label: 'Mona', gender: 'female', bg: '#ffeef5', skin: '#ffe0bd', hair: '#c0c0c0', hairStyle: 'wavy', shirt: '#44546a', accessory: 'none' },
+  { id: 'ava-tess', label: 'Tess', gender: 'female', bg: '#eef3ff', skin: '#f1c27d', hair: '#b3392e', hairStyle: 'short', shirt: '#31517d', accessory: 'none' },
+  { id: 'ava-lila', label: 'Lila', gender: 'female', bg: '#fde8e8', skin: '#ffe0bd', hair: '#e8c268', hairStyle: 'long', shirt: '#37505c', accessory: 'none' },
+  { id: 'ava-noor', label: 'Noor', gender: 'female', bg: '#e2f7f1', skin: '#c68642', hair: '#12100e', hairStyle: 'long', shirt: '#8c3b54', accessory: 'earrings' },
+  { id: 'ava-faye', label: 'Faye', gender: 'female', bg: '#f1e8ff', skin: '#a0663a', hair: '#3a2a1e', hairStyle: 'curly', shirt: '#20605a', accessory: 'none' },
+  { id: 'ava-rex', label: 'Rex', gender: 'male', bg: '#eceff4', skin: '#e0ac69', hair: '#4a3226', hairStyle: 'bald', shirt: '#3a4149', accessory: 'none', beard: 'full' },
+  { id: 'ava-cole', label: 'Cole', gender: 'male', bg: '#dff3f0', skin: '#ffdbac', hair: '#3b2a20', hairStyle: 'short', shirt: '#274156', accessory: 'none', beard: 'goatee' },
+  { id: 'ava-hugo', label: 'Hugo', gender: 'male', bg: '#e9e9ee', skin: '#f1c27d', hair: '#b9b9b9', hairStyle: 'short', shirt: '#4c5a68', accessory: 'none', beard: 'stubble' },
+  { id: 'ava-finn', label: 'Finn', gender: 'male', bg: '#e2f0d9', skin: '#ffe0bd', hair: '#d96f32', hairStyle: 'curly', shirt: '#556b2f', accessory: 'none' },
+  { id: 'ava-dante', label: 'Dante', gender: 'male', bg: '#f3e2ff', skin: '#c68642', hair: '#241a17', hairStyle: 'wavy', shirt: '#3730a3', accessory: 'none', beard: 'full' },
+  { id: 'ava-yusuf', label: 'Yusuf', gender: 'male', bg: '#dbeafe', skin: '#6b4423', hair: '#0c0a09', hairStyle: 'buzz', shirt: '#1f5f5b', accessory: 'none', beard: 'full' },
+  { id: 'ava-paul', label: 'Paul', gender: 'male', bg: '#ffe9e2', skin: '#ffdbac', hair: '#c0c0c0', hairStyle: 'bald', shirt: '#71343f', accessory: 'glasses', beard: 'stubble' },
+  { id: 'ava-reed', label: 'Reed', gender: 'male', bg: '#e8f6ff', skin: '#8d5524', hair: '#14100e', hairStyle: 'fade', shirt: '#2c3e70', accessory: 'none' },
+  { id: 'ava-silas', label: 'Silas', gender: 'male', bg: '#fff0d6', skin: '#f1c27d', hair: '#6e452a', hairStyle: 'long', shirt: '#6a4a2f', accessory: 'none', beard: 'goatee' },
+  { id: 'ava-kofi', label: 'Kofi', gender: 'male', bg: '#fff4d9', skin: '#5c3a21', hair: '#0f0d0c', hairStyle: 'buzz', shirt: '#7a3b12', accessory: 'none' },
 ];
 function caiAvatarOption(id) {
   var found = null;
@@ -1001,7 +1022,9 @@ function caiAvatarSvg(sel, name, accent) {
   if (o.hairStyle === 'ponytail') p += '<rect x="42" y="24" width="7" height="18" rx="3.5" fill="' + o.hair + '"/>';
   /* shoulders, neck, head */
   p += '<path d="M12 64c2.5-10.5 10-16 20-16s17.5 5.5 20 16z" fill="' + o.shirt + '"/>';
+  p += '<path d="M28.2 49.8l3.8 3.8 3.8-3.8" stroke="rgba(0,0,0,0.20)" stroke-width="1.6" fill="none" stroke-linecap="round"/>';
   p += '<rect x="28" y="40" width="8" height="10" rx="3" fill="' + o.skin + '"/>';
+  p += '<circle cx="19.2" cy="31" r="2.7" fill="' + o.skin + '"/><circle cx="44.8" cy="31" r="2.7" fill="' + o.skin + '"/>';
   p += '<circle cx="32" cy="30" r="13" fill="' + o.skin + '"/>';
   /* hair on top of the head, per style */
   if (o.hairStyle === 'short' || o.hairStyle === 'bun' || o.hairStyle === 'ponytail') {
@@ -1015,15 +1038,29 @@ function caiAvatarSvg(sel, name, accent) {
     });
   }
   if (o.hairStyle === 'bun') p += '<circle cx="32" cy="15.5" r="4.6" fill="' + o.hair + '"/>';
+  if (o.hairStyle === 'fade') p += '<path d="M21 28.6a11.5 11.5 0 0 1 22 0z" fill="' + o.hair + '"/>';
+  if (o.hairStyle === 'bob') {
+    p += '<path d="M19 30a13 13 0 0 1 26 0z" fill="' + o.hair + '"/>';
+    p += '<rect x="17.5" y="26" width="6" height="15" rx="3" fill="' + o.hair + '"/>';
+    p += '<rect x="40.5" y="26" width="6" height="15" rx="3" fill="' + o.hair + '"/>';
+  }
   if (o.hairStyle === 'wavy') {
     p += '<path d="M19 29.5a13 13 0 0 1 26 0z" fill="' + o.hair + '"/>';
     [24.5, 32, 39.5].forEach(function (x) {
       p += '<circle cx="' + x + '" cy="30" r="2.6" fill="' + o.hair + '"/>';
     });
   }
+  /* beard sits under the face features */
+  if (o.beard === 'full') p += '<path d="M21.8 33.5q10.2 10.8 20.4 0q-1.2 9.3-10.2 9.3q-9 0-10.2-9.3z" fill="' + o.hair + '"/>';
+  if (o.beard === 'stubble') p += '<path d="M21.8 33.5q10.2 10.8 20.4 0q-1.2 9.3-10.2 9.3q-9 0-10.2-9.3z" fill="' + o.hair + '" opacity="0.38"/>';
+  if (o.beard === 'goatee') p += '<path d="M27.6 38.6q4.4 4.6 8.8 0q-.8 4.9-4.4 4.9q-3.6 0-4.4-4.9z" fill="' + o.hair + '"/>';
   /* face */
+  p += '<path d="M24.3 27.4q2.7-1.5 5.2-.2" stroke="#2a2320" stroke-width="1.3" fill="none" stroke-linecap="round" opacity="0.5"/>';
+  p += '<path d="M34.5 27.2q2.5-1.3 5.2.2" stroke="#2a2320" stroke-width="1.3" fill="none" stroke-linecap="round" opacity="0.5"/>';
   p += '<circle cx="27" cy="31" r="1.7" fill="#2a2320"/><circle cx="37" cy="31" r="1.7" fill="#2a2320"/>';
+  p += '<path d="M32 32.6q1.3 2.1-.3 3.3" stroke="#2a2320" stroke-width="1.1" fill="none" stroke-linecap="round" opacity="0.35"/>';
   p += '<path d="M28 36.5q4 3.2 8 0" stroke="#2a2320" stroke-width="1.7" fill="none" stroke-linecap="round"/>';
+  if (o.accessory === 'earrings') p += '<circle cx="19.2" cy="34.9" r="1.4" fill="#d9a441"/><circle cx="44.8" cy="34.9" r="1.4" fill="#d9a441"/>';
   if (o.accessory === 'glasses') {
     p += '<g class="av-glasses" fill="none" stroke="#2b2b30" stroke-width="1.8"><rect x="20.5" y="26.5" width="10.5" height="8.5" rx="3"/><rect x="33" y="26.5" width="10.5" height="8.5" rx="3"/><path d="M31 29.5h2"/></g>';
   }
@@ -1153,6 +1190,45 @@ var CAI_VOICE_OPTIONS = [
   { id: 'male-young', label: 'Young male', prefer: 'male', pitch: 1.08, rate: 1.02, keys: ['guy', 'eric', 'ryan'] },
   { id: 'neutral', label: 'Neutral', prefer: 'any', pitch: 1.0, rate: 1.0, keys: ['aria', 'jenny', 'guy'] },
 ];
+/* Real human voices, served by the voice service through the
+   cc-voice-tts function (the key never reaches the browser).
+   A selection is stored as 'el:' + voice_id. Gender is carried on
+   every entry so a bot's voice always matches its face: Sam
+   (male) defaults to Roger; female bots pick from the women. */
+var CAI_EL_VOICES = [
+  { id: 'el:CwhRBWXzGAHq8TQ4Fs17', name: 'Roger', tone: 'Laid-back, casual, resonant', gender: 'male', accent: 'American' },
+  { id: 'el:cjVigY5qzO86Huf0OWal', name: 'Eric', tone: 'Smooth, trustworthy', gender: 'male', accent: 'American' },
+  { id: 'el:nPczCjzI2devNBz1zQrb', name: 'Brian', tone: 'Deep, resonant, comforting', gender: 'male', accent: 'American' },
+  { id: 'el:iP95p4xoKVk53GoZ742B', name: 'Chris', tone: 'Charming, down-to-earth', gender: 'male', accent: 'American' },
+  { id: 'el:bIHbv24MWmeRgasZH58o', name: 'Will', tone: 'Relaxed optimist', gender: 'male', accent: 'American' },
+  { id: 'el:TX3LPaxmHKxFdv7VOQHJ', name: 'Liam', tone: 'Energetic, confident', gender: 'male', accent: 'American' },
+  { id: 'el:pNInz6obpgDQGcFmaJgB', name: 'Adam', tone: 'Firm, commanding', gender: 'male', accent: 'American' },
+  { id: 'el:pqHfZKP75CvOlQylNhV4', name: 'Bill', tone: 'Wise, mature, balanced', gender: 'male', accent: 'American' },
+  { id: 'el:N2lVS1w4EtoT3dr4eOWO', name: 'Callum', tone: 'Husky', gender: 'male', accent: 'American' },
+  { id: 'el:SOYHLrjzK2X1ezoPC6cr', name: 'Harry', tone: 'Strong, rough edge', gender: 'male', accent: 'American' },
+  { id: 'el:IKne3meq5aSn9XLyUdCD', name: 'Charlie', tone: 'Deep, confident, energetic', gender: 'male', accent: 'Australian' },
+  { id: 'el:JBFqnCBsd6RMkjVDRZzb', name: 'George', tone: 'Warm storyteller', gender: 'male', accent: 'British' },
+  { id: 'el:onwK4e9ZLuTAKqWW03F9', name: 'Daniel', tone: 'Steady broadcaster', gender: 'male', accent: 'British' },
+  { id: 'el:EXAVITQu4vr4xnSDxMaL', name: 'Sarah', tone: 'Mature, reassuring, confident', gender: 'female', accent: 'American' },
+  { id: 'el:hpp4J3VqNfWAUOO0d1Us', name: 'Bella', tone: 'Professional, bright, warm', gender: 'female', accent: 'American' },
+  { id: 'el:cgSgspJ2msm6clMCkdW9', name: 'Jessica', tone: 'Playful, bright, warm', gender: 'female', accent: 'American' },
+  { id: 'el:XrExE9yKIg1WjnnlVkGX', name: 'Matilda', tone: 'Knowledgeable, professional', gender: 'female', accent: 'American' },
+  { id: 'el:FGY2WhTYpPnrIDTdsKH5', name: 'Laura', tone: 'Enthusiastic, quirky', gender: 'female', accent: 'American' },
+  { id: 'el:Xb7hH8MSUJpSbSDYk0k2', name: 'Alice', tone: 'Clear, engaging educator', gender: 'female', accent: 'British' },
+  { id: 'el:pFZP5JQG7iQjIQuC4Bku', name: 'Lily', tone: 'Velvety, confident', gender: 'female', accent: 'British' },
+  { id: 'el:SAz9YHcvj6GT2YYXdXww', name: 'River', tone: 'Relaxed, neutral, informative', gender: 'neutral', accent: 'American' },
+];
+function caiElVoice(id) {
+  var found = null;
+  CAI_EL_VOICES.forEach(function (o) { if (o.id === id) found = o; });
+  return found;
+}
+function caiElSub(v) {
+  var g = v.gender === 'male' ? "Man's voice" : v.gender === 'female' ? "Woman's voice" : 'Neutral voice';
+  return 'Real voice · ' + g + ' · ' + v.tone;
+}
+/* Sam's voice out of the box: Roger — a real man's voice. */
+var CAI_SAM_DEFAULT_VOICE = 'el:CwhRBWXzGAHq8TQ4Fs17';
 function caiDefaultVoiceSel() { return CAI_VOICE_OPTIONS[0].id; }
 function caiVoiceOption(id) {
   var found = null;
@@ -1161,6 +1237,10 @@ function caiVoiceOption(id) {
 }
 function caiSanitizeVoiceSel(v) {
   var s = String(v == null ? '' : v).trim();
+  if (s.indexOf('el:') === 0) {
+    var vid = s.slice(3);
+    if (/^[A-Za-z0-9]{15,30}$/.test(vid)) return 'el:' + vid;
+  }
   if (caiVoiceOption(s)) return s;
   if (s.indexOf('browser:') === 0) {
     var name = s.slice(8).replace(/[<>&"']/g, '').trim();
@@ -1169,7 +1249,11 @@ function caiSanitizeVoiceSel(v) {
   return caiDefaultVoiceSel();
 }
 function caiLoadVoice(storage, tenant) {
-  return caiSanitizeVoiceSel(caiLoadJson(storage, caiKey(tenant, 'voice'), null));
+  var saved = caiLoadJson(storage, caiKey(tenant, 'voice'), null);
+  /* Nothing saved yet: Sam starts on Roger, a real man's voice.
+     Any saved pick (real voice, style, or device voice) wins. */
+  if (saved == null) return CAI_SAM_DEFAULT_VOICE;
+  return caiSanitizeVoiceSel(saved);
 }
 function caiSaveVoice(storage, tenant, sel) {
   var clean = caiSanitizeVoiceSel(sel);
@@ -1943,11 +2027,15 @@ function renderAvatarSlots() {
   });
 }
 function avatarOptsHtml(bot) {
-  var opts = CAI_AVATAR_OPTIONS.map(function (o) { return { id: o.id, label: o.label }; });
-  opts.push({ id: CAI_AVATAR_INITIALS, label: 'Initials' });
-  return opts.map(function (o) {
+  function btn(o) {
     return '<button type="button" class="avatar-opt' + (bot.avatar === o.id ? ' active' : '') + '" data-avatar-pick="' + esc(o.id) + '" data-avatar-owner="' + esc(bot.id) + '" title="' + esc(o.label) + '" aria-label="' + esc(o.label) + '">' + caiAvatarSvg(o.id, bot.name, ACCENT) + '</button>';
-  }).join('');
+  }
+  var women = CAI_AVATAR_OPTIONS.filter(function (o) { return o.gender === 'female'; });
+  var men = CAI_AVATAR_OPTIONS.filter(function (o) { return o.gender !== 'female'; });
+  var html = '<div class="avatar-group">Women</div>' + women.map(btn).join('');
+  html += '<div class="avatar-group">Men</div>' + men.map(btn).join('');
+  html += '<div class="avatar-group">Or</div>' + btn({ id: CAI_AVATAR_INITIALS, label: 'Initials' });
+  return html;
 }
 function renderAvatarChoosers() {
   ['ashley', 'sam'].forEach(function (id) {
@@ -2013,7 +2101,25 @@ function renderVoiceList(ownerId) {
     : document.querySelector('[data-voices-for="' + ownerId + '"]');
   if (!container) return;
   var sel = voiceSelectionFor(ownerId);
-  var html = '<div class="vgroup">Built-in styles</div>';
+  var bot = botById(ownerId);
+  var avOpt = bot ? caiAvatarOption(bot.avatar) : null;
+  var botGender = avOpt ? avOpt.gender : null;
+  var match = CAI_EL_VOICES, rest = [];
+  if (botGender) {
+    match = CAI_EL_VOICES.filter(function (o) { return o.gender === botGender || o.gender === 'neutral'; });
+    rest = CAI_EL_VOICES.filter(function (o) { return o.gender !== botGender && o.gender !== 'neutral'; });
+  }
+  var html = '<div class="vgroup">Real voices</div>';
+  html += match.map(function (o) {
+    return voiceRowHtml(ownerId, o.id, o.name, caiElSub(o), sel === o.id);
+  }).join('');
+  if (rest.length) {
+    html += '<div class="vgroup">More real voices</div>';
+    html += rest.map(function (o) {
+      return voiceRowHtml(ownerId, o.id, o.name, caiElSub(o), sel === o.id);
+    }).join('');
+  }
+  html += '<div class="vgroup">Built-in styles</div>';
   html += CAI_VOICE_OPTIONS.map(function (o) {
     return voiceRowHtml(ownerId, o.id, o.label, 'Style — matched to the closest voice on this device', sel === o.id);
   }).join('');
@@ -2043,7 +2149,45 @@ function botById(id) {
    both. Returns true when speech was handed to the browser.
    onDone (optional) fires when the line finishes or fails, so a
    test call can reopen the microphone afterwards. */
+var caiCurrentAudio = null;
 function speakWithSelection(text, selId, onDone) {
+  var s = caiSanitizeVoiceSel(selId);
+  if (s.indexOf('el:') === 0) return speakWithElVoice(text, s.slice(3), onDone);
+  return speakWithDevice(text, s, onDone);
+}
+/* Speak through the real-voice service. On any failure (service
+   not connected yet, offline) fall back to the device path with
+   the matching built-in style so a preview never goes silent. */
+function speakWithElVoice(text, voiceId, onDone) {
+  var done = false;
+  function finish() { if (!done) { done = true; if (onDone) onDone(); } }
+  try {
+    fetch('/.netlify/functions/cc-voice-tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ voice_id: voiceId, text: String(text || '') }),
+    }).then(function (res) {
+      if (!res.ok) throw new Error('tts');
+      return res.blob();
+    }).then(function (blob) {
+      var url = URL.createObjectURL(blob);
+      var audio = new Audio(url);
+      caiCurrentAudio = audio;
+      audio.onended = function () { URL.revokeObjectURL(url); finish(); };
+      audio.onerror = function () { URL.revokeObjectURL(url); finish(); };
+      var p = audio.play();
+      if (p && p.catch) p.catch(function () { finish(); });
+    }).catch(function () {
+      var v = caiElVoice('el:' + voiceId);
+      var style = v && v.gender === 'female' ? 'female-warm' : v && v.gender === 'neutral' ? 'neutral' : 'male-friendly';
+      if (!speakWithDevice(text, style, onDone)) finish();
+    });
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+function speakWithDevice(text, selId, onDone) {
   if (!('speechSynthesis' in window)) return false;
   try {
     var voices = window.speechSynthesis.getVoices() || [];
