@@ -17,21 +17,9 @@
    * changes records, spends, or calls anyone. */
   var VOICE_AGENT_ID = 'agent_3801m7vh0zxwfx3v8vzbs4wfh62k';
   function assistantFace(size) {
-    return '<svg viewBox="0 0 64 64" width="' + size + '" height="' + size + '" style="border-radius:50%;display:block" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">'
-      + '<circle cx="32" cy="32" r="32" fill="#c9e7ff"/>'
-      + '<path d="M12 64c2.5-10.5 10-16 20-16s17.5 5.5 20 16z" fill="#20506e"/>'
-      + '<path d="M28.2 49.8l3.8 3.8 3.8-3.8" stroke="rgba(0,0,0,0.20)" stroke-width="1.6" fill="none" stroke-linecap="round"/>'
-      + '<rect x="28" y="40" width="8" height="10" rx="3" fill="#f1c27d"/>'
-      + '<circle cx="19.2" cy="31" r="2.7" fill="#f1c27d"/><circle cx="44.8" cy="31" r="2.7" fill="#f1c27d"/>'
-      + '<circle cx="32" cy="30" r="13" fill="#f1c27d"/>'
-      + '<path d="M19 30a13 13 0 0 1 26 0z" fill="#4a3226"/>'
-      + '<path d="M24.3 27.4q2.7-1.5 5.2-.2" stroke="#2a2320" stroke-width="1.3" fill="none" stroke-linecap="round" opacity="0.5"/>'
-      + '<path d="M34.5 27.2q2.5-1.3 5.2.2" stroke="#2a2320" stroke-width="1.3" fill="none" stroke-linecap="round" opacity="0.5"/>'
-      + '<circle cx="27" cy="31" r="1.7" fill="#2a2320"/><circle cx="37" cy="31" r="1.7" fill="#2a2320"/>'
-      + '<path d="M32 32.6q1.3 2.1-.3 3.3" stroke="#2a2320" stroke-width="1.1" fill="none" stroke-linecap="round" opacity="0.35"/>'
-      + '<path d="M28 36.5q4 3.2 8 0" stroke="#2a2320" stroke-width="1.7" fill="none" stroke-linecap="round"/>'
-      + '<g><path d="M18.5 31a13.5 13.5 0 0 1 27 0" fill="none" stroke="#2b2b30" stroke-width="3"/><rect x="15.8" y="28" width="5.4" height="10" rx="2.7" fill="#2b2b30"/><rect x="42.8" y="28" width="5.4" height="10" rx="2.7" fill="#2b2b30"/><path d="M45 37q-.8 5.5-7.5 6.5" fill="none" stroke="#2b2b30" stroke-width="2"/><circle cx="36.8" cy="43.2" r="1.9" fill="#2b2b30"/></g>'
-      + '</svg>';
+    /* Photo face (Troy's pick, Nov 19): Eric's photo headshot —
+       the face that matches the assistant's voice (Eric). */
+    return '<img src="/avatars/eric.webp" alt="" width="' + size + '" height="' + size + '" style="border-radius:50%;display:block;object-fit:cover">';
   }
   function loadVoiceWidget() {
     if (window.__ccConvaiLoaded) return;
