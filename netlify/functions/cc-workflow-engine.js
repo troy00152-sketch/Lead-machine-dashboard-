@@ -23,6 +23,13 @@
 //                        dnc tag            -> 'ended-dnc'       (no send)
 //                        active-lead gate   -> 'ended-inactive'  (no send)
 //                        bad-number guard   -> 'ended-bad-number'(no send)
+//                        already texted     -> 'ended-already-texted'
+//                                              (no send — the
+//                                              duplicate-send lock:
+//                                              a phone that already
+//                                              received an outbound
+//                                              NEVER gets a second
+//                                              first text)
 //                        otherwise          -> render + send the
 //                                              path's first text,
 //                                              stage 'sent'.
@@ -351,6 +358,19 @@ async function enroll(contact, event) {
       if (terminalExisting.sealReason != null) rec.sealReason = terminalExisting.sealReason;
       ensureTag(rec.tags, 'dnc');
     }
+    if (terminalExisting.sentAt != null) {
+      // DUPLICATE-SEND LOCK (Troy, 2026-11-21): this phone already
+      // received a first text from this system once. The send
+      // history carries forward and the fresh record lands
+      // terminal — a re-enrollment from a later list can never
+      // queue a second first text. (In HighLevel on 2026-11-21,
+      // sellers first texted weeks earlier got a fresh first text
+      // again off a new campaign list — Randall Smith, Ernest
+      // Govan. This lock is why that cannot happen here.)
+      rec.sentAt = terminalExisting.sentAt;
+      rec.messageId = terminalExisting.messageId || null;
+      rec.stage = 'ended-already-texted';
+    }
   }
   await saveEnrollment(s, rec);
   return { ok: true, enrollment: rec };
@@ -481,6 +501,35 @@ async function tick(now, event) {
       rec.stage = 'ended-bad-number';
       await saveEnrollment(es, rec);
       res.action = 'ended-bad-number';
+      results.push(res);
+      continue;
+    }
+
+    // DUPLICATE-SEND LOCK (Troy, 2026-11-21): never a second first
+    // text to the same phone — not from a re-enrollment, not from
+    // another market's list, not after a manual send. Two proofs,
+    // either one ends the enrollment without sending:
+    //   1. this record already carries a sentAt (a first text went
+    //      out under an earlier enrollment for this phone), or
+    //   2. the conversation thread already holds ANY outbound
+    //      message (a manual Conversations send, a bot reply — the
+    //      person is already being talked to).
+    if (rec.sentAt != null) {
+      rec.stage = 'ended-already-texted';
+      await saveEnrollment(es, rec);
+      res.action = 'ended-already-texted';
+      results.push(res);
+      continue;
+    }
+    const priorThread = await readJson(cs, rec.key);
+    if (
+      priorThread &&
+      Array.isArray(priorThread.messages) &&
+      priorThread.messages.some((m) => m && m.dir === 'out')
+    ) {
+      rec.stage = 'ended-already-texted';
+      await saveEnrollment(es, rec);
+      res.action = 'ended-already-texted';
       results.push(res);
       continue;
     }
