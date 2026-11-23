@@ -1421,6 +1421,7 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
   <img id="lightboxImg" src="" alt="Enlarged property image">
 </div>
 <div id="toast"></div>
+<script src="address-autocomplete.js"></script>
 <script src="ai-assistant.js"></script>
 <script>
 /* ============ STATE ============ */
@@ -5497,6 +5498,51 @@ function downloadCompReport(){
   const w = window.open('', '_blank');
   if(!w){ alert('Allow pop-ups to download the comp report.'); return; }
   w.document.write(html); w.document.close(); w.focus();
+}
+/* ⚡ Address type-ahead (Troy, Nov 22, 2026) — shared by the Quick
+   Offer field below and the AI assistant input (ai-assistant.js):
+   start typing an address, pick the full one (zip included) from
+   the dropdown. Local candidates come from your own leads + recent
+   searches — instant, no network; brand-new addresses come from
+   the free address-suggest function. See address-autocomplete.js. */
+window.ccLocalAddressCandidates = function(q){
+  var ql = String(q || '').toLowerCase().trim();
+  if(ql.length < 3) return [];
+  var out = [], seen = {};
+  function push(street, city, state, zip){
+    street = String(street || '').trim();
+    if(!street) return;
+    var tail = (String(state || '') + ' ' + String(zip || '')).trim();
+    var label = [street, String(city || '').trim(), tail].filter(Boolean).join(', ');
+    var key = label.toLowerCase();
+    if(seen[key]) return;
+    seen[key] = 1;
+    out.push({ label: label, streetAddress: street, city: city || '', state: state || '', zip: zip || '', source: 'local' });
+  }
+  try {
+    (leads || []).forEach(function(l){
+      var street = l.addressLine1 || l.address || '';
+      var hay = (street + ' ' + (l.city || '') + ' ' + (l.zipCode || l.zip || '')).toLowerCase();
+      if(String(street).toLowerCase().indexOf(ql) === 0 || hay.indexOf(ql) === 0){
+        push(street, l.city, l.state, l.zipCode || l.zip);
+      }
+    });
+  } catch(e){}
+  try {
+    (recentSearches || []).forEach(function(s){
+      var str = (s && s.q) || '';
+      if(/^\d/.test(str) && str.toLowerCase().indexOf(ql) === 0){
+        var pa = parseDmAddress(str);
+        push(pa.street || str, pa.city, pa.state, pa.zip);
+      }
+    });
+  } catch(e){}
+  return out.slice(0, 4);
+};
+if(window.attachAddressAutocomplete){
+  window.attachAddressAutocomplete(document.getElementById('qoAddr'), {
+    onSelect: function(){ if(typeof syncQuickOfferAddr === 'function') syncQuickOfferAddr(); }
+  });
 }
 /* ⚡ QUICK OFFER: 60-second offer flow — reuses the full Comps engine */
 function setQuickRepairs(amt){
