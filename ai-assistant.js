@@ -105,6 +105,14 @@
     document.getElementById('aiInput').addEventListener('keydown', function (e) {
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
     });
+    // Address type-ahead (Troy, Nov 22, 2026): same dropdown as the
+    // Quick Offer field — start typing an address and pick the full
+    // one (zip included). Fills the input only; never auto-sends.
+    // The widget's capture-phase key handling keeps Enter on an open
+    // dropdown from triggering the send above.
+    if (typeof window.attachAddressAutocomplete === 'function') {
+      window.attachAddressAutocomplete(document.getElementById('aiInput'));
+    }
     var chips = document.querySelectorAll('#aiStarters .ai-chip');
     chips.forEach(function (chip) {
       chip.onclick = function () {
