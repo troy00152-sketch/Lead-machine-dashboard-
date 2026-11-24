@@ -11,6 +11,7 @@
     --line:#26314a; --text:#e8edf5; --muted:#8b96ad; --muted2:#5d6a84;
     --accent:#ff6b1a; --accent2:#ff8c42; --green:#2ecc71; --red:#e74c3c;
     --blue:#3498db; --chip:#223052;
+    --hl-out:#006a5c; --hl-in:#e3e4e9; --hl-bg:#ebf3f6; --hl-in-text:#23262b;
     --radius:10px;
   }
   *{box-sizing:border-box;margin:0;padding:0}
@@ -69,17 +70,18 @@
   .thread-item .t-meta{display:flex;align-items:center;gap:8px;margin-top:4px}
   .unread-badge{background:var(--accent);color:#fff;font-size:11px;font-weight:700;border-radius:99px;min-width:20px;height:20px;line-height:20px;text-align:center;padding:0 6px;margin-left:auto}
   /* center: thread */
-  .messages{overflow-y:auto;height:calc(100vh - 420px);min-height:280px;padding:16px 14px;display:flex;flex-direction:column;gap:4px;background:var(--bg2)}
+  .messages{overflow-y:auto;height:calc(100vh - 420px);min-height:280px;padding:16px 14px;display:flex;flex-direction:column;gap:4px;background:var(--hl-bg)}
   .msg{max-width:75%;padding:9px 12px;border-radius:14px;white-space:pre-wrap;word-break:break-word}
   .msg .m-body{font-size:14px}
   .msg .m-meta{font-size:11px;margin-top:4px;display:flex;gap:8px;align-items:center}
-  .msg.out{align-self:flex-end;background:var(--blue);color:#fff;border-bottom-right-radius:4px}
+  .msg.out{align-self:flex-end;background:var(--hl-out);color:#fff;border-bottom-right-radius:4px}
   .msg.out .m-meta{color:rgba(255,255,255,.85);justify-content:flex-end}
-  .msg.in{align-self:flex-start;background:var(--panel2);border:1px solid var(--line);border-bottom-left-radius:4px}
-  .msg.in .m-meta{color:var(--muted2)}
+  .msg.in{align-self:flex-start;background:var(--hl-in);color:var(--hl-in-text);border:1px solid #d3d6dd;border-bottom-left-radius:4px}
+  .msg.in .m-meta{color:#6d7280}
+  .msg.in .st-failed{color:#c0392b}
   .msg .st-failed{color:#ffb3a7;font-weight:700}
   .msg.out .st-failed{color:#ffd9d2}
-  .day-sep{align-self:center;color:var(--muted2);font-size:11px;margin:8px 0}
+  .day-sep{align-self:center;color:#75808c;font-size:11px;margin:8px 0;background:rgba(255,255,255,.65);padding:1px 10px;border-radius:99px}
   .sendbox{border-top:1px solid var(--line);padding:12px 14px;display:flex;gap:10px;align-items:flex-end}
   .sendbox textarea{flex:1;resize:vertical;min-height:42px;max-height:140px}
   /* right: contact panel */
