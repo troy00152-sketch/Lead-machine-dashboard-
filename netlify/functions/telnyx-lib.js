@@ -23,7 +23,7 @@ const MESSAGING_PROFILE_ID = '4001a1e2-b241-41eb-b381-f6c06571cd64';
 //   cleveland -> 216, florida -> 904
 const SENDER_POOLS = {
   indianapolis: [], // 317 — fill after purchase
-  carolina: [], // 252 — fill after purchase
+  carolina: ['+12525387760', '+12523243038', '+12522623080', '+12525092142', '+12528097976'], // 252 — purchased Nov 25, 2026 (Order 0002f7f5-772e-4f42-b934-a5cbb5875d49)
   kansascity: [], // 816 — fill after purchase
   cleveland: [], // 216 — fill after purchase
   florida: [], // 904 — fill after purchase
