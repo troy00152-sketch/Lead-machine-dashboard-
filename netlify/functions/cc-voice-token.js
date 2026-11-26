@@ -421,3 +421,10 @@ exports._test = {
   credentialNameFor,
   VOICE_CLIENTS,
 };
+
+// The voice webhook's on-demand mint (Nov 26, 2026, inbound fix):
+// when an inbound call arrives and no voice credential exists yet in
+// the store, the webhook mints the 'conversations' credential instead
+// of dropping the call. Same function the token endpoint uses —
+// exported here (not via _test) because a deployed webhook needs it.
+exports.getOrCreateCredential = getOrCreateCredential;

@@ -435,6 +435,13 @@ var state = {
    session, which keeps its own state in cc-dialer-api. */
 var manualCall = { callId: null, active: false, timer: null, pending: false };
 
+/* Inbound presence + redial state (Nov 26, 2026 — see conversations.html):
+   callIds this tab already asked to redial, the heartbeat interval, and
+   whether the ?inbound= deep link has been honoured once. */
+var __redialedInbound = {};
+var __presenceTimer = null;
+var __inboundDeepLinkDone = false;
+
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
     return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
@@ -746,6 +753,95 @@ function answerOutboundLeg(call) {
     if (p && p.catch) p.catch(function (e) { toast('Could not answer the call: ' + ((e && e.message) || e)); });
   }
 }
+/* ---------- inbound presence + ringing-inbound redial (Nov 26, 2026) ---------- */
+/* Same contract as conversations.html: presence says "this SIP URI is live
+   in this tab right now"; the poll after a (re)connect catches any inbound
+   pairing that started ringing while the tab was dead and asks the server
+   to dial ONE fresh agent leg to this tab. The fresh leg arrives as a
+   normal callUpdate/ringing invite and goes through the existing banner
+   path. The dialer's sipUri lives in state.agentSipUri (token response). */
+function sendPresenceHeartbeat() {
+  try {
+    if (!state.agentSipUri) return;
+    fetch(CALL_API + '?action=presence', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ surface: 'dialer', sipUri: state.agentSipUri }),
+    }).catch(function () { /* fire-and-forget */ });
+  } catch (e) { /* a failed heartbeat never breaks calling */ }
+}
+function startPresenceHeartbeat() {
+  try {
+    if (__presenceTimer) return;
+    sendPresenceHeartbeat();
+    __presenceTimer = setInterval(function () {
+      if (!document.hidden) sendPresenceHeartbeat();
+    }, 20000);
+  } catch (e) { /* heartbeat is best-effort */ }
+}
+/* After a successful (re)connect, ask the server what is ringing inbound
+   right now (started within 30s) and redial anything this tab has not
+   already redialed — unless the tab is hidden or a manual dial / session
+   owns the line. */
+function pollRingingInbound() {
+  try {
+    if (!state.agentSipUri) return Promise.resolve();
+    return manualCallApi('?action=ringing-inbound').then(function (data) {
+      var calls = (data && data.calls) || [];
+      calls.forEach(function (c) { redialInboundCall(c && c.callId); });
+    }).catch(function () { /* a failed poll never breaks calling */ });
+  } catch (e) { return Promise.resolve(); }
+}
+function redialInboundCall(callId) {
+  if (!callId || __redialedInbound[callId]) return Promise.resolve(false);
+  if (typeof document !== 'undefined' && document.hidden) return Promise.resolve(false);
+  if (isOurOutgoingLeg()) return Promise.resolve(false);
+  if (!state.agentSipUri) return Promise.resolve(false);
+  // Mark BEFORE the POST so a concurrent poll/deep-link check for the
+  // same call cannot double-dial; the server enforces once-per-pairing
+  // too. Unmark only when the server says the failure is retryable
+  // (presence-stale) or the request itself failed.
+  __redialedInbound[callId] = true;
+  return manualCallApi('', { action: 'redial-inbound', callId: callId, agentSipUri: state.agentSipUri }).then(function (data) {
+    if (data && data.error) {
+      if (data.error === 'presence-stale') { delete __redialedInbound[callId]; sendPresenceHeartbeat(); }
+      return false;
+    }
+    return !!(data && data.ok);
+  }).catch(function () {
+    delete __redialedInbound[callId];
+    return false;
+  });
+}
+/* ?inbound=<callControlId> deep link (push notification tap): after the
+   first successful connect, check that one pairing directly. Ringing +
+   inbound + fresh (< ~30s) → redial it; already bridged/ended → say so
+   and do nothing; not found → do nothing, the poll catches it. */
+function checkInboundDeepLink() {
+  if (__inboundDeepLinkDone) return;
+  __inboundDeepLinkDone = true;
+  var id = null;
+  try {
+    if (window.location && window.location.search) id = new URLSearchParams(window.location.search).get('inbound');
+  } catch (e) { id = null; }
+  if (!id) return;
+  manualCallApi('?action=status&callId=' + encodeURIComponent(id)).then(function (data) {
+    if (!data) return;
+    var st = data.status || '';
+    var dir = data.direction || '';
+    if (dir === 'inbound' && st === 'ringing') {
+      var ageOk = true;
+      if (data.startedAt) {
+        try { ageOk = (Date.now() - new Date(data.startedAt).getTime()) < 30000; } catch (e) { ageOk = true; }
+      }
+      if (ageOk) redialInboundCall(id);
+    } else if (st === 'bridged' || st === 'ended' || st === 'machine') {
+      toast('Call ended');
+    }
+    // Not found / anything else: do nothing — the poll catches it.
+  }).catch(function () { /* a failed lookup never breaks calling */ });
+}
 /* ---------- incoming-call banner (Answer / Decline) ---------- */
 /* Same banner as conversations.html: a seller calling one of our
    numbers rings this browser while Connect Audio is on. The SIP leg
@@ -754,6 +850,7 @@ function answerOutboundLeg(call) {
    ?action=inbound, keyed by the agent leg's call_control_id). */
 function showInboundBanner(call) {
   state.inboundCall = call;
+  __startInboundRing();
   var b = document.getElementById('inboundBanner');
   if (b) { b.classList.remove('hidden'); b.style.display = 'flex'; }
   var sub = document.getElementById('inboundCaller');
@@ -761,6 +858,7 @@ function showInboundBanner(call) {
   resolveInboundCaller(call, 0);
 }
 function hideInboundBanner() {
+  __stopInboundRing();
   var b = document.getElementById('inboundBanner');
   if (b) { b.classList.add('hidden'); b.style.display = 'none'; }
   state.inboundCall = null;
@@ -800,6 +898,7 @@ async function answerInboundCall() {
   if (!call || call.__ccAnswered) return;
   call.__ccAnswered = true;
   hideInboundBanner();
+  __stopInboundRing();
   state.agentCall = call;
   manualCall.active = true;
   var btn = document.getElementById('manualCallBtn');
@@ -824,6 +923,7 @@ async function answerInboundCall() {
 async function declineInboundCall() {
   var call = state.inboundCall;
   hideInboundBanner();
+  __stopInboundRing();
   if (call && typeof call.hangup === 'function') {
     try { await call.hangup(); } catch (e) { /* already gone */ }
   }
@@ -884,7 +984,11 @@ async function connectAudio() {
     }
     state.agentSipUri = data.sipUri || '';
     var RTC = getTelnyxRTC();
-    var client = new RTC({ login_token: data.token });
+    // Client options (Nov 26, 2026 inbound fix — see conversations.html):
+    // keepConnectionAliveOnSocketClose + ringtoneFile are real JS
+    // IClientOptions; pushWhenActive is only documented for Flutter/Dart
+    // — passed anyway, harmless if ignored, never relied on.
+    var client = new RTC({ login_token: data.token, pushWhenActive: true, keepConnectionAliveOnSocketClose: true, ringtoneFile: '/assets/ringtone-inbound.wav' });
     state.rtcClient = client;
     // Let the SDK own remote-audio playout (see conversations.html):
     // it (re)attaches the remote MediaStream when media arrives. The
@@ -894,6 +998,14 @@ async function connectAudio() {
     client.on('telnyx.ready', function () {
       state.audioConnected = true;
       setAudioStatus('Audio connected — answered sellers will ring in here.', true, false);
+      // Registration complete: this tab can receive calls now. Tell the
+      // server so (presence), then ask whether anything started ringing
+      // while this tab was dead (redial), and honour a ?inbound= deep
+      // link once.
+      sendPresenceHeartbeat();
+      startPresenceHeartbeat();
+      pollRingingInbound();
+      checkInboundDeepLink();
     });
     client.on('telnyx.error', function () {
       state.audioConnected = false;
@@ -1304,6 +1416,60 @@ function __stopRingback() {
     }
   } catch (e) {}
 }
+/* ---------- inbound ringtone (US: 440 + 480 Hz, double burst) ---------- */
+/* Mirrors __startRingback (see conversations.html): the agent leg carries
+   no audio until it is answered, so the page rings itself while the
+   Answer banner is up. Cadence: 0.4s on, 0.2s off, 0.4s on, 1.0s off,
+   repeat. The SDK also plays ringtoneFile on the client — both sounding
+   is acceptable. Fail-soft: a suspended AudioContext resumes, any error
+   is swallowed. */
+var __inboundRingCtx = null, __inboundRingNodes = null, __inboundRingTimer = null;
+function __startInboundRing() {
+  try {
+    if (__inboundRingNodes) return;
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    if (!__inboundRingCtx) __inboundRingCtx = new AC();
+    if (__inboundRingCtx.state === 'suspended') __inboundRingCtx.resume();
+    var ctx = __inboundRingCtx;
+    var gain = ctx.createGain();
+    gain.gain.value = 0;
+    gain.connect(ctx.destination);
+    var oscs = [440, 480].map(function (f) {
+      var o = ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.value = f;
+      o.connect(gain);
+      o.start();
+      return o;
+    });
+    var burst = function () {
+      gain.gain.setTargetAtTime(0.1, ctx.currentTime, 0.05);
+      __inboundRingTimer = setTimeout(function () {
+        gain.gain.setTargetAtTime(0, ctx.currentTime, 0.05);
+        __inboundRingTimer = setTimeout(function () {
+          gain.gain.setTargetAtTime(0.1, ctx.currentTime, 0.05);
+          __inboundRingTimer = setTimeout(function () {
+            gain.gain.setTargetAtTime(0, ctx.currentTime, 0.05);
+            __inboundRingTimer = setTimeout(burst, 1000);
+          }, 400);
+        }, 200);
+      }, 400);
+    };
+    burst();
+    __inboundRingNodes = { gain: gain, oscs: oscs };
+  } catch (e) { /* audio is best-effort — the call still works */ }
+}
+function __stopInboundRing() {
+  try {
+    if (__inboundRingTimer) { clearTimeout(__inboundRingTimer); __inboundRingTimer = null; }
+    if (__inboundRingNodes) {
+      __inboundRingNodes.oscs.forEach(function (o) { try { o.stop(); } catch (e) {} });
+      __inboundRingNodes.gain.disconnect();
+      __inboundRingNodes = null;
+    }
+  } catch (e) {}
+}
 function pollManualCallStatus() {
   stopManualCallPolling();
   // 1s while setting up so the local ringback stops the moment the
@@ -1490,7 +1656,7 @@ function init() {
     .catch(handleLoadError);
   // A slept/backgrounded phone tab drops the signaling socket — reconnect
   // when the tab is visible again or the network comes back.
-  document.addEventListener('visibilitychange', function () { if (!document.hidden) scheduleDialerAudioReconnect(0); });
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) { sendPresenceHeartbeat(); scheduleDialerAudioReconnect(0); } });
   if (typeof window !== 'undefined' && window.addEventListener) window.addEventListener('online', function () { scheduleDialerAudioReconnect(0); });
   setInterval(function () {
     if (state.session && ['running', 'connected', 'paused'].includes(state.session.status)) {

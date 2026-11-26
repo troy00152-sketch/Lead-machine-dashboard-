@@ -50,11 +50,46 @@ const voice = require('./telnyx-voice-lib');
 const dialer = require('./cc-dialer-api');
 const engine = dialer._engine;
 const callApi = require('./cc-call-api');
+const pushDefault = require('./cc-push');
+const voiceTokenDefault = require('./cc-voice-token');
 
 // ---- injectable voice actions (tests) ----
-const deps = { voiceLib: null };
+const deps = { voiceLib: null, pushLib: null, voiceToken: null };
 function voiceLib() {
   return deps.voiceLib || voice;
+}
+function pushLib() {
+  return deps.pushLib || pushDefault;
+}
+function voiceTokenLib() {
+  return deps.voiceToken || voiceTokenDefault;
+}
+// Small promise helpers: the webhook must answer Telnyx inside its
+// 10s delivery timeout, so the on-demand credential mint and the
+// credential-read retry are bounded — a slow mint never stalls the
+// webhook past the point where Telnyx retries (and the dedupe in
+// handleInboundCall makes a retry harmless).
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+function withTimeout(promise, ms) {
+  // A rejection (or a late settle after the timeout) must never become
+  // an unhandled rejection — map every outcome to a value, null on
+  // timeout or failure.
+  let timer = null;
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(() => resolve({ ok: false, value: null }), ms);
+  });
+  const raced = Promise.race([
+    Promise.resolve(promise).then(
+      (value) => ({ ok: true, value }),
+      () => ({ ok: false, value: null })
+    ),
+    timeout,
+  ]);
+  return raced
+    .finally(() => { if (timer) clearTimeout(timer); })
+    .then((r) => (r.ok ? r.value : null));
 }
 // Voice side effects are best-effort from the webhook: a failed hangup
 // must not 500 the webhook (Telnyx would retry and double-apply state).
@@ -338,38 +373,81 @@ async function applyThreadCallEvent(evt, event, state) {
   }
 
   if (isAmdEvent(type)) {
-    if (found.role !== 'seller') return { handled: false, reason: 'AMD event for non-seller leg' };
-    // Inbound calls never run AMD (the caller dialed us) — ignore.
-    if (rec.direction === 'inbound') return { handled: true, inboundAmdIgnored: true };
-    // AMD is a label only on this path — the bridge already formed on
-    // call.answered. A 'machine' verdict (including a premium
-    // 'silence' / 'fax' — a live human waiting silently is the classic
-    // false positive) only tags the call 'possible voicemail'; the
-    // agent hears the greeting and ends the call himself if it really
-    // is a machine. (The bulk dialer session still auto-dispositions
-    // machines; this is the single-call path, where the agent is
-    // listening.)
-    const verdict = amdVerdict(payload.result);
-    if (verdict === 'machine') {
-      rec.amdResult = 'machine';
-      await maybeBridge();
-    } else if (verdict === 'human') {
-      rec.sellerHuman = true;
-      await maybeBridge();
+    // PSTN fallback leg AMD (Layer 2): the verdict tells us whether
+    // Troy or his voicemail answered the fallback dial. 'machine'
+    // (voicemail) ends the call as missed; 'human' bridges now. This
+    // runs BEFORE the inbound-AMD ignore below: the fallback leg is
+    // the one leg on an inbound call that DOES run AMD.
+    if (found.role === 'agent' && rec.fallbackLeg && rec.fallbackLeg === callControlId) {
+      const verdict = amdVerdict(payload.result);
+      if (verdict === 'machine') {
+        rec.fallbackFailed = true;
+        rec.fallbackAwaitingAmd = false;
+        rec.amdResult = 'machine';
+        await hangupLeg(callControlId, 'hangup fallback leg (voicemail)');
+        rec.status = 'ended';
+        rec.endedAt = Date.now();
+        if (rec.sellerLeg && rec.sellerLeg !== callControlId) {
+          await hangupLeg(rec.sellerLeg, 'hangup inbound leg (fallback voicemail)');
+        }
+      } else if (verdict === 'human') {
+        rec.fallbackHuman = true;
+        rec.fallbackAwaitingAmd = false;
+        rec.agentAnswered = true;
+        if (rec.direction === 'inbound' && !rec.sellerAnswered) {
+          await safeVoice(() => v.answer(rec.sellerLeg), 'answer inbound leg (fallback human)');
+        }
+        await maybeBridge();
+      }
+      // else: unmapped verdict — leave the leg alone; the sweep
+      // bridges an answered fallback leg whose AMD never lands.
+    } else if (found.role !== 'seller') {
+      return { handled: false, reason: 'AMD event for non-seller leg' };
     } else {
-      return { handled: false, reason: 'unmapped AMD result: ' + String(payload.result || '') };
+      // Inbound calls never run AMD (the caller dialed us) — ignore.
+      if (rec.direction === 'inbound') return { handled: true, inboundAmdIgnored: true };
+      // AMD is a label only on this path — the bridge already formed on
+      // call.answered. A 'machine' verdict (including a premium
+      // 'silence' / 'fax' — a live human waiting silently is the classic
+      // false positive) only tags the call 'possible voicemail'; the
+      // agent hears the greeting and ends the call himself if it really
+      // is a machine. (The bulk dialer session still auto-dispositions
+      // machines; this is the single-call path, where the agent is
+      // listening.)
+      const verdict = amdVerdict(payload.result);
+      if (verdict === 'machine') {
+        rec.amdResult = 'machine';
+        await maybeBridge();
+      } else if (verdict === 'human') {
+        rec.sellerHuman = true;
+        await maybeBridge();
+      } else {
+        return { handled: false, reason: 'unmapped AMD result: ' + String(payload.result || '') };
+      }
     }
   } else if (type === 'call.answered') {
     if (found.role === 'agent') {
-      rec.agentAnswered = true;
       // The answering leg is the agent leg (inbound rings several).
       await claimAgentLeg(callControlId);
-      // Inbound: the caller is still ringing — answer their leg now;
-      // their call.answered lands next and the bridge forms then.
-      if (rec.direction === 'inbound' && !rec.sellerAnswered) {
-        await safeVoice(() => v.answer(rec.sellerLeg), 'answer inbound leg');
+      const isFallbackLeg = !!(rec.fallbackLeg && rec.fallbackLeg === callControlId);
+      if (isFallbackLeg && !rec.fallbackHuman) {
+        // PSTN fallback leg answered — but it may be Troy's voicemail,
+        // not Troy. Hold the bridge until AMD says human (the verdict
+        // lands a few seconds after answer). The seller keeps hearing
+        // ringback; agentAnswered stays false so nothing bridges early.
+        // If the verdict never lands, the sweep bridges an answered
+        // fallback leg past 30s (assume human).
+        rec.fallbackAnsweredAt = Date.now();
+        rec.fallbackAwaitingAmd = true;
+      } else {
+        rec.agentAnswered = true;
+        // Inbound: the caller is still ringing — answer their leg now;
+        // their call.answered lands next and the bridge forms then.
+        if (rec.direction === 'inbound' && !rec.sellerAnswered) {
+          await safeVoice(() => v.answer(rec.sellerLeg), 'answer inbound leg');
+        }
+        await maybeBridge();
       }
-      await maybeBridge();
     } else {
       rec.sellerAnswered = true;
       if (rec.direction === 'inbound') {
@@ -404,11 +482,31 @@ async function applyThreadCallEvent(evt, event, state) {
       const wasActive = rec.agentLeg === callControlId;
       rec.agentLegs = (rec.agentLegs || []).filter((id) => id !== callControlId);
       if (wasActive) rec.agentLeg = rec.agentLegs[0] || null;
+      // The fallback leg hanging up (timeout, busy, Troy declined)
+      // means the PSTN safety net failed — mark it; the ending logic
+      // below (or the sweep) closes the call as missed.
+      if (rec.fallbackLeg === callControlId) {
+        rec.fallbackFailed = true;
+        rec.fallbackAwaitingAmd = false;
+      }
       if (wasActive && (rec.status === 'bridged' || !rec.agentLeg) && rec.status !== 'ended' && rec.status !== 'machine') {
-        if (rec.status === 'bridged') rec.wasBridged = true;
-        rec.status = 'ended';
-        rec.endedAt = Date.now();
-        if (rec.sellerLeg && rec.sellerLeg !== callControlId) await hangupLeg(rec.sellerLeg, 'hangup thread seller leg');
+        // PSTN fallback trigger (Layer 2, event-driven): the last
+        // browser leg just died with the call still unanswered. Try
+        // the fallback FIRST — if it dials, the call stays 'ringing'
+        // on the fallback leg instead of ending as missed. Only when
+        // the fallback is unavailable (flag off, already attempted)
+        // does the call end here.
+        let fallbackDialed = false;
+        if (rec.direction === 'inbound' && rec.status === 'ringing' && !rec.agentAnswered) {
+          const fb = await tryPstnFallback(pairings, rec, event);
+          fallbackDialed = !!(fb && fb.attempted && fb.fallbackLeg);
+        }
+        if (!fallbackDialed) {
+          if (rec.status === 'bridged') rec.wasBridged = true;
+          rec.status = 'ended';
+          rec.endedAt = Date.now();
+          if (rec.sellerLeg && rec.sellerLeg !== callControlId) await hangupLeg(rec.sellerLeg, 'hangup thread seller leg');
+        }
       }
     } else if (rec.status !== 'ended' && rec.status !== 'machine') {
       if (rec.status === 'bridged') rec.wasBridged = true;
@@ -438,10 +536,51 @@ async function applyThreadCallEvent(evt, event, state) {
 // We ring the agent's browser (the stored voice credential's SIP URI)
 // and record a pairing with direction 'inbound'. When the agent leg
 // answers, applyThreadCallEvent answers the inbound leg and bridges.
+//
+// Nov 26, 2026 inbound fix (Layers F1 / 0 / 1):
+//   * Dedupe by event id: a retried/redelivered call.initiated must
+//     not re-dial (a second run would ring the agent twice and create
+//     a duplicate pairing). Telnyx retries a delivery it thinks
+//     failed; the pairing-exists check makes the retry a no-op.
+//   * Credential read with one retry + an on-demand mint: the Nov 26
+//     10:48-11:00 calls returned 200 in <1s with NO pairing — the
+//     store looked empty to the webhook. A missing credential must
+//     never silently drop a call again.
+//   * Presence gate: dial only URIs whose page is live (fresh
+//     heartbeat <30s), fail-open per URI for URIs with no record.
+//     NOTE (Nov 26 portal check): a 180 Ringing on an agent leg does
+//     NOT prove a WebRTC client is behind the identity — Telnyx's
+//     internal generated-credential termination answers 180 itself
+//     (private IPs in the Contact header). A 480 means the identity
+//     has no registration at all. Presence is the only signal a live
+//     client exists.
+//   * Save the pairing EVEN with zero legs (status 'ringing',
+//     agentLegs [], noAgentUri true) so the call appears in recents
+//     and the watchdog flags it (stuck 'ringing' past 60s).
+//   * Dial in parallel with timeout_secs 20 + a unique command_id per
+//     dial; the webhook must answer Telnyx inside its 10s delivery
+//     timeout. Do NOT depend on every leg producing webhook events:
+//     the Nov 26 test dialed one URI twice and one of those legs had
+//     no call_control_id and no webhook events at all (a SIP-level
+//     retry of a failed 480 INVITE) — legs are best-effort, the
+//     pairing + sweep are the source of truth.
+//   * Web push wake-up after the save (Layer 1): high urgency, ~120s
+//     TTL, awaited but bounded by sendToAll's ~3s timeout, fail-soft.
 async function handleInboundCall(evt, event) {
   const payload = (evt && evt.payload) || {};
   const callControlId = payload.call_control_id || null;
   if (!callControlId) return { handled: false, reason: 'inbound call without call_control_id' };
+  const v = voiceLib();
+  const now = Date.now();
+  const pairings = await callApi._thread.loadPairings(event);
+  if (pairings.calls[callControlId]) {
+    return {
+      handled: true,
+      duplicate: true,
+      inbound: true,
+      status: pairings.calls[callControlId].status || 'ringing',
+    };
+  }
   // Ring EVERY known voice credential at once (Nov 26, 2026): the
   // Conversations tab and the Dialer tab each hold their own
   // credential now, and an inbound call must reach whichever tab Troy
@@ -452,27 +591,75 @@ async function handleInboundCall(evt, event) {
     uris = await callApi.voiceCredentialUris(event);
   } catch (e) { uris = []; }
   if (!uris.length) {
-    const fallback = await callApi.agentSipUri(event);
-    if (fallback) uris = [fallback];
+    await sleep(800);
+    try {
+      uris = await callApi.voiceCredentialUris(event);
+    } catch (e) { uris = []; }
   }
-  if (!uris.length) return { handled: false, reason: 'no agent SIP URI — inbound call has nowhere to ring' };
-  const v = voiceLib();
+  if (!uris.length) {
+    // On-demand mint (best-effort, bounded ~3s): mint the
+    // 'conversations' credential now instead of dropping the call.
+    // Only when the store is empty — never on the hot path.
+    try {
+      // The mint gate reads the same (injected) voice lib as the
+      // dial below — the default import would bypass the test fake
+      // and could not be stubbed.
+      const cfg = v.voiceConfig ? v.voiceConfig() : { configured: false };
+      const vt = voiceTokenLib();
+      if (cfg.configured && vt && typeof vt.getOrCreateCredential === 'function') {
+        const cred = await withTimeout(
+          vt.getOrCreateCredential(event, cfg, 'conversations'),
+          3000
+        );
+        if (cred && cred.sipUri) uris = [String(cred.sipUri)];
+      }
+    } catch (e) {
+      console.error('[telnyx-voice-webhook] on-demand credential mint failed:', (e && e.message) || e);
+    }
+    if (!uris.length) {
+      try {
+        uris = await callApi.voiceCredentialUris(event);
+      } catch (e) { uris = []; }
+    }
+  }
+  // Presence gate (fail-open per URI — see the header note above).
+  let dialUris = uris;
+  let skippedStale = [];
+  try {
+    const presence = await callApi.presence.load(event);
+    const fresh = [];
+    for (const uri of uris) {
+      if (callApi.presence.hasRecord(presence, uri) && !callApi.presence.isFresh(presence, uri, now)) {
+        skippedStale.push(uri);
+      } else fresh.push(uri);
+    }
+    dialUris = fresh;
+    if (skippedStale.length) {
+      console.warn(
+        '[telnyx-voice-webhook] inbound ' + callControlId + ': skipped stale-presence URIs: ' + skippedStale.join(',')
+      );
+    }
+  } catch (e) { /* presence read failure = fail open, dial all */ }
   const agentLegs = [];
-  for (const sipUri of uris) {
-    const agent = await safeVoice(
-      () =>
-        v.createAgentLeg({
-          sipUri,
-          from: payload.to || undefined,
-          clientState: { kind: 'thread-call-agent', key: callControlId, sellerCallControlId: callControlId },
-        }),
-      'create agent leg for inbound call'
-    );
-    if (agent && agent.callControlId) agentLegs.push(agent.callControlId);
+  const dialResults = await Promise.allSettled(
+    dialUris.map((sipUri, i) =>
+      safeVoice(
+        () =>
+          v.createAgentLeg({
+            sipUri,
+            from: payload.to || undefined,
+            timeoutSecs: 20,
+            commandId: 'inb-' + String(callControlId).slice(-8) + '-' + i + '-' + now.toString(36),
+            clientState: { kind: 'thread-call-agent', key: callControlId, sellerCallControlId: callControlId },
+          }),
+        'create agent leg for inbound call'
+      )
+    )
+  );
+  for (const r of dialResults) {
+    if (r.status === 'fulfilled' && r.value && r.value.callControlId) agentLegs.push(r.value.callControlId);
   }
-  const now = Date.now();
-  const pairings = await callApi._thread.loadPairings(event);
-  pairings.calls[callControlId] = {
+  const rec = {
     key: callControlId,
     phone: payload.from || '',
     to: payload.to || null,
@@ -486,19 +673,134 @@ async function handleInboundCall(evt, event) {
     sellerAnswered: false,
     startedAt: now,
     updatedAt: now,
+    hunt: agentLegs.length ? 'hunting' : 'no-agent',
+    noAgentUri: agentLegs.length === 0,
   };
+  if (skippedStale.length) rec.presenceSkipped = skippedStale;
+  pairings.calls[callControlId] = rec;
   // The agent can answer before this save lands — merge any signal
   // stashed while the pairing did not exist yet, and if the agent
   // already answered, answer the inbound leg now (the branch that
   // normally does this never ran for a stashed event).
-  const rec = pairings.calls[callControlId];
   await callApi._thread.mergePending(event, callControlId, rec);
   if (rec.agentAnswered && !rec.sellerAnswered) {
     await safeVoice(() => v.answer(rec.sellerLeg), 'answer inbound leg (pending merge)');
   }
   rec.updatedAt = Date.now();
   await callApi._thread.savePairings(pairings, event);
-  return { handled: true, inbound: true, status: 'ringing' };
+  // Web push wake-up (Layer 1): a notification, NOT a ring — it gets
+  // Troy to tap, the tap opens Conversations at ?inbound=<id>, the
+  // page (re)connects, and the re-dial flow rings the live client.
+  try {
+    const push = pushLib();
+    if (push && typeof push.notifyInboundCall === 'function') {
+      await push.notifyInboundCall({ phone: rec.phone, callId: callControlId, at: now }, event);
+    }
+  } catch (e) {
+    console.error('[telnyx-voice-webhook] inbound push failed:', (e && e.message) || e);
+  }
+  if (!agentLegs.length) {
+    console.error(
+      '[telnyx-voice-webhook] INBOUND CALL WITH NO AGENT LEG — caller ' +
+        (rec.phone || '?') +
+        ' to ' +
+        (rec.to || '?') +
+        ' call ' +
+        callControlId +
+        (uris.length ? ' (URIs existed but no leg was created)' : ' (no agent SIP URI in store)') +
+        (skippedStale.length ? ' presence-skipped: ' + skippedStale.join(',') : '')
+    );
+  }
+  return { handled: true, inbound: true, status: 'ringing', agentLegs: agentLegs.length, noAgentUri: rec.noAgentUri };
+}
+
+// ---- PSTN fallback (Layer 2, Nov 26, 2026) ----
+// The GHL-equivalent safety net: when no browser answers an inbound
+// call inside the ~20s ring budget, dial Troy's real mobile from the
+// business DID and bridge the seller to it. BEHIND A FLAG, DEFAULT
+// OFF: INBOUND_PSTN_FALLBACK_ENABLED must be 'true' (or '1') AND
+// INBOUND_PSTN_FALLBACK_NUMBER must hold the mobile number. With the
+// flag off this whole path is inert — the call ends as a missed call
+// instead. The number is env-only on purpose: Troy's personal mobile
+// never goes in the repo.
+// The fallback leg is a normal Call Control leg with AMD premium: when
+// it answers, the bridge WAITS for the AMD verdict (see the agent
+// answer + AMD branches in applyThreadCallEvent) so the seller is
+// never bridged to Troy's voicemail greeting.
+function pstnFallbackConfig() {
+  const raw = String(process.env.INBOUND_PSTN_FALLBACK_ENABLED || '').toLowerCase().trim();
+  const enabled = raw === 'true' || raw === '1';
+  const number = String(process.env.INBOUND_PSTN_FALLBACK_NUMBER || '').trim();
+  return { enabled, number };
+}
+// Dial the fallback leg for an in-memory pairing record. Works on the
+// already-loaded pairings object (the webhook's applyThreadCallEvent
+// saves it at the end) — the exported attemptPstnFallback wrapper
+// below loads + saves for callers that do not hold the record (the
+// scheduled sweep). Returns {attempted, fallbackLeg?, reason?}.
+// Only fires when no browser leg is still ringing: the fallback is the
+// last resort, not a parallel ring. opts.force (sweep only): the ring
+// budget is spent, so listed legs are past their 20s timeout even if
+// their hangup events never arrived (a leg with no call_control_id
+// and no events at all was seen Nov 26) — hang them up best-effort
+// and proceed instead of refusing.
+async function tryPstnFallback(pairings, rec, event, opts) {
+  const cfg = pstnFallbackConfig();
+  if (!cfg.enabled) return { attempted: false, reason: 'disabled' };
+  if (!cfg.number) return { attempted: false, reason: 'no-number-configured' };
+  if (!rec || rec.direction !== 'inbound') return { attempted: false, reason: 'not-inbound' };
+  if (rec.status !== 'ringing') return { attempted: false, reason: 'not-ringing' };
+  if (rec.agentAnswered) return { attempted: false, reason: 'already-answered' };
+  if (rec.fallbackAttempted) return { attempted: false, reason: 'already-attempted' };
+  const v = voiceLib();
+  if ((rec.agentLegs || []).length) {
+    if (!(opts && opts.force)) return { attempted: false, reason: 'agent-legs-still-ringing' };
+    for (const legId of Array.from(new Set(rec.agentLegs))) {
+      await safeVoice(() => v.hangup(legId), 'hangup presumed-dead agent leg (sweep force)');
+    }
+    rec.agentLegs = [];
+    rec.agentLeg = null;
+  }
+  if (rec.agentLeg) {
+    await safeVoice(() => v.hangup(rec.agentLeg), 'hangup stale agent leg before PSTN fallback');
+  }
+  let fallback = null;
+  try {
+    fallback = await v.createCall({
+      to: cfg.number,
+      from: rec.to || undefined,
+      amd: true,
+      timeoutSecs: 20,
+      clientState: { kind: 'thread-call-agent', key: rec.key, sellerCallControlId: rec.sellerLeg, fallback: true },
+    });
+  } catch (e) {
+    rec.fallbackAttempted = true;
+    rec.fallbackFailed = true;
+    rec.lastError = 'pstn-fallback-failed: ' + String((e && e.message) || e);
+    rec.updatedAt = Date.now();
+    return { attempted: true, failed: true, detail: String((e && e.message) || e) };
+  }
+  if (!fallback || !fallback.callControlId) {
+    rec.fallbackAttempted = true;
+    rec.fallbackFailed = true;
+    rec.updatedAt = Date.now();
+    return { attempted: true, failed: true, detail: 'no call_control_id' };
+  }
+  rec.fallbackAttempted = true;
+  rec.fallbackAt = Date.now();
+  rec.fallbackLeg = fallback.callControlId;
+  rec.agentLegs = [fallback.callControlId];
+  rec.agentLeg = fallback.callControlId;
+  rec.updatedAt = Date.now();
+  return { attempted: true, fallbackLeg: fallback.callControlId };
+}
+async function attemptPstnFallback(event, callId, opts) {
+  const pairings = await callApi._thread.loadPairings(event);
+  const rec = pairings.calls[callId];
+  if (!rec) return { attempted: false, reason: 'unknown call' };
+  const result = await tryPstnFallback(pairings, rec, event, opts);
+  await callApi._thread.savePairings(pairings, event);
+  return result;
 }
 
 // ---- core event application (unit-tested) ----
@@ -789,11 +1091,25 @@ exports.handler = async (event) => {
 // Test hooks (not part of the deployed surface).
 exports._test = {
   applyCallEvent,
+  handleInboundCall,
+  attemptPstnFallback,
+  tryPstnFallback,
   verifySignature,
   setVoiceLib(v) {
     deps.voiceLib = v || null;
   },
+  setPushLib(p) {
+    deps.pushLib = p || null;
+  },
+  setVoiceToken(vt) {
+    deps.voiceToken = vt || null;
+  },
   reset() {
     deps.voiceLib = null;
+    deps.pushLib = null;
+    deps.voiceToken = null;
   },
 };
+// The scheduled sweep (cc-inbound-sweep.js) drives the PSTN fallback
+// for pairings whose agent-leg hangups never arrived.
+exports.attemptPstnFallback = attemptPstnFallback;

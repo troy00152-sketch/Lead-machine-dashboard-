@@ -295,6 +295,76 @@ async function voiceCredentialUris(event) {
   return Array.from(new Set(uris));
 }
 
+// ---- presence heartbeats (Nov 26, 2026, inbound fix) ----
+// A page that is actually live and registered sends a heartbeat (on
+// telnyx.ready, on visibilitychange to visible, on (re)connect, and
+// every ~20s while visible). The voice webhook gates the inbound dial
+// on these: a URI whose page went stale (closed, backgrounded, token
+// dead) is not rung — ringing a dead registration is the Nov 26
+// failure (the leg rang 30s, nothing ever answered).
+// Gate rule (fail-open per URI): a URI with NO presence record is
+// dialed (old page, or heartbeats not flowing yet); a URI with a
+// STALE record (>30s) is skipped (its page had the new code, sent
+// heartbeats, then stopped — it is not live). Only a FRESH record
+// (<30s) is a confirmed-live page.
+const PRESENCE_KEY = 'voice-presence';
+const PRESENCE_FRESH_MS = 30000;
+const PRESENCE_PRUNE_MS = 120000;
+async function loadPresence(event) {
+  try {
+    const s = dialerStore(event);
+    const box = await readJson(s, PRESENCE_KEY);
+    if (box && box.byUri && typeof box.byUri === 'object') return box;
+    return { byUri: {} };
+  } catch (e) {
+    return { byUri: {} };
+  }
+}
+async function recordPresence(event, sipUri, surface, userAgent) {
+  const s = dialerStore(event);
+  const box = await loadPresence(event);
+  const now = Date.now();
+  const byUri = box.byUri || {};
+  // Prune anything older than 2 minutes so the record stays small.
+  for (const [uri, rec] of Object.entries(byUri)) {
+    if (!rec || typeof rec.at !== 'number' || now - rec.at > PRESENCE_PRUNE_MS) delete byUri[uri];
+  }
+  byUri[sipUri] = { surface: surface || '', at: now, userAgent: userAgent || '' };
+  await writeJson(s, PRESENCE_KEY, { byUri, updatedAt: now });
+  return byUri[sipUri];
+}
+function presenceHasRecord(presence, sipUri) {
+  return !!(presence && presence.byUri && presence.byUri[sipUri]);
+}
+function presenceFresh(presence, sipUri, nowMs) {
+  if (!presenceHasRecord(presence, sipUri)) return false;
+  const at = presence.byUri[sipUri].at;
+  if (typeof at !== 'number') return false;
+  return (nowMs || Date.now()) - at < PRESENCE_FRESH_MS;
+}
+
+// Thread name for a pairing (banner + ringing poll): an inbound
+// pairing's key is the inbound leg's call_control_id, not the phone
+// key — so the thread is found by the caller's phone, not by rec.key.
+// Try rec.key first (outbound pairings are keyed by phone), then the
+// phone key. Best-effort: a missing thread just means no name.
+async function lookupThreadName(event, rec) {
+  if (!rec) return '';
+  try {
+    const cs = convStore(event);
+    if (rec.key) {
+      const thread = await readJson(cs, rec.key);
+      if (thread && thread.name) return thread.name;
+    }
+    if (rec.phone) {
+      const pk = telnyxLib().phoneKey(rec.phone);
+      const thread = await readJson(cs, pk);
+      if (thread && thread.name) return thread.name;
+    }
+  } catch (e) { /* name is best-effort */ }
+  return '';
+}
+
 // ---- HTTP handler ----
 exports.handler = async (event) => {
   try {
@@ -508,14 +578,7 @@ exports.handler = async (event) => {
       const found = findByLeg(pairings, agentLeg);
       if (!found) return ok({ found: false });
       const rec = found.rec;
-      let name = '';
-      try {
-        const cs = convStore(event);
-        if (rec.key) {
-          const thread = await readJson(cs, rec.key);
-          if (thread && thread.name) name = thread.name;
-        }
-      } catch (e) { /* name is best-effort */ }
+      const name = await lookupThreadName(event, rec);
       return ok({
         found: true,
         callId: found.callId,
@@ -524,6 +587,124 @@ exports.handler = async (event) => {
         status: rec.status || '',
         direction: rec.direction || '',
       });
+    }
+
+    if (action === 'presence') {
+      // Presence heartbeat (Nov 26, 2026, inbound fix): a live page
+      // reports its surface + SIP URI so the voice webhook knows which
+      // client is actually registered. Fire-and-forget from the page;
+      // a bad body is a 400, never a crash.
+      const sipUri = body.sipUri || params.sipUri || '';
+      const surface = String(body.surface || params.surface || '').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 32);
+      if (!/^sip:[A-Za-z0-9._-]+@sip\.telnyx\.com$/i.test(String(sipUri).trim())) return bad('Invalid sipUri.');
+      const headers = event.headers || {};
+      const ua = headers['user-agent'] || headers['User-Agent'] || '';
+      await recordPresence(event, String(sipUri).trim(), surface || 'unknown', String(ua).slice(0, 200));
+      return ok({ ok: true });
+    }
+
+    if (action === 'ringing-inbound') {
+      // Ringing-inbound poll (Nov 26, 2026, inbound fix): after a
+      // (re)connect the page asks whether an inbound call is ringing
+      // right now that it has no invite for (backgrounded tab, missed
+      // invite). Only pairings still inside the ~20s ring budget are
+      // returned — an older one is already over, and re-dialing it
+      // would ring a caller who has hung up.
+      const pairings = await loadPairings(event);
+      const now = Date.now();
+      const calls = [];
+      for (const [callId, r] of Object.entries(pairings.calls || {})) {
+        if (!r || r.direction !== 'inbound') continue;
+        if (r.status !== 'ringing') continue;
+        if (r.agentAnswered) continue;
+        if (typeof r.startedAt !== 'number') continue;
+        const ageSeconds = Math.floor((now - r.startedAt) / 1000);
+        if (ageSeconds > 30) continue;
+        const name = await lookupThreadName(event, r);
+        calls.push({
+          callId,
+          phone: r.phone || '',
+          name,
+          status: r.status,
+          direction: r.direction || 'inbound',
+          startedAt: r.startedAt,
+          ageSeconds,
+        });
+      }
+      calls.sort((a, b) => (b.startedAt - a.startedAt));
+      return ok({ ok: true, calls });
+    }
+
+    if (action === 'redial-inbound') {
+      // One-time re-dial (Nov 26, 2026, inbound fix): the page
+      // (re)connected and found a ringing inbound pairing it has no
+      // invite for. Hang the stale agent leg(s) up and dial ONE fresh
+      // leg to THIS page's SIP URI — the invite lands on the live
+      // client. Once per pairing (rec.redialed), inside the ~20s
+      // ring budget, and only when this page's presence is fresh
+      // (or absent — fail-open for a page that never sent one).
+      const callId = body.callId || params.callId;
+      const agentSipUri = body.agentSipUri || params.agentSipUri || '';
+      if (!callId) return bad('Missing callId.');
+      if (!agentSipUri) return bad('Missing agentSipUri.');
+      const pairings = await loadPairings(event);
+      const rec = pairings.calls[callId];
+      if (!rec) return json(404, { error: 'unknown call' });
+      if (rec.direction !== 'inbound') return bad('not-inbound');
+      if (rec.status !== 'ringing') return ok({ error: 'not-ringing' });
+      if (rec.agentAnswered) return ok({ error: 'already-answered' });
+      if (rec.redialed) return ok({ error: 'already-redialed' });
+      const now = Date.now();
+      if (typeof rec.startedAt === 'number' && now - rec.startedAt > 30000) return ok({ error: 'too-old' });
+      // Strict: the page is asking for a leg to ITS live client. A
+      // URI we do not know must be rejected, never silently dialed to
+      // a different (possibly dead) identity — resolveAgentSipUri's
+      // fallback to the stored credential is for `start`, not here.
+      const uriMatch = /^sip:([A-Za-z0-9._-]+)@sip\.telnyx\.com$/i.exec(String(agentSipUri).trim());
+      const knownUsernames = await knownVoiceUsernames(event);
+      if (!uriMatch || !knownUsernames.has(uriMatch[1])) return ok({ error: 'unknown-agent-uri' });
+      const sipUri = 'sip:' + uriMatch[1] + '@' + SIP_DOMAIN;
+      const presence = await loadPresence(event);
+      if (presenceHasRecord(presence, sipUri) && !presenceFresh(presence, sipUri, now)) {
+        return ok({ error: 'presence-stale' });
+      }
+      // Hang the stale leg(s) first: the old invite must not linger
+      // and answer on a dead client after the fresh one rings.
+      const staleLegs = Array.from(new Set([rec.agentLeg, ...(rec.agentLegs || [])].filter(Boolean)));
+      for (const legId of staleLegs) {
+        try { await v.hangup(legId); } catch (e) { /* leg may already be gone */ }
+      }
+      let agent = null;
+      try {
+        agent = await v.createAgentLeg({
+          sipUri,
+          from: rec.to || undefined,
+          timeoutSecs: 20,
+          commandId: 'redial-' + String(callId).slice(-8) + '-' + now.toString(36),
+          clientState: { kind: 'thread-call-agent', key: callId, sellerCallControlId: callId },
+        });
+      } catch (e) {
+        const p2 = await loadPairings(event);
+        const r2 = p2.calls[callId];
+        if (r2) {
+          r2.lastError = 'redial-failed: ' + String((e && e.message) || e);
+          r2.updatedAt = Date.now();
+          await savePairings(p2, event);
+        }
+        return json(502, { error: 'Could not dial the browser agent leg.', detail: String((e && e.message) || e) });
+      }
+      if (!agent || !agent.callControlId) return json(502, { error: 'Could not dial the browser agent leg.' });
+      const fresh = await loadPairings(event);
+      const r3 = fresh.calls[callId];
+      if (r3) {
+        r3.agentLegs = [agent.callControlId];
+        r3.agentLeg = agent.callControlId;
+        r3.redialed = true;
+        r3.redialedAt = now;
+        r3.updatedAt = Date.now();
+        await savePairings(fresh, event);
+      }
+      return ok({ ok: true, agentLeg: agent.callControlId });
     }
 
     if (action === 'status') {
@@ -687,6 +868,16 @@ exports._thread = { loadPairings, savePairings, findByLeg, loadPending, savePend
 // needs the same SIP URI derivation as the dialer start flow.
 exports.agentSipUri = agentSipUri;
 exports.voiceCredentialUris = voiceCredentialUris;
+
+// The voice webhook gates the inbound dial on presence heartbeats
+// (Nov 26, 2026, inbound fix) — see presenceFresh / presenceHasRecord.
+exports.presence = {
+  load: loadPresence,
+  record: recordPresence,
+  isFresh: presenceFresh,
+  hasRecord: presenceHasRecord,
+  FRESH_MS: PRESENCE_FRESH_MS,
+};
 
 // Test hooks (not part of the deployed surface).
 exports._test = {
