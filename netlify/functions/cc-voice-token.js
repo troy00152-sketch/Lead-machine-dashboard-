@@ -121,11 +121,11 @@ function isAdmin(event) {
 }
 
 // ---- Telnyx credential + token ----
-// Raw API helper for the credential endpoints: unlike Call Control
-// actions, the token endpoint returns the JWT as a bare string in
-// `data`, so this parses tolerantly instead of reusing the voice lib's
-// apiCall (which expects an object payload shape).
-async function telnyxApi(pathname, method, body, apiKey) {
+// Raw API helper for the credential endpoints. Most return JSON, but
+// the token endpoint (POST /telephony_credentials/{id}/token) returns
+// the JWT as PLAIN TEXT — parsing that as JSON yields null, so callers
+// pass raw=true for it and get the text back untouched.
+async function telnyxApi(pathname, method, body, apiKey, raw) {
   const f = fetchImpl();
   if (typeof f !== 'function') throw new Error('No fetch implementation available.');
   const res = await f(voice.TELNYX_API_BASE + pathname, {
@@ -138,6 +138,15 @@ async function telnyxApi(pathname, method, body, apiKey) {
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const text = typeof res.text === 'function' ? await res.text() : '';
+  if (raw) {
+    if (!res.ok) {
+      throw new Error(
+        'Telnyx credential API failed (' + pathname + '): ' +
+        (text ? 'HTTP ' + res.status + ' body: ' + text.slice(0, 200) : 'HTTP ' + res.status)
+      );
+    }
+    return text;
+  }
   let data = null;
   try {
     data = text ? JSON.parse(text) : null;
@@ -307,16 +316,19 @@ async function getOrCreateCredential(event, cfg, who) {
 }
 
 async function mintToken(cred, cfg) {
-  const data = await telnyxApi(
+  // The token endpoint returns the JWT as PLAIN TEXT, not JSON — the
+  // old code JSON-parsed it, got null, and threw on every mint. Fetch
+  // it raw and validate the shape (three base64url segments) so a
+  // stray HTML/error page never reaches the SDK as a token.
+  const text = await telnyxApi(
     '/telephony_credentials/' + encodeURIComponent(cred.id) + '/token',
     'POST',
     undefined,
-    cfg.apiKey
+    cfg.apiKey,
+    true
   );
-  // Telnyx returns the JWT as `data` (a string); tolerate a wrapped
-  // {token} shape too.
-  const token = typeof data === 'string' ? data : data && (data.data || data.token);
-  if (!token || typeof token !== 'string') throw new Error('Telnyx did not return a WebRTC token.');
+  const token = typeof text === 'string' ? text.trim() : '';
+  if (!token || token.split('.').length !== 3) throw new Error('Telnyx did not return a WebRTC token.');
   return token;
 }
 
