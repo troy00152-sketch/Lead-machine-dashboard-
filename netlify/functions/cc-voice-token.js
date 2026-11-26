@@ -287,10 +287,14 @@ async function getOrCreateCredential(event, cfg, who) {
     cfg.apiKey
   );
   const d = (data && data.data) || {};
-  if (!d.id || !d.user_name && !d.username) {
+  // Telnyx returns the SIP identity as `sip_username` (e.g.
+  // "gencred…") — NOT `user_name`. The old guard checked the wrong
+  // field names and threw on every successful create. (Never dump the
+  // raw response into an error: it carries sip_password.)
+  const username = d.sip_username || d.user_name || d.username;
+  if (!d.id || !username) {
     throw new Error('Telnyx did not return a usable telephony credential.');
   }
-  const username = d.user_name || d.username;
   const cred = {
     id: d.id,
     username,
