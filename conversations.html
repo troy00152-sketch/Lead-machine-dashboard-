@@ -79,6 +79,8 @@
   .msg{max-width:75%;padding:9px 12px;border-radius:14px;white-space:pre-wrap;word-break:break-word}
   .msg .m-body{font-size:14px}
   .msg .m-meta{font-size:11px;margin-top:4px;display:flex;gap:8px;align-items:center}
+  .msg .m-dir{font-size:10px;letter-spacing:.05em;text-transform:uppercase;opacity:.75;margin-bottom:3px}
+  .msg.out .m-dir{text-align:right}
   .msg.out{align-self:flex-end;background:var(--hl-out);color:#fff;border-bottom-right-radius:4px}
   .msg.out .m-meta{color:rgba(255,255,255,.85);justify-content:flex-end}
   .msg.in{align-self:flex-start;background:var(--hl-in);color:var(--hl-in-text);border:1px solid #d3d6dd;border-bottom-left-radius:4px}
@@ -86,6 +88,13 @@
   .msg.in .st-failed{color:#c0392b}
   .msg .st-failed{color:#ffb3a7;font-weight:700}
   .msg.out .st-failed{color:#ffd9d2}
+  .call-box{display:flex;gap:10px;align-items:center;margin:10px 0 0;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+  .call-box[hidden]{display:none}
+  .call-box .cb-icon{font-size:20px}
+  .call-box .cb-main{flex:1;min-width:0}
+  .call-box .cb-title{font-weight:700;font-size:14px}
+  .call-box .cb-sub{font-size:12px;color:var(--muted);margin-top:2px}
+  .call-box .cb-dur{font-size:13px;font-weight:700;color:var(--muted);white-space:nowrap}
   .day-sep{align-self:center;color:#75808c;font-size:11px;margin:8px 0;background:rgba(255,255,255,.65);padding:1px 10px;border-radius:99px}
   .sendbox{border-top:1px solid var(--line);padding:12px 14px;display:flex;gap:10px;align-items:flex-end}
   .sendbox textarea{flex:1;resize:vertical;min-height:42px;max-height:140px}
@@ -260,6 +269,18 @@
             <button class="btn small primary" id="dialCallBtn" type="button" disabled>📞 Call</button>
             <span class="note">Keypad sends tones while a call is live.</span>
           </div>
+          <!-- Call box (GoHighLevel-style): opens right here under the Call
+               button when you dial — Dialing, Ringing, Connected with a live
+               timer — then the final result: Call ended (with duration),
+               Missed call, or Voicemail. -->
+          <div id="callBox" class="call-box" hidden>
+            <div class="cb-icon">📞</div>
+            <div class="cb-main">
+              <div class="cb-title" id="callBoxTitle">Dialing…</div>
+              <div class="cb-sub" id="callBoxSub"></div>
+            </div>
+            <div class="cb-dur" id="callBoxDur"></div>
+          </div>
           <div style="display:flex;gap:8px;align-items:center;margin-top:10px">
             <button class="btn small" id="podAudioBtn" type="button">🎧 Connect audio</button>
             <span class="note" id="podAudioStatus"></span>
@@ -323,7 +344,7 @@ var state = {
 
 var voiceCheckPromise = null;
 var rtcClient = null;
-var callState = { callId: null, active: false, timer: null, agentCall: null };
+var callState = { callId: null, active: false, timer: null, agentCall: null, bridged: false, connectedAt: null, durTimer: null, phone: null };
 
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -489,7 +510,7 @@ function renderMessages() {
       html += '<div class="day-sep">' + esc(day) + '</div>';
       lastDay = day;
     }
-    html += '<div class="msg ' + (m.dir === 'out' ? 'out' : 'in') + '"><div class="m-body">' + esc(m.body) + '</div>' +
+    html += '<div class="msg ' + (m.dir === 'out' ? 'out' : 'in') + '"><div class="m-dir">' + (m.dir === 'out' ? 'Outgoing' : 'Incoming') + '</div><div class="m-body">' + esc(m.body) + '</div>' +
       '<div class="m-meta"><span>' + esc(fmtTime(m.at)) + '</span>' + statusTick(m) + '</div></div>';
   });
   box.innerHTML = html;
@@ -738,6 +759,7 @@ function renderThreadHead() {
   document.getElementById('sendText').disabled = !canSend;
   document.getElementById('sendBtn').disabled = !canSend;
   if (!callState.active) setCallButtons(!canSend, false);
+  if (!callState.active) hideCallBox();
   renderDialPod();
   if (!t) {
     title.textContent = 'No conversation selected';
@@ -846,6 +868,39 @@ async function callApi(path, body) {
 function setCallStatus(txt) {
   document.getElementById('callStatus').textContent = txt || '';
 }
+/* ---------- call box (GoHighLevel-style live call card) ---------- */
+function fmtDur(ms) {
+  var s = Math.max(0, Math.floor(ms / 1000));
+  return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+}
+function callBoxSub() {
+  return callState.phone ? 'Outgoing call · ' + fmtPhone(callState.phone) : 'Outgoing call';
+}
+function showCallBox(title) {
+  var box = document.getElementById('callBox');
+  if (!box) return;
+  box.hidden = false;
+  document.getElementById('callBoxTitle').textContent = title;
+  document.getElementById('callBoxSub').textContent = callBoxSub();
+}
+function setCallBoxDur(txt) {
+  var d = document.getElementById('callBoxDur');
+  if (d) d.textContent = txt || '';
+}
+function hideCallBox() {
+  var box = document.getElementById('callBox');
+  if (box) box.hidden = true;
+  setCallBoxDur('');
+}
+function startCallDurTimer() {
+  stopCallDurTimer();
+  callState.durTimer = setInterval(function () {
+    if (callState.connectedAt) setCallBoxDur(fmtDur(Date.now() - callState.connectedAt));
+  }, 1000);
+}
+function stopCallDurTimer() {
+  if (callState.durTimer) { clearInterval(callState.durTimer); callState.durTimer = null; }
+}
 /* ---------- connect audio (visible softphone switch, like the Dialer
    page) ---------- */
 /* The call still dials without it, but this tab has nowhere to hear the
@@ -909,14 +964,24 @@ function setCallButtons(disabled, active) {
     b.textContent = active ? 'End call' : pair[1];
   });
 }
-function finishCallUI(statusText) {
+function finishCallUI(kind) {
   __stopRingback();
   stopCallPolling();
+  stopCallDurTimer();
+  var dur = (callState.bridged && callState.connectedAt) ? fmtDur(Date.now() - callState.connectedAt) : '';
+  var finalText;
+  if (kind === 'machine') finalText = 'Voicemail';
+  else if (callState.bridged) finalText = 'Call ended' + (dur ? ' — ' + dur : '');
+  else finalText = 'Missed call';
   callState.active = false;
   callState.callId = null;
   callState.agentCall = null;
+  callState.bridged = false;
+  callState.connectedAt = null;
   setCallButtons(!state.selectedThread, false);
-  setCallStatus(statusText || '');
+  setCallStatus(finalText);
+  showCallBox(finalText);
+  setCallBoxDur(dur);
 }
 /* ---------- ringback tone (US: 440 + 480 Hz, 2s on / 4s off) ---------- */
 /* The two call legs only join once the other end is a confirmed human,
@@ -970,18 +1035,23 @@ function pollCallStatus() {
     try {
       var data = await callApi('?action=status&callId=' + encodeURIComponent(callState.callId));
       var st = data.status || '';
-      if (st === 'bridged') { __stopRingback(); setCallStatus('Connected'); }
-      else if (st === 'machine') { finishCallUI('Machine answered'); toast('A machine answered — call ended.'); }
-      else if (st === 'ended') { finishCallUI('Ended'); }
-      else { setCallStatus(st === 'ringing' ? 'Ringing…' : 'Calling…'); __startRingback(); }
+      if (st === 'bridged') {
+        __stopRingback();
+        if (!callState.bridged) { callState.bridged = true; callState.connectedAt = Date.now(); startCallDurTimer(); }
+        setCallStatus('Connected');
+        showCallBox('Connected');
+      }
+      else if (st === 'machine') { finishCallUI('machine'); toast('A machine answered — call ended.'); }
+      else if (st === 'ended') { finishCallUI('ended'); }
+      else { setCallStatus(st === 'ringing' ? 'Ringing…' : 'Calling…'); showCallBox(st === 'ringing' ? 'Ringing…' : 'Dialing…'); __startRingback(); }
     } catch (e) {
-      finishCallUI('Ended');
+      finishCallUI('ended');
     }
   }, 3000);
 }
 async function endCurrentCall() {
   var id = callState.callId;
-  finishCallUI('Ended');
+  finishCallUI('ended');
   if (id) {
     try { await callApi('', { action: 'hangup', callId: id }); } catch (e) { /* already gone */ }
   }
@@ -989,6 +1059,9 @@ async function endCurrentCall() {
 async function startCall(phone, from) {
   var t = state.selectedThread;
   if (!t) return;
+  callState.phone = phone;
+  callState.bridged = false;
+  callState.connectedAt = null;
   var btn = document.getElementById('callBtn');
   var cfg = await checkVoiceConfig();
   if (!cfg) {
@@ -1008,6 +1081,7 @@ async function startCall(phone, from) {
     callState.active = true;
     setCallButtons(false, true);
     setCallStatus('Calling…');
+    showCallBox('Dialing…');
     __startRingback();
     pollCallStatus();
   } catch (e) {
