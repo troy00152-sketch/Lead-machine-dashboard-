@@ -632,6 +632,11 @@ async function connectAudio() {
     var RTC = getTelnyxRTC();
     var client = new RTC({ login_token: data.token });
     state.rtcClient = client;
+    // Let the SDK own remote-audio playout (see conversations.html):
+    // it (re)attaches the remote MediaStream when media arrives. The
+    // old one-time srcObject bind at callReceived went stale because
+    // the SDK replaces the remoteStream object on first media.
+    client.remoteElement = 'remoteAudio';
     client.on('telnyx.ready', function () {
       state.audioConnected = true;
       setAudioStatus('Audio connected — answered sellers will ring in here.', true, false);
@@ -646,12 +651,20 @@ async function connectAudio() {
       // leg so the manual-dial keypad can send DTMF tones live.
       try {
         var call = note && note.call;
-        if (call && note.type === 'callReceived') {
-          state.agentCall = call;
-          var audio = document.getElementById('remoteAudio');
-          if (audio && call.remoteStream) audio.srcObject = call.remoteStream;
-          if (typeof call.answer === 'function') call.answer();
+        if (!call) return;
+        // Re-attach on EVERY notification: the remoteStream object is
+        // swapped when media starts flowing.
+        var audio = document.getElementById('remoteAudio');
+        if (audio && call.remoteStream) {
+          if (audio.srcObject !== call.remoteStream) audio.srcObject = call.remoteStream;
+          if (audio.paused) { try { var p = audio.play(); if (p && p.catch) p.catch(function () {}); } catch (e2) {} }
         }
+        if (note.type === 'callReceived') {
+          state.agentCall = call;
+          var audioEl = document.getElementById('remoteAudio');
+          if (typeof call.answer === 'function') call.answer({ remoteElement: audioEl || 'remoteAudio' });
+        }
+        if ((call.state === 'hangup' || call.state === 'destroy') && call === state.agentCall) state.agentCall = null;
       } catch (e) { /* best-effort */ }
     });
     await client.connect();

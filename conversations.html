@@ -308,7 +308,7 @@
 </div>
 
 <div id="toast"></div>
-<audio id="remoteAudio" autoplay></audio>
+<audio id="remoteAudio" autoplay playsinline></audio>
 
 <script>
 'use strict';
@@ -933,21 +933,50 @@ async function ensureRtc(cfg) {
   var RTC = getTelnyxRTC();
   if (!RTC) throw new Error('Calling library failed to load — refresh and try again.');
   var client = new RTC({ login_token: cfg.token });
+  // Let the SDK own remote-audio playout: it (re)attaches the remote
+  // MediaStream to this element when media arrives. The old code bound
+  // audio.srcObject = call.remoteStream at callReceived time, but the
+  // SDK replaces the remoteStream object when the first stream arrives
+  // (peer 'addstream'), so the element kept pointing at the empty
+  // pre-answer stream — the seller was never heard even after the
+  // bridge formed.
+  client.remoteElement = 'remoteAudio';
   client.on('telnyx.notification', function (note) {
     // The server rings this browser with the agent leg — answer it so
     // the bridge to the seller lands. Keep the leg so the keypad can
     // send DTMF tones while the call is live.
     try {
       var call = note && note.call;
-      if (call && note.type === 'callReceived') {
-        callState.agentCall = call;
-        var audio = document.getElementById('remoteAudio');
-        if (audio && call.remoteStream) audio.srcObject = call.remoteStream;
-        if (typeof call.answer === 'function') call.answer();
+      if (!call) return;
+      // Re-attach on EVERY notification, not just callReceived: the
+      // remoteStream object is swapped when media starts flowing, so
+      // a one-time bind at ring time goes stale.
+      var audio = document.getElementById('remoteAudio');
+      if (audio && call.remoteStream) {
+        if (audio.srcObject !== call.remoteStream) audio.srcObject = call.remoteStream;
+        if (audio.paused) { try { var p = audio.play(); if (p && p.catch) p.catch(function () {}); } catch (e2) {} }
       }
+      if (note.type === 'callReceived') {
+        callState.agentCall = call;
+        var audioEl = document.getElementById('remoteAudio');
+        if (typeof call.answer === 'function') call.answer({ remoteElement: audioEl || 'remoteAudio' });
+      }
+      if ((call.state === 'hangup' || call.state === 'destroy') && call === callState.agentCall) callState.agentCall = null;
     } catch (e) { /* best-effort */ }
   });
-  await client.connect();
+  // Wait for telnyx.ready (SIP registration) before declaring audio
+  // connected: connect() alone can resolve before the client is
+  // registered, and a Call Control dial to an unregistered agent leg
+  // goes nowhere. 20s cap — we proceed anyway after it so a slow
+  // registration never wedges the button.
+  var readyP = new Promise(function (resolve) {
+    var done = false;
+    var to = setTimeout(function () { if (!done) { done = true; resolve(false); } }, 20000);
+    client.on('telnyx.ready', function () { if (!done) { done = true; clearTimeout(to); resolve(true); } });
+  });
+  var connected = false;
+  try { await client.connect(); connected = true; } catch (e) { console.warn('[rtc] connect failed', e); }
+  if (connected) await readyP;
   rtcClient = client;
   return client;
 }
