@@ -199,6 +199,14 @@
           <input class="field" id="newPhone" type="tel" placeholder="(555) 123-4567" autocomplete="off">
           <label for="newMsg" style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;display:block;margin:8px 0 4px">First message</label>
           <textarea class="field" id="newMsg" rows="3" placeholder="Type the first text…"></textarea>
+          <label for="newMarket" style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;display:block;margin:8px 0 4px">Market (which numbers it sends from)</label>
+          <select class="field" id="newMarket">
+            <option value="carolina" selected>Carolina</option>
+            <option value="indianapolis">Indianapolis</option>
+            <option value="kansascity">Kansas City</option>
+            <option value="cleveland">Cleveland</option>
+            <option value="florida">Florida</option>
+          </select>
           <div style="display:flex;gap:8px;margin-top:8px">
             <button class="btn primary small" id="newSendBtn" type="button">Send</button>
             <button class="btn small" id="newCancelBtn" type="button">Cancel</button>
@@ -766,7 +774,7 @@ async function sendCurrent(ev) {
   btn.disabled = true;
   hideError('sendError');
   try {
-    await api('', { action: 'send', phone: t.phone, body: body, market: t.market || state.market || undefined });
+    await api('', { action: 'send', phone: t.phone, body: body, market: t.market || state.market || 'carolina' });
     input.value = '';
     await selectThread(state.selectedKey);
     await loadThreads();
@@ -908,7 +916,7 @@ async function startCall(phone, from) {
   setCallStatus('Calling…');
   try {
     await ensureRtc(cfg);
-    var body = { action: 'start', phone: phone, market: t.market || undefined };
+    var body = { action: 'start', phone: phone, market: t.market || state.market || 'carolina' };
     if (from) body.from = from;
     var data = await callApi('', body);
     callState.callId = data.callId;
@@ -1038,7 +1046,11 @@ async function sendNewThread() {
   try {
     // The server auto-creates the thread for a new phone — this sends
     // one manual text and nothing else (no workflow enrollment).
-    await api('', { action: 'send', phone: phone, body: body, market: state.market || undefined });
+    // The market must never be blank: the server picks the sender
+    // numbers from it, and a missing market fails the send.
+    var marketSel = document.getElementById('newMarket');
+    var market = (marketSel && marketSel.value) || state.market || 'carolina';
+    await api('', { action: 'send', phone: phone, body: body, market: market });
     phoneEl.value = '';
     msgEl.value = '';
     document.getElementById('newThreadForm').classList.add('hidden');
