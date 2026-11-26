@@ -20,6 +20,10 @@
 //                                                'queued', the webhook
 //                                                moves it sent/delivered/
 //                                                failed
+//   GET  ?action=numbers                         our Telnyx numbers per
+//                                                market (SENDER_POOLS) —
+//                                                the dialer pod's
+//                                                "call from" switcher
 //   GET  ?action=stats                           today's queue stats per
 //                                                market (America/New_York):
 //                                                {sent, queued, failed,
@@ -323,6 +327,15 @@ exports.handler = async (event) => {
         await saveThread(s, thread);
         return json(502, { error: msg.failureReason, message: msg });
       }
+    }
+
+    if (action === 'numbers') {
+      const pools = (lib && lib.SENDER_POOLS) || {};
+      const flat = [];
+      for (const [market, numbers] of Object.entries(pools)) {
+        for (const n of numbers || []) flat.push({ market, number: n });
+      }
+      return ok({ numbers: pools, flat });
     }
 
     if (action === 'stats') {

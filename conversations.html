@@ -37,6 +37,11 @@
   .empty .big{font-size:32px;margin-bottom:8px}
   .note{color:var(--muted);font-size:13px}
   .hidden{display:none}
+  /* ---- dialer pod (GoHighLevel-style keypad) ---- */
+  .dialer-pod{margin-top:10px;border:1px solid var(--line);border-radius:8px;padding:10px;background:var(--bg2)}
+  .dialer-pod .lbl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:4px}
+  .keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:8px}
+  .keypad .btn{padding:10px 0;font-size:16px}
   #toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px 18px;font-size:14px;display:none;z-index:60;box-shadow:0 8px 24px rgba(0,0,0,.4)}
   .pill{display:inline-block;font-size:11px;font-weight:700;border-radius:99px;padding:2px 10px;background:var(--chip);color:var(--text)}
   /* ---- header market cards ---- */
@@ -138,7 +143,18 @@
 <meta name="apple-mobile-web-app-title" content="Command Center" />
 <link rel="apple-touch-icon" href="/assets/icons/icon-192.png" />
 <script src="/assets/pwa.js" defer></script>
-<script src="https://unpkg.com/@telnyx/webrtc@2/dist/telnyx-rtc.min.js" defer></script>
+<script>
+  /* Telnyx WebRTC SDK load guard: bundle.js is the real file (the old
+     dist/telnyx-rtc.min.js path 404s). If the CDN fails, flag it so the
+     call flow can say so plainly instead of failing silently. */
+  window.__telnyxSdkFailed = false;
+  function __telnyxSdkError() {
+    window.__telnyxSdkFailed = true;
+    var t = document.getElementById('toast');
+    if (t) { t.textContent = 'Calling library failed to load — check your connection and refresh.'; t.style.display = 'block'; }
+  }
+</script>
+<script src="https://unpkg.com/@telnyx/webrtc@2.28.2/lib/bundle.js" defer onerror="__telnyxSdkError()"></script>
 </head>
 <body>
 <div class="wrap">
@@ -172,6 +188,22 @@
           <span class="spacer" style="flex:1"></span>
           <span id="threadCount"></span>
         </label>
+        <div style="margin-top:10px">
+          <button class="btn small" id="newThreadBtn" type="button">＋ New conversation</button>
+        </div>
+        <!-- New conversation: one manual text to a brand-new number.
+             The server creates the thread for the new phone — this sends
+             one text and nothing else (no workflow enrollment). -->
+        <div id="newThreadForm" class="hidden" style="margin-top:10px;border:1px solid var(--line);border-radius:8px;padding:10px;background:var(--bg2)">
+          <label class="lbl" for="newPhone" style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:4px">Phone number</label>
+          <input class="field" id="newPhone" type="tel" placeholder="(555) 123-4567" autocomplete="off">
+          <label for="newMsg" style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;display:block;margin:8px 0 4px">First message</label>
+          <textarea class="field" id="newMsg" rows="3" placeholder="Type the first text…"></textarea>
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <button class="btn primary small" id="newSendBtn" type="button">Send</button>
+            <button class="btn small" id="newCancelBtn" type="button">Cancel</button>
+          </div>
+        </div>
       </div>
       <div class="thread-list" id="threadList"></div>
     </section>
@@ -184,6 +216,35 @@
         <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
           <button class="btn small" id="callBtn" type="button" disabled>📞 Call</button>
           <span class="note" id="callStatus"></span>
+        </div>
+        <!-- Dialer pod (GoHighLevel-style): dial any number from the
+             thread, pick which of our numbers it goes out from, keypad
+             for DTMF while on a call. Hidden until a thread is open. -->
+        <div id="dialerPod" class="dialer-pod hidden">
+          <label class="lbl" for="dialNumber">Call</label>
+          <input class="field" id="dialNumber" type="tel" placeholder="(555) 123-4567" autocomplete="off">
+          <div id="dialFromRow" style="margin-top:8px">
+            <label class="lbl" for="dialFrom">Call from</label>
+            <select class="field" id="dialFrom"></select>
+          </div>
+          <div class="keypad" id="dialKeypad">
+            <button type="button" class="btn" data-key="1">1</button>
+            <button type="button" class="btn" data-key="2">2</button>
+            <button type="button" class="btn" data-key="3">3</button>
+            <button type="button" class="btn" data-key="4">4</button>
+            <button type="button" class="btn" data-key="5">5</button>
+            <button type="button" class="btn" data-key="6">6</button>
+            <button type="button" class="btn" data-key="7">7</button>
+            <button type="button" class="btn" data-key="8">8</button>
+            <button type="button" class="btn" data-key="9">9</button>
+            <button type="button" class="btn" data-key="*">*</button>
+            <button type="button" class="btn" data-key="0">0</button>
+            <button type="button" class="btn" data-key="#">#</button>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;margin-top:10px">
+            <button class="btn small primary" id="dialCallBtn" type="button" disabled>📞 Call</button>
+            <span class="note">Keypad sends tones while a call is live.</span>
+          </div>
         </div>
       </div>
       <div class="messages" id="messages">
@@ -243,7 +304,7 @@ var state = {
 
 var voiceCheckPromise = null;
 var rtcClient = null;
-var callState = { callId: null, active: false, timer: null };
+var callState = { callId: null, active: false, timer: null, agentCall: null };
 
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -657,8 +718,8 @@ function renderThreadHead() {
   var canSend = !!t;
   document.getElementById('sendText').disabled = !canSend;
   document.getElementById('sendBtn').disabled = !canSend;
-  var callBtn = document.getElementById('callBtn');
-  if (callBtn && !callState.active) callBtn.disabled = !canSend;
+  if (!callState.active) setCallButtons(!canSend, false);
+  renderDialPod();
   if (!t) {
     title.textContent = 'No conversation selected';
     sub.textContent = '';
@@ -722,6 +783,14 @@ async function sendCurrent(ev) {
 }
 
 /* ---------- calling (Telnyx WebRTC + cc-call-api) ---------- */
+/* Telnyx WebRTC SDK ships as window.TelnyxWebRTC.TelnyxRTC (bundle.js);
+   older pages used a bare TelnyxRTC global — accept either so a
+   future SDK shape change doesn't silently break calling. */
+function getTelnyxRTC() {
+  if (window.TelnyxWebRTC && window.TelnyxWebRTC.TelnyxRTC) return window.TelnyxWebRTC.TelnyxRTC;
+  if (window.TelnyxRTC) return window.TelnyxRTC;
+  return null;
+}
 function checkVoiceConfig() {
   if (!voiceCheckPromise) {
     voiceCheckPromise = fetch(VOICE_TOKEN_API, { credentials: 'include' })
@@ -760,14 +829,17 @@ function setCallStatus(txt) {
 }
 async function ensureRtc(cfg) {
   if (rtcClient) return rtcClient;
-  if (typeof TelnyxRTC === 'undefined') throw new Error('Calling library failed to load — refresh and try again.');
-  var client = new TelnyxRTC({ login_token: cfg.token });
+  var RTC = getTelnyxRTC();
+  if (!RTC) throw new Error('Calling library failed to load — refresh and try again.');
+  var client = new RTC({ login_token: cfg.token });
   client.on('telnyx.notification', function (note) {
     // The server rings this browser with the agent leg — answer it so
-    // the bridge to the seller lands.
+    // the bridge to the seller lands. Keep the leg so the keypad can
+    // send DTMF tones while the call is live.
     try {
       var call = note && note.call;
       if (call && note.type === 'callReceived') {
+        callState.agentCall = call;
         var audio = document.getElementById('remoteAudio');
         if (audio && call.remoteStream) audio.srcObject = call.remoteStream;
         if (typeof call.answer === 'function') call.answer();
@@ -781,13 +853,22 @@ async function ensureRtc(cfg) {
 function stopCallPolling() {
   if (callState.timer) { clearInterval(callState.timer); callState.timer = null; }
 }
+/* Both call buttons (thread Call + dialer-pod Call) always show the same
+   state: they start and end the same one active call. */
+function setCallButtons(disabled, active) {
+  [['callBtn', '📞 Call'], ['dialCallBtn', '📞 Call']].forEach(function (pair) {
+    var b = document.getElementById(pair[0]);
+    if (!b) return;
+    b.disabled = disabled;
+    b.textContent = active ? 'End call' : pair[1];
+  });
+}
 function finishCallUI(statusText) {
   stopCallPolling();
   callState.active = false;
   callState.callId = null;
-  var btn = document.getElementById('callBtn');
-  btn.textContent = '📞 Call';
-  btn.disabled = !state.selectedThread;
+  callState.agentCall = null;
+  setCallButtons(!state.selectedThread, false);
   setCallStatus(statusText || '');
 }
 function pollCallStatus() {
@@ -813,32 +894,166 @@ async function endCurrentCall() {
     try { await callApi('', { action: 'hangup', callId: id }); } catch (e) { /* already gone */ }
   }
 }
-async function onCallClick() {
-  if (callState.active) { await endCurrentCall(); return; }
+async function startCall(phone, from) {
   var t = state.selectedThread;
   if (!t) return;
   var btn = document.getElementById('callBtn');
   var cfg = await checkVoiceConfig();
   if (!cfg) {
-    btn.dataset.state = 'off';
+    if (btn) btn.dataset.state = 'off';
     toast("Voice isn't switched on yet — calling turns on when the voice app is set up.");
     return;
   }
-  btn.disabled = true;
+  setCallButtons(true, false);
   setCallStatus('Calling…');
   try {
     await ensureRtc(cfg);
-    var data = await callApi('', { action: 'start', phone: t.phone, market: t.market || undefined });
+    var body = { action: 'start', phone: phone, market: t.market || undefined };
+    if (from) body.from = from;
+    var data = await callApi('', body);
     callState.callId = data.callId;
     callState.active = true;
-    btn.disabled = false;
-    btn.textContent = 'End call';
+    setCallButtons(false, true);
     setCallStatus('Calling…');
     pollCallStatus();
   } catch (e) {
-    btn.disabled = false;
+    setCallButtons(false, false);
     setCallStatus('');
     toast('Call failed: ' + (e && e.message ? e.message : e));
+  }
+}
+async function onCallClick() {
+  if (callState.active) { await endCurrentCall(); return; }
+  var t = state.selectedThread;
+  if (!t) return;
+  await startCall(t.phone, null);
+}
+/* Dialer pod: dial whatever is in the pod's number box (defaults to the
+   thread's number) from whichever of our numbers is picked. */
+async function onDialCallClick() {
+  if (callState.active) { await endCurrentCall(); return; }
+  var t = state.selectedThread;
+  if (!t) return;
+  var phone = document.getElementById('dialNumber').value.trim();
+  if (!phone) { toast('Enter a number to call.'); return; }
+  var fromSel = document.getElementById('dialFrom');
+  var from = (fromSel && !fromSel.classList.contains('hidden')) ? fromSel.value : null;
+  await startCall(phone, from);
+}
+
+/* ---------- dialer pod: our numbers + keypad + new conversation -- */
+var ourNumbers = null; /* { numbers: {market:[e164]}, flat: [{market, number}] } */
+var dialFromSig = null;
+var dialPodThreadKey = null;
+function digitsOnly(p) {
+  var d = String(p || '').replace(/\D/g, '');
+  if (d.length === 11 && d.charAt(0) === '1') d = d.slice(1);
+  return d;
+}
+function samePhone(a, b) {
+  var da = digitsOnly(a), db = digitsOnly(b);
+  return !!da && da === db;
+}
+async function loadOurNumbers() {
+  try {
+    ourNumbers = await api('?action=numbers');
+  } catch (e) { ourNumbers = null; }
+  renderDialFrom();
+  applyDialFromDefault();
+}
+function renderDialFrom() {
+  var sel = document.getElementById('dialFrom');
+  if (!sel) return;
+  var row = document.getElementById('dialFromRow');
+  var t = state.selectedThread;
+  var opts = [];
+  if (ourNumbers && Array.isArray(ourNumbers.flat) && ourNumbers.flat.length) {
+    opts = ourNumbers.flat.map(function (n) {
+      return { value: n.number, label: fmtPhone(n.number) + (n.market ? ' · ' + (MARKET_LABELS[n.market] || n.market) : '') };
+    });
+  } else if (t && t.ourNumber) {
+    opts = [{ value: t.ourNumber, label: fmtPhone(t.ourNumber) }];
+  }
+  // Rebuild only when the option set changes, so a 30s refresh never
+  // clobbers a "Call from" pick the user already made.
+  var sig = opts.map(function (o) { return o.value; }).join('|');
+  if (sig === dialFromSig) return;
+  dialFromSig = sig;
+  if (!opts.length) {
+    sel.innerHTML = '';
+    if (row) row.classList.add('hidden');
+    return;
+  }
+  if (row) row.classList.remove('hidden');
+  sel.innerHTML = opts.map(function (o) {
+    return '<option value="' + esc(o.value) + '">' + esc(o.label) + '</option>';
+  }).join('');
+}
+function applyDialFromDefault() {
+  var sel = document.getElementById('dialFrom');
+  if (!sel || sel.classList.contains('hidden')) return;
+  var t = state.selectedThread;
+  var want = null;
+  if (t && t.ourNumber) want = t.ourNumber;
+  else if (ourNumbers && t && t.market && ourNumbers.numbers && ourNumbers.numbers[t.market] && ourNumbers.numbers[t.market].length) want = ourNumbers.numbers[t.market][0];
+  else if (ourNumbers && Array.isArray(ourNumbers.flat) && ourNumbers.flat.length) want = ourNumbers.flat[0].number;
+  if (!want) return;
+  for (var i = 0; i < sel.options.length; i++) {
+    if (sel.options[i].value === want) { sel.selectedIndex = i; return; }
+  }
+}
+function renderDialPod() {
+  var pod = document.getElementById('dialerPod');
+  var t = state.selectedThread;
+  if (!pod) return;
+  pod.classList.toggle('hidden', !t);
+  if (!t) { dialPodThreadKey = null; return; }
+  renderDialFrom();
+  if (dialPodThreadKey !== state.selectedKey) {
+    var input = document.getElementById('dialNumber');
+    if (input) input.value = fmtPhone(t.phone) || t.phone;
+    dialPodThreadKey = state.selectedKey;
+    applyDialFromDefault();
+  }
+}
+function dialKeypadPress(key) {
+  var input = document.getElementById('dialNumber');
+  if (input) input.value = (input.value || '') + key;
+  if (callState.active && callState.agentCall) {
+    try {
+      if (typeof callState.agentCall.dtmf === 'function') callState.agentCall.dtmf(key);
+    } catch (e) { /* DTMF is best-effort — the digit still landed in the box */ }
+  }
+}
+async function sendNewThread() {
+  var phoneEl = document.getElementById('newPhone');
+  var msgEl = document.getElementById('newMsg');
+  var phone = phoneEl.value.trim();
+  var body = msgEl.value.trim();
+  if (!phone) { toast('Enter a phone number.'); return; }
+  if (!body) { toast('Type the first message.'); return; }
+  var btn = document.getElementById('newSendBtn');
+  btn.disabled = true;
+  hideError('sendError');
+  try {
+    // The server auto-creates the thread for a new phone — this sends
+    // one manual text and nothing else (no workflow enrollment).
+    await api('', { action: 'send', phone: phone, body: body, market: state.market || undefined });
+    phoneEl.value = '';
+    msgEl.value = '';
+    document.getElementById('newThreadForm').classList.add('hidden');
+    await loadThreads();
+    await loadStats();
+    var entry = state.threads.find(function (th) { return samePhone(th.phone, phone); });
+    if (entry) await selectThread(entry.key);
+    toast('Text sent.');
+  } catch (e) {
+    // The API stores a failed send on the thread when it can — show the
+    // error and reload so the failed bubble is visible, never silently dropped.
+    showError('sendError', 'Send failed: ' + (e && e.message ? e.message : e));
+    try { await loadThreads(); } catch (e2) { /* keep the error visible */ }
+  } finally {
+    btn.disabled = false;
   }
 }
 
@@ -924,6 +1139,25 @@ function init() {
   document.getElementById('callBtn').addEventListener('click', function () {
     onCallClick().catch(function (e) { toast('Call failed: ' + (e && e.message ? e.message : e)); });
   });
+  document.getElementById('dialCallBtn').addEventListener('click', function () {
+    onDialCallClick().catch(function (e) { toast('Call failed: ' + (e && e.message ? e.message : e)); });
+  });
+  document.getElementById('dialKeypad').addEventListener('click', function (ev) {
+    var b = ev.target.closest ? ev.target.closest('[data-key]') : null;
+    if (b) dialKeypadPress(b.getAttribute('data-key'));
+  });
+  document.getElementById('newThreadBtn').addEventListener('click', function () {
+    var f = document.getElementById('newThreadForm');
+    f.classList.toggle('hidden');
+    if (!f.classList.contains('hidden')) document.getElementById('newPhone').focus();
+  });
+  document.getElementById('newCancelBtn').addEventListener('click', function () {
+    document.getElementById('newThreadForm').classList.add('hidden');
+  });
+  document.getElementById('newSendBtn').addEventListener('click', function () {
+    sendNewThread().catch(function (e) { showError('sendError', 'Send failed: ' + (e && e.message ? e.message : e)); });
+  });
+  loadOurNumbers();
   document.getElementById('notifBtn').addEventListener('click', function () {
     document.getElementById('notifPanel').classList.toggle('hidden');
   });

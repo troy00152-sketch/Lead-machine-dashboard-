@@ -235,6 +235,18 @@ exports.handler = async (event) => {
         }
       }
 
+      // A caller ID chosen in the dialer pod wins over the thread's
+      // number and the pool pick — but only if it is one of our own
+      // Telnyx numbers (never an arbitrary number).
+      if (body.from) {
+        try {
+          const chosen = lib.toE164(body.from);
+          const pools = lib.SENDER_POOLS || {};
+          const owned = Object.values(pools).some((list) => (list || []).includes(chosen));
+          if (owned) ourNumber = chosen;
+        } catch (e) { /* invalid chosen number — keep the fallback */ }
+      }
+
       const seller = await v.createCall({
         to: phoneE164,
         from: ourNumber || undefined,

@@ -99,6 +99,9 @@
   .status-dot{display:inline-block;width:9px;height:9px;border-radius:99px;background:var(--muted2);vertical-align:middle}
   .status-dot.on{background:var(--green)}
   .status-dot.warn{background:var(--accent2)}
+  /* ---- manual-dial keypad ---- */
+  .keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:10px}
+  .keypad .btn{padding:10px 0;font-size:16px}
 </style>
 <!-- PWA (v1): manifest, theme, iOS install support, service worker -->
 <link rel="manifest" href="/manifest.webmanifest" />
@@ -111,8 +114,19 @@
 <script src="/assets/pwa.js" defer></script>
 <!-- Telnyx WebRTC client SDK (browser voice leg). Loaded defensively:
      if the CDN is unreachable the page still works and "Connect audio"
-     explains itself — it never fakes a connection. -->
-<script src="https://unpkg.com/@telnyx/webrtc@2/dist/telnyx-rtc.min.js" defer></script>
+     explains itself — it never fakes a connection. bundle.js is the
+     real file (the old dist/telnyx-rtc.min.js path 404s). -->
+<script>
+  window.__telnyxSdkFailed = false;
+  function __telnyxSdkError() {
+    window.__telnyxSdkFailed = true;
+    var s = document.getElementById('audioStatus');
+    if (s) s.textContent = 'Calling library failed to load — check your connection and refresh.';
+    var d = document.getElementById('audioDot');
+    if (d) d.className = 'status-dot warn';
+  }
+</script>
+<script src="https://unpkg.com/@telnyx/webrtc@2.28.2/lib/bundle.js" defer onerror="__telnyxSdkError()"></script>
 </head>
 <body>
 <div class="wrap">
@@ -202,6 +216,40 @@
         </div>
       </section>
 
+      <!-- Manual dial: keypad + any number + call-from. Visible without
+           connecting audio first — the keypad is always usable, and
+           hitting Call connects audio on demand. -->
+      <section class="pane" aria-label="Manual dial">
+        <div class="pane-head"><h2>Manual dial</h2></div>
+        <div class="pane-body">
+          <label class="lbl" for="manualNumber">Number to call</label>
+          <input class="field" id="manualNumber" type="tel" placeholder="(555) 123-4567" autocomplete="off">
+          <div style="margin-top:10px" id="manualFromRow">
+            <label class="lbl" for="manualFrom">Call from</label>
+            <select class="field" id="manualFrom"></select>
+          </div>
+          <div class="keypad" id="manualKeypad">
+            <button type="button" class="btn" data-key="1">1</button>
+            <button type="button" class="btn" data-key="2">2</button>
+            <button type="button" class="btn" data-key="3">3</button>
+            <button type="button" class="btn" data-key="4">4</button>
+            <button type="button" class="btn" data-key="5">5</button>
+            <button type="button" class="btn" data-key="6">6</button>
+            <button type="button" class="btn" data-key="7">7</button>
+            <button type="button" class="btn" data-key="8">8</button>
+            <button type="button" class="btn" data-key="9">9</button>
+            <button type="button" class="btn" data-key="*">*</button>
+            <button type="button" class="btn" data-key="0">0</button>
+            <button type="button" class="btn" data-key="#">#</button>
+          </div>
+          <div class="row">
+            <button class="btn primary" id="manualCallBtn" type="button">📞 Call</button>
+            <span class="note" id="manualCallStatus"></span>
+          </div>
+          <div class="note" style="margin-top:6px">The keypad works any time — hitting Call connects audio on demand. Tones go out live while a call is connected.</div>
+        </div>
+      </section>
+
       <section class="pane" aria-label="Queue">
         <div class="pane-head"><h2>Queue</h2><span class="note" id="queueCount"></span></div>
         <div class="q-list" id="queueList">
@@ -272,6 +320,8 @@
 'use strict';
 var API = '/.netlify/functions/cc-dialer-api';
 var TOKEN_API = '/.netlify/functions/cc-voice-token';
+var CALL_API = '/.netlify/functions/cc-call-api';
+var CONV_API = '/.netlify/functions/cc-conversations-api';
 var MARKET_LABELS = { indianapolis: 'Indianapolis', carolina: 'Carolina', kansascity: 'Kansas City', cleveland: 'Cleveland', florida: 'Florida' };
 var DISPOSITIONS = ['Hot Lead', 'Appointment Set', 'Not Interested', 'Wrong Number', 'DNC', 'Callback Later', 'No Answer', 'Voicemail', 'Machine'];
 
@@ -282,7 +332,12 @@ var state = {
   agentSipUri: '',
   audioConnected: false,
   rtcClient: null,
+  agentCall: null,
 };
+
+/* One manual (keypad) call at a time — separate from the triple-line
+   session, which keeps its own state in cc-dialer-api. */
+var manualCall = { callId: null, active: false, timer: null };
 
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -546,13 +601,21 @@ async function createSession() {
 }
 
 /* ---------- audio (Telnyx WebRTC) ---------- */
+/* Telnyx WebRTC SDK ships as window.TelnyxWebRTC.TelnyxRTC (bundle.js);
+   older pages used a bare TelnyxRTC global — accept either so a
+   future SDK shape change doesn't silently break calling. */
+function getTelnyxRTC() {
+  if (window.TelnyxWebRTC && window.TelnyxWebRTC.TelnyxRTC) return window.TelnyxWebRTC.TelnyxRTC;
+  if (window.TelnyxRTC) return window.TelnyxRTC;
+  return null;
+}
 function setAudioStatus(txt, on, warn) {
   document.getElementById('audioStatus').textContent = txt;
   var dot = document.getElementById('audioDot');
   dot.className = 'status-dot' + (on ? ' on' : (warn ? ' warn' : ''));
 }
 async function connectAudio() {
-  if (typeof TelnyxRTC === 'undefined') {
+  if (!getTelnyxRTC()) {
     setAudioStatus('Calling library failed to load — check your connection and refresh.', false, true);
     return;
   }
@@ -566,7 +629,8 @@ async function connectAudio() {
       return;
     }
     state.agentSipUri = data.sipUri || '';
-    var client = new TelnyxRTC({ login_token: data.token });
+    var RTC = getTelnyxRTC();
+    var client = new RTC({ login_token: data.token });
     state.rtcClient = client;
     client.on('telnyx.ready', function () {
       state.audioConnected = true;
@@ -578,10 +642,12 @@ async function connectAudio() {
     });
     client.on('telnyx.notification', function (note) {
       // The dialer server rings this browser when a seller answers —
-      // pick up automatically so the bridge lands instantly.
+      // pick up automatically so the bridge lands instantly. Keep the
+      // leg so the manual-dial keypad can send DTMF tones live.
       try {
         var call = note && note.call;
         if (call && note.type === 'callReceived') {
+          state.agentCall = call;
           var audio = document.getElementById('remoteAudio');
           if (audio && call.remoteStream) audio.srcObject = call.remoteStream;
           if (typeof call.answer === 'function') call.answer();
@@ -591,6 +657,145 @@ async function connectAudio() {
     await client.connect();
   } catch (e) {
     setAudioStatus('Audio could not connect: ' + (e && e.message ? e.message : e), false, true);
+  }
+}
+
+/* ---------- manual dial (keypad + any number + call-from) ---------- */
+/* Same call path Conversations uses (cc-call-api 'start' with phone +
+   from), but from the dialer page — and the keypad is NOT gated behind
+   Connect audio: hitting Call connects audio on demand. */
+var manualNumbers = null; /* { numbers: {market:[e164]}, flat: [{market, number}] } */
+var manualFromSig = null;
+function setManualCallStatus(txt) {
+  document.getElementById('manualCallStatus').textContent = txt || '';
+}
+async function manualCallApi(path, body) {
+  var opts = { credentials: 'include' };
+  if (body !== undefined) {
+    opts.method = 'POST';
+    opts.headers = { 'Content-Type': 'application/json' };
+    opts.body = JSON.stringify(body);
+  }
+  var r = await fetch(CALL_API + path, opts);
+  var data = {};
+  try { data = await r.json(); } catch (e) { data = {}; }
+  if (!r.ok) {
+    var err = new Error((data && data.error) || ('Request failed (HTTP ' + r.status + ')'));
+    err.status = r.status;
+    err.data = data;
+    throw err;
+  }
+  return data;
+}
+async function loadManualNumbers() {
+  try {
+    var r = await fetch(CONV_API + '?action=numbers', { credentials: 'include' });
+    var data = {};
+    try { data = await r.json(); } catch (e) { data = {}; }
+    manualNumbers = r.ok ? data : null;
+  } catch (e) { manualNumbers = null; }
+  renderManualFrom();
+}
+function renderManualFrom() {
+  var sel = document.getElementById('manualFrom');
+  if (!sel) return;
+  var row = document.getElementById('manualFromRow');
+  var opts = [];
+  if (manualNumbers && Array.isArray(manualNumbers.flat) && manualNumbers.flat.length) {
+    opts = manualNumbers.flat.map(function (n) {
+      return { value: n.number, label: fmtPhone(n.number) + (n.market ? ' · ' + (MARKET_LABELS[n.market] || n.market) : '') };
+    });
+  }
+  // Rebuild only when the option set changes, so a re-render never
+  // clobbers a "Call from" pick the user already made.
+  var sig = opts.map(function (o) { return o.value; }).join('|');
+  if (sig === manualFromSig) return;
+  manualFromSig = sig;
+  if (!opts.length) {
+    sel.innerHTML = '';
+    if (row) row.classList.add('hidden');
+    return;
+  }
+  if (row) row.classList.remove('hidden');
+  sel.innerHTML = opts.map(function (o) {
+    return '<option value="' + esc(o.value) + '">' + esc(o.label) + '</option>';
+  }).join('');
+}
+async function ensureAudioForManualCall() {
+  if (state.rtcClient && state.audioConnected) return state.rtcClient;
+  await connectAudio();
+  if (!state.rtcClient) throw new Error('Audio could not connect — try Connect audio again.');
+  return state.rtcClient;
+}
+function stopManualCallPolling() {
+  if (manualCall.timer) { clearInterval(manualCall.timer); manualCall.timer = null; }
+}
+function finishManualCallUI(statusText) {
+  stopManualCallPolling();
+  manualCall.active = false;
+  manualCall.callId = null;
+  state.agentCall = null;
+  var btn = document.getElementById('manualCallBtn');
+  btn.textContent = '📞 Call';
+  btn.disabled = false;
+  setManualCallStatus(statusText || '');
+}
+function pollManualCallStatus() {
+  stopManualCallPolling();
+  manualCall.timer = setInterval(async function () {
+    if (!manualCall.callId) { stopManualCallPolling(); return; }
+    try {
+      var data = await manualCallApi('?action=status&callId=' + encodeURIComponent(manualCall.callId));
+      var st = data.status || '';
+      if (st === 'bridged') setManualCallStatus('Connected');
+      else if (st === 'machine') { finishManualCallUI('Machine answered'); toast('A machine answered — call ended.'); }
+      else if (st === 'ended') { finishManualCallUI('Ended'); }
+      else setManualCallStatus('Calling…');
+    } catch (e) {
+      finishManualCallUI('Ended');
+    }
+  }, 3000);
+}
+async function endManualCall() {
+  var id = manualCall.callId;
+  finishManualCallUI('Ended');
+  if (id) {
+    try { await manualCallApi('', { action: 'hangup', callId: id }); } catch (e) { /* already gone */ }
+  }
+}
+async function onManualCallClick() {
+  if (manualCall.active) { await endManualCall(); return; }
+  var phone = document.getElementById('manualNumber').value.trim();
+  if (!phone) { toast('Enter a number to call.'); return; }
+  var fromSel = document.getElementById('manualFrom');
+  var from = (fromSel && !fromSel.classList.contains('hidden')) ? fromSel.value : null;
+  var btn = document.getElementById('manualCallBtn');
+  btn.disabled = true;
+  setManualCallStatus('Connecting audio…');
+  try {
+    await ensureAudioForManualCall();
+    var body = { action: 'start', phone: phone };
+    if (from) body.from = from;
+    var data = await manualCallApi('', body);
+    manualCall.callId = data.callId;
+    manualCall.active = true;
+    btn.disabled = false;
+    btn.textContent = 'End call';
+    setManualCallStatus('Calling…');
+    pollManualCallStatus();
+  } catch (e) {
+    btn.disabled = false;
+    setManualCallStatus('');
+    toast('Call failed: ' + (e && e.message ? e.message : e));
+  }
+}
+function manualKeypadPress(key) {
+  var input = document.getElementById('manualNumber');
+  if (input) input.value = (input.value || '') + key;
+  if (manualCall.active && state.agentCall) {
+    try {
+      if (typeof state.agentCall.dtmf === 'function') state.agentCall.dtmf(key);
+    } catch (e) { /* DTMF is best-effort — the digit still landed in the box */ }
   }
 }
 
@@ -656,6 +861,14 @@ function init() {
   });
   document.getElementById('createBtn').addEventListener('click', createSession);
   document.getElementById('audioBtn').addEventListener('click', connectAudio);
+  document.getElementById('manualCallBtn').addEventListener('click', function () {
+    onManualCallClick().catch(function (e) { toast('Call failed: ' + (e && e.message ? e.message : e)); });
+  });
+  document.getElementById('manualKeypad').addEventListener('click', function (ev) {
+    var b = ev.target.closest ? ev.target.closest('[data-key]') : null;
+    if (b) manualKeypadPress(b.getAttribute('data-key'));
+  });
+  loadManualNumbers();
   document.getElementById('startBtn').addEventListener('click', startSession);
   document.getElementById('pauseBtn').addEventListener('click', pauseSession);
   document.getElementById('stopBtn').addEventListener('click', stopSession);
