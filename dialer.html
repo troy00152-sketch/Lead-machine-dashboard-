@@ -912,7 +912,15 @@ function resolveInboundCaller(call, attempt) {
    live replacement object when the held one is stale, and recovers
    (hang up the dead leg + redial a fresh one) when nothing is live.
    "Connected" only lands on a verified live leg — never on a resolved
-   promise. */
+   promise.
+   Nov 26 evening addendum (Troy's 4:42 PM retest still failed on the
+   stale-object path): the tracked map only knows objects the SDK
+   NOTIFIED about, and the Attach branch creates its replacement with
+   NO notification — so the page can still hold a stale object with an
+   empty tracked map. __liveCallFor() below reads the SDK's own live
+   registry (client.calls, keyed by Verto call id — the same registry
+   answer()'s guard reads) at answer time, so the CURRENT object is
+   answered even when no notification ever carried it. */
 var __latestCallByLegKey = {}; /* legKey -> newest Call object seen on any notification */
 var __inboundAnswerWatch = null; /* { legKey, call, at, recovering } while an Answer is unverified */
 function __legKey(call) {
@@ -922,6 +930,39 @@ function __legKey(call) {
 function __trackCall(call) {
   if (!call) return;
   __latestCallByLegKey[__legKey(call)] = call;
+}
+function __rtcClient() {
+  try { return (typeof state !== 'undefined' && state && state.rtcClient) || null; } catch (e) { return null; }
+}
+/* Resolve the CURRENT Call object for a leg from the SDK's own live
+   registry — client.calls (TelnyxRTC inherits the session's calls map,
+   keyed by Verto call id; getActiveCalls() is the same map filtered to
+   live states). This is the ground truth answer()'s stale-object guard
+   reads: if the registry holds a DIFFERENT object than the one the
+   page is holding, the held one is orphaned and its answer() is
+   silently ignored. Falls back to the newest object seen on any
+   notification, then the held object itself. Never throws. */
+function __liveCallFor(call) {
+  if (!call) return null;
+  try {
+    var client = __rtcClient();
+    if (client) {
+      var reg = client.calls || client.sessionCalls || null;
+      if (reg) {
+        if (reg[call.id]) return reg[call.id];
+        for (var k in reg) {
+          if (reg[k] && reg[k].id === call.id) return reg[k];
+        }
+      }
+      if (typeof client.getActiveCalls === 'function') {
+        var act = client.getActiveCalls() || [];
+        for (var i = 0; i < act.length; i++) {
+          if (act[i] && (act[i].id === call.id || __legKey(act[i]) === __legKey(call))) return act[i];
+        }
+      }
+    }
+  } catch (e) { /* registry read never breaks answering */ }
+  return __latestCallByLegKey[__legKey(call)] || call;
 }
 /* The SDK's ringtone is ONE shared <audio id="_ringtone"> element
    (xi() reuses it by id; created by the first Call that carries a
@@ -954,8 +995,12 @@ function __attachRemoteAudio(call) {
 }
 /* Answer one leg and report whether it actually took. Returns false
    when the SDK silently ignored it (guards above) — detected by the
-   SDK ringtone still playing after the await. A rejection is also a
-   false (with a toast, so it is never silent). */
+   SDK ringtone still playing after the await, AND by re-reading the
+   registry: if it now holds a DIFFERENT object, this one's answer()
+   was ignored. The ringtone check alone can lie — the ringtone
+   element is SHARED, and an auto-answered replacement stops it, so a
+   stale answer can look healthy. A rejection is also a false (with a
+   toast, so it is never silent). */
 async function __answerLeg(call) {
   if (!call || typeof call.answer !== 'function') return false;
   try {
@@ -964,6 +1009,8 @@ async function __answerLeg(call) {
     toast('Could not answer: ' + ((e && e.message) || e));
     return false;
   }
+  var live = __liveCallFor(call);
+  if (live && live !== call) return false;
   if (__sdkRingtonePlaying()) return false;
   return true;
 }
@@ -986,17 +1033,19 @@ function __adoptLiveInboundCall(call) {
     resolveInboundCaller(call, 0);
   }
 }
-/* The held leg did not answer. Find the newest object the SDK has
-   shown us for this leg: if it is already answering/active the SDK
-   answered it itself (Attach) — adopt it. If it is a different,
-   still-ringing replacement, answer IT. Otherwise nothing is live —
-   fail out (hang up the dead leg + redial a fresh one). */
+/* The held leg did not answer. Find the LIVE object for this leg
+   (SDK registry first — it knows about replacements no notification
+   ever carried — then the newest notified object): if it is already
+   answering/active the SDK answered it itself (Attach) — adopt it. If
+   it is a different, still-ringing replacement, answer IT. Otherwise
+   nothing is live — fail out (hang up the dead leg + redial a fresh
+   one). */
 function __recoverInboundAnswer(legKey) {
   var watch = __inboundAnswerWatch;
   if (!watch || watch.legKey !== legKey || watch.recovering) return;
   watch.recovering = true;
   var stale = watch.call;
-  var live = __latestCallByLegKey[legKey] || stale;
+  var live = __liveCallFor(stale);
   __stopSdkRingtone(stale);
   if (live !== stale) __stopSdkRingtone(live);
   if (live.state === 'active' || live.state === 'answering') {
@@ -1042,30 +1091,49 @@ function __failInboundAnswer(legKey) {
 /* 2.5s backstop (the ringtone check is vacuous when the shared
    _ringtone element does not exist): a leg still 'ringing' this long
    after the tap never answered — recover. A healthy leg has moved to
-   answering/active by then. */
+   answering/active by then.
+   Also recover when the watched object DIED (hangup/destroy/
+   recovering — the SDK hangs it up as recovering on Attach) or was
+   REPLACED in the registry without a bridge: clearing the watch on a
+   dead leg used to strand the page at "Answering…" forever with the
+   caller still ringing and no audio. */
 function __checkInboundAnswerWatch() {
   var watch = __inboundAnswerWatch;
   if (!watch || watch.recovering) return;
   var call = watch.call;
-  if (call && (call.state === 'ringing' || __sdkRingtonePlaying())) __recoverInboundAnswer(watch.legKey);
-  else __inboundAnswerWatch = null;
+  if (!call) { __recoverInboundAnswer(watch.legKey); return; }
+  if (call.state === 'ringing' || __sdkRingtonePlaying()) { __recoverInboundAnswer(watch.legKey); return; }
+  var live = __liveCallFor(call);
+  if (live && live !== call) { __recoverInboundAnswer(watch.legKey); return; }
+  if (call.state === 'hangup' || call.state === 'destroy' || call.state === 'recovering') { __recoverInboundAnswer(watch.legKey); return; }
+  __inboundAnswerWatch = null;
 }
 async function answerInboundCall() {
   var call = state.inboundCall;
   if (!call) return;
   var legKey = __legKey(call);
-  // The SDK may already have answered a REPLACEMENT object for this
-  // leg (Attach / session re-attach auto-answers the new object and
-  // never rings it — the banner still holds the old one). If the
-  // newest object for this leg is already answering/active, adopt it:
-  // it carries the media, and answer() on the old object is silently
-  // ignored by the SDK (guard 2).
-  var live = __latestCallByLegKey[legKey];
-  if (live && live !== call && (live.state === 'active' || live.state === 'answering')) {
+  // Resolve the CURRENT object from the SDK registry BEFORE answering:
+  // the banner may hold an object the SDK already replaced (Attach /
+  // duplicate Invite with NO notification) — answer() on the stale one
+  // is silently ignored (bundle guard 2), and the tracked map cannot
+  // know about a replacement it was never told about. The replacement
+  // is the only object whose answer() works.
+  var live = __liveCallFor(call);
+  if (live && live !== call) {
+    call = live;
+    state.inboundCall = live;
+    __trackCall(live);
+    legKey = __legKey(call);
+  }
+  // The SDK may already have answered the live object for this leg
+  // (Attach / session re-attach auto-answers the replacement and never
+  // rings it — the banner still holds the old one). If it is already
+  // answering/active, adopt it: it carries the media.
+  if (call.state === 'active' || call.state === 'answering') {
     call.__ccAnswered = true;
     hideInboundBanner();
     __stopInboundRing();
-    __adoptLiveInboundCall(live);
+    __adoptLiveInboundCall(call);
     return;
   }
   call.__ccAnswered = true;
@@ -1200,10 +1268,13 @@ async function connectAudio() {
         var msg = String((warn && warn.message) || warn || '');
         if (code === 34001 || code === 'TOKEN_EXPIRING_SOON' || /TOKEN_EXPIRING_SOON|token expir/i.test(msg)) refreshDialerAudio();
         // An answer() guard fired for the leg we just tried to answer
-        // (the SDK warns when it silently ignores one): the ringtone
-        // is still playing — recover now instead of waiting for the
-        // 2.5s watch.
-        if (__inboundAnswerWatch && w && (w.callId === __inboundAnswerWatch.call.id || w.activeCallId === __inboundAnswerWatch.call.id) && __sdkRingtonePlaying()) __recoverInboundAnswer(__inboundAnswerWatch.legKey);
+        // (the SDK warns when it silently ignores one — 33006/33007):
+        // recover now instead of waiting for the 2.5s watch. The
+        // warning IS the proof — do not also require the ringtone
+        // element to be playing: inbound legs carry no ringtoneFile,
+        // so the element often does not exist and the guard would
+        // never fire.
+        if (__inboundAnswerWatch && w && (w.callId === __inboundAnswerWatch.call.id || w.activeCallId === __inboundAnswerWatch.call.id)) __recoverInboundAnswer(__inboundAnswerWatch.legKey);
       } catch (e) { /* warning handling never breaks calling */ }
     });
     client.on('telnyx.notification', function (note) {
