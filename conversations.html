@@ -225,6 +225,13 @@
           <button class="btn small" id="callBtn" type="button" disabled>📞 Call</button>
           <span class="note" id="callStatus"></span>
         </div>
+        <!-- Connect audio (same softphone as the Dialer page): connect once
+             per browser and answered sellers ring in here. Without it the
+             call still dials, but this tab has nowhere to hear the seller. -->
+        <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+          <button class="btn small" id="audioBtn" type="button">🎧 Connect audio</button>
+          <span class="note" id="audioStatus">Audio not connected yet.</span>
+        </div>
         <!-- Dialer pod (GoHighLevel-style): dial any number from the
              thread, pick which of our numbers it goes out from, keypad
              for DTMF while on a call. Hidden until a thread is open. -->
@@ -252,6 +259,10 @@
           <div style="display:flex;gap:8px;align-items:center;margin-top:10px">
             <button class="btn small primary" id="dialCallBtn" type="button" disabled>📞 Call</button>
             <span class="note">Keypad sends tones while a call is live.</span>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;margin-top:10px">
+            <button class="btn small" id="podAudioBtn" type="button">🎧 Connect audio</button>
+            <span class="note" id="podAudioStatus"></span>
           </div>
         </div>
       </div>
@@ -835,6 +846,33 @@ async function callApi(path, body) {
 function setCallStatus(txt) {
   document.getElementById('callStatus').textContent = txt || '';
 }
+/* ---------- connect audio (visible softphone switch, like the Dialer
+   page) ---------- */
+/* The call still dials without it, but this tab has nowhere to hear the
+   seller — connecting first is what puts the audio on this Mac. */
+function setAudioStatus(txt, on) {
+  var a = document.getElementById('audioStatus');
+  if (a) a.textContent = txt || '';
+  var p = document.getElementById('podAudioStatus');
+  if (p) p.textContent = txt || '';
+  var label = on ? '🟢 Audio connected' : '🎧 Connect audio';
+  var b1 = document.getElementById('audioBtn');
+  if (b1) b1.textContent = label;
+  var b2 = document.getElementById('podAudioBtn');
+  if (b2) b2.textContent = label;
+}
+async function connectAudioNow() {
+  if (rtcClient) { setAudioStatus('🟢 Audio connected — answered sellers will ring in here.', true); return; }
+  setAudioStatus('Connecting audio…', false);
+  try {
+    var cfg = await checkVoiceConfig();
+    if (!cfg) { setAudioStatus('Voice is not switched on yet — audio cannot connect.', false); return; }
+    await ensureRtc(cfg);
+    setAudioStatus('🟢 Audio connected — answered sellers will ring in here.', true);
+  } catch (e) {
+    setAudioStatus('Audio connection error — try Connect audio again.', false);
+  }
+}
 async function ensureRtc(cfg) {
   if (rtcClient) return rtcClient;
   var RTC = getTelnyxRTC();
@@ -962,6 +1000,7 @@ async function startCall(phone, from) {
   setCallStatus('Calling…');
   try {
     await ensureRtc(cfg);
+    setAudioStatus('🟢 Audio connected — answered sellers will ring in here.', true);
     var body = { action: 'start', phone: phone, market: t.market || state.market || 'carolina' };
     if (from) body.from = from;
     var data = await callApi('', body);
@@ -1201,6 +1240,8 @@ function init() {
   document.getElementById('dialCallBtn').addEventListener('click', function () {
     onDialCallClick().catch(function (e) { toast('Call failed: ' + (e && e.message ? e.message : e)); });
   });
+  document.getElementById('audioBtn').addEventListener('click', function () { connectAudioNow(); });
+  document.getElementById('podAudioBtn').addEventListener('click', function () { connectAudioNow(); });
   document.getElementById('dialKeypad').addEventListener('click', function (ev) {
     var b = ev.target.closest ? ev.target.closest('[data-key]') : null;
     if (b) dialKeypadPress(b.getAttribute('data-key'));
