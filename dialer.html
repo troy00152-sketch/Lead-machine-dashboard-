@@ -203,6 +203,19 @@
           <div class="row">
             <button class="btn" id="audioBtn" type="button">🎧 Connect audio</button>
           </div>
+          <!-- Incoming-call banner: a seller calling one of our numbers
+               rings this browser — Answer / Decline here. It only shows
+               for a call that arrives while NO dialer work is active:
+               triple-line session legs and manual dials are
+               auto-answered (below), so they never land here. -->
+          <div id="inboundBanner" class="hidden" style="gap:10px;align-items:center;margin-top:10px;padding:10px 12px;border:2px solid #1f9d63;border-radius:10px;background:rgba(31,157,99,.12)">
+            <div style="flex:1;min-width:0">
+              <div style="font-weight:700">📞 Incoming call</div>
+              <div class="note" id="inboundCaller">Incoming call…</div>
+            </div>
+            <button class="btn small primary" id="inboundAnswerBtn" type="button">Answer</button>
+            <button class="btn small" id="inboundDeclineBtn" type="button">Decline</button>
+          </div>
           <div class="row">
             <button class="btn primary" id="startBtn" type="button">▶ Start dialing</button>
             <button class="btn" id="pauseBtn" type="button">⏸ Pause</button>
@@ -333,11 +346,14 @@ var state = {
   audioConnected: false,
   rtcClient: null,
   agentCall: null,
+  inboundCall: null,
+  inboundCallId: null,
+  inboundPhone: null,
 };
 
 /* One manual (keypad) call at a time — separate from the triple-line
    session, which keeps its own state in cc-dialer-api. */
-var manualCall = { callId: null, active: false, timer: null };
+var manualCall = { callId: null, active: false, timer: null, pending: false };
 
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -614,6 +630,107 @@ function setAudioStatus(txt, on, warn) {
   var dot = document.getElementById('audioDot');
   dot.className = 'status-dot' + (on ? ' on' : (warn ? ' warn' : ''));
 }
+/* Is this ringing leg one of OUR dials (auto-answer it), or a real
+   incoming call (show the Answer banner)? A triple-line session in
+   'running'/'connected', or a manual dial in flight, owns the leg.
+   Anything ringing while none of those is true is inbound. The
+   manual dial sets `pending` BEFORE its start API call returns —
+   the server creates the agent leg first, so the invite can arrive
+   while `active` is still false. */
+function isOurOutgoingLeg() {
+  if (manualCall.active || manualCall.pending) return true;
+  var s = state.session;
+  return !!(s && (s.status === 'running' || s.status === 'connected'));
+}
+function answerOutboundLeg(call) {
+  state.agentCall = call;
+  var audioEl = document.getElementById('remoteAudio');
+  if (typeof call.answer === 'function') {
+    var p = call.answer({ remoteElement: audioEl || 'remoteAudio' });
+    if (p && p.catch) p.catch(function (e) { toast('Could not answer the call: ' + ((e && e.message) || e)); });
+  }
+}
+/* ---------- incoming-call banner (Answer / Decline) ---------- */
+/* Same banner as conversations.html: a seller calling one of our
+   numbers rings this browser while Connect Audio is on. The SIP leg
+   only carries our own number as caller ID, so the banner resolves
+   the real caller from the server pairing (cc-call-api
+   ?action=inbound, keyed by the agent leg's call_control_id). */
+function showInboundBanner(call) {
+  state.inboundCall = call;
+  var b = document.getElementById('inboundBanner');
+  if (b) { b.classList.remove('hidden'); b.style.display = 'flex'; }
+  var sub = document.getElementById('inboundCaller');
+  if (sub) sub.textContent = 'Incoming call…';
+  resolveInboundCaller(call, 0);
+}
+function hideInboundBanner() {
+  var b = document.getElementById('inboundBanner');
+  if (b) { b.classList.add('hidden'); b.style.display = 'none'; }
+  state.inboundCall = null;
+}
+function inboundAgentLegId(call) {
+  if (!call) return '';
+  if (call.options && call.options.telnyxCallControlId) return call.options.telnyxCallControlId;
+  if (call.telnyxCallControlId) return call.telnyxCallControlId;
+  return '';
+}
+function resolveInboundCaller(call, attempt) {
+  var legId = inboundAgentLegId(call);
+  if (!legId) {
+    if (attempt < 6) setTimeout(function () { if (state.inboundCall === call) resolveInboundCaller(call, attempt + 1); }, 1000);
+    return;
+  }
+  manualCallApi('?action=inbound&agentLeg=' + encodeURIComponent(legId)).then(function (data) {
+    if (state.inboundCall !== call) return;
+    if (data && data.found) {
+      state.inboundCallId = data.callId || null;
+      state.inboundPhone = data.phone || null;
+      var sub = document.getElementById('inboundCaller');
+      if (sub) sub.textContent = (data.name ? data.name + ' · ' : '') + (data.phone ? fmtPhone(data.phone) : 'Unknown number');
+      if (manualCall.active && state.inboundCallId && !manualCall.callId) {
+        manualCall.callId = state.inboundCallId;
+        pollManualCallStatus();
+      }
+    } else if (attempt < 6) {
+      setTimeout(function () { if (state.inboundCall === call) resolveInboundCaller(call, attempt + 1); }, 1000);
+    }
+  }).catch(function () {
+    if (attempt < 6) setTimeout(function () { if (state.inboundCall === call) resolveInboundCaller(call, attempt + 1); }, 1000);
+  });
+}
+async function answerInboundCall() {
+  var call = state.inboundCall;
+  if (!call) return;
+  hideInboundBanner();
+  state.agentCall = call;
+  manualCall.active = true;
+  var btn = document.getElementById('manualCallBtn');
+  if (btn) { btn.disabled = false; btn.textContent = 'End call'; }
+  setManualCallStatus('Connected');
+  var audioEl = document.getElementById('remoteAudio');
+  try {
+    if (typeof call.answer === 'function') await call.answer({ remoteElement: audioEl || 'remoteAudio' });
+  } catch (e) {
+    toast('Could not answer: ' + ((e && e.message) || e));
+    manualCall.active = false;
+    if (btn) btn.textContent = '📞 Call';
+    return;
+  }
+  if (state.inboundCallId) {
+    manualCall.callId = state.inboundCallId;
+    pollManualCallStatus();
+  } else {
+    resolveInboundCaller(call, 0);
+  }
+}
+async function declineInboundCall() {
+  var call = state.inboundCall;
+  hideInboundBanner();
+  if (call && typeof call.hangup === 'function') {
+    try { await call.hangup(); } catch (e) { /* already gone */ }
+  }
+}
 async function connectAudio() {
   if (!getTelnyxRTC()) {
     setAudioStatus('Calling library failed to load — check your connection and refresh.', false, true);
@@ -647,11 +764,18 @@ async function connectAudio() {
     });
     client.on('telnyx.notification', function (note) {
       // The dialer server rings this browser when a seller answers —
-      // pick up automatically so the bridge lands instantly. Keep the
-      // leg so the manual-dial keypad can send DTMF tones live.
+      // pick up automatically so the bridge lands instantly. A real
+      // incoming call (nothing dialing) waits for the Answer banner
+      // instead. Keep the leg so the manual-dial keypad can send DTMF
+      // tones live.
       try {
         var call = note && note.call;
         if (!call) return;
+        if (note.type === 'userMediaError') {
+          setAudioStatus('Microphone blocked — allow the microphone for this site, then tap Connect audio again.', false, true);
+          toast('Microphone blocked — allow the microphone for this site to answer calls.');
+          return;
+        }
         // Re-attach on EVERY notification: the remoteStream object is
         // swapped when media starts flowing.
         var audio = document.getElementById('remoteAudio');
@@ -667,16 +791,15 @@ async function connectAudio() {
           // reports the incoming call as {type:'callUpdate', call} with
           // call.state === 'ringing' (Telnyx docs: "Receive an Inbound
           // Call"); answer on that.
-          state.agentCall = call;
-          var audioEl = document.getElementById('remoteAudio');
-          if (typeof call.answer === 'function') call.answer({ remoteElement: audioEl || 'remoteAudio' });
+          if (isOurOutgoingLeg()) answerOutboundLeg(call);
+          else showInboundBanner(call);
         } else if (note.type === 'callReceived') {
           // Legacy shape (v1 SDKs): same answer, kept as a fallback.
-          state.agentCall = call;
-          var audioElLegacy = document.getElementById('remoteAudio');
-          if (typeof call.answer === 'function') call.answer({ remoteElement: audioElLegacy || 'remoteAudio' });
+          if (isOurOutgoingLeg()) answerOutboundLeg(call);
+          else showInboundBanner(call);
         }
         if ((call.state === 'hangup' || call.state === 'destroy') && call === state.agentCall) state.agentCall = null;
+        if ((call.state === 'hangup' || call.state === 'destroy') && call === state.inboundCall) hideInboundBanner();
       } catch (e) { /* best-effort */ }
     });
     await client.connect();
@@ -759,8 +882,12 @@ function finishManualCallUI(statusText) {
   __stopRingback();
   stopManualCallPolling();
   manualCall.active = false;
+  manualCall.pending = false;
   manualCall.callId = null;
   state.agentCall = null;
+  state.inboundCallId = null;
+  state.inboundPhone = null;
+  hideInboundBanner();
   var btn = document.getElementById('manualCallBtn');
   btn.textContent = '📞 Call';
   btn.disabled = false;
@@ -845,6 +972,11 @@ async function onManualCallClick() {
   setManualCallStatus('Connecting audio…');
   try {
     await ensureAudioForManualCall();
+    // Flag BEFORE the start call: the server creates the agent leg
+    // before this POST returns, so its invite can arrive while
+    // `active` is still false — without this the page would mistake
+    // its own manual dial for an inbound call and show the banner.
+    manualCall.pending = true;
     var body = { action: 'start', phone: phone };
     if (from) body.from = from;
     var data = await manualCallApi('', body);
@@ -856,6 +988,7 @@ async function onManualCallClick() {
     __startRingback();
     pollManualCallStatus();
   } catch (e) {
+    manualCall.pending = false;
     btn.disabled = false;
     setManualCallStatus('');
     toast('Call failed: ' + (e && e.message ? e.message : e));
@@ -933,6 +1066,8 @@ function init() {
   });
   document.getElementById('createBtn').addEventListener('click', createSession);
   document.getElementById('audioBtn').addEventListener('click', connectAudio);
+  document.getElementById('inboundAnswerBtn').addEventListener('click', function () { answerInboundCall(); });
+  document.getElementById('inboundDeclineBtn').addEventListener('click', function () { declineInboundCall(); });
   document.getElementById('manualCallBtn').addEventListener('click', function () {
     onManualCallClick().catch(function (e) { toast('Call failed: ' + (e && e.message ? e.message : e)); });
   });
