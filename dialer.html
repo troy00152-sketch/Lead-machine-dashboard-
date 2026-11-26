@@ -422,6 +422,8 @@ var state = {
   recordings: [],
   agentSipUri: '',
   audioConnected: false,
+  audioConnecting: false, /* a connect is in flight — never stack a second client on one credential */
+  lastAudioConnectAt: 0, /* ms — when the last connect (tap, refresh, or auto) started */
   rtcClient: null,
   agentCall: null,
   inboundCall: null,
@@ -840,11 +842,34 @@ async function refreshDialerAudio() {
   state.audioRefreshPending = false;
   await connectAudio();
 }
+// Auto-reconnect (Nov 26, 2026 — Troy: "audio supposed to be on every
+// time. I'm not supposed to click no audio or nothing like that.").
+// Audio connects on page load (see init) and reconnects itself when the
+// connection drops, the tab comes back, or the network returns — no tap.
+// Never mid-call or mid-session; skip if a connect just started (an
+// intentional token refresh disconnects the old client, which can
+// surface as a signaling close — the refresh's own connect is already
+// on its way).
+function scheduleDialerAudioReconnect(delayMs) {
+  setTimeout(function () {
+    try {
+      if (manualCall.active) return;
+      if (state.session && (state.session.status === 'running' || state.session.status === 'connected' || state.session.status === 'paused')) return;
+      if (state.audioConnected || state.audioConnecting) return;
+      if (Date.now() - state.lastAudioConnectAt < 3000) return;
+      connectAudio();
+    } catch (e) { /* a failed auto-reconnect just leaves the status line; the next trigger retries */ }
+  }, delayMs || 0);
+}
 async function connectAudio() {
   if (!getTelnyxRTC()) {
     setAudioStatus('Calling library failed to load — check your connection and refresh.', false, true);
     return;
   }
+  if (state.audioConnecting) return; /* a connect is already in flight (tap, refresh, or auto-reconnect) */
+  state.audioConnecting = true;
+  state.lastAudioConnectAt = Date.now();
+  try {
   // Never stack a second client on a stale one: disconnect first
   // (the SDK warns against replacing a client without disconnect()).
   if (state.rtcClient) { try { await state.rtcClient.disconnect(); } catch (e) {} state.rtcClient = null; state.audioConnected = false; }
@@ -895,7 +920,8 @@ async function connectAudio() {
       // Signaling closed = this client can no longer receive calls.
       if (note && note.type === 'signalingStateClosed') {
         state.audioConnected = false;
-        setAudioStatus('Audio connection lost — tap Connect audio again.', false, true);
+        setAudioStatus('Audio connection lost — reconnecting…', false, true);
+        scheduleDialerAudioReconnect(1500);
         return;
       }
       try {
@@ -935,6 +961,9 @@ async function connectAudio() {
     await client.connect();
   } catch (e) {
     setAudioStatus('Audio could not connect: ' + (e && e.message ? e.message : e), false, true);
+  }
+  } finally {
+    state.audioConnecting = false;
   }
 }
 
@@ -1452,7 +1481,17 @@ function init() {
   });
   loadConfig()
     .then(function () { return refreshState(); })
+    .then(function () {
+      // Audio stays on by itself (Nov 26, 2026 — Troy: no more tapping
+      // Connect audio every time): connect on load so an inbound call
+      // can ring in without a tap first.
+      connectAudio();
+    })
     .catch(handleLoadError);
+  // A slept/backgrounded phone tab drops the signaling socket — reconnect
+  // when the tab is visible again or the network comes back.
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) scheduleDialerAudioReconnect(0); });
+  if (typeof window !== 'undefined' && window.addEventListener) window.addEventListener('online', function () { scheduleDialerAudioReconnect(0); });
   setInterval(function () {
     if (state.session && ['running', 'connected', 'paused'].includes(state.session.status)) {
       refreshState().catch(function () { /* keep the last good render */ });
