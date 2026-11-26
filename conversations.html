@@ -95,6 +95,29 @@
   .call-box .cb-title{font-weight:700;font-size:14px}
   .call-box .cb-sub{font-size:12px;color:var(--muted);margin-top:2px}
   .call-box .cb-dur{font-size:13px;font-weight:700;color:var(--muted);white-space:nowrap}
+  /* Call-history entries (HighLevel shape): a grey bubble under the
+     date pill — "Call completed" / "Missed call" / "Voicemail" with
+     the time, tap for the Details dialog. No duration, no recording,
+     no transcript (HL shows none of those either). */
+  .msg.call{align-self:center;max-width:90%;background:#e9ebef;color:#4a4f57;border:1px solid #d3d6dd;text-align:center;cursor:pointer}
+  .msg.call .m-body{font-weight:600}
+  .msg.call .m-meta{justify-content:center;color:#6d7280}
+  /* Post-call disposition row (HighLevel's six custom dispositions). */
+  .disp-row{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;align-items:center}
+  .disp-row .btn.sel{background:var(--accent);border-color:var(--accent);color:#fff}
+  /* The thread Call button opens the dialer pod instead of dialing
+     (HighLevel) — flash the pod so it is obvious where the call
+     starts. */
+  .dialer-flash{outline:3px solid var(--accent);outline-offset:2px;border-radius:12px}
+  /* Shared plain modal (quiet-hours warning + call Details). */
+  .modal-ov{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:90}
+  .modal-ov[hidden]{display:none}
+  .modal-card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;max-width:420px;width:calc(100% - 32px);box-shadow:0 12px 40px rgba(0,0,0,.3)}
+  .modal-card h3{font-size:16px;margin-bottom:6px}
+  .modal-card .m-sub{font-size:13px;color:var(--muted);margin-bottom:12px}
+  .modal-card .m-row{display:flex;gap:8px;justify-content:flex-end;margin-top:14px}
+  .modal-card .m-fact{display:flex;justify-content:space-between;gap:12px;font-size:13px;padding:5px 0;border-bottom:1px solid var(--line)}
+  .modal-card .m-fact .k{color:var(--muted)}
   .day-sep{align-self:center;color:#75808c;font-size:11px;margin:8px 0;background:rgba(255,255,255,.65);padding:1px 10px;border-radius:99px}
   .sendbox{border-top:1px solid var(--line);padding:12px 14px;display:flex;gap:10px;align-items:flex-end}
   .sendbox textarea{flex:1;resize:vertical;min-height:42px;max-height:140px}
@@ -295,7 +318,15 @@
               <div class="cb-sub" id="callBoxSub"></div>
             </div>
             <div class="cb-dur" id="callBoxDur"></div>
+            <!-- End call, right here in the call card (Nov 26, 2026 —
+                 Troy: HighLevel's call feature has it here; the Call
+                 button flipping its label is not the same thing). -->
+            <button class="btn small" id="callBoxEndBtn" type="button">End call</button>
           </div>
+          <!-- Post-call disposition (HighLevel's six custom
+               dispositions). Shows after a call ends; one tap files
+               it on the call log. -->
+          <div id="dispRow" class="disp-row" hidden></div>
           <div style="display:flex;gap:8px;align-items:center;margin-top:10px">
             <button class="btn small" id="podAudioBtn" type="button">🎧 Connect audio</button>
             <span class="note" id="podAudioStatus"></span>
@@ -323,6 +354,26 @@
 </div>
 
 <div id="toast"></div>
+<!-- Quiet-hours warning (HighLevel: avoid calling people during
+     quiet hours 9pm–8am, ON) + call Details dialog. -->
+<div class="modal-ov" id="qhModal" hidden>
+  <div class="modal-card">
+    <h3>🕐 It's late for them</h3>
+    <div class="m-sub" id="qhText"></div>
+    <div class="m-fact"><span class="k">Calling</span><span id="qhWho"></span></div>
+    <div class="m-row">
+      <button class="btn" id="qhCancelBtn" type="button">Cancel</button>
+      <button class="btn danger" id="qhAnywayBtn" type="button">Call Anyway</button>
+    </div>
+  </div>
+</div>
+<div class="modal-ov" id="callDetailsModal" hidden>
+  <div class="modal-card">
+    <h3>📞 Call details</h3>
+    <div id="callDetailsBody"></div>
+    <div class="m-row"><button class="btn" id="callDetailsCloseBtn" type="button">Close</button></div>
+  </div>
+</div>
 <audio id="remoteAudio" autoplay playsinline></audio>
 
 <script>
@@ -339,7 +390,7 @@ var MARKETS = [
 var MARKET_LABELS = { indianapolis: 'Indianapolis', carolina: 'Carolina', kansascity: 'Kansas City', cleveland: 'Cleveland', florida: 'Florida' };
 
 var CALL_API = '/.netlify/functions/cc-call-api';
-var VOICE_TOKEN_API = '/.netlify/functions/cc-voice-token';
+var VOICE_TOKEN_API = '/.netlify/functions/cc-voice-token?client=conversations';
 var GROK_API = '/.netlify/functions/grok-assist';
 var GEMINI_API = '/.netlify/functions/gemini-assist';
 var OPENROUTER_API = '/.netlify/functions/openrouter-assist';
@@ -357,8 +408,9 @@ var state = {
   flags: [],
 };
 
-var voiceCheckPromise = null;
 var rtcClient = null;
+var rtcLive = false; /* true from telnyx.ready until an error / signaling close */
+var rtcRefreshPending = false; /* token-expiry refresh deferred past a live call */
 var callState = { callId: null, active: false, timer: null, agentCall: null, bridged: false, connectedAt: null, durTimer: null, phone: null, direction: null, outgoingPending: false, inboundCall: null, inboundCallId: null, inboundPhone: null };
 
 function esc(s) {
@@ -519,11 +571,20 @@ function renderMessages() {
   }
   var html = '';
   var lastDay = '';
-  t.messages.forEach(function (m) {
+  t.messages.forEach(function (m, i) {
     var day = fmtDay(m.at);
     if (day && day !== lastDay) {
       html += '<div class="day-sep">' + esc(day) + '</div>';
       lastDay = day;
+    }
+    if (m.kind === 'call') {
+      // Call-history entry (HighLevel shape): grey bubble under the
+      // date pill, tap for Details. Written by the server when the
+      // call ends (cc-call-api logCallToThread).
+      var label = m.callStatus === 'missed' ? 'Missed call' : m.callStatus === 'voicemail' ? 'Voicemail' : 'Call completed';
+      html += '<div class="msg call" data-call-idx="' + i + '"><div class="m-body">📞 ' + esc(label) + '</div>' +
+        '<div class="m-meta"><span>' + esc(fmtTime(m.at)) + '</span><span>Details ›</span></div></div>';
+      return;
     }
     html += '<div class="msg ' + (m.dir === 'out' ? 'out' : 'in') + '"><div class="m-dir">' + (m.dir === 'out' ? 'Outgoing' : 'Incoming') + '</div><div class="m-body">' + esc(m.body) + '</div>' +
       '<div class="m-meta"><span>' + esc(fmtTime(m.at)) + '</span>' + statusTick(m) + '</div></div>';
@@ -787,6 +848,7 @@ function renderThreadHead() {
 }
 async function selectThread(key) {
   state.selectedKey = key;
+  hideDispositions();
   renderThreads();
   var entry = state.threads.find(function (t) { return t.key === key; });
   var phone = entry ? entry.phone : key;
@@ -847,20 +909,23 @@ function getTelnyxRTC() {
   if (window.TelnyxRTC) return window.TelnyxRTC;
   return null;
 }
+/* The voice token is a 24h JWT — it MUST be fetched fresh on every
+   connect/call (Nov 26, 2026: this used to cache the first fetch for
+   the whole page lifetime, so a tab left open past the token's life
+   kept a dead client behind a green "Audio connected" label and the
+   agent leg never rang in here. The dialer page always fetched fresh;
+   that asymmetry is why the dialer worked and this page did not.) */
 function checkVoiceConfig() {
-  if (!voiceCheckPromise) {
-    voiceCheckPromise = fetch(VOICE_TOKEN_API, { credentials: 'include' })
-      .then(function (r) {
-        return r.text().then(function (text) {
-          var data = {};
-          try { data = JSON.parse(text); } catch (e) { data = {}; }
-          if (!r.ok || !data || data.configured === false || !data.token) return null;
-          return data;
-        });
-      })
-      .catch(function () { return null; });
-  }
-  return voiceCheckPromise;
+  return fetch(VOICE_TOKEN_API, { credentials: 'include' })
+    .then(function (r) {
+      return r.text().then(function (text) {
+        var data = {};
+        try { data = JSON.parse(text); } catch (e) { data = {}; }
+        if (!r.ok || !data || data.configured === false || !data.token) return null;
+        return data;
+      });
+    })
+    .catch(function () { return null; });
 }
 async function callApi(path, body) {
   var opts = { credentials: 'include' };
@@ -898,6 +963,10 @@ function showCallBox(title) {
   box.hidden = false;
   document.getElementById('callBoxTitle').textContent = title;
   document.getElementById('callBoxSub').textContent = callBoxSub();
+  // The End call button only shows while a call is live — after the
+  // call ends the box stays up with the final result and no button.
+  var eb = document.getElementById('callBoxEndBtn');
+  if (eb) eb.style.display = callState.active ? '' : 'none';
 }
 function setCallBoxDur(txt) {
   var d = document.getElementById('callBoxDur');
@@ -933,7 +1002,10 @@ function setAudioStatus(txt, on) {
   if (b2) b2.textContent = label;
 }
 async function connectAudioNow() {
-  if (rtcClient) { setAudioStatus('🟢 Audio connected — answered sellers will ring in here.', true); return; }
+  // A client that exists but is no longer live must never be reused:
+  // drop it and reconnect with a fresh token instead of dialing deaf.
+  if (rtcClient && rtcLive) { setAudioStatus('🟢 Audio connected — answered sellers will ring in here.', true); return; }
+  if (rtcClient) { try { await rtcClient.disconnect(); } catch (e) {} rtcClient = null; rtcLive = false; }
   setAudioStatus('Connecting audio…', false);
   try {
     var cfg = await checkVoiceConfig();
@@ -942,6 +1014,23 @@ async function connectAudioNow() {
     setAudioStatus('🟢 Audio connected — answered sellers will ring in here.', true);
   } catch (e) {
     setAudioStatus('Audio connection error — try Connect audio again.', false);
+  }
+}
+// Token refresh (Telnyx warns 120s before the 24h JWT dies, code
+// 34001 — the pinned v2.28.2 bundle has NO updateToken(), so the
+// refresh is a full reconnect with a fresh token. Never mid-call: a
+// reconnect would drop the live call, so it waits for the call to end
+// instead — see finishCallUI.)
+async function refreshRtcToken() {
+  if (callState.active) { rtcRefreshPending = true; setAudioStatus('Audio session expires soon — refreshing after this call.', false); return; }
+  if (rtcClient) { try { await rtcClient.disconnect(); } catch (e) {} rtcClient = null; rtcLive = false; }
+  try {
+    var cfg = await checkVoiceConfig();
+    if (!cfg) { setAudioStatus('Voice is not switched on yet — audio cannot connect.', false); return; }
+    await ensureRtc(cfg);
+    setAudioStatus('🟢 Audio connected — answered sellers will ring in here.', true);
+  } catch (e) {
+    setAudioStatus('Audio session expired — tap Connect audio again.', false);
   }
 }
 /* Is this ringing leg one of OUR outgoing calls (auto-answer it), or
@@ -954,6 +1043,13 @@ function isOurOutgoingLeg() {
   return !!(callState.active || callState.outgoingPending);
 }
 function answerOutboundLeg(call) {
+  // Answer exactly once per leg: the SDK re-emits callUpdate with
+  // state 'ringing' while the leg is still answering (its Answering
+  // state maps to 'ringing'), and the SDK ignores a second answer()
+  // on the same call — but a duplicate can still confuse bridging,
+  // so guard it here.
+  if (!call || call.__ccAnswered) return;
+  call.__ccAnswered = true;
   callState.agentCall = call;
   var audioEl = document.getElementById('remoteAudio');
   if (typeof call.answer === 'function') {
@@ -1018,7 +1114,8 @@ function resolveInboundCaller(call, attempt) {
 }
 async function answerInboundCall() {
   var call = callState.inboundCall;
-  if (!call) return;
+  if (!call || call.__ccAnswered) return;
+  call.__ccAnswered = true;
   hideInboundBanner();
   callState.agentCall = call;
   callState.active = true;
@@ -1051,6 +1148,13 @@ async function declineInboundCall() {
   }
 }
 async function ensureRtc(cfg) {
+  // A client that exists but is no longer live (token died, signaling
+  // closed, registration lost) must never be reused: drop it and
+  // reconnect with a fresh token instead of dialing deaf.
+  if (rtcClient && !rtcLive) {
+    try { await rtcClient.disconnect(); } catch (e) {}
+    rtcClient = null;
+  }
   if (rtcClient) return rtcClient;
   var RTC = getTelnyxRTC();
   if (!RTC) throw new Error('Calling library failed to load — refresh and try again.');
@@ -1067,10 +1171,30 @@ async function ensureRtc(cfg) {
   // registration or media error used to leave the button green while
   // no call could ever ring in here.
   client.on('telnyx.error', function (err) {
+    rtcLive = false;
     setAudioStatus('Audio connection error — try Connect audio again.', false);
     toast('Audio error: ' + ((err && err.error && err.error.message) || 'connection failed'));
   });
+  // Token expiry (Telnyx warns 120s ahead, code 34001): refresh with
+  // a fresh token before the connection dies. The pinned SDK has no
+  // updateToken(), so the refresh is a reconnect — never mid-call
+  // (refreshRtcToken defers past a live call).
+  client.on('telnyx.warning', function (w) {
+    try {
+      var warn = (w && w.warning) || w || {};
+      var code = warn.code || warn.name || '';
+      var msg = String((warn && warn.message) || warn || '');
+      if (code === 34001 || code === 'TOKEN_EXPIRING_SOON' || /TOKEN_EXPIRING_SOON|token expir/i.test(msg)) refreshRtcToken();
+    } catch (e) { /* warning handling never breaks calling */ }
+  });
   client.on('telnyx.notification', function (note) {
+    // Signaling closed = this client can no longer receive calls;
+    // say so instead of leaving the button green on a dead client.
+    if (note && note.type === 'signalingStateClosed') {
+      rtcLive = false;
+      setAudioStatus('Audio connection lost — tap Connect audio again.', false);
+      return;
+    }
     // The server rings this browser with the agent leg. Our own
     // outgoing legs are answered instantly so the bridge lands; a
     // real incoming call waits for Troy to tap Answer (or Decline)
@@ -1124,7 +1248,7 @@ async function ensureRtc(cfg) {
   var readyP = new Promise(function (resolve) {
     var done = false;
     var to = setTimeout(function () { if (!done) { done = true; resolve(false); } }, 20000);
-    client.on('telnyx.ready', function () { if (!done) { done = true; clearTimeout(to); resolve(true); } });
+    client.on('telnyx.ready', function () { rtcLive = true; if (!done) { done = true; clearTimeout(to); resolve(true); } });
   });
   try {
     await client.connect();
@@ -1139,8 +1263,10 @@ async function ensureRtc(cfg) {
 function stopCallPolling() {
   if (callState.timer) { clearInterval(callState.timer); callState.timer = null; }
 }
-/* Both call buttons (thread Call + dialer-pod Call) always show the same
-   state: they start and end the same one active call. */
+/* Both call buttons show the same state while a call is live
+   (they end the same one active call). Idle, they differ: the
+   thread's Call button opens the dialer pod pre-filled (HighLevel);
+   the pod's Call button is what places the call. */
 function setCallButtons(disabled, active) {
   [['callBtn', '📞 Call'], ['dialCallBtn', '📞 Call']].forEach(function (pair) {
     var b = document.getElementById(pair[0]);
@@ -1153,6 +1279,8 @@ function finishCallUI(kind) {
   __stopRingback();
   stopCallPolling();
   stopCallDurTimer();
+  var endedPhone = callState.phone || null;
+  var endedCallId = callState.callId || null;
   var dur = (callState.bridged && callState.connectedAt) ? fmtDur(Date.now() - callState.connectedAt) : '';
   var finalText;
   if (kind === 'machine') finalText = 'Voicemail';
@@ -1172,11 +1300,19 @@ function finishCallUI(kind) {
   setCallStatus(finalText);
   showCallBox(finalText);
   setCallBoxDur(dur);
+  // A token refresh deferred past this call runs now (see
+  // refreshRtcToken) — the next call gets a live client.
+  if (rtcRefreshPending) { rtcRefreshPending = false; refreshRtcToken(); }
+  // Post-call disposition (HighLevel's six) + pull the server-logged
+  // call entry into the thread.
+  if (endedPhone) showDispositions(endedPhone, endedCallId);
+  reloadSelectedThread();
 }
 /* ---------- ringback tone (US: 440 + 480 Hz, 2s on / 4s off) ---------- */
-/* The two call legs only join once the other end is a confirmed human,
-   so nothing from the network reaches the browser while the phone
-   rings — the page plays the ringing sound itself, like a handset. */
+/* The two call legs join the moment the other end answers (bridge on
+   call.answered — AMD is only a label), so nothing from the network
+   reaches the browser while the phone rings — the page plays the
+   ringing sound itself, like a handset. */
 var __ringCtx = null, __ringNodes = null, __ringTimer = null;
 function __startRingback() {
   try {
@@ -1220,6 +1356,11 @@ function __stopRingback() {
 }
 function pollCallStatus() {
   stopCallPolling();
+  // Poll fast (1s) while the call is still setting up so the local
+  // ringback stops the moment the seller picks up — the tone in the
+  // room can push a silent answer to an AMD 'machine'. Once bridged,
+  // slow to 3s (only watching for the end).
+  var delay = callState.bridged ? 3000 : 1000;
   callState.timer = setInterval(async function () {
     if (!callState.callId) { stopCallPolling(); return; }
     try {
@@ -1227,9 +1368,18 @@ function pollCallStatus() {
       var st = data.status || '';
       if (st === 'bridged') {
         __stopRingback();
-        if (!callState.bridged) { callState.bridged = true; callState.connectedAt = Date.now(); startCallDurTimer(); }
+        if (!callState.bridged) { callState.bridged = true; callState.connectedAt = Date.now(); startCallDurTimer(); pollCallStatus(); }
         setCallStatus('Connected');
-        showCallBox('Connected');
+        // A machine verdict still bridges (Nov 26, 2026 — the agent
+        // hears the greeting and decides); say so plainly.
+        showCallBox(data.amdResult === 'machine' ? 'Connected — possible voicemail' : 'Connected');
+      }
+      else if (st === 'answered') {
+        // Seller picked up, AMD still listening: stop the local
+        // ringback NOW so AMD hears clean audio.
+        __stopRingback();
+        setCallStatus('Answered…');
+        showCallBox('Answered…');
       }
       else if (st === 'machine') { finishCallUI('machine'); toast('A machine answered — call ended.'); }
       else if (st === 'ended') { finishCallUI('ended'); }
@@ -1237,7 +1387,7 @@ function pollCallStatus() {
     } catch (e) {
       finishCallUI('ended');
     }
-  }, 3000);
+  }, delay);
 }
 async function endCurrentCall() {
   var id = callState.callId;
@@ -1249,6 +1399,7 @@ async function endCurrentCall() {
 async function startCall(phone, from) {
   var t = state.selectedThread;
   if (!t) return;
+  hideDispositions();
   callState.phone = phone;
   callState.direction = 'outbound';
   callState.bridged = false;
@@ -1260,6 +1411,11 @@ async function startCall(phone, from) {
     toast("Voice isn't switched on yet — calling turns on when the voice app is set up.");
     return;
   }
+  // Quiet hours (HighLevel: avoid calling 9pm–8am, ON): if it is
+  // quiet hours where the seller is, ask first. Cancel leaves the
+  // number in the dialer and dials nothing.
+  var qhOk = await quietHoursCheck(t.market || state.market || 'carolina', (t.name ? t.name + ' · ' : '') + (fmtPhone(phone) || phone));
+  if (!qhOk) { if (btn) btn.dataset.state = 'on'; return; }
   setCallButtons(true, false);
   setCallStatus('Calling…');
   try {
@@ -1272,6 +1428,9 @@ async function startCall(phone, from) {
     callState.outgoingPending = true;
     var body = { action: 'start', phone: phone, market: t.market || state.market || 'carolina' };
     if (from) body.from = from;
+    // Ring THIS tab's client: the server dials the SIP URI of the
+    // credential this page registered with, never a sibling tab's.
+    if (cfg.sipUri) body.agentSipUri = cfg.sipUri;
     var data = await callApi('', body);
     callState.callId = data.callId;
     callState.active = true;
@@ -1291,7 +1450,19 @@ async function onCallClick() {
   if (callState.active) { await endCurrentCall(); return; }
   var t = state.selectedThread;
   if (!t) return;
-  await startCall(t.phone, null);
+  // Like GoHighLevel, the thread's Call button does NOT dial. It
+  // opens the dialer pod with the contact's number pre-filled; the
+  // pod's green Call button is what places the call.
+  var pod = document.getElementById('dialerPod');
+  if (pod) {
+    pod.classList.remove('hidden');
+    renderDialPod();
+    var input = document.getElementById('dialNumber');
+    if (input) { input.value = fmtPhone(t.phone) || t.phone; input.focus(); input.select(); }
+    if (pod.scrollIntoView) pod.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    pod.classList.add('dialer-flash');
+    setTimeout(function () { pod.classList.remove('dialer-flash'); }, 1200);
+  }
 }
 /* Dialer pod: dial whatever is in the pod's number box (defaults to the
    thread's number) from whichever of our numbers is picked. */
@@ -1304,6 +1475,115 @@ async function onDialCallClick() {
   var fromSel = document.getElementById('dialFrom');
   var from = (fromSel && !fromSel.classList.contains('hidden')) ? fromSel.value : null;
   await startCall(phone, from);
+}
+
+/* ---------- quiet hours (HighLevel: 9pm–8am, ON) ---------- */
+// Every market but Kansas City is Eastern; KC is Central. The
+// warning shows the callee's local time and asks first — Cancel
+// leaves the number in the dialer and dials nothing.
+var MARKET_TZ = { kansascity: 'America/Chicago' };
+var QUIET_START_HOUR = 21; // 9pm
+var QUIET_END_HOUR = 8;    // 8am
+function marketTimeZone(market) {
+  return MARKET_TZ[(market || '').toLowerCase()] || 'America/New_York';
+}
+function calleeLocalParts(market) {
+  try {
+    var parts = new Intl.DateTimeFormat('en-US', { timeZone: marketTimeZone(market), hour: 'numeric', minute: '2-digit', hour12: true }).formatToParts(new Date());
+    var hour = null, period = '', text = '';
+    parts.forEach(function (p) {
+      if (p.type === 'hour') hour = parseInt(p.value, 10);
+      if (p.type === 'dayPeriod') period = p.value;
+      text += p.value;
+    });
+    if (hour === null) return { hour24: null, text: '' };
+    var h24 = hour % 12;
+    if (period === 'PM') h24 += 12;
+    return { hour24: h24, text: text };
+  } catch (e) { return { hour24: null, text: '' }; }
+}
+var __qhResolve = null;
+function quietHoursCheck(market, whoLabel) {
+  var local = calleeLocalParts(market);
+  if (local.hour24 === null) return Promise.resolve(true);
+  var quiet = local.hour24 >= QUIET_START_HOUR || local.hour24 < QUIET_END_HOUR;
+  if (!quiet) return Promise.resolve(true);
+  var modal = document.getElementById('qhModal');
+  var txt = document.getElementById('qhText');
+  var who = document.getElementById('qhWho');
+  if (!modal || !txt) return Promise.resolve(true);
+  txt.textContent = "It's around " + local.text + " for them. Quiet hours are 9pm to 8am — are you sure you want to call them?";
+  if (who) who.textContent = whoLabel || '';
+  modal.hidden = false;
+  return new Promise(function (resolve) { __qhResolve = resolve; });
+}
+function __qhAnswer(ok) {
+  var modal = document.getElementById('qhModal');
+  if (modal) modal.hidden = true;
+  if (__qhResolve) { var r = __qhResolve; __qhResolve = null; r(ok); }
+}
+
+/* ---------- post-call disposition (HighLevel's six) ---------- */
+var HL_DISPOSITIONS = ['No Answer', 'Voicemail', 'Follow Up', 'Requested Appointment', 'Not Interested', 'Incorrect Number'];
+var __dispPhone = null, __dispCallId = null;
+function showDispositions(phone, callId) {
+  var row = document.getElementById('dispRow');
+  if (!row) return;
+  __dispPhone = phone || null;
+  __dispCallId = callId || null;
+  row.innerHTML = '<span class="note" style="align-self:center">Outcome:</span>' + HL_DISPOSITIONS.map(function (d) {
+    return '<button class="btn small" type="button" data-disp="' + esc(d) + '">' + esc(d) + '</button>';
+  }).join('');
+  row.hidden = false;
+  row.querySelectorAll('[data-disp]').forEach(function (b) {
+    b.addEventListener('click', function () { fileDisposition(b.getAttribute('data-disp')); });
+  });
+}
+async function fileDisposition(disp) {
+  if (!__dispPhone) return;
+  try {
+    await callApi('', { action: 'disposition', phone: __dispPhone, disposition: disp, callId: __dispCallId });
+    var row = document.getElementById('dispRow');
+    if (row) row.querySelectorAll('[data-disp]').forEach(function (b) {
+      b.classList.toggle('sel', b.getAttribute('data-disp') === disp);
+    });
+    toast('Outcome saved: ' + disp);
+  } catch (e) { toast('Could not save outcome: ' + (e && e.message ? e.message : e)); }
+}
+function hideDispositions() {
+  var row = document.getElementById('dispRow');
+  if (row) { row.hidden = true; row.innerHTML = ''; }
+  __dispPhone = null; __dispCallId = null;
+}
+
+/* ---------- call Details dialog (HighLevel shape) ---------- */
+function showCallDetails(m) {
+  var body = document.getElementById('callDetailsBody');
+  var modal = document.getElementById('callDetailsModal');
+  if (!body || !modal) return;
+  var dirLabel = m.dir === 'in' ? 'Inbound (Phone Call)' : 'Outbound (Phone Call)';
+  var label = m.callStatus === 'missed' ? 'Missed call' : m.callStatus === 'voicemail' ? 'Voicemail' : 'Call completed';
+  var dur = (m.durationMs != null && m.durationMs >= 0) ? fmtDur(m.durationMs) : '—';
+  body.innerHTML =
+    '<div class="m-fact"><span class="k">From</span><span>' + esc(fmtPhone(m.from) || m.from || '—') + '</span></div>' +
+    '<div class="m-fact"><span class="k">To</span><span>' + esc(fmtPhone(m.to) || m.to || '—') + '</span></div>' +
+    '<div class="m-fact"><span class="k">Type</span><span>' + esc(dirLabel) + '</span></div>' +
+    '<div class="m-fact"><span class="k">Result</span><span>' + esc(label) + '</span></div>' +
+    '<div class="m-fact"><span class="k">Duration</span><span>' + esc(dur) + '</span></div>' +
+    '<div class="m-fact"><span class="k">When</span><span>' + esc(fmtDay(m.at) + ' · ' + fmtTime(m.at) + ' ET') + '</span></div>';
+  modal.hidden = false;
+}
+
+/* Re-fetch just the open thread (no thread switch, no disposition
+   reset) — pulls the server-logged call entry in after a call ends. */
+async function reloadSelectedThread() {
+  var t = state.selectedThread;
+  if (!t) return;
+  try {
+    var data = await api('?action=thread&phone=' + encodeURIComponent(t.phone));
+    state.selectedThread = data.thread;
+    renderMessages();
+  } catch (e) { /* the call entry lands on the next refresh */ }
 }
 
 /* ---------- dialer pod: our numbers + keypad + new conversation -- */
@@ -1334,7 +1614,7 @@ function renderDialFrom() {
   var opts = [];
   if (ourNumbers && Array.isArray(ourNumbers.flat) && ourNumbers.flat.length) {
     opts = ourNumbers.flat.map(function (n) {
-      return { value: n.number, label: fmtPhone(n.number) + (n.market ? ' · ' + (MARKET_LABELS[n.market] || n.market) : '') };
+      return { value: n.number, label: fmtPhone(n.number) + (n.market ? ' · ' + (MARKET_LABELS[n.market] || n.market) : '') + ' · Local' };
     });
   } else if (t && t.ourNumber) {
     opts = [{ value: t.ourNumber, label: fmtPhone(t.ourNumber) }];
@@ -1512,6 +1792,21 @@ function init() {
     onDialCallClick().catch(function (e) { toast('Call failed: ' + (e && e.message ? e.message : e)); });
   });
   document.getElementById('audioBtn').addEventListener('click', function () { connectAudioNow(); });
+  document.getElementById('callBoxEndBtn').addEventListener('click', function () { endCurrentCall(); });
+  document.getElementById('qhCancelBtn').addEventListener('click', function () { __qhAnswer(false); });
+  document.getElementById('qhAnywayBtn').addEventListener('click', function () { __qhAnswer(true); });
+  document.getElementById('qhModal').addEventListener('click', function (ev) { if (ev.target === this) __qhAnswer(false); });
+  document.getElementById('callDetailsCloseBtn').addEventListener('click', function () { document.getElementById('callDetailsModal').hidden = true; });
+  document.getElementById('callDetailsModal').addEventListener('click', function (ev) { if (ev.target === this) this.hidden = true; });
+  // Call-history bubble → Details dialog.
+  document.getElementById('messages').addEventListener('click', function (ev) {
+    var el = ev.target.closest ? ev.target.closest('.msg.call') : null;
+    if (!el) return;
+    var idx = parseInt(el.getAttribute('data-call-idx'), 10);
+    var t = state.selectedThread;
+    if (!t || !t.messages || !t.messages[idx]) return;
+    showCallDetails(t.messages[idx]);
+  });
   document.getElementById('podAudioBtn').addEventListener('click', function () { connectAudioNow(); });
   document.getElementById('inboundAnswerBtn').addEventListener('click', function () { answerInboundCall(); });
   document.getElementById('inboundDeclineBtn').addEventListener('click', function () { declineInboundCall(); });
