@@ -872,12 +872,58 @@ function setCallButtons(disabled, active) {
   });
 }
 function finishCallUI(statusText) {
+  __stopRingback();
   stopCallPolling();
   callState.active = false;
   callState.callId = null;
   callState.agentCall = null;
   setCallButtons(!state.selectedThread, false);
   setCallStatus(statusText || '');
+}
+/* ---------- ringback tone (US: 440 + 480 Hz, 2s on / 4s off) ---------- */
+/* The two call legs only join once the other end is a confirmed human,
+   so nothing from the network reaches the browser while the phone
+   rings — the page plays the ringing sound itself, like a handset. */
+var __ringCtx = null, __ringNodes = null, __ringTimer = null;
+function __startRingback() {
+  try {
+    if (__ringNodes) return;
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    if (!__ringCtx) __ringCtx = new AC();
+    if (__ringCtx.state === 'suspended') __ringCtx.resume();
+    var ctx = __ringCtx;
+    var gain = ctx.createGain();
+    gain.gain.value = 0;
+    gain.connect(ctx.destination);
+    var oscs = [440, 480].map(function (f) {
+      var o = ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.value = f;
+      o.connect(gain);
+      o.start();
+      return o;
+    });
+    var cycle = function () {
+      gain.gain.setTargetAtTime(0.1, ctx.currentTime, 0.05);
+      __ringTimer = setTimeout(function () {
+        gain.gain.setTargetAtTime(0, ctx.currentTime, 0.05);
+        __ringTimer = setTimeout(cycle, 4000);
+      }, 2000);
+    };
+    cycle();
+    __ringNodes = { gain: gain, oscs: oscs };
+  } catch (e) { /* audio is best-effort — the call still works */ }
+}
+function __stopRingback() {
+  try {
+    if (__ringTimer) { clearTimeout(__ringTimer); __ringTimer = null; }
+    if (__ringNodes) {
+      __ringNodes.oscs.forEach(function (o) { try { o.stop(); } catch (e) {} });
+      __ringNodes.gain.disconnect();
+      __ringNodes = null;
+    }
+  } catch (e) {}
 }
 function pollCallStatus() {
   stopCallPolling();
@@ -886,10 +932,10 @@ function pollCallStatus() {
     try {
       var data = await callApi('?action=status&callId=' + encodeURIComponent(callState.callId));
       var st = data.status || '';
-      if (st === 'bridged') setCallStatus('Connected');
+      if (st === 'bridged') { __stopRingback(); setCallStatus('Connected'); }
       else if (st === 'machine') { finishCallUI('Machine answered'); toast('A machine answered — call ended.'); }
       else if (st === 'ended') { finishCallUI('Ended'); }
-      else setCallStatus('Calling…');
+      else { setCallStatus(st === 'ringing' ? 'Ringing…' : 'Calling…'); __startRingback(); }
     } catch (e) {
       finishCallUI('Ended');
     }
@@ -923,6 +969,7 @@ async function startCall(phone, from) {
     callState.active = true;
     setCallButtons(false, true);
     setCallStatus('Calling…');
+    __startRingback();
     pollCallStatus();
   } catch (e) {
     setCallButtons(false, false);
