@@ -108,6 +108,7 @@ const bad = (msg) => json(400, { error: msg });
 const unauth = () => json(401, { error: 'Not signed in — open the dashboard and sign in first.' });
 const forbidden = () => json(403, { error: 'Calling access only — thread calls are started from the full dashboard login.' });
 const ccAuth = require('./cc-auth');
+const push = require('./cc-push');
 function getCookie(header, name) {
   if (!header) return null;
   for (const part of header.split(';')) {
@@ -597,6 +598,17 @@ exports.handler = async (event) => {
       box.list.push(entry);
       if (box.list.length > 200) box.list = box.list.slice(-200);
       await writeJson(s, DISPOSITIONS_KEY, box);
+      if (disp === 'Requested Appointment') {
+        // Phone push: someone asked for an appointment on this call.
+        // Bounded (never throws, never past ~3s).
+        try {
+          await push.notifyAppointment({
+            phone: phoneE164, callId: entry.callId, at: entry.at, requested: true,
+          }, event);
+        } catch (e) {
+          console.error('[cc-call-api] push failed:', e);
+        }
+      }
       return ok({ ok: true, disposition: disp });
     }
 
