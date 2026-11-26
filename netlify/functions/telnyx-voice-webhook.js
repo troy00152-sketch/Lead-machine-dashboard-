@@ -570,6 +570,11 @@ async function handleInboundCall(evt, event) {
   const payload = (evt && evt.payload) || {};
   const callControlId = payload.call_control_id || null;
   if (!callControlId) return { handled: false, reason: 'inbound call without call_control_id' };
+  // Telnyx from/to can arrive as objects ({number, ...}) — normalize
+  // to strings before dialing/storing; createAgentLeg's toE164 throws
+  // on objects and the leg fails silently (Nov 26 local repro).
+  const fromStr = typeof payload.from === 'string' ? payload.from : (payload.from && (payload.from.number || payload.from.phone_number)) || '';
+  const toStr = typeof payload.to === 'string' ? payload.to : (payload.to && (payload.to.number || payload.to.phone_number)) || '';
   const v = voiceLib();
   const now = Date.now();
   const pairings = await callApi._thread.loadPairings(event);
@@ -647,7 +652,7 @@ async function handleInboundCall(evt, event) {
         () =>
           v.createAgentLeg({
             sipUri,
-            from: payload.to || undefined,
+            from: toStr || undefined,
             timeoutSecs: 20,
             commandId: 'inb-' + String(callControlId).slice(-8) + '-' + i + '-' + now.toString(36),
             clientState: { kind: 'thread-call-agent', key: callControlId, sellerCallControlId: callControlId },
@@ -661,8 +666,8 @@ async function handleInboundCall(evt, event) {
   }
   const rec = {
     key: callControlId,
-    phone: payload.from || '',
-    to: payload.to || null,
+    phone: fromStr || '',
+    to: toStr || null,
     sellerLeg: callControlId,
     agentLeg: agentLegs[0] || null,
     agentLegs,
@@ -854,7 +859,13 @@ async function applyCallEvent(evt, event) {
 
   // Inbound calls: no client_state, no pairing — the caller dialed one
   // of our numbers (direction 'inbound'). Ring the agent's browser.
-  if (type === 'call.initiated' && payload.direction === 'inbound') {
+  // Telnyx sends direction 'incoming' (not 'inbound') on real
+  // call.initiated events — 'inbound' is our internal pairing label.
+  // Accept both so a real inbound call reaches handleInboundCall.
+  // (Nov 26: the 'inbound'-only gate dropped every real inbound call
+  // with "no active session" — proven by local repro.)
+  const dir = String(payload.direction || '').toLowerCase();
+  if (type === 'call.initiated' && (dir === 'incoming' || dir === 'inbound')) {
     return handleInboundCall(evt, event);
   }
 
