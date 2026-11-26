@@ -231,6 +231,24 @@ export default async function handler(req: Request, context: any) {
   ) {
     return context.next();
   }
+
+  // Telnyx webhooks (added Nov 25, 2026 — ROOT CAUSE of the Paula test
+  // failure): Telnyx POSTs here with NO dashboard cookie, so the gate
+  // answered 401 and every inbound reply + delivery receipt died before
+  // the function ever ran. Both functions verify the Telnyx Ed25519
+  // signature themselves when TELNYX_PUBLIC_KEY is set (telnyx-webhook.js
+  // / telnyx-voice-webhook.js); with the key unset they process
+  // unverified and warn (pre-launch TODO: set the key). NEVER re-gate
+  // these paths — gating them breaks SMS-in, SMS status updates, and
+  // inbound calls with no visible error in the app.
+  if (
+    url.pathname === "/.netlify/functions/telnyx-webhook" ||
+    url.pathname === "/.netlify/functions/telnyx-voice-webhook"
+  ) {
+    const res = await context.next();
+    res.headers.set("x-robots-tag", "noindex, nofollow");
+    return res;
+  }
   if (url.pathname === "/.netlify/functions/cc-funnel-api") {
     const res = await context.next();
     res.headers.set("x-robots-tag", "noindex, nofollow");
