@@ -4,12 +4,26 @@
 // answered seller calls bridge to.
 //
 // How it works: the browser agent is a Telnyx "telephony credential"
-// bound to the Call Control application (TELNYX_VOICE_APP_ID). The
-// credential is created ONCE via the API and cached in the 'cc-dialer'
-// Blobs store ('voice-credential'); each request mints a short-lived
-// JWT for it via POST /v2/telephony_credentials/{id}/token. The
-// response carries {token, sipUri, username} — the SIP URI is what the
-// voice webhook dials when a seller answers (session.agentSipUri).
+// bound to a CREDENTIAL-BASED SIP CONNECTION (created once via
+// POST /v2/credential_connections and cached in the 'cc-dialer' Blobs
+// store as 'voice-sip-connection'). The credential itself is created
+// ONCE per agent via the API and cached in the same store
+// ('voice-credential' for the admin, 'voice-credential-irish' for
+// Irish — one credential per agent/device; sharing one across
+// concurrent devices makes the second registration overwrite the
+// first). Each request mints a short-lived JWT for it via
+// POST /v2/telephony_credentials/{id}/token. The response carries
+// {token, sipUri, username} — the SIP URI is what the voice webhook
+// dials when a seller answers (session.agentSipUri).
+//
+// NOTE (verified Nov 25): the telephony-credentials endpoint does NOT
+// accept a Call Control Application id as connection_id — it 422s.
+// connection_id MUST be a credential SIP connection id. The Call
+// Control app id (TELNYX_VOICE_APP_ID) is only for Call Control dials
+// (cc-call-api / cc-dialer-api), never for credentials. The SIP
+// connection is created with sip_uri_calling_preference 'internal'
+// so the webhook can dial the agent's sip: URI to bridge inbound
+// calls to the registered browser client.
 //
 // FAIL CLOSED: without TELNYX_API_KEY + TELNYX_VOICE_APP_ID this
 // returns 503 {configured:false, missing:[...]} and the page shows its
@@ -32,6 +46,10 @@ const ccAuth = require('./cc-auth');
 
 const DIALER_STORE = 'cc-dialer';
 const CREDENTIAL_KEY = 'voice-credential';
+const CREDENTIAL_KEY_IRISH = 'voice-credential-irish';
+const SIP_CONNECTION_KEY = 'voice-sip-connection';
+const SIP_CONNECTION_NAME = 'Command Center Voice';
+const SIP_CONNECTION_USER = 'ccvoiceagent';
 const CREDENTIAL_NAME = 'cc-dialer-agent';
 const SIP_DOMAIN = 'sip.telnyx.com';
 
@@ -125,20 +143,98 @@ async function telnyxApi(pathname, method, body, apiKey) {
   if (!res.ok) {
     const detail =
       (data && data.errors && data.errors[0] && (data.errors[0].detail || data.errors[0].title)) ||
-      'HTTP ' + res.status;
+      (data && (data.message || data.error)) ||
+      // Telnyx 422s sometimes carry no errors[] at all — keep the raw
+      // body (truncated) so the next diagnostic shows what Telnyx said.
+      (text ? 'HTTP ' + res.status + ' body: ' + text.slice(0, 200) : 'HTTP ' + res.status);
     throw new Error('Telnyx credential API failed (' + pathname + '): ' + detail);
   }
   return data;
 }
 
-async function getOrCreateCredential(event, cfg) {
+// ---- SIP credential connection (the ONLY valid connection_id for
+// telephony credentials) ----
+// Telnyx telephony credentials bind to a credential-based SIP
+// connection, NOT to a Call Control application — passing the app id
+// 422s with no usable detail. Resolve the connection once and cache
+// it in Blobs ('voice-sip-connection'): reuse a connection named
+// 'Command Center Voice' if one already exists, else create it via
+// POST /v2/credential_connections (same V2 API key). The connection
+// password is generated server-side and stored with the record (it is
+// never sent to the browser — the browser logs in with JWTs). After
+// creation we PATCH sip_uri_calling_preference to 'internal': the
+// default 'disabled' blocks SIP-URI calls, and the voice webhook
+// bridges inbound calls by dialing the agent's sip: URI.
+function randomPassword() {
+  const chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  const buf = crypto.randomBytes(32);
+  let out = '';
+  for (let i = 0; i < 32; i++) out += chars[buf[i] % chars.length];
+  return out;
+}
+async function getOrCreateSipConnection(event, cfg) {
   const s = dialerStore(event);
-  const cached = await readJson(s, CREDENTIAL_KEY);
-  if (cached && cached.id && cached.username) return cached;
+  const envId = (process.env.TELNYX_SIP_CONNECTION_ID || '').trim();
+  if (envId) return { id: envId, user_name: SIP_CONNECTION_USER, fromEnv: true };
+  const cached = await readJson(s, SIP_CONNECTION_KEY);
+  if (cached && cached.id) return cached;
+  // Reuse an existing connection with our name if the portal (or an
+  // earlier run) already made one.
+  try {
+    const list = await telnyxApi('/credential_connections?page[number]=1&page[size]=100', 'GET', undefined, cfg.apiKey);
+    const items = (list && list.data) || [];
+    const found = items.find((c) => c && c.connection_name === SIP_CONNECTION_NAME);
+    if (found && found.id) {
+      const rec = { id: String(found.id), user_name: found.user_name || SIP_CONNECTION_USER, createdAt: Date.now() };
+      await writeJson(s, SIP_CONNECTION_KEY, rec);
+      return rec;
+    }
+  } catch (e) { /* list failure falls through to create */ }
+  const created = await telnyxApi(
+    '/credential_connections',
+    'POST',
+    { connection_name: SIP_CONNECTION_NAME, user_name: SIP_CONNECTION_USER, password: randomPassword() },
+    cfg.apiKey
+  );
+  const d = (created && created.data) || {};
+  if (!d.id) throw new Error('Telnyx did not return a credential connection id.');
+  const rec = {
+    id: String(d.id),
+    user_name: d.user_name || SIP_CONNECTION_USER,
+    password: d.password || undefined,
+    createdAt: Date.now(),
+  };
+  // Allow the voice webhook to dial the agent's sip: URI (inbound
+  // bridging). Best-effort: the token flow below works without it.
+  try {
+    await telnyxApi(
+      '/credential_connections/' + encodeURIComponent(rec.id),
+      'PATCH',
+      { sip_uri_calling_preference: 'internal' },
+      cfg.apiKey
+    );
+    rec.sipUriCallingPreference = 'internal';
+  } catch (e) {
+    rec.sipUriCallingPreference = 'unknown';
+  }
+  await writeJson(s, SIP_CONNECTION_KEY, rec);
+  return rec;
+}
+
+async function getOrCreateCredential(event, cfg, who) {
+  const s = dialerStore(event);
+  const key = who === 'irish' ? CREDENTIAL_KEY_IRISH : CREDENTIAL_KEY;
+  const name = who === 'irish' ? CREDENTIAL_NAME + '-irish' : CREDENTIAL_NAME;
+  const sipConn = await getOrCreateSipConnection(event, cfg);
+  const cached = await readJson(s, key);
+  // A cached credential is only reusable when it belongs to the same
+  // SIP connection (an old record made against the Call Control app
+  // id can never have worked — discard it).
+  if (cached && cached.id && cached.username && cached.connectionId === sipConn.id) return cached;
   const data = await telnyxApi(
     '/telephony_credentials',
     'POST',
-    { connection_id: cfg.appId, name: CREDENTIAL_NAME },
+    { connection_id: sipConn.id, name },
     cfg.apiKey
   );
   const d = (data && data.data) || {};
@@ -149,10 +245,11 @@ async function getOrCreateCredential(event, cfg) {
   const cred = {
     id: d.id,
     username,
+    connectionId: sipConn.id,
     sipUri: 'sip:' + username + '@' + SIP_DOMAIN,
     createdAt: Date.now(),
   };
-  await writeJson(s, CREDENTIAL_KEY, cred);
+  await writeJson(s, key, cred);
   return cred;
 }
 
@@ -186,7 +283,10 @@ exports.handler = async (event) => {
         error: 'Telnyx voice is not configured — missing env: ' + cfg.missing.join(', ') + '.',
       });
     }
-    const cred = await getOrCreateCredential(event, cfg);
+    // One telephony credential per agent: the admin and Irish must not
+    // share one (a second registration overwrites the first).
+    const who = isAdmin(event) ? 'admin' : 'irish';
+    const cred = await getOrCreateCredential(event, cfg, who);
     const token = await mintToken(cred, cfg);
     return json(200, {
       configured: true,
