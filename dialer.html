@@ -102,6 +102,36 @@
   /* ---- manual-dial keypad ---- */
   .keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:10px}
   .keypad .btn{padding:10px 0;font-size:16px}
+  /* ---- manual-dial tabs (HighLevel dialer, in order: Recents,
+         Contacts, Keypad, Voicemail, Queue) ---- */
+  .mtabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:12px;flex-wrap:wrap}
+  .mtab{border:1px solid transparent;border-bottom:none;background:none;color:var(--muted);padding:8px 10px;font-size:13px;font-weight:600;cursor:pointer;border-radius:8px 8px 0 0}
+  .mtab.active{color:var(--text);background:var(--panel2);border-color:var(--line)}
+  .mtab-pane[hidden]{display:none}
+  .mrow{display:flex;gap:10px;align-items:center;padding:9px 4px;border-bottom:1px solid var(--line);cursor:pointer}
+  .mrow:hover{background:var(--panel2)}
+  .mrow .avatar{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;color:#fff;background:#5b7fa6;flex:none}
+  .mrow .m-main{flex:1;min-width:0}
+  .mrow .m-name{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .mrow .m-sub{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .mrow .m-time{font-size:11px;color:var(--muted2);white-space:nowrap}
+  .mrow .m-call{flex:none}
+  .seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .seg-btn{flex:1;background:none;border:none;padding:7px 0;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer}
+  .seg-btn.active{background:var(--panel2);color:var(--text)}
+  .vm-circle{width:64px;height:64px;border-radius:50%;background:#7c5cd6;color:#fff;display:flex;align-items:center;justify-content:center;font-size:28px;margin:0 auto 10px}
+  /* Post-call disposition row (HighLevel's six custom dispositions). */
+  .disp-row{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;align-items:center}
+  .disp-row .btn.sel{background:var(--accent);border-color:var(--accent);color:#fff}
+  /* Shared plain modal (quiet-hours warning). */
+  .modal-ov{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:90}
+  .modal-ov[hidden]{display:none}
+  .modal-card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;max-width:420px;width:calc(100% - 32px);box-shadow:0 12px 40px rgba(0,0,0,.3)}
+  .modal-card h3{font-size:16px;margin-bottom:6px}
+  .modal-card .m-sub{font-size:13px;color:var(--muted);margin-bottom:12px}
+  .modal-card .m-row{display:flex;gap:8px;justify-content:flex-end;margin-top:14px}
+  .modal-card .m-fact{display:flex;justify-content:space-between;gap:12px;font-size:13px;padding:5px 0;border-bottom:1px solid var(--line)}
+  .modal-card .m-fact .k{color:var(--muted)}
 </style>
 <!-- PWA (v1): manifest, theme, iOS install support, service worker -->
 <link rel="manifest" href="/manifest.webmanifest" />
@@ -235,6 +265,28 @@
       <section class="pane" aria-label="Manual dial">
         <div class="pane-head"><h2>Manual dial</h2></div>
         <div class="pane-body">
+          <!-- HighLevel dialer tabs, in order: Recents, Contacts,
+               Keypad, Voicemail, Queue. Keypad is the working tab;
+               Queue is "Coming soon…" exactly like HighLevel (there
+               is no working queue in the HL dialer either — the
+               session Queue pane below is the power-dialer's lead
+               list, a different thing). -->
+          <div class="mtabs" role="tablist">
+            <button type="button" class="mtab" data-mtab="recents">🕐 Recents</button>
+            <button type="button" class="mtab" data-mtab="contacts">👤 Contacts</button>
+            <button type="button" class="mtab active" data-mtab="keypad">▦ Keypad</button>
+            <button type="button" class="mtab" data-mtab="voicemail">✉ Voicemail</button>
+            <button type="button" class="mtab" data-mtab="queue">☰ Queue</button>
+          </div>
+          <div class="mtab-pane" id="mtab-recents" hidden>
+            <input class="field" id="recentsSearch" type="search" placeholder="Search for Contacts" autocomplete="off">
+            <div id="recentsList" style="margin-top:10px"><div class="empty"><div>No recent calls yet.</div></div></div>
+          </div>
+          <div class="mtab-pane" id="mtab-contacts" hidden>
+            <input class="field" id="contactsSearch" type="search" placeholder="Search for Contacts" autocomplete="off">
+            <div id="contactsList" style="margin-top:10px"><div class="empty"><div>No contacts yet.</div></div></div>
+          </div>
+          <div class="mtab-pane" id="mtab-keypad">
           <label class="lbl" for="manualNumber">Number to call</label>
           <input class="field" id="manualNumber" type="tel" placeholder="(555) 123-4567" autocomplete="off">
           <div style="margin-top:10px" id="manualFromRow">
@@ -259,7 +311,20 @@
             <button class="btn primary" id="manualCallBtn" type="button">📞 Call</button>
             <span class="note" id="manualCallStatus"></span>
           </div>
+          <!-- Post-call disposition (HighLevel's six custom
+               dispositions). Shows after a manual call ends; one tap
+               files it on the call log. -->
+          <div id="manualDispRow" class="disp-row" hidden></div>
           <div class="note" style="margin-top:6px">The keypad works any time — hitting Call connects audio on demand. Tones go out live while a call is connected.</div>
+          </div>
+          <div class="mtab-pane" id="mtab-voicemail" hidden>
+            <input class="field" id="voicemailSearch" type="search" placeholder="Search for a phone number" autocomplete="off">
+            <div class="seg" style="margin-top:10px"><button type="button" class="seg-btn active" data-vm="me">For Me</button><button type="button" class="seg-btn" data-vm="all">All</button></div>
+            <div class="empty" style="text-align:center;padding:28px 0"><div class="vm-circle">✉</div><div>No voicemail</div></div>
+          </div>
+          <div class="mtab-pane" id="mtab-queue" hidden>
+            <div class="empty" style="text-align:center;padding:28px 0"><div class="big" style="color:#9aa0a6">📞</div><div>Coming soon…</div></div>
+          </div>
         </div>
       </section>
 
@@ -327,12 +392,25 @@
 </div>
 
 <audio id="remoteAudio" autoplay playsinline></audio>
+<!-- Quiet-hours warning (HighLevel: avoid calling people during
+     quiet hours 9pm–8am, ON). -->
+<div class="modal-ov" id="qhModal" hidden>
+  <div class="modal-card">
+    <h3>🕐 It's late for them</h3>
+    <div class="m-sub" id="qhText"></div>
+    <div class="m-fact"><span class="k">Calling</span><span id="qhWho"></span></div>
+    <div class="m-row">
+      <button class="btn" id="qhCancelBtn" type="button">Cancel</button>
+      <button class="btn danger" id="qhAnywayBtn" type="button">Call Anyway</button>
+    </div>
+  </div>
+</div>
 <div id="toast"></div>
 
 <script>
 'use strict';
 var API = '/.netlify/functions/cc-dialer-api';
-var TOKEN_API = '/.netlify/functions/cc-voice-token';
+var TOKEN_API = '/.netlify/functions/cc-voice-token?client=dialer';
 var CALL_API = '/.netlify/functions/cc-call-api';
 var CONV_API = '/.netlify/functions/cc-conversations-api';
 var MARKET_LABELS = { indianapolis: 'Indianapolis', carolina: 'Carolina', kansascity: 'Kansas City', cleveland: 'Cleveland', florida: 'Florida' };
@@ -562,6 +640,16 @@ function renderSession() {
   renderSlots();
   renderQueue();
   renderCallCard();
+  // A token refresh deferred past a live call drains once the session
+  // is no longer busy (Nov 26, 2026 — worked-once regression: a 34001
+  // fired mid-session, the session ended, and the pending refresh
+  // never ran, so the next manual call dialed on a dying token and
+  // the agent leg never rang in). refreshDialerAudio re-defers if
+  // anything is still live, so calling it here is safe.
+  if (state.audioRefreshPending && (!s || (s.status !== 'running' && s.status !== 'connected' && s.status !== 'paused'))) {
+    state.audioRefreshPending = false;
+    refreshDialerAudio();
+  }
 }
 
 /* ---------- data ---------- */
@@ -643,6 +731,12 @@ function isOurOutgoingLeg() {
   return !!(s && (s.status === 'running' || s.status === 'connected'));
 }
 function answerOutboundLeg(call) {
+  // Answer exactly once per leg (see conversations.html): the SDK
+  // re-emits callUpdate with state 'ringing' while the leg is still
+  // answering, and a duplicate answer() is ignored by the SDK but can
+  // still confuse bridging — guard it here.
+  if (!call || call.__ccAnswered) return;
+  call.__ccAnswered = true;
   state.agentCall = call;
   var audioEl = document.getElementById('remoteAudio');
   if (typeof call.answer === 'function') {
@@ -701,7 +795,8 @@ function resolveInboundCaller(call, attempt) {
 }
 async function answerInboundCall() {
   var call = state.inboundCall;
-  if (!call) return;
+  if (!call || call.__ccAnswered) return;
+  call.__ccAnswered = true;
   hideInboundBanner();
   state.agentCall = call;
   manualCall.active = true;
@@ -731,11 +826,28 @@ async function declineInboundCall() {
     try { await call.hangup(); } catch (e) { /* already gone */ }
   }
 }
+// Token refresh — see refreshRtcToken in conversations.html: the
+// pinned SDK has no updateToken(), so a refresh is a reconnect with
+// a fresh token, never mid-call. A refresh deferred past a live call
+// drains in finishManualCallUI.
+async function refreshDialerAudio() {
+  var sessionBusy = !!(state.session && (state.session.status === 'running' || state.session.status === 'connected'));
+  if (manualCall.active || sessionBusy) {
+    state.audioRefreshPending = true;
+    setAudioStatus('Audio session expires soon — refreshing after this call.', false, true);
+    return;
+  }
+  state.audioRefreshPending = false;
+  await connectAudio();
+}
 async function connectAudio() {
   if (!getTelnyxRTC()) {
     setAudioStatus('Calling library failed to load — check your connection and refresh.', false, true);
     return;
   }
+  // Never stack a second client on a stale one: disconnect first
+  // (the SDK warns against replacing a client without disconnect()).
+  if (state.rtcClient) { try { await state.rtcClient.disconnect(); } catch (e) {} state.rtcClient = null; state.audioConnected = false; }
   setAudioStatus('Connecting audio…', false, true);
   try {
     var r = await fetch(TOKEN_API, { credentials: 'include' });
@@ -762,12 +874,30 @@ async function connectAudio() {
       state.audioConnected = false;
       setAudioStatus('Audio connection error — try Connect audio again.', false, true);
     });
+    // Token expiry (Telnyx warns 120s ahead, code 34001): refresh
+    // with a fresh token before the connection dies. The pinned SDK
+    // has no updateToken(), so the refresh is a reconnect — never
+    // mid-call (refreshDialerAudio defers past a live call).
+    client.on('telnyx.warning', function (w) {
+      try {
+        var warn = (w && w.warning) || w || {};
+        var code = warn.code || warn.name || '';
+        var msg = String((warn && warn.message) || warn || '');
+        if (code === 34001 || code === 'TOKEN_EXPIRING_SOON' || /TOKEN_EXPIRING_SOON|token expir/i.test(msg)) refreshDialerAudio();
+      } catch (e) { /* warning handling never breaks calling */ }
+    });
     client.on('telnyx.notification', function (note) {
       // The dialer server rings this browser when a seller answers —
       // pick up automatically so the bridge lands instantly. A real
       // incoming call (nothing dialing) waits for the Answer banner
       // instead. Keep the leg so the manual-dial keypad can send DTMF
       // tones live.
+      // Signaling closed = this client can no longer receive calls.
+      if (note && note.type === 'signalingStateClosed') {
+        state.audioConnected = false;
+        setAudioStatus('Audio connection lost — tap Connect audio again.', false, true);
+        return;
+      }
       try {
         var call = note && note.call;
         if (!call) return;
@@ -806,6 +936,195 @@ async function connectAudio() {
   } catch (e) {
     setAudioStatus('Audio could not connect: ' + (e && e.message ? e.message : e), false, true);
   }
+}
+
+/* ---------- manual-dial tabs (HighLevel dialer) ---------- */
+var __recents = null, __dialerContacts = null;
+function switchMtab(name) {
+  document.querySelectorAll('[data-mtab]').forEach(function (b) { b.classList.toggle('active', b.getAttribute('data-mtab') === name); });
+  ['recents', 'contacts', 'keypad', 'voicemail', 'queue'].forEach(function (n) {
+    var pane = document.getElementById('mtab-' + n);
+    if (pane) pane.hidden = n !== name;
+  });
+  if (name === 'recents') loadRecents();
+  if (name === 'contacts') loadDialerContacts();
+}
+function initialsFor(label) {
+  var parts = String(label || '').replace(/[^A-Za-z0-9 ]/g, ' ').trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return '?';
+  return (parts[0].charAt(0) + (parts[1] ? parts[1].charAt(0) : '')).toUpperCase();
+}
+function avatarColor(label) {
+  var colors = ['#5b7fa6', '#7a6aa8', '#5d9b7a', '#a86a5b', '#6a8aa8', '#8a6aa8'];
+  var h = 0; String(label || '').split('').forEach(function (c) { h = (h * 31 + c.charCodeAt(0)) % 997; });
+  return colors[h % colors.length];
+}
+function relTime(ts) {
+  if (!ts) return '';
+  var s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+  if (s < 60) return 'just now';
+  if (s < 3600) return Math.floor(s / 60) + ' min ago';
+  if (s < 86400) return Math.floor(s / 3600) + ' hours ago';
+  return Math.floor(s / 86400) + ' days ago';
+}
+function fillKeypadNumber(phone) {
+  var input = document.getElementById('manualNumber');
+  if (input) { input.value = fmtPhone(phone) || phone; input.focus(); }
+  switchMtab('keypad');
+}
+async function loadRecents() {
+  var box = document.getElementById('recentsList');
+  try {
+    var data = await manualCallApi('?action=recents');
+    __recents = (data && data.calls) || [];
+    renderRecents();
+  } catch (e) {
+    if (box) box.innerHTML = '<div class="empty"><div>Could not load recents.</div></div>';
+  }
+}
+function renderRecents() {
+  var box = document.getElementById('recentsList');
+  if (!box) return;
+  var q = (document.getElementById('recentsSearch').value || '').replace(/\D/g, '');
+  var list = (__recents || []).filter(function (c) { return !q || (c.phone || '').replace(/\D/g, '').indexOf(q) !== -1; });
+  if (!list.length) { box.innerHTML = '<div class="empty"><div>No recent calls yet.</div></div>'; return; }
+  box.innerHTML = list.map(function (c) {
+    var arrow = c.direction === 'inbound' ? '↙' : '↗';
+    var outcome = c.disposition || (c.callStatus === 'completed' ? 'Call completed' : c.callStatus === 'voicemail' ? 'Voicemail' : c.callStatus === 'missed' ? 'Missed call' : c.status || '');
+    return '<div class="mrow" data-phone="' + esc(c.phone) + '">' +
+      '<div class="avatar" style="background:' + avatarColor(c.phone) + '">' + esc(initialsFor(fmtPhone(c.phone))) + '</div>' +
+      '<div class="m-main"><div class="m-name">' + esc(fmtPhone(c.phone) || c.phone) + '</div>' +
+      '<div class="m-sub">' + arrow + ' ' + esc(fmtPhone(c.phone) || c.phone) + ' · ' + esc(outcome) + '</div></div>' +
+      '<div class="m-time">' + esc(relTime(c.startedAt)) + '</div></div>';
+  }).join('');
+  box.querySelectorAll('.mrow').forEach(function (row) {
+    row.addEventListener('click', function () { fillKeypadNumber(row.getAttribute('data-phone')); });
+  });
+}
+async function loadDialerContacts() {
+  var box = document.getElementById('contactsList');
+  try {
+    var r = await fetch(CONV_API + '?action=threads', { credentials: 'include' });
+    var data = {};
+    try { data = await r.json(); } catch (e) { data = {}; }
+    __dialerContacts = (r.ok && data.threads) || [];
+    renderDialerContacts();
+  } catch (e) {
+    if (box) box.innerHTML = '<div class="empty"><div>Could not load contacts.</div></div>';
+  }
+}
+function renderDialerContacts() {
+  var box = document.getElementById('contactsList');
+  if (!box) return;
+  var q = (document.getElementById('contactsSearch').value || '').toLowerCase();
+  var list = (__dialerContacts || []).filter(function (t) {
+    if (!q) return true;
+    return ((t.name || '') + ' ' + (t.phone || '')).toLowerCase().indexOf(q) !== -1;
+  });
+  if (!list.length) { box.innerHTML = '<div class="empty"><div>No contacts yet.</div></div>'; return; }
+  box.innerHTML = list.slice(0, 100).map(function (t) {
+    var label = t.name || fmtPhone(t.phone) || t.phone;
+    return '<div class="mrow" data-phone="' + esc(t.phone) + '">' +
+      '<div class="avatar" style="background:' + avatarColor(label) + '">' + esc(initialsFor(label)) + '</div>' +
+      '<div class="m-main"><div class="m-name">' + esc(label) + '</div>' +
+      '<div class="m-sub">' + esc(fmtPhone(t.phone) || t.phone) + '</div></div>' +
+      '<button type="button" class="btn small m-call" data-call="' + esc(t.phone) + '">📞</button></div>';
+  }).join('');
+  box.querySelectorAll('[data-call]').forEach(function (b) {
+    b.addEventListener('click', function (ev) { ev.stopPropagation(); fillKeypadNumber(b.getAttribute('data-call')); });
+  });
+  box.querySelectorAll('.mrow').forEach(function (row) {
+    row.addEventListener('click', function () { fillKeypadNumber(row.getAttribute('data-phone')); });
+  });
+}
+
+/* ---------- quiet hours (HighLevel: 9pm–8am, ON) ---------- */
+// The callee's market comes from the picked "Call from" number, else
+// the session market. Every market but Kansas City is Eastern.
+var MARKET_TZ = { kansascity: 'America/Chicago' };
+var QUIET_START_HOUR = 21; // 9pm
+var QUIET_END_HOUR = 8;    // 8am
+function marketTimeZone(market) {
+  return MARKET_TZ[(market || '').toLowerCase()] || 'America/New_York';
+}
+function manualCallMarket() {
+  var fromSel = document.getElementById('manualFrom');
+  var from = fromSel ? fromSel.value : '';
+  if (from && manualNumbers && Array.isArray(manualNumbers.flat)) {
+    var hit = manualNumbers.flat.find(function (n) { return n.number === from; });
+    if (hit && hit.market) return hit.market;
+  }
+  var ms = document.getElementById('marketSel');
+  if (ms && ms.value) return ms.value;
+  return 'carolina';
+}
+function calleeLocalParts(market) {
+  try {
+    var parts = new Intl.DateTimeFormat('en-US', { timeZone: marketTimeZone(market), hour: 'numeric', minute: '2-digit', hour12: true }).formatToParts(new Date());
+    var hour = null, period = '', text = '';
+    parts.forEach(function (p) {
+      if (p.type === 'hour') hour = parseInt(p.value, 10);
+      if (p.type === 'dayPeriod') period = p.value;
+      text += p.value;
+    });
+    if (hour === null) return { hour24: null, text: '' };
+    var h24 = hour % 12;
+    if (period === 'PM') h24 += 12;
+    return { hour24: h24, text: text };
+  } catch (e) { return { hour24: null, text: '' }; }
+}
+var __qhResolve = null;
+function quietHoursCheck(market, whoLabel) {
+  var local = calleeLocalParts(market);
+  if (local.hour24 === null) return Promise.resolve(true);
+  var quiet = local.hour24 >= QUIET_START_HOUR || local.hour24 < QUIET_END_HOUR;
+  if (!quiet) return Promise.resolve(true);
+  var modal = document.getElementById('qhModal');
+  var txt = document.getElementById('qhText');
+  var who = document.getElementById('qhWho');
+  if (!modal || !txt) return Promise.resolve(true);
+  txt.textContent = "It's around " + local.text + " for them. Quiet hours are 9pm to 8am — are you sure you want to call them?";
+  if (who) who.textContent = whoLabel || '';
+  modal.hidden = false;
+  return new Promise(function (resolve) { __qhResolve = resolve; });
+}
+function __qhAnswer(ok) {
+  var modal = document.getElementById('qhModal');
+  if (modal) modal.hidden = true;
+  if (__qhResolve) { var r = __qhResolve; __qhResolve = null; r(ok); }
+}
+
+/* ---------- post-call disposition (HighLevel's six) ---------- */
+var HL_DISPOSITIONS = ['No Answer', 'Voicemail', 'Follow Up', 'Requested Appointment', 'Not Interested', 'Incorrect Number'];
+var __manualDispPhone = null, __manualDispCallId = null;
+function showManualDispositions(phone, callId) {
+  var row = document.getElementById('manualDispRow');
+  if (!row) return;
+  __manualDispPhone = phone || null;
+  __manualDispCallId = callId || null;
+  row.innerHTML = '<span class="note" style="align-self:center">Outcome:</span>' + HL_DISPOSITIONS.map(function (d) {
+    return '<button class="btn small" type="button" data-disp="' + esc(d) + '">' + esc(d) + '</button>';
+  }).join('');
+  row.hidden = false;
+  row.querySelectorAll('[data-disp]').forEach(function (b) {
+    b.addEventListener('click', function () { fileManualDisposition(b.getAttribute('data-disp')); });
+  });
+}
+async function fileManualDisposition(disp) {
+  if (!__manualDispPhone) return;
+  try {
+    await manualCallApi('', { action: 'disposition', phone: __manualDispPhone, disposition: disp, callId: __manualDispCallId });
+    var row = document.getElementById('manualDispRow');
+    if (row) row.querySelectorAll('[data-disp]').forEach(function (b) {
+      b.classList.toggle('sel', b.getAttribute('data-disp') === disp);
+    });
+    toast('Outcome saved: ' + disp);
+  } catch (e) { toast('Could not save outcome: ' + (e && e.message ? e.message : e)); }
+}
+function hideManualDispositions() {
+  var row = document.getElementById('manualDispRow');
+  if (row) { row.hidden = true; row.innerHTML = ''; }
+  __manualDispPhone = null; __manualDispCallId = null;
 }
 
 /* ---------- manual dial (keypad + any number + call-from) ---------- */
@@ -851,7 +1170,7 @@ function renderManualFrom() {
   var opts = [];
   if (manualNumbers && Array.isArray(manualNumbers.flat) && manualNumbers.flat.length) {
     opts = manualNumbers.flat.map(function (n) {
-      return { value: n.number, label: fmtPhone(n.number) + (n.market ? ' · ' + (MARKET_LABELS[n.market] || n.market) : '') };
+      return { value: n.number, label: fmtPhone(n.number) + (n.market ? ' · ' + (MARKET_LABELS[n.market] || n.market) : '') + ' · Local' };
     });
   }
   // Rebuild only when the option set changes, so a re-render never
@@ -872,7 +1191,15 @@ function renderManualFrom() {
 async function ensureAudioForManualCall() {
   if (state.rtcClient && state.audioConnected) return state.rtcClient;
   await connectAudio();
-  if (!state.rtcClient) throw new Error('Audio could not connect — try Connect audio again.');
+  // Wait for SIP registration before dialing: an agent leg dialed to
+  // a not-yet-registered client never rings in. 20s cap, then fail
+  // loud instead of dialing deaf.
+  var waited = 0;
+  while (!state.audioConnected && state.rtcClient && waited < 20000) {
+    await new Promise(function (r) { setTimeout(r, 250); });
+    waited += 250;
+  }
+  if (!state.rtcClient || !state.audioConnected) throw new Error('Audio did not finish registering with Telnyx in 20s — tap Connect audio again.');
   return state.rtcClient;
 }
 function stopManualCallPolling() {
@@ -881,9 +1208,13 @@ function stopManualCallPolling() {
 function finishManualCallUI(statusText) {
   __stopRingback();
   stopManualCallPolling();
+  var endedPhone = (document.getElementById('manualNumber').value || '').trim() || null;
+  var endedCallId = manualCall.callId || null;
+  var rang = !!manualCall.rang;
   manualCall.active = false;
   manualCall.pending = false;
   manualCall.callId = null;
+  manualCall.rang = false;
   state.agentCall = null;
   state.inboundCallId = null;
   state.inboundPhone = null;
@@ -892,11 +1223,17 @@ function finishManualCallUI(statusText) {
   btn.textContent = '📞 Call';
   btn.disabled = false;
   setManualCallStatus(statusText || '');
+  // Post-call disposition (HighLevel's six) — only when the call
+  // actually rang, never for a dial that never started.
+  if (rang && endedPhone) showManualDispositions(endedPhone, endedCallId);
+  // A token refresh deferred past this call runs now.
+  if (state.audioRefreshPending) { state.audioRefreshPending = false; refreshDialerAudio(); }
 }
 /* ---------- ringback tone (US: 440 + 480 Hz, 2s on / 4s off) ---------- */
-/* The two call legs only join once the other end is a confirmed human,
-   so nothing from the network reaches the browser while the phone
-   rings — the page plays the ringing sound itself, like a handset. */
+/* The two call legs join the moment the other end answers (bridge on
+   call.answered — AMD is only a label), so nothing from the network
+   reaches the browser while the phone rings — the page plays the
+   ringing sound itself, like a handset. */
 var __ringCtx = null, __ringNodes = null, __ringTimer = null;
 function __startRingback() {
   try {
@@ -940,19 +1277,24 @@ function __stopRingback() {
 }
 function pollManualCallStatus() {
   stopManualCallPolling();
+  // 1s while setting up so the local ringback stops the moment the
+  // seller picks up (the tone in the room can push a silent answer to
+  // an AMD 'machine' — see conversations.html pollCallStatus).
   manualCall.timer = setInterval(async function () {
     if (!manualCall.callId) { stopManualCallPolling(); return; }
     try {
       var data = await manualCallApi('?action=status&callId=' + encodeURIComponent(manualCall.callId));
       var st = data.status || '';
-      if (st === 'bridged') { __stopRingback(); setManualCallStatus('Connected'); }
+      if (st === 'ringing' || st === 'answered' || st === 'bridged' || st === 'machine') manualCall.rang = true;
+      if (st === 'bridged') { __stopRingback(); setManualCallStatus(data.amdResult === 'machine' ? 'Connected — possible voicemail' : 'Connected'); }
+      else if (st === 'answered') { __stopRingback(); setManualCallStatus('Answered…'); }
       else if (st === 'machine') { finishManualCallUI('Machine answered'); toast('A machine answered — call ended.'); }
       else if (st === 'ended') { finishManualCallUI('Ended'); }
       else { setManualCallStatus(st === 'ringing' ? 'Ringing…' : 'Calling…'); __startRingback(); }
     } catch (e) {
       finishManualCallUI('Ended');
     }
-  }, 3000);
+  }, 1000);
 }
 async function endManualCall() {
   var id = manualCall.callId;
@@ -965,6 +1307,11 @@ async function onManualCallClick() {
   if (manualCall.active) { await endManualCall(); return; }
   var phone = document.getElementById('manualNumber').value.trim();
   if (!phone) { toast('Enter a number to call.'); return; }
+  // Quiet hours (HighLevel: 9pm–8am, ON) — same warning as the
+  // Conversations page. Cancel leaves the number and dials nothing.
+  var qhOk = await quietHoursCheck(manualCallMarket(), fmtPhone(phone) || phone);
+  if (!qhOk) return;
+  hideManualDispositions();
   var fromSel = document.getElementById('manualFrom');
   var from = (fromSel && !fromSel.classList.contains('hidden')) ? fromSel.value : null;
   var btn = document.getElementById('manualCallBtn');
@@ -977,11 +1324,14 @@ async function onManualCallClick() {
     // `active` is still false — without this the page would mistake
     // its own manual dial for an inbound call and show the banner.
     manualCall.pending = true;
-    var body = { action: 'start', phone: phone };
+    var body = { action: 'start', phone: phone, market: manualCallMarket() };
     if (from) body.from = from;
+    // Ring THIS tab's client (see conversations.html startCall).
+    if (state.agentSipUri) body.agentSipUri = state.agentSipUri;
     var data = await manualCallApi('', body);
     manualCall.callId = data.callId;
     manualCall.active = true;
+    manualCall.rang = false;
     btn.disabled = false;
     btn.textContent = 'End call';
     setManualCallStatus('Calling…');
@@ -1075,6 +1425,20 @@ function init() {
     var b = ev.target.closest ? ev.target.closest('[data-key]') : null;
     if (b) manualKeypadPress(b.getAttribute('data-key'));
   });
+  // Manual-dial tabs (HighLevel dialer).
+  document.querySelectorAll('[data-mtab]').forEach(function (b) {
+    b.addEventListener('click', function () { switchMtab(b.getAttribute('data-mtab')); });
+  });
+  document.getElementById('recentsSearch').addEventListener('input', renderRecents);
+  document.getElementById('contactsSearch').addEventListener('input', renderDialerContacts);
+  document.querySelectorAll('[data-vm]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      document.querySelectorAll('[data-vm]').forEach(function (x) { x.classList.toggle('active', x === b); });
+    });
+  });
+  document.getElementById('qhCancelBtn').addEventListener('click', function () { __qhAnswer(false); });
+  document.getElementById('qhAnywayBtn').addEventListener('click', function () { __qhAnswer(true); });
+  document.getElementById('qhModal').addEventListener('click', function (ev) { if (ev.target === this) __qhAnswer(false); });
   loadManualNumbers();
   document.getElementById('startBtn').addEventListener('click', startSession);
   document.getElementById('pauseBtn').addEventListener('click', pauseSession);

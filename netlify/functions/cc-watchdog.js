@@ -17,6 +17,20 @@
 //                    * CAP: the flags array is held at 200 entries —
 //                      oldest 'resolved'/'dismissed' drop first, then
 //                      oldest 'open'.
+//                    * STUCK CALL (Nov 25, 2026): a pairing in the
+//                      'cc-dialer' store (key 'thread-calls') stuck
+//                      unbridged (status 'dialing', 'ringing' or
+//                      'answered') past stuckCallSeconds (default
+//                      60) — seller leg live, bridge never formed —
+//                      raises an 'open' flag of type 'stuck-call'
+//                      carrying lastEvent/lastError/agentAnswered/
+//                      sellerHuman, so the next debug round starts from
+//                      the pairing's own diagnostics. Auto-resolves
+//                      when the pairing later shows 'bridged'/'ended'.
+//                      Read-only alerting: this pass never touches a
+//                      call. A dead/missing dialer store skips this
+//                      pass (best-effort) and never breaks the
+//                      unanswered-inbound scan.
 //   listFlags()  — all flags, open first then newest flaggedAt first.
 //   dismissFlag()— mark one flag 'dismissed'.
 //
@@ -43,12 +57,16 @@ const NOTIF_STORE = 'cc-notifications';
 const FLAGS_KEY = 'flags';
 const MAX_FLAGS = 200;
 const DEFAULT_THRESHOLD_MINUTES = 30;
+const DIALER_STORE = 'cc-dialer';
+const PAIRINGS_KEY = 'thread-calls';
+const DEFAULT_STUCK_CALL_SECONDS = 60;
 
 // ---- injectable stores (tests) ----
 const deps = {
   convStoreFactory: null,
   enrollStoreFactory: null,
   notifStoreFactory: null,
+  dialerStoreFactory: null,
 };
 
 function makeStore(name, factory, event) {
@@ -67,6 +85,9 @@ function enrollStore(event) {
 }
 function notifStore(event) {
   return makeStore(NOTIF_STORE, deps.notifStoreFactory, event);
+}
+function dialerStore(event) {
+  return makeStore(DIALER_STORE, deps.dialerStoreFactory, event);
 }
 
 // Strict read: store errors PROPAGATE (a dead conversations store must
@@ -191,6 +212,15 @@ async function scan(opts, event) {
   } catch (e) {
     es = null; // enrollment suppression is best-effort ("when available")
   }
+  const stuckCallSeconds =
+    typeof o.stuckCallSeconds === 'number' ? o.stuckCallSeconds : DEFAULT_STUCK_CALL_SECONDS;
+  let ds = null;
+  try {
+    ds = dialerStore(event);
+  } catch (e) {
+    ds = null; // stuck-call pass is best-effort; a dead dialer store
+    // must never break the unanswered-inbound scan.
+  }
 
   const threads = await loadThreads(cs);
   const byKey = new Map();
@@ -246,6 +276,77 @@ async function scan(opts, event) {
       status: 'open',
     });
     flagged += 1;
+  }
+
+  // ---- stuck calls (Nov 25, 2026 call-audio deadlock guard) ----
+  // A pairing stuck in 'dialing' past the threshold means the seller
+  // leg is live but the bridge never formed — the exact failure Troy
+  // hit: ringback played forever and the seller was unheard, and
+  // nothing surfaced it. Flag it with the pairing's own diagnostics
+  // so the next debug round starts from lastEvent/lastError instead
+  // of a blank "it doesn't work". Read-only alerting: this pass never
+  // touches a call, it only writes flags. Counts fold into the same
+  // flagged/resolved/open summary as the inbound pass, so the scan
+  // return shape is unchanged.
+  if (ds) {
+    const pairingsRec = await readJsonSafe(ds, PAIRINGS_KEY);
+    const calls =
+      pairingsRec && typeof pairingsRec.calls === 'object' ? pairingsRec.calls : {};
+    // Auto-resolve: a stuck-call flag whose pairing has since bridged
+    // or ended is done — the call got through (or was hung up).
+    for (const f of flags) {
+      if (f.status !== 'open' || f.type !== 'stuck-call') continue;
+      const rec = calls[f.callId];
+      if (!rec) continue; // pairing record gone — leave the flag for a human
+      if (rec.status === 'bridged' || rec.status === 'ended') {
+        f.status = 'resolved';
+        f.resolvedAt = now;
+        resolved += 1;
+      }
+    }
+    for (const [callId, rec] of Object.entries(calls)) {
+      // Stuck = unbridged past the threshold. 'dialing' (never rang),
+      // 'ringing' (rang, never answered) and 'answered' (seller picked
+      // up, AMD pending or machine-verdict-but-unbridged — Nov 26,
+      // 2026: the 'answered' state is new, and a bridge that never
+      // forms there is the same deadlock with a different label).
+      if (!rec || !['dialing', 'ringing', 'answered'].includes(rec.status)) continue;
+      if (typeof rec.startedAt !== 'number') continue; // cannot age it — no guess
+      const ageSeconds = Math.floor((now - rec.startedAt) / 1000);
+      if (ageSeconds <= stuckCallSeconds) continue;
+      if (flags.some((f) => f.type === 'stuck-call' && f.callId === callId && f.status === 'open')) {
+        continue;
+      }
+      const thread = rec.key ? byKey.get(rec.key) : null;
+      const detail = [
+        rec.lastEvent ? 'last event: ' + rec.lastEvent : 'no webhook event recorded',
+        rec.lastError ? 'error: ' + rec.lastError : null,
+        'agent answered: ' + (rec.agentAnswered ? 'yes' : 'no'),
+        'seller human: ' + (rec.sellerHuman ? 'yes' : 'no'),
+        rec.amdResult ? 'AMD: ' + rec.amdResult : null,
+      ]
+        .filter(Boolean)
+        .join('; ');
+      flags.push({
+        id: crypto.randomUUID(),
+        type: 'stuck-call',
+        key: rec.key || '',
+        phone: rec.phone || (thread && thread.phone) || '',
+        name: (thread && thread.name) || '',
+        market: (thread && thread.market) || '',
+        callId,
+        startedAt: rec.startedAt,
+        ageSeconds,
+        lastEvent: rec.lastEvent || '',
+        lastError: rec.lastError || '',
+        agentAnswered: rec.agentAnswered === true,
+        sellerHuman: rec.sellerHuman === true,
+        preview: ('Call stuck unbridged ' + ageSeconds + 's — ' + detail).slice(0, 200),
+        flaggedAt: now,
+        status: 'open',
+      });
+      flagged += 1;
+    }
   }
 
   flags = capFlags(flags);
@@ -323,10 +424,13 @@ exports._test = {
       stores && stores.enrollments ? () => stores.enrollments : null;
     deps.notifStoreFactory =
       stores && stores.notifications ? () => stores.notifications : null;
+    deps.dialerStoreFactory =
+      stores && stores.dialer ? () => stores.dialer : null;
   },
   reset() {
     deps.convStoreFactory = null;
     deps.enrollStoreFactory = null;
     deps.notifStoreFactory = null;
+    deps.dialerStoreFactory = null;
   },
 };

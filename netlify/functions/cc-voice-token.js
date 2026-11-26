@@ -47,6 +47,28 @@ const ccAuth = require('./cc-auth');
 const DIALER_STORE = 'cc-dialer';
 const CREDENTIAL_KEY = 'voice-credential';
 const CREDENTIAL_KEY_IRISH = 'voice-credential-irish';
+// One telephony credential per browser surface (Nov 26, 2026 — the
+// dialer worked and Conversations did not because BOTH pages shared
+// the single 'voice-credential': two live WebRTC clients on one
+// credential fight over the one SIP registration, and the server
+// rings whichever client logged in last. Each page gets its own
+// credential (own sip_username -> own SIP URI), so an agent leg dialed
+// to the Conversations URI can only ring the Conversations tab.
+const CREDENTIAL_KEY_CONVERSATIONS = 'voice-credential-conversations';
+const CREDENTIAL_KEY_DIALER = 'voice-credential-dialer';
+const VOICE_CLIENTS = ['admin', 'conversations', 'dialer'];
+function credentialKeyFor(who) {
+  if (who === 'irish') return CREDENTIAL_KEY_IRISH;
+  if (who === 'conversations') return CREDENTIAL_KEY_CONVERSATIONS;
+  if (who === 'dialer') return CREDENTIAL_KEY_DIALER;
+  return CREDENTIAL_KEY;
+}
+function credentialNameFor(who) {
+  if (who === 'irish') return CREDENTIAL_NAME + '-irish';
+  if (who === 'conversations') return CREDENTIAL_NAME + '-conversations';
+  if (who === 'dialer') return CREDENTIAL_NAME + '-dialer';
+  return CREDENTIAL_NAME;
+}
 const SIP_CONNECTION_KEY = 'voice-sip-connection';
 // NOTE: this name MUST differ from the Call Control application
 // 'Command Center Voice' — Telnyx requires unique connection names
@@ -281,8 +303,8 @@ async function getOrCreateSipConnection(event, cfg) {
 
 async function getOrCreateCredential(event, cfg, who) {
   const s = dialerStore(event);
-  const key = who === 'irish' ? CREDENTIAL_KEY_IRISH : CREDENTIAL_KEY;
-  const name = who === 'irish' ? CREDENTIAL_NAME + '-irish' : CREDENTIAL_NAME;
+  const key = credentialKeyFor(who);
+  const name = credentialNameFor(who);
   const sipConn = await getOrCreateSipConnection(event, cfg);
   const cached = await readJson(s, key);
   // A cached credential is only reusable when it belongs to the same
@@ -348,13 +370,30 @@ exports.handler = async (event) => {
         error: 'Telnyx voice is not configured — missing env: ' + cfg.missing.join(', ') + '.',
       });
     }
-    // One telephony credential per agent: the admin and Irish must not
-    // share one (a second registration overwrites the first).
-    const who = isAdmin(event) ? 'admin' : 'irish';
+    // One telephony credential per agent AND per browser surface: the
+    // admin and Irish must not share one (a second registration
+    // overwrites the first), and neither may the Conversations tab and
+    // the Dialer tab (same fight, same symptom — the leg rings the
+    // wrong tab). The page asks for its surface with ?client=
+    // (conversations | dialer); anything else falls back to the shared
+    // 'admin' credential, which is what the dialer used before.
+    let who = 'admin';
+    if (isAdmin(event)) {
+      const params = event.queryStringParameters || {};
+      let bodyClient = '';
+      if (event.body) {
+        try { bodyClient = (JSON.parse(event.body).client || ''); } catch (e) { bodyClient = ''; }
+      }
+      const asked = String(params.client || bodyClient || 'admin').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 32);
+      who = VOICE_CLIENTS.includes(asked) ? asked : 'admin';
+    } else {
+      who = 'irish';
+    }
     const cred = await getOrCreateCredential(event, cfg, who);
     const token = await mintToken(cred, cfg);
     return json(200, {
       configured: true,
+      client: who,
       token,
       sipUri: cred.sipUri,
       username: cred.username,
@@ -378,4 +417,7 @@ exports._test = {
   },
   getOrCreateCredential,
   mintToken,
+  credentialKeyFor,
+  credentialNameFor,
+  VOICE_CLIENTS,
 };
