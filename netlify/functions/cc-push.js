@@ -157,6 +157,33 @@ function buildAppointmentPayload(input) {
     at: r.at || Date.now(),
   };
 }
+// Inbound call (Nov 26, 2026): a seller dialed one of our numbers. This
+// is a WAKE-UP notification, not a ring — a mobile browser has no
+// PushKit/CallKit, so the push cannot ring the phone by itself. Its job
+// is to get Troy to tap: the tap opens/focuses Conversations at the
+// ?inbound=<callControlId> deep link, the page (re)connects, and the
+// re-dial flow rings the now-live client. High urgency + short TTL
+// (~120s): a call that is still unanswered after two minutes is a
+// missed call, and a stale "incoming call" banner is worse than none.
+// tag is unique per call (never collapses): two inbound calls must
+// never replace each other.
+function buildInboundCallPayload(input) {
+  const r = input || {};
+  const callId = String(r.callId || r.key || '');
+  const name = String(r.name || '').trim();
+  const who = name || formatPhone(r.phone) || 'A seller';
+  return {
+    title: 'Incoming call — ' + who,
+    body: who + ' is calling your business line. Tap to answer.',
+    icon: ICON,
+    badge: ICON,
+    tag: 'cc-inbound-' + (callId || phoneKey(r.phone) + '-' + (r.at || Date.now())),
+    url: '/conversations.html' + (callId ? '?inbound=' + encodeURIComponent(callId) : ''),
+    type: 'incoming-call',
+    callId,
+    at: r.at || Date.now(),
+  };
+}
 
 // ---- subscriptions ----
 function validSubscription(sub) {
@@ -231,7 +258,7 @@ function withTimeout(promise, ms) {
   ]).finally(() => { if (timer) clearTimeout(timer); });
 }
 
-async function sendToAll(payload, event) {
+async function sendToAll(payload, event, opts) {
   const result = { sent: 0, failed: 0, pruned: 0, total: 0 };
   try {
     const vapid = vapidDetails();
@@ -249,9 +276,14 @@ async function sendToAll(payload, event) {
       result.error = String((e && e.message) || e);
       return result;
     }
+    const o = opts && typeof opts === 'object' ? opts : {};
+    // Per-send delivery: a seller reply may sit 24h; an inbound call is
+    // stale after ~2 minutes. Defaults preserve the old behavior.
+    const ttl = typeof o.ttl === 'number' && o.ttl > 0 ? Math.floor(o.ttl) : PUSH_TTL_SECONDS;
+    const urgency = o.urgency === 'high' || o.urgency === 'low' ? o.urgency : 'normal';
     const body = JSON.stringify(payload);
     const sends = subs.map((sub) =>
-      wp.sendNotification(sub, body, { TTL: PUSH_TTL_SECONDS, urgency: 'normal' })
+      wp.sendNotification(sub, body, { TTL: ttl, urgency })
         .then(() => ({ ok: true, sub }))
         .catch((err) => ({ ok: false, sub, statusCode: err && err.statusCode }))
     );
@@ -292,11 +324,18 @@ async function notifyReply(input, event) {
 async function notifyAppointment(input, event) {
   return sendToAll(buildAppointmentPayload(input), event);
 }
+// Inbound call wake-up: high urgency, ~120s TTL (see
+// buildInboundCallPayload). Fail-soft like the other notifiers —
+// sendToAll never throws and never blocks past ~3s.
+async function notifyInboundCall(input, event) {
+  return sendToAll(buildInboundCallPayload(input), event, { ttl: 120, urgency: 'high' });
+}
 
 module.exports = {
   STORE_NAME,
   buildReplyPayload,
   buildAppointmentPayload,
+  buildInboundCallPayload,
   getPublicKey,
   vapidDetails,
   validSubscription,
@@ -306,6 +345,7 @@ module.exports = {
   sendToAll,
   notifyReply,
   notifyAppointment,
+  notifyInboundCall,
   formatPhone,
   formatWhen,
 };

@@ -105,11 +105,23 @@ function pickVoiceSender(market, poolOverride) {
 
 // ---- call actions ----
 // createCall({to, from, market?, amd?, record?, clientState?, fetchImpl?,
-//             apiKey?, appId?}) -> {callControlId, callLegId,
+//             apiKey?, appId?, timeoutSecs?}) -> {callControlId, callLegId,
 //             callSessionId, raw}
-// AMD: answering_machine_detection 'detect' — the result arrives as a
-// call.machine.detection.ended webhook ('machine' | 'human' |
-// 'not_sure'). Recording starts at answer ('record-from-answer').
+// AMD: answering_machine_detection 'premium' (Nov 26, 2026 —
+// Telnyx research: standard 'detect' classifies on greeting length /
+// silence thresholds (~3.5s), so a live human who answers and waits
+// silently is scored 'machine'; premium uses speech-recognition + ML
+// and is materially more accurate. The verdict arrives as a
+// call.machine.premium.detection.ended webhook ('human_residence' |
+// 'human_business' | 'machine' | 'silence' | 'fax_detected' |
+// 'not_sure'; 'not_sure' is treated as human per Telnyx). AMD is a
+// PARALLEL label only — the bridge never waits on it (see
+// telnyx-voice-webhook.js). timeout_secs 30: the seller's phone rings
+// a full 30s before Telnyx times the leg out (GHL's floor is 20s).
+// Recording starts at answer ('record-from-answer').
+// timeoutSecs overrides the ring budget when a caller passes it (the
+// inbound PSTN fallback leg uses 20 so a carrier voicemail that picks
+// up late cannot swallow the seller).
 async function createCall(opts) {
   const o = opts || {};
   const cfg = requireConfig();
@@ -120,7 +132,8 @@ async function createCall(opts) {
     connection_id: appId,
     to,
     from,
-    answering_machine_detection: o.amd === false ? 'disabled' : 'detect',
+    answering_machine_detection: o.amd === false ? 'disabled' : 'premium',
+    timeout_secs: typeof o.timeoutSecs === 'number' && o.timeoutSecs > 0 ? Math.floor(o.timeoutSecs) : 30,
     record: o.record === false ? undefined : 'record-from-answer',
     recording_channels: 'single',
     client_state: encodeClientState(o.clientState || {}),
@@ -143,6 +156,11 @@ async function createCall(opts) {
 // The agent leg: rings the agent's registered WebRTC client (TelnyxRTC
 // SDK) at its SIP URI. When the agent answers, the webhook bridges it
 // to the winning seller leg.
+// timeoutSecs / commandId (Nov 26, 2026, inbound fix): an inbound agent
+// leg rings 20s (the caller's ~20s patience budget, not Telnyx's 30s
+// default) and carries a unique command_id per dial so a re-dial is a
+// distinct leg Telnyx can correlate — never reuse a command_id across
+// dials of the same call.
 async function createAgentLeg(opts) {
   const o = opts || {};
   const cfg = requireConfig();
@@ -154,6 +172,8 @@ async function createAgentLeg(opts) {
     from,
     client_state: encodeClientState(o.clientState || {}),
   };
+  if (typeof o.timeoutSecs === 'number' && o.timeoutSecs > 0) body.timeout_secs = Math.floor(o.timeoutSecs);
+  if (o.commandId) body.command_id = String(o.commandId);
   const wu = webhookUrl();
   if (wu) body.webhook_url = wu;
   const data = await apiCall('/calls', { body, fetchImpl: o.fetchImpl, apiKey: o.apiKey });
@@ -183,6 +203,14 @@ async function hangup(callControlId, opts) {
   return { hungUp: true, callControlId };
 }
 
+// Answer an inbound leg (the caller dialed one of our numbers). The
+// webhook answers the inbound leg once the agent leg has answered,
+// then bridges the two.
+async function answer(callControlId, opts) {
+  await callAction(callControlId, 'answer', {}, opts);
+  return { answered: true, callControlId };
+}
+
 // Bridge the winning seller leg to the answered agent leg. Per Telnyx,
 // the bridge action is issued on ONE leg with the other leg's
 // call_control_id in the body.
@@ -209,6 +237,7 @@ module.exports = {
   createCall,
   createAgentLeg,
   hangup,
+  answer,
   bridge,
   startRecording,
 };
