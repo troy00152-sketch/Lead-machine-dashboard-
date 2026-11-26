@@ -193,7 +193,10 @@ function renderFirstTextFrom(workflow, path, contact) {
     address1: c.address1 || c.address || '',
     city: c.city || '',
   };
-  return String(tpl).replace(/\{\{(first_name|address1|city)\}\}/g, (m, k) => String(vals[k] || ''));
+  const body = String(tpl).replace(/\{\{(first_name|address1|city)\}\}/g, (m, k) => String(vals[k] || ''));
+  // A2P opt-out line on EVERY first text (Troy, Nov 25: "put reply out").
+  // OUT is a recognized opt-out keyword in cc-bot-hook (seals the enrollment).
+  return /opt out/i.test(body) ? body : body + ' Reply OUT to opt out.';
 }
 
 // ---- persistence ----
