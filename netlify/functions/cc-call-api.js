@@ -4,8 +4,10 @@
 // is placed via Telnyx Call Control with answering-machine detection;
 // the agent leg rings the agent's registered WebRTC client (the same
 // telephony credential cc-voice-token.js created) and
-// telnyx-voice-webhook.js bridges the two legs once the seller is a
-// confirmed human AND the agent has answered.
+// telnyx-voice-webhook.js bridges the two legs once the seller answers
+// AND the agent has answered (AMD is a parallel 'possible voicemail'
+// label, never a bridge gate — Nov 26, 2026, Telnyx research: bridge
+// on call.answered).
 //
 // Pairings live in the 'cc-dialer' Blobs store under 'thread-calls':
 //   {calls: {<sellerCallControlId>: {key, phone, sellerLeg, agentLeg,
@@ -35,6 +37,19 @@ const CONV_STORE = 'cc-conversations';
 const THREAD_CALLS_KEY = 'thread-calls';
 const CREDENTIAL_KEY = 'voice-credential';
 const SIP_DOMAIN = 'sip.telnyx.com';
+
+// ---- call history + dispositions (GoHighLevel shape, Nov 26, 2026) ----
+// Finished thread calls land in the conversation thread as a call
+// entry ("Call completed" / "Missed call" / "Voicemail") with a
+// Details dialog — exactly what HighLevel renders for past calls.
+// No duration, no recording, no transcript (HL shows none either).
+// Post-call dispositions are HighLevel's six custom dispositions
+// (created 2026-10-28): "Voicemail" is a post-call outcome label,
+// not a drop action — there is no voicemail-drop button anywhere.
+const HL_DISPOSITIONS = ['No Answer', 'Voicemail', 'Follow Up', 'Requested Appointment', 'Not Interested', 'Incorrect Number'];
+const DISPOSITIONS_KEY = 'call-dispositions';
+const THREAD_INDEX_KEY = 'index';
+const MAX_THREAD_MESSAGES = 500;
 
 // ---- injectable dependencies (tests) ----
 const deps = {
@@ -148,6 +163,44 @@ async function agentSipUri(event) {
   return null;
 }
 
+// Usernames of every voice credential we have minted (one per browser
+// surface since Nov 26, 2026 — see cc-voice-token.js). A page-reported
+// agent SIP URI is trusted ONLY when its username is one of these:
+// the URI is how the server addresses that page's WebRTC client, and
+// an arbitrary SIP URI must never be dialable from here.
+const VOICE_CREDENTIAL_KEYS = [
+  'voice-credential',
+  'voice-credential-conversations',
+  'voice-credential-dialer',
+  'voice-credential-irish',
+];
+async function knownVoiceUsernames(event) {
+  const s = dialerStore(event);
+  const names = new Set();
+  for (const key of VOICE_CREDENTIAL_KEYS) {
+    try {
+      const cred = await readJson(s, key);
+      const u = cred && (cred.username || cred.user_name);
+      if (u) names.add(String(u));
+    } catch (e) { /* a missing record just is not a known username */ }
+  }
+  return names;
+}
+// Prefer the SIP URI the calling page reports (its own registered
+// client identity — the dialer session flow already works this way
+// via session.agentSipUri). Fall back to the stored default
+// credential's URI when the page sends none or an unknown one.
+async function resolveAgentSipUri(event, reported) {
+  if (reported && typeof reported === 'string') {
+    const m = /^sip:([A-Za-z0-9._-]+)@sip\.telnyx\.com$/i.exec(reported.trim());
+    if (m) {
+      const known = await knownVoiceUsernames(event);
+      if (known.has(m[1])) return 'sip:' + m[1] + '@' + SIP_DOMAIN;
+    }
+  }
+  return agentSipUri(event);
+}
+
 // ---- pairing records (shared with telnyx-voice-webhook.js) ----
 async function loadPairings(event) {
   try {
@@ -194,7 +247,15 @@ async function mergePending(event, sellerCallControlId, rec) {
   if (pending.agentAnswered) rec.agentAnswered = true;
   if (pending.sellerHuman) rec.sellerHuman = true;
   if (pending.sellerAnswered) rec.sellerAnswered = true;
+  // A stashed 'machine' verdict is a label only now (Nov 26, 2026:
+  // the bridge no longer waits on AMD) — it still lands so the page
+  // can show 'Connected — possible voicemail'.
+  if (pending.sellerMachine) rec.amdResult = 'machine';
   if (pending.agentLeg && !rec.agentLeg) rec.agentLeg = pending.agentLeg;
+  if (pending.agentLeg) {
+    rec.agentLegs = Array.from(new Set([...(rec.agentLegs || []), pending.agentLeg]));
+    if (!rec.agentLeg) rec.agentLeg = pending.agentLeg;
+  }
   // Inbound: the caller dialed us, so their answer IS the human
   // signal (same derivation as the webhook's call.answered branch).
   if (rec.direction === 'inbound' && pending.sellerAnswered) rec.sellerHuman = true;
@@ -208,11 +269,29 @@ function findByLeg(pairings, callControlId) {
     if (callId === callControlId || rec.sellerLeg === callControlId) {
       return { callId, rec, role: 'seller' };
     }
-    if (rec.agentLeg === callControlId) {
+    // Inbound rings every known credential at once (Nov 26, 2026) —
+    // the pairing can hold several agent legs; any of them is ours.
+    if (rec.agentLeg === callControlId || (Array.isArray(rec.agentLegs) && rec.agentLegs.includes(callControlId))) {
       return { callId, rec, role: 'agent' };
     }
   }
   return null;
+}
+
+// SIP URIs of every voice credential we have minted (one per browser
+// surface + Irish), for inbound ringing: an inbound call must ring
+// every surface that could be showing, first answer wins.
+async function voiceCredentialUris(event) {
+  const s = dialerStore(event);
+  const uris = [];
+  for (const key of VOICE_CREDENTIAL_KEYS) {
+    try {
+      const cred = await readJson(s, key);
+      if (cred && cred.sipUri) uris.push(String(cred.sipUri));
+      else if (cred && (cred.username || cred.user_name)) uris.push('sip:' + (cred.username || cred.user_name) + '@' + SIP_DOMAIN);
+    } catch (e) { /* a missing record just is not rung */ }
+  }
+  return Array.from(new Set(uris));
 }
 
 // ---- HTTP handler ----
@@ -238,7 +317,9 @@ exports.handler = async (event) => {
       if (!isVoiceConfigured(v)) {
         return json(503, { configured: false, error: 'voice not configured' });
       }
-      const sipUri = await agentSipUri(event);
+      // Ring the SIP URI of the page that placed the call (its own
+      // per-surface credential) — never a sibling tab's client.
+      const sipUri = await resolveAgentSipUri(event, body.agentSipUri);
       if (!sipUri) {
         return json(503, { configured: false, reason: 'agent voice credential not created yet' });
       }
@@ -305,8 +386,11 @@ exports.handler = async (event) => {
       pairings.calls[sellerCallControlId] = {
         key,
         phone: phoneE164,
+        from: ourNumber || null,
+        market: market || null,
         sellerLeg: sellerCallControlId,
         agentLeg: null,
+        agentSipUri: sipUri,
         status: 'dialing',
         agentAnswered: false,
         sellerHuman: false,
@@ -354,11 +438,16 @@ exports.handler = async (event) => {
         rec.updatedAt = Date.now();
         await savePairings(fresh, event);
         // If both bridge signals are already true, bridge now instead
-        // of waiting for another event that may never come.
-        if (rec.sellerHuman && rec.agentAnswered && rec.agentLeg) {
+        // of waiting for another event that may never come. Bridge on
+        // seller answer + agent answer (Nov 26, 2026 — AMD never
+        // gates the bridge; an AMD verdict also counts as proof the
+        // seller answered, see telnyx-voice-webhook.js).
+        if ((rec.sellerAnswered || rec.sellerHuman || rec.amdResult === 'machine') && rec.agentAnswered && rec.agentLeg) {
           try {
             await v.bridge(rec.sellerLeg, rec.agentLeg);
             rec.status = 'bridged';
+            rec.wasBridged = true;
+            rec.bridgedAt = rec.bridgedAt || Date.now();
           } catch (e) {
             rec.lastError = 'bridge-failed: ' + String((e && e.message) || e);
           }
@@ -376,15 +465,28 @@ exports.handler = async (event) => {
       const found = findByLeg(pairings, callId);
       const rec = found ? found.rec : pairings.calls[callId];
       if (!rec) return json(404, { error: 'unknown call' });
-      for (const legId of [rec.sellerLeg, rec.agentLeg]) {
-        if (!legId) continue;
+      const legs = Array.from(new Set([rec.sellerLeg, rec.agentLeg, ...(rec.agentLegs || [])].filter(Boolean)));
+      for (const legId of legs) {
         try {
           await v.hangup(legId);
         } catch (e) { /* leg may already be gone */ }
       }
+      // Capture the bridged flag BEFORE overwriting the status —
+      // the thread log uses it to tell a completed call from a miss.
+      if (rec.status === 'bridged') rec.wasBridged = true;
       rec.status = 'ended';
+      rec.endedAt = Date.now();
       rec.updatedAt = Date.now();
       await savePairings(pairings, event);
+      // Log the finished call into the thread (HL call-history
+      // shape). Fail-soft — thread logging never fails a hangup.
+      try {
+        if (!rec.loggedToThread) {
+          await logCallToThread(event, rec);
+          rec.loggedToThread = true;
+          await savePairings(pairings, event);
+        }
+      } catch (e) { /* already guarded inside logCallToThread */ }
       return ok({ ok: true });
     }
 
@@ -433,19 +535,146 @@ exports.handler = async (event) => {
       return ok(Object.assign({}, rec, { callId: found ? found.callId : callId }));
     }
 
+    if (action === 'recents') {
+      // Dialer Recents tab (HighLevel shape): every thread/manual
+      // call, newest first, with direction, outcome and the latest
+      // post-call disposition for the number.
+      const pairings = await loadPairings(event);
+      const disps = (await readJson(dialerStore(event), DISPOSITIONS_KEY)) || {};
+      const byPhone = (disps && disps.byPhone) || {};
+      const lib = telnyxLib();
+      const calls = Object.entries(pairings.calls || {}).map(([callId, r], i) => {
+        let pkey = '';
+        try { pkey = lib.phoneKey(r.phone); } catch (e) { pkey = ''; }
+        const wasBridged = !!(r.wasBridged || r.status === 'bridged' || (r.sellerAnswered && r.agentAnswered));
+        const callStatus = r.status === 'ended'
+          ? (wasBridged ? (r.amdResult === 'machine' ? 'voicemail' : 'completed') : 'missed')
+          : r.status;
+        const d = (pkey && byPhone[pkey]) || null;
+        return {
+          callId,
+          phone: r.phone || '',
+          direction: r.direction || 'outbound',
+          status: r.status || '',
+          callStatus,
+          startedAt: r.startedAt || 0,
+          endedAt: r.endedAt || null,
+          durationMs: r.bridgedAt && r.endedAt ? Math.max(0, r.endedAt - r.bridgedAt) : null,
+          disposition: d ? d.disposition : null,
+          dispositionAt: d ? d.at : null,
+          _seq: i,
+        };
+      });
+      // Newest first. startedAt ties (two calls in the same
+      // millisecond) break by creation order — later-created first —
+      // so the order is deterministic, never clock-luck.
+      calls.sort((a, b) => (b.startedAt - a.startedAt) || (b._seq - a._seq));
+      calls.forEach((c) => { delete c._seq; });
+      return ok({ calls: calls.slice(0, 50), count: calls.length });
+    }
+
+    if (action === 'disposition') {
+      // Post-call disposition — HighLevel's six custom dispositions
+      // only. Anything else is rejected (the triple-line session
+      // keeps its own nine labels; this is the thread/manual log).
+      const rawPhone = body.phone || params.phone;
+      const disp = body.disposition || params.disposition;
+      if (!rawPhone) return bad('Missing phone.');
+      if (!HL_DISPOSITIONS.includes(disp)) return bad('Unknown disposition.');
+      const lib = telnyxLib();
+      let key;
+      let phoneE164;
+      try {
+        key = lib.phoneKey(rawPhone);
+        phoneE164 = lib.toE164(rawPhone);
+      } catch (e) { return bad('Invalid phone number.'); }
+      const s = dialerStore(event);
+      const box = (await readJson(s, DISPOSITIONS_KEY)) || { byPhone: {}, list: [] };
+      const entry = { phone: phoneE164, disposition: disp, callId: body.callId || params.callId || null, at: Date.now() };
+      box.byPhone = box.byPhone || {};
+      box.byPhone[key] = entry;
+      box.list = box.list || [];
+      box.list.push(entry);
+      if (box.list.length > 200) box.list = box.list.slice(-200);
+      await writeJson(s, DISPOSITIONS_KEY, box);
+      return ok({ ok: true, disposition: disp });
+    }
+
     return bad('Unknown action.');
   } catch (e) {
     return json(503, { error: 'Call storage is not ready yet', detail: String((e && e.message) || e) });
   }
 };
 
+// ---- call history (GoHighLevel shape) ----
+// A finished thread call is written into the conversation thread as
+// a call entry, so the thread shows the grey "Call completed" /
+// "Missed call" / "Voicemail" bubble with a Details dialog. The
+// voice webhook calls this when a pairing ends; the page-initiated
+// 'hangup' action calls it too. Returns true when an entry was
+// written. Fail-soft throughout: a missing thread (manual dial to a
+// number with no conversation) simply skips the thread write — the
+// call still shows in Recents.
+function callHistoryLabel(status) {
+  if (status === 'voicemail') return 'Voicemail';
+  if (status === 'missed') return 'Missed call';
+  return 'Call completed';
+}
+async function logCallToThread(event, rec) {
+  try {
+    if (!rec || !rec.phone) return false;
+    const lib = telnyxLib();
+    const key = lib.phoneKey(rec.phone);
+    const s = convStore(event);
+    const thread = await readJson(s, key);
+    if (!thread || !Array.isArray(thread.messages)) return false;
+    const wasBridged = !!(rec.wasBridged || rec.status === 'bridged');
+    const answered = !!(rec.sellerAnswered && rec.agentAnswered);
+    let callStatus = 'missed';
+    if (wasBridged || answered) callStatus = rec.amdResult === 'machine' ? 'voicemail' : 'completed';
+    const durationMs = rec.bridgedAt && rec.endedAt ? Math.max(0, rec.endedAt - rec.bridgedAt) : null;
+    const dir = rec.direction === 'inbound' ? 'in' : 'out';
+    const label = callHistoryLabel(callStatus);
+    const entry = {
+      dir,
+      kind: 'call',
+      callStatus,
+      body: label,
+      at: Date.now(),
+      from: dir === 'in' ? (rec.phone || '') : (rec.from || ''),
+      to: dir === 'in' ? (rec.to || '') : (rec.phone || ''),
+      durationMs,
+    };
+    thread.messages.push(entry);
+    if (thread.messages.length > MAX_THREAD_MESSAGES) thread.messages = thread.messages.slice(-MAX_THREAD_MESSAGES);
+    thread.updatedAt = Date.now();
+    await writeJson(s, key, thread);
+    const idx = (await readJson(s, THREAD_INDEX_KEY)) || { updatedAt: 0, threads: {} };
+    idx.threads[key] = {
+      phone: thread.phone,
+      name: thread.name || '',
+      market: thread.market || '',
+      preview: label,
+      lastAt: entry.at,
+      lastDir: dir,
+      unread: thread.unread || 0,
+    };
+    idx.updatedAt = Date.now();
+    await writeJson(s, THREAD_INDEX_KEY, idx);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
 // Pairing surface shared with telnyx-voice-webhook.js (same
 // cross-require pattern as telnyx-webhook -> cc-bot-hook).
-exports._thread = { loadPairings, savePairings, findByLeg, loadPending, savePending, clearPending, mergePending };
+exports._thread = { loadPairings, savePairings, findByLeg, loadPending, savePending, clearPending, mergePending, logCallToThread, HL_DISPOSITIONS };
 
 // The voice webhook rings the agent's browser for inbound calls, so it
 // needs the same SIP URI derivation as the dialer start flow.
 exports.agentSipUri = agentSipUri;
+exports.voiceCredentialUris = voiceCredentialUris;
 
 // Test hooks (not part of the deployed surface).
 exports._test = {
@@ -466,5 +695,6 @@ exports._test = {
     deps.telnyxLib = null;
   },
   agentSipUri,
+  resolveAgentSipUri,
   isVoiceConfigured,
 };

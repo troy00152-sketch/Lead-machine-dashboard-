@@ -72,6 +72,29 @@ function legFor(session, callControlId) {
   return callControlId ? session.legs[callControlId] || null : null;
 }
 
+// AMD verdicts, normalized across standard + premium events (premium
+// is what createCall requests since Nov 26, 2026 — see
+// telnyx-voice-lib.js). Premium adds human_residence /
+// human_business (human), silence (nobody spoke in the analysis
+// window — the thread path bridges anyway and lets the agent decide;
+// the bulk dialer treats it as a machine), fax_detected (machine),
+// and greeting beeps (beep_detected = machine). 'not_sure' is treated
+// as human per Telnyx. Returns 'human' | 'machine' | null (unmapped).
+function amdVerdict(result) {
+  const r = String(result || '').toLowerCase();
+  if (r === 'human' || r === 'human_residence' || r === 'human_business' || r === 'not_sure') return 'human';
+  if (r === 'machine' || r === 'fax_detected' || r === 'silence' || r === 'beep_detected') return 'machine';
+  return null;
+}
+function isAmdEvent(type) {
+  return (
+    type === 'call.machine.detection.ended' ||
+    type === 'call.machine.greeting.ended' ||
+    type === 'call.machine.premium.detection.ended' ||
+    type === 'call.machine.premium.greeting.ended'
+  );
+}
+
 // Hang up every still-live seller leg except the winner. Legs that were
 // only ringing go back to 'pending' (never reached — redial later);
 // a leg that already answered as a human gets a 'Callback Later'
@@ -188,9 +211,11 @@ async function refillAndMaybeComplete(session, event) {
 // ---- thread calls (single-call placement from Conversations) ----
 // Pairings are owned by cc-call-api.js (exports._thread); client_state
 // kinds 'thread-call' (seller leg) / 'thread-call-agent' (agent leg)
-// route here. Bridge rule mirrors the dialer: bridge ONLY once the
-// seller is a confirmed human AND the agent has answered — whichever
-// of those two signals lands second triggers the bridge.
+// route here. Bridge rule (Nov 26, 2026, Telnyx docs): bridge the
+// moment the seller leg answers AND the agent has answered — whichever
+// of those two signals lands second triggers the bridge. AMD never
+// gates the bridge; its verdict is a parallel label ('possible
+// voicemail').
 // Inbound pairings (direction 'inbound', created by handleInboundCall
 // below): the caller dialed us, so their answer IS the human signal —
 // no AMD wait. The agent leg answers first, then we answer the
@@ -222,10 +247,13 @@ async function applyThreadCallEvent(evt, event, state) {
     if (type === 'call.answered') {
       if (isAgentLeg) { pending.agentAnswered = true; pending.agentLeg = callControlId; }
       else pending.sellerAnswered = true;
-    } else if (type === 'call.machine.detection.ended' || type === 'call.machine.greeting.ended') {
-      const result = String((payload && payload.result) || '').toLowerCase();
-      if (result === 'human' || result === 'not_sure') pending.sellerHuman = true;
-      else if (result === 'machine') pending.sellerMachine = true;
+    } else if (isAmdEvent(type)) {
+      // A stashed verdict is a label only now (the bridge no longer
+      // waits on AMD) — but keep the stash so the page's 'possible
+      // voicemail' tag still lands when the pairing appears.
+      const verdict = amdVerdict(payload && payload.result);
+      if (verdict === 'human') pending.sellerHuman = true;
+      else if (verdict === 'machine') pending.sellerMachine = true;
     }
     await callApi._thread.savePending(event, sellerId, pending);
     return { handled: true, pending: true };
@@ -240,16 +268,59 @@ async function applyThreadCallEvent(evt, event, state) {
   async function hangupBoth() {
     await hangupLeg(rec.sellerLeg, 'hangup thread seller leg');
     await hangupLeg(rec.agentLeg, 'hangup thread agent leg');
+    for (const legId of rec.agentLegs || []) await hangupLeg(legId, 'hangup thread agent leg');
+  }
+  // Bridge rule — the one-fix contract (Nov 26, 2026, corrected
+  // against Telnyx's own docs): bridge the moment the seller leg
+  // answers AND the agent has answered — whichever of those two
+  // signals lands second triggers the bridge. AMD NEVER gates the
+  // bridge: Telnyx AMD only reports, and while it analyses (seconds)
+  // an unbridged seller hears silence and hangs up while the agent
+  // hears ringback — Troy's exact "I answer, wait, nothing, call
+  // ended" failure. AMD verdicts arrive mid-conversation and only
+  // set the 'possible voicemail' label (amdResult). The bulk dialer
+  // session keeps its own human-win / auto-machine disposition.
+  // An AMD verdict is also accepted as a seller-answer signal: in
+  // Telnyx's event order call.answered always precedes the verdict,
+  // so a verdict proves the seller answered even if the answered
+  // webhook itself was lost — the bridge must not depend on a single
+  // event landing.
+  function canBridge() {
+    return !!(
+      rec.agentAnswered &&
+      rec.agentLeg &&
+      rec.sellerLeg &&
+      (rec.sellerAnswered || rec.sellerHuman || rec.amdResult === 'machine')
+    );
   }
   async function maybeBridge() {
-    if (rec.sellerHuman && rec.agentAnswered && rec.sellerLeg && rec.agentLeg) {
+    // Never bridge twice: the agent branch, the seller branch and
+    // the AMD branch can all fire maybeBridge for the same call, and
+    // a second bridge to Telnyx 422s (or worse). The first bridge
+    // sets status 'bridged'; everything after it is a no-op.
+    if (rec.status === 'bridged') return;
+    if (canBridge()) {
       const ok = await safeVoice(() => v.bridge(rec.sellerLeg, rec.agentLeg), 'bridge thread call');
       // Only report 'bridged' when Telnyx accepted the bridge. A
       // failed bridge used to be recorded as bridged anyway, so the
       // page stopped ringing while nobody could hear anybody.
-      if (ok !== null) rec.status = 'bridged';
-      else rec.lastError = 'bridge-failed';
+      // bridgedAt/wasBridged feed the thread call-history entry
+      // (duration + completed-vs-missed) written when the call ends.
+      if (ok !== null) {
+        rec.status = 'bridged';
+        rec.wasBridged = true;
+        rec.bridgedAt = rec.bridgedAt || Date.now();
+      } else rec.lastError = 'bridge-failed';
     }
+  }
+  // The leg that answered is the agent leg: claim it, and hang up any
+  // other agent legs (inbound rings every credential at once; the
+  // losers must not linger).
+  async function claimAgentLeg(legId) {
+    rec.agentLeg = legId;
+    const others = (rec.agentLegs || []).filter((id) => id && id !== legId);
+    rec.agentLegs = [legId];
+    for (const other of others) await hangupLeg(other, 'hangup losing agent leg');
   }
 
   // Merge any signal stashed before the pairing existed. If the merge
@@ -262,27 +333,37 @@ async function applyThreadCallEvent(evt, event, state) {
   if (rec.direction === 'inbound' && rec.agentAnswered && !rec.sellerAnswered) {
     await safeVoice(() => v.answer(rec.sellerLeg), 'answer inbound leg (pending merge)');
   }
-  if (rec.sellerHuman && rec.agentAnswered && rec.status !== 'bridged' && rec.status !== 'ended' && rec.status !== 'machine') {
+  if (canBridge() && rec.status !== 'bridged' && rec.status !== 'ended' && rec.status !== 'machine') {
     await maybeBridge();
   }
 
-  if (type === 'call.machine.detection.ended' || type === 'call.machine.greeting.ended') {
+  if (isAmdEvent(type)) {
     if (found.role !== 'seller') return { handled: false, reason: 'AMD event for non-seller leg' };
     // Inbound calls never run AMD (the caller dialed us) — ignore.
     if (rec.direction === 'inbound') return { handled: true, inboundAmdIgnored: true };
-    const result = String(payload.result || '').toLowerCase();
-    if (result === 'machine') {
-      await hangupBoth();
-      rec.status = 'machine';
-    } else if (result === 'human' || result === 'not_sure') {
+    // AMD is a label only on this path — the bridge already formed on
+    // call.answered. A 'machine' verdict (including a premium
+    // 'silence' / 'fax' — a live human waiting silently is the classic
+    // false positive) only tags the call 'possible voicemail'; the
+    // agent hears the greeting and ends the call himself if it really
+    // is a machine. (The bulk dialer session still auto-dispositions
+    // machines; this is the single-call path, where the agent is
+    // listening.)
+    const verdict = amdVerdict(payload.result);
+    if (verdict === 'machine') {
+      rec.amdResult = 'machine';
+      await maybeBridge();
+    } else if (verdict === 'human') {
       rec.sellerHuman = true;
       await maybeBridge();
     } else {
-      return { handled: false, reason: 'unmapped AMD result: ' + result };
+      return { handled: false, reason: 'unmapped AMD result: ' + String(payload.result || '') };
     }
   } else if (type === 'call.answered') {
     if (found.role === 'agent') {
       rec.agentAnswered = true;
+      // The answering leg is the agent leg (inbound rings several).
+      await claimAgentLeg(callControlId);
       // Inbound: the caller is still ringing — answer their leg now;
       // their call.answered lands next and the bridge forms then.
       if (rec.direction === 'inbound' && !rec.sellerAnswered) {
@@ -295,24 +376,57 @@ async function applyThreadCallEvent(evt, event, state) {
         // The caller dialed us — answer IS the human signal (no AMD).
         rec.sellerHuman = true;
         await maybeBridge();
+      } else if (rec.status === 'dialing' || rec.status === 'ringing') {
+        // Outbound: the seller picked up — tell the page at once so
+        // it stops its local ringback, and bridge NOW if the agent
+        // already answered (bridge on call.answered, never on AMD —
+        // see canBridge). If the agent hasn't answered yet, the agent
+        // branch's maybeBridge fires the moment they do.
+        rec.status = 'answered';
+        await maybeBridge();
       }
-      // Outbound: no bridge until the AMD verdict lands.
     }
   } else if (type === 'call.initiated') {
     // The other end is ringing — the page shows this + plays ringback.
     if (rec.status === 'dialing') rec.status = 'ringing';
   } else if (type === 'call.bridged') {
     rec.status = 'bridged';
+    rec.wasBridged = true;
+    rec.bridgedAt = rec.bridgedAt || Date.now();
   } else if (type === 'call.hangup') {
-    if (rec.status !== 'ended' && rec.status !== 'machine') {
-      rec.status = 'ended';
-      const other = found.role === 'seller' ? rec.agentLeg : rec.sellerLeg;
-      if (other && other !== callControlId) {
-        await hangupLeg(other, 'hangup other thread leg');
+    if (found.role === 'agent') {
+      // A losing agent leg hanging up (inbound rang several) is not
+      // the call ending — prune it and carry on. Only the ACTIVE leg
+      // hanging up ends the call (bridged: hang the seller; still
+      // setting up with no legs left: hang the seller too). If other
+      // agent legs are still ringing, the call can still connect
+      // through one of them.
+      const wasActive = rec.agentLeg === callControlId;
+      rec.agentLegs = (rec.agentLegs || []).filter((id) => id !== callControlId);
+      if (wasActive) rec.agentLeg = rec.agentLegs[0] || null;
+      if (wasActive && (rec.status === 'bridged' || !rec.agentLeg) && rec.status !== 'ended' && rec.status !== 'machine') {
+        if (rec.status === 'bridged') rec.wasBridged = true;
+        rec.status = 'ended';
+        rec.endedAt = Date.now();
+        if (rec.sellerLeg && rec.sellerLeg !== callControlId) await hangupLeg(rec.sellerLeg, 'hangup thread seller leg');
       }
+    } else if (rec.status !== 'ended' && rec.status !== 'machine') {
+      if (rec.status === 'bridged') rec.wasBridged = true;
+      rec.status = 'ended';
+      rec.endedAt = Date.now();
+      const others = Array.from(new Set([rec.agentLeg, ...(rec.agentLegs || [])].filter((id) => id && id !== callControlId)));
+      for (const other of others) await hangupLeg(other, 'hangup other thread leg');
     }
   }
   // Anything else: state stands.
+  // The call just ended: write the HighLevel-shaped call entry into
+  // the conversation thread ("Call completed" / "Missed call" /
+  // "Voicemail" + Details dialog). Once per pairing — the flag rides
+  // in the saved record, so a redelivered hangup never double-logs.
+  if (rec.status === 'ended' && !rec.loggedToThread) {
+    try { await callApi._thread.logCallToThread(event, rec); } catch (e) { /* thread logging never fails a webhook */ }
+    rec.loggedToThread = true;
+  }
   rec.lastEvent = type;
   rec.updatedAt = Date.now();
   await callApi._thread.savePairings(pairings, event);
@@ -328,25 +442,43 @@ async function handleInboundCall(evt, event) {
   const payload = (evt && evt.payload) || {};
   const callControlId = payload.call_control_id || null;
   if (!callControlId) return { handled: false, reason: 'inbound call without call_control_id' };
-  const sipUri = await callApi.agentSipUri(event);
-  if (!sipUri) return { handled: false, reason: 'no agent SIP URI — inbound call has nowhere to ring' };
+  // Ring EVERY known voice credential at once (Nov 26, 2026): the
+  // Conversations tab and the Dialer tab each hold their own
+  // credential now, and an inbound call must reach whichever tab Troy
+  // is looking at — first answer wins, the losers are hung up when
+  // the winner answers.
+  let uris = [];
+  try {
+    uris = await callApi.voiceCredentialUris(event);
+  } catch (e) { uris = []; }
+  if (!uris.length) {
+    const fallback = await callApi.agentSipUri(event);
+    if (fallback) uris = [fallback];
+  }
+  if (!uris.length) return { handled: false, reason: 'no agent SIP URI — inbound call has nowhere to ring' };
   const v = voiceLib();
-  const agent = await safeVoice(
-    () =>
-      v.createAgentLeg({
-        sipUri,
-        from: payload.to || undefined,
-        clientState: { kind: 'thread-call-agent', key: callControlId, sellerCallControlId: callControlId },
-      }),
-    'create agent leg for inbound call'
-  );
+  const agentLegs = [];
+  for (const sipUri of uris) {
+    const agent = await safeVoice(
+      () =>
+        v.createAgentLeg({
+          sipUri,
+          from: payload.to || undefined,
+          clientState: { kind: 'thread-call-agent', key: callControlId, sellerCallControlId: callControlId },
+        }),
+      'create agent leg for inbound call'
+    );
+    if (agent && agent.callControlId) agentLegs.push(agent.callControlId);
+  }
   const now = Date.now();
   const pairings = await callApi._thread.loadPairings(event);
   pairings.calls[callControlId] = {
     key: callControlId,
     phone: payload.from || '',
+    to: payload.to || null,
     sellerLeg: callControlId,
-    agentLeg: agent && agent.callControlId ? agent.callControlId : null,
+    agentLeg: agentLegs[0] || null,
+    agentLegs,
     status: 'ringing',
     direction: 'inbound',
     agentAnswered: false,
@@ -470,15 +602,18 @@ async function applyCallEvent(evt, event) {
     return { handled: true };
   }
 
-  if (type === 'call.machine.detection.ended' || type === 'call.machine.greeting.ended') {
+  if (isAmdEvent(type)) {
     if (leg.kind !== 'seller') return { handled: false, reason: 'AMD event for non-seller leg' };
     if (leg.state === 'ended') {
       // Stale verdict for a leg we already hung up (race loser) — the
       // state we wrote when it ended stands.
       return { handled: true, duplicate: true };
     }
-    const result = String(payload.result || '').toLowerCase();
-    if (result === 'machine') {
+    // Premium AMD (see telnyx-voice-lib.js): human_residence /
+    // human_business are human, 'not_sure' is human per Telnyx,
+    // silence/fax/beep are machine.
+    const verdict = amdVerdict(payload.result);
+    if (verdict === 'machine') {
       leg.amdResult = 'machine';
       leg.state = 'ended';
       leg.endedAt = Date.now();
@@ -496,7 +631,7 @@ async function applyCallEvent(evt, event) {
       const fresh = await refillAndMaybeComplete(session, event);
       return { handled: true, machine: true, session: fresh && fresh.status };
     }
-    if (result === 'human' || result === 'not_sure') {
+    if (verdict === 'human') {
       leg.amdResult = 'human';
       leg.state = 'answered-human';
       if (!session.winnerCallControlId) {
@@ -521,7 +656,7 @@ async function applyCallEvent(evt, event) {
       await engine.saveSession(session, event);
       return { handled: true, lateHuman: true };
     }
-    return { handled: false, reason: 'unmapped AMD result: ' + result };
+    return { handled: false, reason: 'unmapped AMD result: ' + String(payload.result || '') };
   }
 
   if (type === 'call.hangup') {
