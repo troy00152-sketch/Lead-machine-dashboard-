@@ -13,12 +13,14 @@
  *   populated from the network on first use.
  *
  * Bump CACHE_NAME on any strategy change: activate deletes every old cache.
- */
+ * v8 (Nov 26, 2026): inbound Answer fix — a deploy must never again be
+ * tested against a stale Conversations/Dialer page; bumping the cache
+ * name forces every client onto the new worker + fresh pages. */
 // Phone push handlers (Web Push v1) — push + notificationclick live
 // in sw-push.js so this file keeps only the caching strategy.
 importScripts('/sw-push.js');
 
-var CACHE_NAME = 'leadmachine-pwa-v7';
+var CACHE_NAME = 'leadmachine-pwa-v8';
 
 var PRECACHE_URLS = [
   '/manifest.webmanifest',

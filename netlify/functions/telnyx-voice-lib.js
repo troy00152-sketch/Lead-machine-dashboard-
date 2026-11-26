@@ -213,10 +213,18 @@ async function answer(callControlId, opts) {
 
 // Bridge the winning seller leg to the answered agent leg. Per Telnyx,
 // the bridge action is issued on ONE leg with the other leg's
-// call_control_id in the body.
+// call_control_id in the body (REST field name — this lib uses raw
+// fetch, NOT Telnyx's Node SDK, whose field is
+// call_control_id_to_bridge_with; do not mix them up).
+// opts.commandId (Nov 26, 2026, inbound sweep retry): a fresh id per
+// retry — Telnyx silently ignores a command that re-uses a command_id
+// for the same call_control_id, so a retry must never repeat one.
 async function bridge(callControlId, otherCallControlId, opts) {
   if (!otherCallControlId) throw new Error('otherCallControlId is required to bridge.');
-  await callAction(callControlId, 'bridge', { call_control_id: otherCallControlId }, opts);
+  const o = opts || {};
+  const body = { call_control_id: otherCallControlId };
+  if (o.commandId) body.command_id = String(o.commandId);
+  await callAction(callControlId, 'bridge', body, o);
   return { bridged: true, callControlId, otherCallControlId };
 }
 
