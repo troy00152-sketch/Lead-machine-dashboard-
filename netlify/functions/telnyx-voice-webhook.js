@@ -366,7 +366,13 @@ async function applyThreadCallEvent(evt, event, state) {
   // the bridge) can still land.
   await callApi._thread.mergePending(event, found.callId, rec);
   if (rec.direction === 'inbound' && rec.agentAnswered && !rec.sellerAnswered) {
-    await safeVoice(() => v.answer(rec.sellerLeg), 'answer inbound leg (pending merge)');
+    // A failed answer used to vanish inside safeVoice — the pairing
+    // sat 'ringing' with agentAnswered set and nothing ever retried
+    // it, so the caller rang forever. Record it: the watchdog's
+    // stuck-call flag surfaces lastError, and the inbound sweep
+    // retries a stalled answer (see cc-inbound-sweep.js case (c)).
+    const answered = await safeVoice(() => v.answer(rec.sellerLeg), 'answer inbound leg (pending merge)');
+    if (answered === null) rec.lastError = 'inbound-answer-failed';
   }
   if (canBridge() && rec.status !== 'bridged' && rec.status !== 'ended' && rec.status !== 'machine') {
     await maybeBridge();
@@ -395,7 +401,8 @@ async function applyThreadCallEvent(evt, event, state) {
         rec.fallbackAwaitingAmd = false;
         rec.agentAnswered = true;
         if (rec.direction === 'inbound' && !rec.sellerAnswered) {
-          await safeVoice(() => v.answer(rec.sellerLeg), 'answer inbound leg (fallback human)');
+          const answered = await safeVoice(() => v.answer(rec.sellerLeg), 'answer inbound leg (fallback human)');
+          if (answered === null) rec.lastError = 'inbound-answer-failed';
         }
         await maybeBridge();
       }
@@ -443,8 +450,12 @@ async function applyThreadCallEvent(evt, event, state) {
         rec.agentAnswered = true;
         // Inbound: the caller is still ringing — answer their leg now;
         // their call.answered lands next and the bridge forms then.
+        // Record a failed answer (see the pending-merge note above):
+        // a swallowed failure used to strand the caller on ringback
+        // with no retry and no flag.
         if (rec.direction === 'inbound' && !rec.sellerAnswered) {
-          await safeVoice(() => v.answer(rec.sellerLeg), 'answer inbound leg');
+          const answered = await safeVoice(() => v.answer(rec.sellerLeg), 'answer inbound leg');
+          if (answered === null) rec.lastError = 'inbound-answer-failed';
         }
         await maybeBridge();
       }
@@ -689,7 +700,8 @@ async function handleInboundCall(evt, event) {
   // normally does this never ran for a stashed event).
   await callApi._thread.mergePending(event, callControlId, rec);
   if (rec.agentAnswered && !rec.sellerAnswered) {
-    await safeVoice(() => v.answer(rec.sellerLeg), 'answer inbound leg (pending merge)');
+    const answered = await safeVoice(() => v.answer(rec.sellerLeg), 'answer inbound leg (pending merge)');
+    if (answered === null) rec.lastError = 'inbound-answer-failed';
   }
   rec.updatedAt = Date.now();
   await callApi._thread.savePairings(pairings, event);
