@@ -659,10 +659,22 @@ async function connectAudio() {
           if (audio.srcObject !== call.remoteStream) audio.srcObject = call.remoteStream;
           if (audio.paused) { try { var p = audio.play(); if (p && p.catch) p.catch(function () {}); } catch (e2) {} }
         }
-        if (note.type === 'callReceived') {
+        if (note.type === 'callUpdate' && call.state === 'ringing') {
+          // @telnyx/webrtc v2 incoming call: the SDK has NO 'callReceived'
+          // notification — the old gate never fired, so the agent leg was
+          // never answered and the bridge could never form (ringing
+          // forever, seller unheard — the Nov 25/26 live failure). v2
+          // reports the incoming call as {type:'callUpdate', call} with
+          // call.state === 'ringing' (Telnyx docs: "Receive an Inbound
+          // Call"); answer on that.
           state.agentCall = call;
           var audioEl = document.getElementById('remoteAudio');
           if (typeof call.answer === 'function') call.answer({ remoteElement: audioEl || 'remoteAudio' });
+        } else if (note.type === 'callReceived') {
+          // Legacy shape (v1 SDKs): same answer, kept as a fallback.
+          state.agentCall = call;
+          var audioElLegacy = document.getElementById('remoteAudio');
+          if (typeof call.answer === 'function') call.answer({ remoteElement: audioElLegacy || 'remoteAudio' });
         }
         if ((call.state === 'hangup' || call.state === 'destroy') && call === state.agentCall) state.agentCall = null;
       } catch (e) { /* best-effort */ }
