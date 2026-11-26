@@ -16,3 +16,16 @@
 
 [functions."gmail-token-watch"]
   schedule = "0 14 * * *"
+
+# Inbound-call sweep backstop (Nov 26, 2026): every minute it checks
+# for inbound pairings whose ring budget is spent with no answer and
+# no PSTN fallback attempted (legs whose hangup webhooks never
+# arrived, or zero-leg F1 saves) and attempts the fallback — which is
+# itself flag-gated (INBOUND_PSTN_FALLBACK_ENABLED), so with the flag
+# off this is a no-op scan that only logs. Also bridges a PSTN
+# fallback leg whose AMD verdict never landed (past 30s, assume human).
+# Schedules are UTC. A 1-minute schedule means a fallback can fire
+# 20-80s after the ring budget is spent; the event-driven trigger
+# (agent-leg timeout call.hangup) is the fast path.
+[functions."cc-inbound-sweep"]
+  schedule = "* * * * *"
