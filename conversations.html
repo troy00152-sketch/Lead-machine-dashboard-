@@ -413,6 +413,8 @@ var state = {
 var rtcClient = null;
 var rtcLive = false; /* true from telnyx.ready until an error / signaling close */
 var rtcRefreshPending = false; /* token-expiry refresh deferred past a live call */
+var rtcConnecting = false; /* a connect is in flight — never stack a second client on one credential */
+var rtcLastConnectStartAt = 0; /* ms — when the last connect (tap, refresh, or auto) started */
 var callState = { callId: null, active: false, timer: null, agentCall: null, bridged: false, connectedAt: null, durTimer: null, phone: null, direction: null, outgoingPending: false, inboundCall: null, inboundCallId: null, inboundPhone: null };
 
 function esc(s) {
@@ -1007,15 +1009,20 @@ async function connectAudioNow() {
   // A client that exists but is no longer live must never be reused:
   // drop it and reconnect with a fresh token instead of dialing deaf.
   if (rtcClient && rtcLive) { setAudioStatus('🟢 Audio connected — answered sellers will ring in here.', true); return; }
-  if (rtcClient) { try { await rtcClient.disconnect(); } catch (e) {} rtcClient = null; rtcLive = false; }
-  setAudioStatus('Connecting audio…', false);
+  if (rtcConnecting) return; /* a connect is already in flight (tap, refresh, or auto-reconnect) */
+  rtcConnecting = true;
+  rtcLastConnectStartAt = Date.now();
   try {
+    if (rtcClient) { try { await rtcClient.disconnect(); } catch (e) {} rtcClient = null; rtcLive = false; }
+    setAudioStatus('Connecting audio…', false);
     var cfg = await checkVoiceConfig();
     if (!cfg) { setAudioStatus('Voice is not switched on yet — audio cannot connect.', false); return; }
     await ensureRtc(cfg);
     setAudioStatus('🟢 Audio connected — answered sellers will ring in here.', true);
   } catch (e) {
     setAudioStatus('Audio connection error — try Connect audio again.', false);
+  } finally {
+    rtcConnecting = false;
   }
 }
 // Token refresh (Telnyx warns 120s before the 24h JWT dies, code
@@ -1025,15 +1032,37 @@ async function connectAudioNow() {
 // instead — see finishCallUI.)
 async function refreshRtcToken() {
   if (callState.active) { rtcRefreshPending = true; setAudioStatus('Audio session expires soon — refreshing after this call.', false); return; }
-  if (rtcClient) { try { await rtcClient.disconnect(); } catch (e) {} rtcClient = null; rtcLive = false; }
+  if (rtcConnecting) return; /* a connect is already in flight — it carries a fresh token */
+  rtcConnecting = true;
+  rtcLastConnectStartAt = Date.now();
   try {
+    if (rtcClient) { try { await rtcClient.disconnect(); } catch (e) {} rtcClient = null; rtcLive = false; }
     var cfg = await checkVoiceConfig();
     if (!cfg) { setAudioStatus('Voice is not switched on yet — audio cannot connect.', false); return; }
     await ensureRtc(cfg);
     setAudioStatus('🟢 Audio connected — answered sellers will ring in here.', true);
   } catch (e) {
     setAudioStatus('Audio session expired — tap Connect audio again.', false);
+  } finally {
+    rtcConnecting = false;
   }
+}
+// Auto-reconnect (Nov 26, 2026 — Troy: "audio supposed to be on every
+// time. I'm not supposed to click no audio or nothing like that.").
+// Audio connects on page load (see init) and reconnects itself when the
+// connection drops, the tab comes back, or the network returns — no tap.
+// Never mid-call; skip if a connect just started (an intentional token
+// refresh disconnects the old client, which can surface as a signaling
+// close — the refresh's own connect is already on its way).
+function scheduleAudioReconnect(delayMs) {
+  setTimeout(function () {
+    try {
+      if (callState.active) return;
+      if (rtcLive || rtcConnecting) return;
+      if (Date.now() - rtcLastConnectStartAt < 3000) return;
+      connectAudioNow();
+    } catch (e) { /* a failed auto-reconnect just leaves the status line; the next trigger retries */ }
+  }, delayMs || 0);
 }
 /* Is this ringing leg one of OUR outgoing calls (auto-answer it), or
    a real incoming call (show the Answer banner)? The page knows when
@@ -1194,7 +1223,8 @@ async function ensureRtc(cfg) {
     // say so instead of leaving the button green on a dead client.
     if (note && note.type === 'signalingStateClosed') {
       rtcLive = false;
-      setAudioStatus('Audio connection lost — tap Connect audio again.', false);
+      setAudioStatus('Audio connection lost — reconnecting…', false);
+      scheduleAudioReconnect(1500);
       return;
     }
     // The server rings this browser with the agent leg. Our own
@@ -1888,7 +1918,15 @@ function init() {
     var deep = null;
     try { deep = new URLSearchParams(window.location.search).get('thread'); } catch (e) { deep = null; }
     if (deep) selectThread(deep).catch(handleLoadError);
+    // Audio stays on by itself (Nov 26, 2026 — Troy: no more tapping
+    // Connect audio every time): connect on load so an inbound call can
+    // ring in without a tap first.
+    connectAudioNow();
   });
+  // A slept/backgrounded phone tab drops the signaling socket — reconnect
+  // when the tab is visible again or the network comes back.
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) scheduleAudioReconnect(0); });
+  if (typeof window !== 'undefined' && window.addEventListener) window.addEventListener('online', function () { scheduleAudioReconnect(0); });
   setInterval(refreshAll, 30000);
 }
 
