@@ -166,6 +166,41 @@ async function savePairings(obj, event) {
   await writeJson(s, THREAD_CALLS_KEY, obj);
   return obj;
 }
+
+// Pending signals: a webhook event can arrive BEFORE the pairing
+// record exists — the browser auto-answers the agent leg within ~1s
+// of 'start', and the webhook can deliver call.answered before the
+// Blobs write lands. Dropping that event used to lose agentAnswered
+// forever, so the bridge never formed and the page rang on while the
+// seller was unheard. Signals are stashed here (keyed by the seller
+// leg's call_control_id) and merged when the pairing appears.
+const PENDING_PREFIX = 'thread-call-pending:';
+async function loadPending(event, sellerCallControlId) {
+  const s = dialerStore(event);
+  return await readJson(s, PENDING_PREFIX + sellerCallControlId);
+}
+async function savePending(event, sellerCallControlId, marker) {
+  const s = dialerStore(event);
+  marker.updatedAt = Date.now();
+  await writeJson(s, PENDING_PREFIX + sellerCallControlId, marker);
+}
+async function clearPending(event, sellerCallControlId) {
+  const s = dialerStore(event);
+  await s.delete(PENDING_PREFIX + sellerCallControlId).catch(() => {});
+}
+async function mergePending(event, sellerCallControlId, rec) {
+  const pending = await loadPending(event, sellerCallControlId);
+  if (!pending) return false;
+  if (pending.agentAnswered) rec.agentAnswered = true;
+  if (pending.sellerHuman) rec.sellerHuman = true;
+  if (pending.sellerAnswered) rec.sellerAnswered = true;
+  if (pending.agentLeg && !rec.agentLeg) rec.agentLeg = pending.agentLeg;
+  // Inbound: the caller dialed us, so their answer IS the human
+  // signal (same derivation as the webhook's call.answered branch).
+  if (rec.direction === 'inbound' && pending.sellerAnswered) rec.sellerHuman = true;
+  await clearPending(event, sellerCallControlId);
+  return true;
+}
 function findByLeg(pairings, callControlId) {
   if (!pairings || !pairings.calls || !callControlId) return null;
   for (const [callId, rec] of Object.entries(pairings.calls)) {
@@ -258,18 +293,20 @@ exports.handler = async (event) => {
         return json(502, { error: 'Telnyx did not return a call_control_id for the seller leg.' });
       }
       const sellerCallControlId = seller.callControlId;
-      const agent = await v.createAgentLeg({
-        sipUri,
-        from: ourNumber || undefined,
-        clientState: { kind: 'thread-call-agent', key, sellerCallControlId },
-      });
+      // Save the pairing BEFORE creating the agent leg. The browser
+      // auto-answers the agent leg within ~1s, and the webhook can
+      // deliver call.answered before a later save completes — a
+      // dropped agentAnswered used to deadlock the bridge forever:
+      // the page rang on (ringback never stops) while the seller was
+      // unheard. The agent leg cannot be answered before it exists,
+      // so saving first removes the race entirely.
       const now = Date.now();
       const pairings = await loadPairings(event);
       pairings.calls[sellerCallControlId] = {
         key,
         phone: phoneE164,
         sellerLeg: sellerCallControlId,
-        agentLeg: agent && agent.callControlId ? agent.callControlId : null,
+        agentLeg: null,
         status: 'dialing',
         agentAnswered: false,
         sellerHuman: false,
@@ -278,6 +315,57 @@ exports.handler = async (event) => {
         updatedAt: now,
       };
       await savePairings(pairings, event);
+      const failAgentLeg = async (detail) => {
+        // No agent leg, no call: hang the seller leg up and mark the
+        // pairing ended so the page stops ringing instead of ringing
+        // the seller's phone with nobody on our side.
+        try { await v.hangup(sellerCallControlId); } catch (_) { /* already gone */ }
+        const p2 = await loadPairings(event);
+        const r2 = p2.calls[sellerCallControlId];
+        if (r2) {
+          r2.status = 'ended';
+          r2.lastError = 'agent-leg-failed: ' + detail;
+          r2.updatedAt = Date.now();
+          await savePairings(p2, event);
+        }
+      };
+      let agent = null;
+      try {
+        agent = await v.createAgentLeg({
+          sipUri,
+          from: ourNumber || undefined,
+          clientState: { kind: 'thread-call-agent', key, sellerCallControlId },
+        });
+      } catch (e) {
+        await failAgentLeg(String((e && e.message) || e));
+        return json(502, { error: 'Could not dial the browser agent leg.', detail: String((e && e.message) || e) });
+      }
+      if (!agent || !agent.callControlId) {
+        await failAgentLeg('Telnyx did not return an agent leg.');
+        return json(502, { error: 'Could not dial the browser agent leg.', detail: 'Telnyx did not return an agent leg.' });
+      }
+      // Re-read: a webhook event may already have landed (and been
+      // stashed as a pending signal) between the save and this read.
+      const fresh = await loadPairings(event);
+      const rec = fresh.calls[sellerCallControlId];
+      if (rec) {
+        rec.agentLeg = agent.callControlId;
+        await mergePending(event, sellerCallControlId, rec);
+        rec.updatedAt = Date.now();
+        await savePairings(fresh, event);
+        // If both bridge signals are already true, bridge now instead
+        // of waiting for another event that may never come.
+        if (rec.sellerHuman && rec.agentAnswered && rec.agentLeg) {
+          try {
+            await v.bridge(rec.sellerLeg, rec.agentLeg);
+            rec.status = 'bridged';
+          } catch (e) {
+            rec.lastError = 'bridge-failed: ' + String((e && e.message) || e);
+          }
+          rec.updatedAt = Date.now();
+          await savePairings(fresh, event);
+        }
+      }
       return ok({ ok: true, callId: sellerCallControlId, status: 'dialing' });
     }
 
@@ -318,7 +406,11 @@ exports.handler = async (event) => {
 
 // Pairing surface shared with telnyx-voice-webhook.js (same
 // cross-require pattern as telnyx-webhook -> cc-bot-hook).
-exports._thread = { loadPairings, savePairings, findByLeg };
+exports._thread = { loadPairings, savePairings, findByLeg, loadPending, savePending, clearPending, mergePending };
+
+// The voice webhook rings the agent's browser for inbound calls, so it
+// needs the same SIP URI derivation as the dialer start flow.
+exports.agentSipUri = agentSipUri;
 
 // Test hooks (not part of the deployed surface).
 exports._test = {
