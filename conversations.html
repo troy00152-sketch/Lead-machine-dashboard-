@@ -1215,11 +1215,14 @@ function inboundAgentLegId(call) {
 function resolveInboundCaller(call, attempt) {
   var legId = inboundAgentLegId(call);
   if (!legId) {
-    if (attempt < 6) setTimeout(function () { if (callState.inboundCall === call) resolveInboundCaller(call, attempt + 1); }, 1000);
+    if (attempt < 6) setTimeout(function () { if (callState.inboundCall === call || callState.agentCall === call) resolveInboundCaller(call, attempt + 1); }, 1000);
     return;
   }
   callApi('?action=inbound&agentLeg=' + encodeURIComponent(legId)).then(function (data) {
-    if (callState.inboundCall !== call) return;
+    // The lookup result belongs to this leg whether it is still the
+    // banner leg or already the live agent call (answered before the
+    // lookup landed — the old guard discarded it once the banner hid).
+    if (callState.inboundCall !== call && callState.agentCall !== call) return;
     if (data && data.found) {
       callState.inboundCallId = data.callId || null;
       callState.inboundPhone = data.phone || null;
@@ -1233,32 +1236,213 @@ function resolveInboundCaller(call, attempt) {
         pollCallStatus();
       }
     } else if (attempt < 6) {
-      setTimeout(function () { if (callState.inboundCall === call) resolveInboundCaller(call, attempt + 1); }, 1000);
+      setTimeout(function () { if (callState.inboundCall === call || callState.agentCall === call) resolveInboundCaller(call, attempt + 1); }, 1000);
     }
   }).catch(function () {
-    if (attempt < 6) setTimeout(function () { if (callState.inboundCall === call) resolveInboundCaller(call, attempt + 1); }, 1000);
+    if (attempt < 6) setTimeout(function () { if (callState.inboundCall === call || callState.agentCall === call) resolveInboundCaller(call, attempt + 1); }, 1000);
   });
 }
-async function answerInboundCall() {
-  var call = callState.inboundCall;
-  if (!call || call.__ccAnswered) return;
-  call.__ccAnswered = true;
-  hideInboundBanner();
-  __stopInboundRing();
+/* ---------- inbound Answer verification (Nov 26, 2026 — Troy, live:
+   Paula called, the banner showed, Answer was tapped — the ringtone
+   kept playing and Troy heard nothing) ----------
+   Root cause (verified in the pinned @telnyx/webrtc v2.28.2 bundle):
+   call.answer() can RESOLVE WITHOUT ANSWERING, in two guarded cases
+   that return silently — no reject, no ringtone stop, no media:
+     (1) a peer is already being created / exists on this object
+         (the SDK auto-answered it on Attach / session re-attach);
+     (2) a DIFFERENT Call object is registered under this id in
+         session.calls (Attach / a duplicate Invite replaced this
+         object) — the stale object's answer() is ignored.
+   The old code trusted the resolved promise, showed "Connected"
+   before the leg moved, and never checked. Worse, the SDK re-emits
+   callUpdate/ringing while a leg is still ringing, and the handler
+   re-showed the banner on every one — restarting the page ringtone
+   forever. So Answer now VERIFIES: it watches what the leg actually
+   does next (SDK ringtone stopped? leg moved to answering/active?
+   server bridged?), adopts the live replacement object when the held
+   one is stale, and recovers (hang up the dead leg + redial a fresh
+   one) when nothing is live. "Connected" only lands on a verified
+   live leg — never on a resolved promise. */
+var __latestCallByLegKey = {}; /* legKey -> newest Call object seen on any notification */
+var __inboundAnswerWatch = null; /* { legKey, call, at, recovering } while an Answer is unverified */
+function __legKey(call) {
+  if (!call) return '';
+  return (call.id || '') + '|' + inboundAgentLegId(call);
+}
+function __trackCall(call) {
+  if (!call) return;
+  __latestCallByLegKey[__legKey(call)] = call;
+}
+/* The SDK's ringtone is ONE shared <audio id="_ringtone"> element
+   (xi() reuses it by id; created by the first Call that carries a
+   ringtoneFile — e.g. an earlier outbound call in this tab). The SDK
+   stops it inside answer() AFTER its guards pass, so a still-playing
+   element right after `await answer()` proves the guards fired and
+   the answer was ignored. No element (inbound legs carry no
+   ringtoneFile) means this check is vacuous — the 2.5s watch below
+   is the backstop for that case. */
+function __sdkRingtonePlaying() {
+  try {
+    var el = document.getElementById('_ringtone');
+    return !!(el && !el.paused);
+  } catch (e) { return false; }
+}
+function __stopSdkRingtone(call) {
+  try { if (call && typeof call.stopRingtone === 'function') call.stopRingtone(); } catch (e) {}
+  try {
+    var el = document.getElementById('_ringtone');
+    if (el && !el.paused) { el.pause(); el.currentTime = 0; }
+  } catch (e) {}
+}
+function __attachRemoteAudio(call) {
+  try {
+    var audioEl = document.getElementById('remoteAudio');
+    if (audioEl && call && call.remoteStream) {
+      audioEl.srcObject = call.remoteStream;
+      if (audioEl.paused) { var p = audioEl.play(); if (p && p.catch) p.catch(function () {}); }
+    }
+  } catch (e) {}
+}
+/* Answer one leg and report whether it actually took. Returns false
+   when the SDK silently ignored it (guards above) — detected by the
+   SDK ringtone still playing after the await. A rejection is also a
+   false (with a toast, so it is never silent). */
+async function __answerLeg(call) {
+  if (!call || typeof call.answer !== 'function') return false;
+  try {
+    await call.answer({ remoteElement: document.getElementById('remoteAudio') || 'remoteAudio' });
+  } catch (e) {
+    toast('Could not answer: ' + ((e && e.message) || e));
+    return false;
+  }
+  if (__sdkRingtonePlaying()) return false;
+  return true;
+}
+/* The leg is verified live — make it the call: stop every ringtone,
+   attach its audio, show Connected with the working End button, and
+   start the status poll (which starts the duration timer on bridged). */
+function __adoptLiveInboundCall(call) {
+  __inboundAnswerWatch = null;
+  __stopSdkRingtone(call);
   callState.agentCall = call;
   callState.active = true;
   callState.direction = 'inbound';
   callState.phone = callState.inboundPhone;
+  __attachRemoteAudio(call);
   setCallStatus('Connected');
   showCallBox('Connected');
-  var audioEl = document.getElementById('remoteAudio');
-  try {
-    if (typeof call.answer === 'function') await call.answer({ remoteElement: audioEl || 'remoteAudio' });
-  } catch (e) {
-    toast('Could not answer: ' + ((e && e.message) || e));
-    callState.active = false;
+  if (callState.inboundCallId) {
+    callState.callId = callState.inboundCallId;
+    pollCallStatus();
+  } else {
+    resolveInboundCaller(call, 0);
+  }
+}
+/* The held leg did not answer. Find the newest object the SDK has
+   shown us for this leg: if it is already answering/active the SDK
+   answered it itself (Attach) — adopt it. If it is a different,
+   still-ringing replacement, answer IT. Otherwise nothing is live —
+   fail out (hang up the dead leg + redial a fresh one). */
+function __recoverInboundAnswer(legKey) {
+  var watch = __inboundAnswerWatch;
+  if (!watch || watch.legKey !== legKey || watch.recovering) return;
+  watch.recovering = true;
+  var stale = watch.call;
+  var live = __latestCallByLegKey[legKey] || stale;
+  __stopSdkRingtone(stale);
+  if (live !== stale) __stopSdkRingtone(live);
+  if (live.state === 'active' || live.state === 'answering') {
+    __adoptLiveInboundCall(live);
     return;
   }
+  if (live !== stale && live.state === 'ringing') {
+    __inboundAnswerWatch = { legKey: legKey, call: live, at: Date.now(), recovering: false };
+    __answerLeg(live).then(function (ok) {
+      if (ok) __adoptLiveInboundCall(live);
+      else __failInboundAnswer(legKey);
+    });
+    return;
+  }
+  __failInboundAnswer(legKey);
+}
+/* Nothing live for this leg: end the stale leg for real, stop every
+   ringtone, clear the phantom call, and ask the server to dial ONE
+   fresh leg (the redial mark is cleared so this recovery redial is
+   allowed even if a reconnect redial already ran once). */
+function __failInboundAnswer(legKey) {
+  var watch = __inboundAnswerWatch;
+  __inboundAnswerWatch = null;
+  var stale = (watch && watch.call) || callState.inboundCall || callState.agentCall;
+  __stopSdkRingtone(stale);
+  __stopInboundRing();
+  __stopRingback();
+  if (stale && typeof stale.hangup === 'function') {
+    try { var h = stale.hangup(); if (h && h.catch) h.catch(function () {}); } catch (e) {}
+  }
+  callState.active = false;
+  callState.agentCall = null;
+  setCallStatus('');
+  hideCallBox();
+  toast('Could not answer that call — redialing…');
+  var id = callState.inboundCallId;
+  if (id) {
+    delete __redialedInbound[id];
+    redialInboundCall(id);
+  }
+}
+/* 2.5s backstop (the ringtone check is vacuous when the shared
+   _ringtone element does not exist): a leg still 'ringing' this long
+   after the tap never answered — recover. A healthy leg has moved to
+   answering/active by then; an already-bridged call clears the watch. */
+function __checkInboundAnswerWatch() {
+  var watch = __inboundAnswerWatch;
+  if (!watch || watch.recovering) return;
+  if (callState.bridged) { __inboundAnswerWatch = null; return; }
+  var call = watch.call;
+  if (call && (call.state === 'ringing' || __sdkRingtonePlaying())) __recoverInboundAnswer(watch.legKey);
+  else __inboundAnswerWatch = null;
+}
+async function answerInboundCall() {
+  var call = callState.inboundCall;
+  if (!call) return;
+  var legKey = __legKey(call);
+  // The SDK may already have answered a REPLACEMENT object for this
+  // leg (Attach / session re-attach auto-answers the new object and
+  // never rings it — the banner still holds the old one). If the
+  // newest object for this leg is already answering/active, adopt it:
+  // it carries the media, and answer() on the old object is silently
+  // ignored by the SDK (guard 2).
+  var live = __latestCallByLegKey[legKey];
+  if (live && live !== call && (live.state === 'active' || live.state === 'answering')) {
+    call.__ccAnswered = true;
+    hideInboundBanner();
+    __stopInboundRing();
+    __adoptLiveInboundCall(live);
+    return;
+  }
+  call.__ccAnswered = true;
+  hideInboundBanner();
+  __stopInboundRing();
+  // Do NOT stop the SDK ringtone here: it is the verification signal.
+  // answer() stops it itself AFTER its guards pass, so a still-playing
+  // ringtone after the await proves the answer was silently ignored.
+  // The page ringtone above stops immediately on tap; the SDK ringtone
+  // stops inside a healthy answer() (ms) or in the recovery below.
+  callState.agentCall = call;
+  callState.active = true;
+  callState.direction = 'inbound';
+  callState.phone = callState.inboundPhone;
+  // NOT "Connected" yet — the leg has not been verified as answered.
+  // The call box shows with its (now working) End button while we
+  // verify; Connected lands only when the leg actually moves.
+  setCallStatus('Answering…');
+  showCallBox('Answering…');
+  __inboundAnswerWatch = { legKey: legKey, call: call, at: Date.now(), recovering: false };
+  var ok = await __answerLeg(call);
+  if (!ok) { __recoverInboundAnswer(legKey); return; }
+  // Answered (ringtone stopped) — the watch + poll finish the job:
+  // Connected on Active/bridged, recovery if it is still ringing.
+  setTimeout(function () { __checkInboundAnswerWatch(); }, 2500);
   if (callState.inboundCallId) {
     callState.callId = callState.inboundCallId;
     pollCallStatus();
@@ -1272,6 +1456,7 @@ async function declineInboundCall() {
   var call = callState.inboundCall;
   hideInboundBanner();
   __stopInboundRing();
+  __stopSdkRingtone(call);
   if (call && typeof call.hangup === 'function') {
     try { await call.hangup(); } catch (e) { /* already gone */ }
   }
@@ -1318,6 +1503,11 @@ async function ensureRtc(cfg) {
       var code = warn.code || warn.name || '';
       var msg = String((warn && warn.message) || warn || '');
       if (code === 34001 || code === 'TOKEN_EXPIRING_SOON' || /TOKEN_EXPIRING_SOON|token expir/i.test(msg)) refreshRtcToken();
+      // An answer() guard fired for the leg we just tried to answer
+      // (the SDK warns when it silently ignores one): the ringtone
+      // is still playing — recover now instead of waiting for the
+      // 2.5s watch.
+      if (__inboundAnswerWatch && w && (w.callId === __inboundAnswerWatch.call.id || w.activeCallId === __inboundAnswerWatch.call.id) && __sdkRingtonePlaying()) __recoverInboundAnswer(__inboundAnswerWatch.legKey);
     } catch (e) { /* warning handling never breaks calling */ }
   });
   client.on('telnyx.notification', function (note) {
@@ -1352,6 +1542,10 @@ async function ensureRtc(cfg) {
         if (audio.srcObject !== call.remoteStream) audio.srcObject = call.remoteStream;
         if (audio.paused) { try { var p = audio.play(); if (p && p.catch) p.catch(function () {}); } catch (e2) {} }
       }
+      // Track the newest Call object for every leg: the SDK can
+      // replace the object under us (Attach), and the replacement is
+      // the only one whose answer() works.
+      __trackCall(call);
       if (note.type === 'callUpdate' && call.state === 'ringing') {
         // @telnyx/webrtc v2 incoming call: the SDK has NO 'callReceived'
         // notification — the old gate never fired, so the agent leg was
@@ -1360,12 +1554,31 @@ async function ensureRtc(cfg) {
         // — the Nov 25/26 live failure). v2 reports the incoming call
         // as {type:'callUpdate', call} with call.state === 'ringing'
         // (Telnyx docs: "Receive an Inbound Call"); answer on that.
-        if (isOurOutgoingLeg()) answerOutboundLeg(call);
+        // A stale duplicate for a leg we already adopted (the old
+        // object keeps ringing after Attach replaced it): never
+        // re-show the banner, never re-ring, never auto-answer it —
+        // hang the stale leg up and stay on the live one.
+        if (callState.agentCall && __legKey(call) === __legKey(callState.agentCall) && call !== callState.agentCall) {
+          __stopSdkRingtone(call);
+          if (typeof call.hangup === 'function') { try { call.hangup(); } catch (e) {} }
+        } else if (__inboundAnswerWatch && __legKey(call) === __inboundAnswerWatch.legKey && __sdkRingtonePlaying()) {
+          // Still ringing after we tapped Answer AND the SDK ringtone
+          // is still playing: answer() was silently ignored (a
+          // healthy answering leg stops its ringtone inside answer())
+          // — recover now, and do NOT re-show the banner or restart
+          // the page ringtone for this leg.
+          __recoverInboundAnswer(__inboundAnswerWatch.legKey);
+        } else if (isOurOutgoingLeg()) answerOutboundLeg(call);
         else showInboundBanner(call);
       } else if (note.type === 'callReceived') {
         // Legacy shape (v1 SDKs): same answer, kept as a fallback.
         if (isOurOutgoingLeg()) answerOutboundLeg(call);
         else showInboundBanner(call);
+      }
+      // The watched leg moved to answering/active: the Answer took —
+      // adopt it (Connected) and clear the watch.
+      if ((call.state === 'active' || call.state === 'answering') && __inboundAnswerWatch && __legKey(call) === __inboundAnswerWatch.legKey && !__inboundAnswerWatch.recovering) {
+        __adoptLiveInboundCall(call);
       }
       if ((call.state === 'hangup' || call.state === 'destroy') && call === callState.agentCall) callState.agentCall = null;
       if ((call.state === 'hangup' || call.state === 'destroy') && call === callState.inboundCall) hideInboundBanner();
@@ -1422,6 +1635,7 @@ function setCallButtons(disabled, active) {
   });
 }
 function finishCallUI(kind) {
+  __stopSdkRingtone(callState.agentCall || callState.inboundCall);
   __stopRingback();
   stopCallPolling();
   stopCallDurTimer();
@@ -1590,6 +1804,19 @@ function pollCallStatus() {
 }
 async function endCurrentCall() {
   var id = callState.callId;
+  // End the LIVE WebRTC leg first — the server hangup alone never
+  // ends the browser leg, and for a fresh inbound call the pairing
+  // key is often still unresolved (callId null), so the server hangup
+  // below would be skipped entirely and the call would keep ringing
+  // with no way out (Troy, Nov 26 — "we need to have an end button
+  // there too to actually end the call").
+  var leg = callState.agentCall || callState.inboundCall;
+  __stopInboundRing();
+  __stopRingback();
+  __stopSdkRingtone(leg);
+  if (leg && typeof leg.hangup === 'function') {
+    try { await leg.hangup(); } catch (e) { /* already gone */ }
+  }
   finishCallUI('ended');
   if (id) {
     try { await callApi('', { action: 'hangup', callId: id }); } catch (e) { /* already gone */ }
