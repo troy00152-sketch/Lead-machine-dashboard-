@@ -14,7 +14,11 @@
  *
  * Bump CACHE_NAME on any strategy change: activate deletes every old cache.
  */
-var CACHE_NAME = 'leadmachine-pwa-v6';
+// Phone push handlers (Web Push v1) — push + notificationclick live
+// in sw-push.js so this file keeps only the caching strategy.
+importScripts('/sw-push.js');
+
+var CACHE_NAME = 'leadmachine-pwa-v7';
 
 var PRECACHE_URLS = [
   '/manifest.webmanifest',

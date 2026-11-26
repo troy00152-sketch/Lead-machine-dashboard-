@@ -18,6 +18,7 @@ try {
 } catch (e) {
   blobs = null;
 }
+const push = require('./cc-push');
 
 const STORE_NAME = 'cc-appointments';
 const CALENDAR_ID = 'seller-calls';
@@ -108,6 +109,16 @@ async function createAppointment(rec, event) {
   };
   const s = makeStore(event);
   await saveRecord(s, out);
+  // Phone push: a booking exists now — tell Troy's phone. Bounded
+  // (never throws, never past ~3s); a failed push never fails the booking.
+  try {
+    await push.notifyAppointment({
+      id: out.id, name: out.name, phone: out.phone,
+      startMs: out.startMs, startISO: out.startISO, title: out.title,
+    }, event);
+  } catch (e) {
+    console.error('[cc-appointments] push failed:', e);
+  }
   return out;
 }
 

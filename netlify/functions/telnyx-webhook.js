@@ -46,6 +46,7 @@ try {
 
 const lib = require('./telnyx-lib');
 const botHook = require('./cc-bot-hook');
+const push = require('./cc-push');
 
 const STORE_NAME = 'cc-conversations';
 const INDEX_KEY = 'index';
@@ -187,7 +188,7 @@ async function applyEvent(s, evt) {
     thread.unread = (thread.unread || 0) + 1;
     thread.updatedAt = Date.now();
     await saveThread(s, thread);
-    return { handled: true, thread: key };
+    return { handled: true, thread: key, name: thread.name, phone: thread.phone, preview: String(payload.text || '').slice(0, 120) };
   }
 
   if (type === 'message.sent' || type === 'message.finalized' || type === 'message.failed') {
@@ -274,6 +275,26 @@ exports.handler = async (event) => {
         }
       } catch (e) {
         console.error('[telnyx-webhook] bot hook failed:', e);
+      }
+    }
+    // Phone push: seller reply — same gate as the bot hook (handled,
+    // not a Telnyx retry duplicate). Awaited but bounded inside
+    // cc-push (never throws, never past ~3s) so a reply push is
+    // never silently dropped by a frozen lambda.
+    if (
+      evt && evt.event_type === 'message.received' &&
+      result && result.handled && result.thread && !result.duplicate
+    ) {
+      try {
+        await push.notifyReply({
+          threadKey: result.thread,
+          name: result.name,
+          phone: result.phone,
+          preview: result.preview,
+          at: Date.now(),
+        }, event);
+      } catch (e) {
+        console.error('[telnyx-webhook] push failed:', e);
       }
     }
     return respond(200, { received: true, ...result });
