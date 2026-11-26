@@ -241,6 +241,21 @@
           <button class="btn small" id="audioBtn" type="button">🎧 Connect audio</button>
           <span class="note" id="audioStatus">Audio not connected yet.</span>
         </div>
+        <!-- Incoming-call banner: a seller calling one of our numbers
+             rings this browser — Answer / Decline here. It only shows
+             for a call that arrives while NO outgoing call is active:
+             our own outgoing agent legs are auto-answered (below), so
+             they never land here. Sam answers real incoming seller
+             calls; the calls that ring through to Troy are the ones
+             this banner catches. -->
+        <div id="inboundBanner" class="hidden" style="gap:10px;align-items:center;margin-top:10px;padding:10px 12px;border:2px solid #1f9d63;border-radius:10px;background:rgba(31,157,99,.12)">
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:700">📞 Incoming call</div>
+            <div class="note" id="inboundCaller">Incoming call…</div>
+          </div>
+          <button class="btn small primary" id="inboundAnswerBtn" type="button">Answer</button>
+          <button class="btn small" id="inboundDeclineBtn" type="button">Decline</button>
+        </div>
         <!-- Dialer pod (GoHighLevel-style): dial any number from the
              thread, pick which of our numbers it goes out from, keypad
              for DTMF while on a call. Hidden until a thread is open. -->
@@ -344,7 +359,7 @@ var state = {
 
 var voiceCheckPromise = null;
 var rtcClient = null;
-var callState = { callId: null, active: false, timer: null, agentCall: null, bridged: false, connectedAt: null, durTimer: null, phone: null };
+var callState = { callId: null, active: false, timer: null, agentCall: null, bridged: false, connectedAt: null, durTimer: null, phone: null, direction: null, outgoingPending: false, inboundCall: null, inboundCallId: null, inboundPhone: null };
 
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -874,6 +889,7 @@ function fmtDur(ms) {
   return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
 }
 function callBoxSub() {
+  if (callState.direction === 'inbound') return 'Incoming call' + (callState.phone ? ' · ' + fmtPhone(callState.phone) : '');
   return callState.phone ? 'Outgoing call · ' + fmtPhone(callState.phone) : 'Outgoing call';
 }
 function showCallBox(title) {
@@ -928,6 +944,112 @@ async function connectAudioNow() {
     setAudioStatus('Audio connection error — try Connect audio again.', false);
   }
 }
+/* Is this ringing leg one of OUR outgoing calls (auto-answer it), or
+   a real incoming call (show the Answer banner)? The page knows when
+   it placed a call: startCall sets outgoingPending BEFORE the start
+   API call returns (the server creates the agent leg before the
+   response lands, so the invite can arrive while `active` is still
+   false). Anything ringing while neither flag is set is inbound. */
+function isOurOutgoingLeg() {
+  return !!(callState.active || callState.outgoingPending);
+}
+function answerOutboundLeg(call) {
+  callState.agentCall = call;
+  var audioEl = document.getElementById('remoteAudio');
+  if (typeof call.answer === 'function') {
+    var p = call.answer({ remoteElement: audioEl || 'remoteAudio' });
+    if (p && p.catch) p.catch(function (e) { toast('Could not answer the call: ' + ((e && e.message) || e)); });
+  }
+}
+/* ---------- incoming-call banner (Answer / Decline) ---------- */
+/* A seller calling one of our numbers rings this browser via the
+   agent leg — but only while Connect Audio is on. The SIP leg only
+   carries our own number as caller ID, so the banner resolves the
+   real caller from the server pairing (cc-call-api ?action=inbound,
+   keyed by the agent leg's call_control_id) and retries while the
+   webhook is still saving it. Answering works even before the lookup
+   lands — the server bridges on its own pairing match; the lookup is
+   only for the caller display + the status poll. */
+function showInboundBanner(call) {
+  callState.inboundCall = call;
+  var b = document.getElementById('inboundBanner');
+  if (b) { b.classList.remove('hidden'); b.style.display = 'flex'; }
+  var sub = document.getElementById('inboundCaller');
+  if (sub) sub.textContent = 'Incoming call…';
+  resolveInboundCaller(call, 0);
+}
+function hideInboundBanner() {
+  var b = document.getElementById('inboundBanner');
+  if (b) { b.classList.add('hidden'); b.style.display = 'none'; }
+  callState.inboundCall = null;
+}
+function inboundAgentLegId(call) {
+  if (!call) return '';
+  if (call.options && call.options.telnyxCallControlId) return call.options.telnyxCallControlId;
+  if (call.telnyxCallControlId) return call.telnyxCallControlId;
+  return '';
+}
+function resolveInboundCaller(call, attempt) {
+  var legId = inboundAgentLegId(call);
+  if (!legId) {
+    if (attempt < 6) setTimeout(function () { if (callState.inboundCall === call) resolveInboundCaller(call, attempt + 1); }, 1000);
+    return;
+  }
+  callApi('?action=inbound&agentLeg=' + encodeURIComponent(legId)).then(function (data) {
+    if (callState.inboundCall !== call) return;
+    if (data && data.found) {
+      callState.inboundCallId = data.callId || null;
+      callState.inboundPhone = data.phone || null;
+      var sub = document.getElementById('inboundCaller');
+      if (sub) sub.textContent = (data.name ? data.name + ' · ' : '') + (data.phone ? fmtPhone(data.phone) : 'Unknown number');
+      // Answered already (or answering now) but the poll had no
+      // pairing key yet — start it now that we have one.
+      if (callState.active && callState.inboundCallId && !callState.callId) {
+        callState.callId = callState.inboundCallId;
+        callState.phone = callState.inboundPhone;
+        pollCallStatus();
+      }
+    } else if (attempt < 6) {
+      setTimeout(function () { if (callState.inboundCall === call) resolveInboundCaller(call, attempt + 1); }, 1000);
+    }
+  }).catch(function () {
+    if (attempt < 6) setTimeout(function () { if (callState.inboundCall === call) resolveInboundCaller(call, attempt + 1); }, 1000);
+  });
+}
+async function answerInboundCall() {
+  var call = callState.inboundCall;
+  if (!call) return;
+  hideInboundBanner();
+  callState.agentCall = call;
+  callState.active = true;
+  callState.direction = 'inbound';
+  callState.phone = callState.inboundPhone;
+  setCallStatus('Connected');
+  showCallBox('Connected');
+  var audioEl = document.getElementById('remoteAudio');
+  try {
+    if (typeof call.answer === 'function') await call.answer({ remoteElement: audioEl || 'remoteAudio' });
+  } catch (e) {
+    toast('Could not answer: ' + ((e && e.message) || e));
+    callState.active = false;
+    return;
+  }
+  if (callState.inboundCallId) {
+    callState.callId = callState.inboundCallId;
+    pollCallStatus();
+  } else {
+    // Pairing not resolved yet — keep resolving; the poll starts the
+    // moment resolveInboundCaller finds it.
+    resolveInboundCaller(call, 0);
+  }
+}
+async function declineInboundCall() {
+  var call = callState.inboundCall;
+  hideInboundBanner();
+  if (call && typeof call.hangup === 'function') {
+    try { await call.hangup(); } catch (e) { /* already gone */ }
+  }
+}
 async function ensureRtc(cfg) {
   if (rtcClient) return rtcClient;
   var RTC = getTelnyxRTC();
@@ -941,13 +1063,29 @@ async function ensureRtc(cfg) {
   // pre-answer stream — the seller was never heard even after the
   // bridge formed.
   client.remoteElement = 'remoteAudio';
+  // Surface SDK-level failures instead of swallowing them: a
+  // registration or media error used to leave the button green while
+  // no call could ever ring in here.
+  client.on('telnyx.error', function (err) {
+    setAudioStatus('Audio connection error — try Connect audio again.', false);
+    toast('Audio error: ' + ((err && err.error && err.error.message) || 'connection failed'));
+  });
   client.on('telnyx.notification', function (note) {
-    // The server rings this browser with the agent leg — answer it so
-    // the bridge to the seller lands. Keep the leg so the keypad can
-    // send DTMF tones while the call is live.
+    // The server rings this browser with the agent leg. Our own
+    // outgoing legs are answered instantly so the bridge lands; a
+    // real incoming call waits for Troy to tap Answer (or Decline)
+    // on the banner. Keep the leg so the keypad can send DTMF tones
+    // while the call is live.
     try {
       var call = note && note.call;
       if (!call) return;
+      // A denied/blocked microphone kills answer() inside the SDK —
+      // say so plainly instead of ringing forever in silence.
+      if (note.type === 'userMediaError') {
+        setAudioStatus('Microphone blocked — allow the microphone for this site, then tap Connect audio again.', false);
+        toast('Microphone blocked — allow the microphone for this site to answer calls.');
+        return;
+      }
       // Re-attach on EVERY notification, not just callReceived: the
       // remoteStream object is swapped when media starts flowing, so
       // a one-time bind at ring time goes stale.
@@ -964,31 +1102,37 @@ async function ensureRtc(cfg) {
         // — the Nov 25/26 live failure). v2 reports the incoming call
         // as {type:'callUpdate', call} with call.state === 'ringing'
         // (Telnyx docs: "Receive an Inbound Call"); answer on that.
-        callState.agentCall = call;
-        var audioEl = document.getElementById('remoteAudio');
-        if (typeof call.answer === 'function') call.answer({ remoteElement: audioEl || 'remoteAudio' });
+        if (isOurOutgoingLeg()) answerOutboundLeg(call);
+        else showInboundBanner(call);
       } else if (note.type === 'callReceived') {
         // Legacy shape (v1 SDKs): same answer, kept as a fallback.
-        callState.agentCall = call;
-        var audioElLegacy = document.getElementById('remoteAudio');
-        if (typeof call.answer === 'function') call.answer({ remoteElement: audioElLegacy || 'remoteAudio' });
+        if (isOurOutgoingLeg()) answerOutboundLeg(call);
+        else showInboundBanner(call);
       }
       if ((call.state === 'hangup' || call.state === 'destroy') && call === callState.agentCall) callState.agentCall = null;
+      if ((call.state === 'hangup' || call.state === 'destroy') && call === callState.inboundCall) hideInboundBanner();
     } catch (e) { /* best-effort */ }
   });
   // Wait for telnyx.ready (SIP registration) before declaring audio
   // connected: connect() alone can resolve before the client is
   // registered, and a Call Control dial to an unregistered agent leg
-  // goes nowhere. 20s cap — we proceed anyway after it so a slow
-  // registration never wedges the button.
+  // goes nowhere. FAIL LOUD if either step fails — the old code
+  // swallowed a failed connect() and returned a dead client as if
+  // audio were connected, so the page dialed sellers it could never
+  // hear (ringing forever, no error anywhere). 20s cap on the ready
+  // wait: past it, retry instead of dialing deaf.
   var readyP = new Promise(function (resolve) {
     var done = false;
     var to = setTimeout(function () { if (!done) { done = true; resolve(false); } }, 20000);
     client.on('telnyx.ready', function () { if (!done) { done = true; clearTimeout(to); resolve(true); } });
   });
-  var connected = false;
-  try { await client.connect(); connected = true; } catch (e) { console.warn('[rtc] connect failed', e); }
-  if (connected) await readyP;
+  try {
+    await client.connect();
+  } catch (e) {
+    throw new Error('Audio could not connect to Telnyx: ' + ((e && e.message) || e));
+  }
+  var ready = await readyP;
+  if (!ready) throw new Error('Audio did not finish registering with Telnyx in 20s — tap Connect audio again.');
   rtcClient = client;
   return client;
 }
@@ -1019,6 +1163,11 @@ function finishCallUI(kind) {
   callState.agentCall = null;
   callState.bridged = false;
   callState.connectedAt = null;
+  callState.direction = null;
+  callState.outgoingPending = false;
+  callState.inboundCallId = null;
+  callState.inboundPhone = null;
+  hideInboundBanner();
   setCallButtons(!state.selectedThread, false);
   setCallStatus(finalText);
   showCallBox(finalText);
@@ -1101,6 +1250,7 @@ async function startCall(phone, from) {
   var t = state.selectedThread;
   if (!t) return;
   callState.phone = phone;
+  callState.direction = 'outbound';
   callState.bridged = false;
   callState.connectedAt = null;
   var btn = document.getElementById('callBtn');
@@ -1115,6 +1265,11 @@ async function startCall(phone, from) {
   try {
     await ensureRtc(cfg);
     setAudioStatus('🟢 Audio connected — answered sellers will ring in here.', true);
+    // Flag BEFORE the start call: the server creates the agent leg
+    // before this POST returns, so its invite can arrive while
+    // `active` is still false — without this the page would mistake
+    // its own outgoing leg for an inbound call and show the banner.
+    callState.outgoingPending = true;
     var body = { action: 'start', phone: phone, market: t.market || state.market || 'carolina' };
     if (from) body.from = from;
     var data = await callApi('', body);
@@ -1126,6 +1281,7 @@ async function startCall(phone, from) {
     __startRingback();
     pollCallStatus();
   } catch (e) {
+    callState.outgoingPending = false;
     setCallButtons(false, false);
     setCallStatus('');
     toast('Call failed: ' + (e && e.message ? e.message : e));
@@ -1357,6 +1513,8 @@ function init() {
   });
   document.getElementById('audioBtn').addEventListener('click', function () { connectAudioNow(); });
   document.getElementById('podAudioBtn').addEventListener('click', function () { connectAudioNow(); });
+  document.getElementById('inboundAnswerBtn').addEventListener('click', function () { answerInboundCall(); });
+  document.getElementById('inboundDeclineBtn').addEventListener('click', function () { declineInboundCall(); });
   document.getElementById('dialKeypad').addEventListener('click', function (ev) {
     var b = ev.target.closest ? ev.target.closest('[data-key]') : null;
     if (b) dialKeypadPress(b.getAttribute('data-key'));

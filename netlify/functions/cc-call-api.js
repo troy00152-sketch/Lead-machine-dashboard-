@@ -388,6 +388,41 @@ exports.handler = async (event) => {
       return ok({ ok: true });
     }
 
+    if (action === 'inbound') {
+      // Incoming-call banner lookup: the browser just got a WebRTC
+      // invite for an agent leg it did not place (a seller called one
+      // of our numbers). The SIP leg only carries our own number as
+      // caller ID, so the page asks the server which inbound pairing
+      // this agent leg belongs to — that carries the real caller phone
+      // (+ name from the thread) and the pairing key the page needs to
+      // poll the call to Connected. The agent leg's call_control_id
+      // rides on the SDK call object (options.telnyxCallControlId).
+      // Returns {found:false} while the webhook is still saving the
+      // pairing — the page retries for a few seconds.
+      const agentLeg = params.agentLeg || body.agentLeg;
+      if (!agentLeg) return bad('Missing agentLeg.');
+      const pairings = await loadPairings(event);
+      const found = findByLeg(pairings, agentLeg);
+      if (!found) return ok({ found: false });
+      const rec = found.rec;
+      let name = '';
+      try {
+        const cs = convStore(event);
+        if (rec.key) {
+          const thread = await readJson(cs, rec.key);
+          if (thread && thread.name) name = thread.name;
+        }
+      } catch (e) { /* name is best-effort */ }
+      return ok({
+        found: true,
+        callId: found.callId,
+        phone: rec.phone || '',
+        name,
+        status: rec.status || '',
+        direction: rec.direction || '',
+      });
+    }
+
     if (action === 'status') {
       const callId = params.callId || body.callId;
       if (!callId) return bad('Missing callId.');
