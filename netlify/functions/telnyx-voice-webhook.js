@@ -191,6 +191,10 @@ async function refillAndMaybeComplete(session, event) {
 // route here. Bridge rule mirrors the dialer: bridge ONLY once the
 // seller is a confirmed human AND the agent has answered — whichever
 // of those two signals lands second triggers the bridge.
+// Inbound pairings (direction 'inbound', created by handleInboundCall
+// below): the caller dialed us, so their answer IS the human signal —
+// no AMD wait. The agent leg answers first, then we answer the
+// inbound leg and bridge.
 async function applyThreadCallEvent(evt, event, state) {
   const type = evt && evt.event_type;
   const payload = (evt && evt.payload) || {};
@@ -204,7 +208,28 @@ async function applyThreadCallEvent(evt, event, state) {
       role: state.kind === 'thread-call-agent' ? 'agent' : 'seller',
     };
   }
-  if (!found) return { handled: false, reason: 'thread pairing not found' };
+  if (!found) {
+    // The pairing is not saved yet (the 'start' call is still writing
+    // it, or the browser auto-answered the agent leg in <1s). Stash
+    // the signal instead of dropping it — a dropped agentAnswered
+    // used to deadlock the bridge forever (ringback on, seller
+    // unheard). 'start' and the merge below pick the stash up.
+    let sellerId = state && state.sellerCallControlId;
+    if (!sellerId && state && state.kind === 'thread-call-agent' && state.key) sellerId = state.key; // inbound: key IS the inbound leg id
+    if (!sellerId) sellerId = callControlId; // seller-leg events are keyed by their own call_control_id
+    const isAgentLeg = (state && state.kind === 'thread-call-agent') || (callControlId && sellerId && callControlId !== sellerId);
+    const pending = (await callApi._thread.loadPending(event, sellerId)) || {};
+    if (type === 'call.answered') {
+      if (isAgentLeg) { pending.agentAnswered = true; pending.agentLeg = callControlId; }
+      else pending.sellerAnswered = true;
+    } else if (type === 'call.machine.detection.ended' || type === 'call.machine.greeting.ended') {
+      const result = String((payload && payload.result) || '').toLowerCase();
+      if (result === 'human' || result === 'not_sure') pending.sellerHuman = true;
+      else if (result === 'machine') pending.sellerMachine = true;
+    }
+    await callApi._thread.savePending(event, sellerId, pending);
+    return { handled: true, pending: true };
+  }
   const rec = found.rec;
   const v = voiceLib();
 
@@ -218,13 +243,33 @@ async function applyThreadCallEvent(evt, event, state) {
   }
   async function maybeBridge() {
     if (rec.sellerHuman && rec.agentAnswered && rec.sellerLeg && rec.agentLeg) {
-      await safeVoice(() => v.bridge(rec.sellerLeg, rec.agentLeg), 'bridge thread call');
-      rec.status = 'bridged';
+      const ok = await safeVoice(() => v.bridge(rec.sellerLeg, rec.agentLeg), 'bridge thread call');
+      // Only report 'bridged' when Telnyx accepted the bridge. A
+      // failed bridge used to be recorded as bridged anyway, so the
+      // page stopped ringing while nobody could hear anybody.
+      if (ok !== null) rec.status = 'bridged';
+      else rec.lastError = 'bridge-failed';
     }
+  }
+
+  // Merge any signal stashed before the pairing existed. If the merge
+  // completes the pair, bridge now instead of waiting for another
+  // event that may never come. Inbound: if the agent answered before
+  // the pairing existed, the branch that answers the inbound leg
+  // never ran — answer it here so the caller's call.answered (and
+  // the bridge) can still land.
+  await callApi._thread.mergePending(event, found.callId, rec);
+  if (rec.direction === 'inbound' && rec.agentAnswered && !rec.sellerAnswered) {
+    await safeVoice(() => v.answer(rec.sellerLeg), 'answer inbound leg (pending merge)');
+  }
+  if (rec.sellerHuman && rec.agentAnswered && rec.status !== 'bridged' && rec.status !== 'ended' && rec.status !== 'machine') {
+    await maybeBridge();
   }
 
   if (type === 'call.machine.detection.ended' || type === 'call.machine.greeting.ended') {
     if (found.role !== 'seller') return { handled: false, reason: 'AMD event for non-seller leg' };
+    // Inbound calls never run AMD (the caller dialed us) — ignore.
+    if (rec.direction === 'inbound') return { handled: true, inboundAmdIgnored: true };
     const result = String(payload.result || '').toLowerCase();
     if (result === 'machine') {
       await hangupBoth();
@@ -238,11 +283,26 @@ async function applyThreadCallEvent(evt, event, state) {
   } else if (type === 'call.answered') {
     if (found.role === 'agent') {
       rec.agentAnswered = true;
+      // Inbound: the caller is still ringing — answer their leg now;
+      // their call.answered lands next and the bridge forms then.
+      if (rec.direction === 'inbound' && !rec.sellerAnswered) {
+        await safeVoice(() => v.answer(rec.sellerLeg), 'answer inbound leg');
+      }
       await maybeBridge();
     } else {
-      // Seller picked up — no bridge until the AMD verdict lands.
       rec.sellerAnswered = true;
+      if (rec.direction === 'inbound') {
+        // The caller dialed us — answer IS the human signal (no AMD).
+        rec.sellerHuman = true;
+        await maybeBridge();
+      }
+      // Outbound: no bridge until the AMD verdict lands.
     }
+  } else if (type === 'call.initiated') {
+    // The other end is ringing — the page shows this + plays ringback.
+    if (rec.status === 'dialing') rec.status = 'ringing';
+  } else if (type === 'call.bridged') {
+    rec.status = 'bridged';
   } else if (type === 'call.hangup') {
     if (rec.status !== 'ended' && rec.status !== 'machine') {
       rec.status = 'ended';
@@ -252,10 +312,61 @@ async function applyThreadCallEvent(evt, event, state) {
       }
     }
   }
-  // call.initiated / call.bridged / anything else: state stands.
+  // Anything else: state stands.
+  rec.lastEvent = type;
   rec.updatedAt = Date.now();
   await callApi._thread.savePairings(pairings, event);
   return { handled: true, threadCall: true, status: rec.status };
+}
+
+// ---- inbound calls (someone dials one of our numbers) ----
+// An inbound call.initiated carries no client_state and no pairing.
+// We ring the agent's browser (the stored voice credential's SIP URI)
+// and record a pairing with direction 'inbound'. When the agent leg
+// answers, applyThreadCallEvent answers the inbound leg and bridges.
+async function handleInboundCall(evt, event) {
+  const payload = (evt && evt.payload) || {};
+  const callControlId = payload.call_control_id || null;
+  if (!callControlId) return { handled: false, reason: 'inbound call without call_control_id' };
+  const sipUri = await callApi.agentSipUri(event);
+  if (!sipUri) return { handled: false, reason: 'no agent SIP URI — inbound call has nowhere to ring' };
+  const v = voiceLib();
+  const agent = await safeVoice(
+    () =>
+      v.createAgentLeg({
+        sipUri,
+        from: payload.to || undefined,
+        clientState: { kind: 'thread-call-agent', key: callControlId, sellerCallControlId: callControlId },
+      }),
+    'create agent leg for inbound call'
+  );
+  const now = Date.now();
+  const pairings = await callApi._thread.loadPairings(event);
+  pairings.calls[callControlId] = {
+    key: callControlId,
+    phone: payload.from || '',
+    sellerLeg: callControlId,
+    agentLeg: agent && agent.callControlId ? agent.callControlId : null,
+    status: 'ringing',
+    direction: 'inbound',
+    agentAnswered: false,
+    sellerHuman: false,
+    sellerAnswered: false,
+    startedAt: now,
+    updatedAt: now,
+  };
+  // The agent can answer before this save lands — merge any signal
+  // stashed while the pairing did not exist yet, and if the agent
+  // already answered, answer the inbound leg now (the branch that
+  // normally does this never ran for a stashed event).
+  const rec = pairings.calls[callControlId];
+  await callApi._thread.mergePending(event, callControlId, rec);
+  if (rec.agentAnswered && !rec.sellerAnswered) {
+    await safeVoice(() => v.answer(rec.sellerLeg), 'answer inbound leg (pending merge)');
+  }
+  rec.updatedAt = Date.now();
+  await callApi._thread.savePairings(pairings, event);
+  return { handled: true, inbound: true, status: 'ringing' };
 }
 
 // ---- core event application (unit-tested) ----
@@ -305,6 +416,12 @@ async function applyCallEvent(evt, event) {
     if (callApi._thread.findByLeg(pairings, callControlId)) {
       return applyThreadCallEvent(evt, event, threadState);
     }
+  }
+
+  // Inbound calls: no client_state, no pairing — the caller dialed one
+  // of our numbers (direction 'inbound'). Ring the agent's browser.
+  if (type === 'call.initiated' && payload.direction === 'inbound') {
+    return handleInboundCall(evt, event);
   }
 
   const session = await engine.loadSession(event);
