@@ -371,6 +371,11 @@ async function processInbound(key, event) {
       runner = null;
     }
     if (runner && runner.configured()) {
+      // Thread the Lambda event through: without it the runner's
+      // CcClient builds context-less Blobs stores (reads miss, writes
+      // silently no-op — the Nov 26 Amber repeat-question +
+      // missing-outbound bug). telnyx-webhook already passes this
+      // invocation's event to processInbound; it must not stop here.
       const result = await runner.runBot({
         contactId: key,
         conversationId: key,
@@ -378,7 +383,7 @@ async function processInbound(key, event) {
         body: String(inbound.body || ''),
         type: 'SMS',
         toNumber: inbound.to || null,
-      });
+      }, undefined, event);
       // The bot wrote to the same stores through cc-client — reload
       // before logging so we never overwrite its messages with the
       // stale in-memory copy.
