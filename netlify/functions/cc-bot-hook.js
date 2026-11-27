@@ -126,6 +126,12 @@ async function writeJson(s, key, obj) {
   await s.set(key, JSON.stringify(obj), { contentType: 'application/json' });
 }
 
+// Small delay for retry loops (stale-read re-reads, seal retries).
+// Bounded sleeps only — never on the hot path without a cap.
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function loadThread(s, key) {
   const t = await readJson(s, key);
   if (t && Array.isArray(t.messages)) return t;
@@ -282,6 +288,31 @@ async function sealEnrollment(es, key, thread, reason) {
   thread.dnd = true;
   return rec;
 }
+
+// sealWithRetry (FIX B, Nov 27 2026 — Jason 'Out' / Michelle 'OUT'
+// silent seals): sealEnrollment does unguarded Blobs writes, and the
+// opt-out branch used to log only AFTER the seal — so a throw left
+// no seal AND no botLog, and the silence was invisible. Retry the
+// seal (default 3 attempts, ~250ms apart) and report the outcome;
+// the caller logs the failure as a botLog entry instead of swallowing
+// it. Returns {ok, rec} on success, {ok:false, error} when every
+// attempt threw.
+async function sealWithRetry(es, key, thread, reason, attempts, delayMs) {
+  const tries = Math.max(1, attempts || 3);
+  const delay = delayMs != null ? delayMs : 250;
+  let lastErr = null;
+  for (let i = 1; i <= tries; i++) {
+    try {
+      const rec = await sealEnrollment(es, key, thread, reason);
+      return { ok: true, rec };
+    } catch (e) {
+      lastErr = e;
+      console.error('[cc-bot-hook] seal attempt ' + i + '/' + tries + ' failed for ' + key + ' (' + reason + '):', String((e && e.message) || e));
+      if (i < tries) await sleep(delay);
+    }
+  }
+  return { ok: false, error: String((lastErr && lastErr.message) || lastErr) };
+}
 async function addTagsToEnrollment(es, key, newTags) {
   const rec = await readJson(es, key);
   if (!rec) return null;
@@ -435,26 +466,101 @@ async function sendReply(cs, thread, enrollment, body) {
 // Returns a result object describing the decision; never throws for
 // bot/transport problems (silence is the failure mode), only for store
 // failures the caller may want to log.
-async function processInbound(key, event) {
+//
+// FIX A (Nov 27, 2026 — Stephanie '325k' / Jason 'Out' / Michelle
+// 'OUT' got NO botLog at all): processInbound re-read the thread from
+// Blobs milliseconds after the webhook wrote it, hit a lagging
+// replica with no inbound, and returned
+// {handled:false, reason:'no inbound message on thread'} with NO log.
+// Two changes:
+//   1. The caller (telnyx-webhook) passes the inbound it JUST stored
+//      as `knownInbound` — the hook trusts that message instead of
+//      re-reading for it. The thread is still loaded for history /
+//      context, and the known message is merged onto the loaded copy
+//      when it lacks it (saveThread unions by id anyway).
+//   2. Without a known message (HTTP replay path), the load is
+//      retried up to 3x ~250ms apart before giving up — and giving up
+//      now logs an ERROR and writes a best-effort 'bot-missed' botLog
+//      entry, so it can never again be invisible.
+// Every botLog entry below also carries messageId (FIX D): the
+// webhook dedupes a retry on "already evaluated", and without the id
+// on the entry there is nothing to match against.
+async function processInbound(key, event, knownInbound) {
   const cs = convStore(event);
   const es = enrollStore(event);
-  const thread = await loadThread(cs, key);
-  const enrollment = await readJson(es, key);
+  let thread = await loadThread(cs, key);
 
   let inbound = null;
-  for (let i = thread.messages.length - 1; i >= 0; i--) {
-    if (thread.messages[i].dir === 'in') {
-      inbound = thread.messages[i];
-      break;
+  if (knownInbound && knownInbound.id) {
+    inbound = {
+      id: knownInbound.id,
+      dir: 'in',
+      body: String(knownInbound.body || ''),
+      status: 'received',
+      at: knownInbound.at || Date.now(),
+      from: knownInbound.from || ('+' + key),
+      to: knownInbound.to || '',
+    };
+    if (!thread.messages.some((m) => m && m.id === inbound.id)) thread.messages.push(inbound);
+  } else {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      for (let i = thread.messages.length - 1; i >= 0; i--) {
+        if (thread.messages[i].dir === 'in') {
+          inbound = thread.messages[i];
+          break;
+        }
+      }
+      if (inbound) break;
+      if (attempt < 3) {
+        await sleep(250);
+        thread = await loadThread(cs, key);
+      }
     }
   }
-  if (!inbound) return { handled: false, reason: 'no inbound message on thread' };
+  const enrollment = await readJson(es, key);
+
+  if (!inbound) {
+    console.error('[cc-bot-hook] processInbound: no inbound message on thread ' + key + ' after retries'
+      + (knownInbound && knownInbound.id ? ' (expected message id ' + knownInbound.id + ')' : '')
+      + ' — returning without a bot decision; this must never be silent');
+    try {
+      logBotEvent(thread, {
+        type: 'bot-missed',
+        decision: 'bot-missed: no inbound message on thread after retries',
+        inbound: knownInbound ? String(knownInbound.body || '') : '',
+        messageId: (knownInbound && knownInbound.id) || null,
+      });
+      thread.updatedAt = Date.now();
+      await saveThread(cs, thread);
+    } catch (e) {
+      console.error('[cc-bot-hook] could not persist bot-missed trail for ' + key + ':', String((e && e.message) || e));
+    }
+    return { handled: false, reason: 'no inbound message on thread' };
+  }
 
   // 1) Opt-out seal — adapter-level, mirrors the HL platform behavior.
   const keyword = optOutKeyword(inbound.body);
   if (keyword) {
-    await sealEnrollment(es, key, thread, 'opt-out:' + keyword);
-    logBotEvent(thread, { type: 'opt-out-seal', decision: 'sealed: opt-out ' + keyword, inbound: String(inbound.body || '') });
+    // FIX B: retried seal; a throw no longer leaves "no seal, no
+    // botLog". The failure is logged as 'opt-out-seal-failed' and
+    // reported — the caller must not believe the contact is sealed.
+    const sealed = await sealWithRetry(es, key, thread, 'opt-out:' + keyword);
+    if (!sealed.ok) {
+      logBotEvent(thread, {
+        type: 'opt-out-seal-failed',
+        decision: 'opt-out-seal-failed: ' + sealed.error,
+        inbound: String(inbound.body || ''),
+        messageId: inbound.id || null,
+      });
+      thread.updatedAt = Date.now();
+      try {
+        await saveThread(cs, thread);
+      } catch (e) {
+        console.error('[cc-bot-hook] could not persist opt-out-seal-failed trail for ' + key + ':', String((e && e.message) || e));
+      }
+      return { handled: true, action: 'opt-out-seal-failed', keyword, botCalled: false, error: sealed.error };
+    }
+    logBotEvent(thread, { type: 'opt-out-seal', decision: 'sealed: opt-out ' + keyword, inbound: String(inbound.body || ''), messageId: inbound.id || null });
     thread.updatedAt = Date.now();
     await saveThread(cs, thread);
     return { handled: true, action: 'sealed-opt-out', keyword, botCalled: false };
@@ -462,7 +568,7 @@ async function processInbound(key, event) {
 
   // 2) Already sealed -> the bot never sees it.
   if (isSealed(enrollment)) {
-    logBotEvent(thread, { type: 'bot-skipped', decision: 'bot-skipped: contact sealed', inbound: String(inbound.body || '') });
+    logBotEvent(thread, { type: 'bot-skipped', decision: 'bot-skipped: contact sealed', inbound: String(inbound.body || ''), messageId: inbound.id || null });
     thread.updatedAt = Date.now();
     await saveThread(cs, thread);
     return { handled: true, action: 'skipped-sealed', botCalled: false };
@@ -506,6 +612,13 @@ async function processInbound(key, event) {
         type: 'bot-local',
         decision: 'bot-local: ' + result.outcome,
         inbound: String(inbound.body || ''),
+        messageId: inbound.id || null,
+        // FIX C: when the bot stayed silent because of a booking, name
+        // the tripping appointment(s) — 'booked-silent' with no ids is
+        // unactionable (Paula's cancelled Sat Nov 28 11 AM row).
+        ...(Array.isArray(result.appointmentIds) && result.appointmentIds.length
+          ? { appointmentIds: result.appointmentIds }
+          : {}),
       });
       fresh.updatedAt = Date.now();
       await saveThread(cs, fresh);
@@ -523,6 +636,7 @@ async function processInbound(key, event) {
       type: 'bot-skipped',
       decision: 'bot-skipped: no transport configured',
       inbound: String(inbound.body || ''),
+      messageId: inbound.id || null,
     });
     thread.updatedAt = Date.now();
     await saveThread(cs, thread);
@@ -549,6 +663,7 @@ async function processInbound(key, event) {
       type: 'bot-error',
       decision: 'bot-error: ' + String((e && e.message) || e),
       inbound: String(inbound.body || ''),
+      messageId: inbound.id || null,
     });
     thread.updatedAt = Date.now();
     await saveThread(cs, thread);
@@ -567,8 +682,17 @@ async function processInbound(key, event) {
       currentEnrollment = (await addTagsToEnrollment(es, key, a.tags)) || currentEnrollment;
       applied.push({ type: 'addTags', tags: a.tags });
     } else if (a.type === 'seal') {
-      currentEnrollment = await sealEnrollment(es, key, thread, 'bot-seal');
-      applied.push({ type: 'seal' });
+      // FIX B: retried seal — a failed seal here must not throw the
+      // whole action loop away, and must be visible in the bot-actions
+      // entry below (ok:false + error) instead of silent.
+      const sealed = await sealWithRetry(es, key, thread, 'bot-seal');
+      if (sealed.ok) {
+        currentEnrollment = sealed.rec;
+        applied.push({ type: 'seal', ok: true });
+      } else {
+        console.error('[cc-bot-hook] bot seal action failed for ' + key + ': ' + sealed.error);
+        applied.push({ type: 'seal', ok: false, error: sealed.error });
+      }
     } else if (a.type === 'silence') {
       applied.push({ type: 'silence' });
     }
@@ -577,6 +701,7 @@ async function processInbound(key, event) {
     type: 'bot-actions',
     decision: 'bot: ' + (applied.map((a) => a.type).join(',') || 'no actions'),
     inbound: String(inbound.body || ''),
+    messageId: inbound.id || null,
     actions: applied,
   });
   thread.updatedAt = Date.now();
@@ -620,8 +745,14 @@ exports.handler = async (event) => {
   } catch (e) {
     return json(400, { error: 'Invalid phone number.' });
   }
+  // A replay may name the exact inbound to evaluate (messageId and/or
+  // body) — passed through as knownInbound (FIX A) so the hook does
+  // not have to find it by re-reading a possibly lagging store.
+  const knownInbound = (body.messageId || body.body)
+    ? { id: body.messageId || null, body: body.body || '' }
+    : null;
   try {
-    const result = await processInbound(key, event);
+    const result = await processInbound(key, event, knownInbound);
     return json(200, { ok: true, ...result });
   } catch (e) {
     return json(500, { error: String((e && e.message) || e) });
@@ -636,6 +767,7 @@ exports._test = {
   assembleBotInput,
   normalizeActions,
   isSealed,
+  sealWithRetry,
   setStores(stores) {
     deps.convStoreFactory = stores && stores.conversations ? () => stores.conversations : null;
     deps.enrollStoreFactory = stores && stores.enrollments ? () => stores.enrollments : null;
