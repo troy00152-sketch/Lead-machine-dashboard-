@@ -80,9 +80,10 @@ function ensureKnowledge(persona, log) {
 }
 
 let handlerInstance = null;
+let handlerClient = null;
 let testOverrides = null;
 
-function buildHandler(log) {
+function buildHandler(log, lambdaEvent) {
   const env = {
     ...process.env,
     // The vendored loadConfig requires these keys to exist; cc-client
@@ -131,23 +132,35 @@ function buildHandler(log) {
     }
   }
   if (testOverrides && testOverrides.sendSms) clientOpts.sendSms = testOverrides.sendSms;
+  // The Lambda event for this invocation: without it the client's
+  // default Blobs stores have no context on Netlify Functions v1
+  // (reads miss, writes silently no-op — the Nov 26 Amber
+  // repeat-question + missing-outbound bug). The handler calls hl.*
+  // with no event argument, so the client must carry it.
+  if (lambdaEvent) clientOpts.event = lambdaEvent;
   const hl = new CcClient(clientOpts);
+  handlerClient = hl;
   const llm = testOverrides && testOverrides.llm ? testOverrides.llm : createLlm(config);
   const deps = { config, hl, llm, logger: { log } };
   if (testOverrides && testOverrides.now) deps.now = testOverrides.now;
   return createHandler(deps);
 }
 
-// runBot(payload) -> {outcome, statusCode, ...} — never throws; any
+// runBot(payload, log, lambdaEvent) -> {outcome, statusCode, ...} — never throws; any
 // internal failure resolves to outcome 'error' and the adapter treats
 // it as silence (the bot's own doctrine: failure = no reply, ever).
-async function runBot(payload, log) {
+// `lambdaEvent` is the Lambda event of the current invocation, threaded
+// through so the client's Blobs stores get their context (see
+// buildHandler). A warm container reuses the cached handler, so the
+// stored event is refreshed on every call that carries one.
+async function runBot(payload, log, lambdaEvent) {
   const logger = typeof log === 'function' ? log : (...a) => console.log(...a);
   if (!configured() && !testOverrides) {
     return { outcome: 'not-configured', statusCode: 503 };
   }
   try {
-    if (!handlerInstance) handlerInstance = buildHandler(logger);
+    if (!handlerInstance) handlerInstance = buildHandler(logger, lambdaEvent);
+    else if (lambdaEvent && handlerClient) handlerClient.setEvent(lambdaEvent);
     const event = {
       httpMethod: 'POST',
       headers: { 'x-bot-secret': botSecret() || (testOverrides && testOverrides.secret) || '' },
@@ -170,11 +183,13 @@ module.exports._test = {
   setOverrides(o) {
     testOverrides = o || null;
     handlerInstance = null;
+    handlerClient = null;
     knowledgeReady = false;
   },
   reset() {
     testOverrides = null;
     handlerInstance = null;
+    handlerClient = null;
     knowledgeReady = false;
   },
 };

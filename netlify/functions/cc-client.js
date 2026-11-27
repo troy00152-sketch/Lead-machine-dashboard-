@@ -302,6 +302,15 @@ class CcClient {
     this._appointmentsApi = o.appointmentsApi || appointmentsDefault;
     this._sendSms = o.sendSms || null;
     this._nowOpt = o.now != null ? o.now : null;
+    // Lambda event for the current invocation (Netlify Functions v1:
+    // getStore() without connectLambda(event) has no context — reads
+    // miss, writes silently no-op. The vendored bot handler calls
+    // hl.* with NO event argument, so method-level event params are
+    // always undefined on the bot path; the event MUST ride on the
+    // client. Set at construction (cc-bot-runner) and refreshed per
+    // invocation via setEvent() so a warm container never reuses a
+    // stale invocation's context.
+    this._event = o.event || null;
     this.config = o.config || {};
     // Field IDs (HL parity), overridable via config like hl.js.
     this.arvFieldId = this.config.arvFieldId || ARV_FIELD_ID;
@@ -314,9 +323,17 @@ class CcClient {
     if (typeof this._nowOpt === 'number') return this._nowOpt;
     return Date.now();
   }
-  _convStore(event) { return this._conversations || makeDefaultStore(CONV_STORE, event); }
-  _enrollStore(event) { return this._enrollments || makeDefaultStore(ENROLL_STORE, event); }
-  _oppStore(event) { return this._opportunities || makeDefaultStore(OPP_STORE, event); }
+  // Refresh the Lambda event for the current invocation (see
+  // constructor). A method-level event, when the caller passes one,
+  // still wins over the stored one.
+  setEvent(event) {
+    this._event = event || null;
+    return this;
+  }
+  _eventOr(event) { return event || this._event; }
+  _convStore(event) { return this._conversations || makeDefaultStore(CONV_STORE, this._eventOr(event)); }
+  _enrollStore(event) { return this._enrollments || makeDefaultStore(ENROLL_STORE, this._eventOr(event)); }
+  _oppStore(event) { return this._opportunities || makeDefaultStore(OPP_STORE, this._eventOr(event)); }
   _sendSmsImpl() { return this._sendSms || lib.sendSms; }
 
   async _loadEnrollment(key, event) {
@@ -577,12 +594,12 @@ class CcClient {
 
   // ---- calendars / appointments ----
   async getFreeSlots(calendarId, startMs, endMs, event) {
-    const appts = await this._appointmentsApi.listAppointments({ fromMs: startMs, toMs: endMs }, event);
+    const appts = await this._appointmentsApi.listAppointments({ fromMs: startMs, toMs: endMs }, this._eventOr(event));
     return slots.generateFreeSlots(appts || [], startMs, endMs);
   }
 
   async getCalendarEvents(calendarId, startMs, endMs, event) {
-    const appts = await this._appointmentsApi.listAppointments({ fromMs: startMs, toMs: endMs }, event);
+    const appts = await this._appointmentsApi.listAppointments({ fromMs: startMs, toMs: endMs }, this._eventOr(event));
     return (appts || [])
       .filter((a) => {
         const st = String(a.status || '').toLowerCase();
@@ -614,7 +631,7 @@ class CcClient {
       startISO: o.startISO || o.startTime,
       endISO: o.endISO || o.endTime,
       source: 'bot',
-    }, event);
+    }, this._eventOr(event));
     return {
       id: rec.id,
       calendarId: rec.calendarId,
@@ -622,6 +639,8 @@ class CcClient {
       startTime: rec.startISO,
       endTime: rec.endISO,
       status: rec.status || 'confirmed',
+      hlEventId: rec.hlEventId || null,
+      hlSync: rec.hlSync || null,
     };
   }
 
@@ -629,7 +648,7 @@ class CcClient {
     const now = nowMs != null ? nowMs : this._now();
     const key = keyOf(contactId);
     const appts = await this._appointmentsApi.listAppointments(
-      { fromMs: now, toMs: now + 365 * 24 * 60 * 60 * 1000 }, event);
+      { fromMs: now, toMs: now + 365 * 24 * 60 * 60 * 1000 }, this._eventOr(event));
     // Overlap listing from `now` includes in-progress appointments
     // (endMs > now); the filter below drops already-ended ones.
     return (appts || [])
@@ -664,7 +683,7 @@ class CcClient {
     const phone = normalizePhoneDigits(c.phone || c.phoneNumber || c.mobile || c.phone_number);
     const address = c.address1 ? String(c.address1).trim().toLowerCase() : null;
     const appts = await this._appointmentsApi.listAppointments(
-      { fromMs: now - win, toMs: now }, event);
+      { fromMs: now - win, toMs: now }, this._eventOr(event));
     return (appts || [])
       .filter((a) => {
         if (!a.id) return false;
@@ -696,7 +715,7 @@ class CcClient {
   }
 
   async cancelAppointment(eventId, event) {
-    const rec = await this._appointmentsApi.cancelAppointment(eventId, event);
+    const rec = await this._appointmentsApi.cancelAppointment(eventId, this._eventOr(event));
     if (!rec) return {};
     return { id: rec.id, status: 'cancelled' };
   }
@@ -768,7 +787,7 @@ class CcClient {
         conversationId: body.conversationId,
         message: body.message,
         fromNumber: body.fromNumber,
-      });
+      }, this._event);
     }
     throw new Error('CcClient: unsupported request ' + method + ' ' + path);
   }
