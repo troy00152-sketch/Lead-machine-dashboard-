@@ -175,32 +175,78 @@ function e164OfPhone(phone) {
   return '+' + d;
 }
 
+// Pull an HL contact id out of any of the shapes the Contacts API
+// returns: a bare contact ({id}), {contact:{id}}, a lookup/search
+// page ({contacts:[{id}]}), or any of those nested under `data`.
+function extractHlContactId(found) {
+  if (!found) return null;
+  const d = found.data || found;
+  if (d.contact && d.contact.id) return String(d.contact.id);
+  if (d.id) return String(d.id);
+  if (Array.isArray(d.contacts) && d.contacts[0] && d.contacts[0].id) return String(d.contacts[0].id);
+  return null;
+}
+
+// Search fallback for contact resolution (Nov 27, 2026): the
+// /contacts/lookup endpoint is documented OAuth-only, and the live
+// function calls HL with a Private Integration Token — the lookup
+// missed an existing contact live (Paula Test Seller) and the create
+// fallback 400'd on duplicates. The free-text search is the second
+// path before falling back to create. Returns the contact id or null.
+// Never throws.
+async function searchHlContactByPhone(phone, cfg) {
+  try {
+    const found = await hlFetch(cfg, `/contacts/search?locationId=${encodeURIComponent(cfg.locationId)}`, {
+      method: 'POST',
+      version: HL_VERSION_CONTACTS,
+      body: { query: phone },
+    });
+    return extractHlContactId(found);
+  } catch (e) {
+    console.error('[cc-appointments] HL contact search failed:', String((e && e.message) || e).slice(0, 150));
+    return null;
+  }
+}
+
 // Resolve the HL contact id for a booking: the record's contactId
-// when it already is one, else lookup by phone, else create the HL
-// contact (the seller is an HL contact in the live flow — the bot
-// creates them there too). Throws when there is no phone and no id.
+// when it already is one, else lookup by phone, else free-text search
+// by phone, else create the HL contact (the seller is an HL contact
+// in the live flow — the bot creates them there too). A create that
+// 400s on duplicates means the contact exists but neither read path
+// found it — re-search once and use the match instead of failing.
+// Throws when there is no phone and no id.
 async function resolveHlContactId(rec, cfg) {
   if (looksLikeHlId(rec.hlContactId)) return String(rec.hlContactId);
   if (looksLikeHlId(rec.contactId)) return String(rec.contactId);
   const phone = e164OfPhone(rec.phone);
   if (!phone) throw new Error('no phone or HL contact id to book against');
   const found = await hlFetch(cfg, `/contacts/lookup?phone=${encodeURIComponent(phone)}&locationId=${encodeURIComponent(cfg.locationId)}`, { version: HL_VERSION_CONTACTS }).catch((e) => { console.error('[cc-appointments] HL contact lookup failed (create fallback will run):', String((e && e.message) || e).slice(0, 150)); return null; });
-  const hit = found && (found.contact || found);
-  const hitId = hit && (hit.id || (Array.isArray(hit.contacts) && hit.contacts[0] && hit.contacts[0].id));
-  if (hitId) return String(hitId);
+  let hitId = extractHlContactId(found);
+  if (!hitId) hitId = await searchHlContactByPhone(phone, cfg);
+  if (hitId) return hitId;
   const name = String(rec.name || '').trim();
   const parts = name ? name.split(/\s+/) : [];
-  const created = await hlFetch(cfg, '/contacts/', {
-    method: 'POST',
-    version: HL_VERSION_CONTACTS,
-    body: {
-      locationId: cfg.locationId,
-      firstName: parts[0] || 'Seller',
-      lastName: parts.slice(1).join(' ') || '',
-      phone,
-      ...(rec.email ? { email: rec.email } : {}),
-    },
-  });
+  let created;
+  try {
+    created = await hlFetch(cfg, '/contacts/', {
+      method: 'POST',
+      version: HL_VERSION_CONTACTS,
+      body: {
+        locationId: cfg.locationId,
+        firstName: parts[0] || 'Seller',
+        lastName: parts.slice(1).join(' ') || '',
+        phone,
+        ...(rec.email ? { email: rec.email } : {}),
+      },
+    });
+  } catch (e) {
+    if (/duplicat/i.test(String((e && e.message) || e))) {
+      const again = await searchHlContactByPhone(phone, cfg);
+      if (again) return again;
+      console.error('[cc-appointments] contact create hit a duplicate but the re-search found nothing for', phone);
+    }
+    throw e;
+  }
   const c = created && (created.contact || created);
   const id = c && (c.id || c.contactId);
   if (!id) throw new Error('HL contact create returned no id');
@@ -483,19 +529,35 @@ async function cancelAppointment(id, event) {
   const s = makeStore(event);
   const bare = bareId(id);
   const cfg = hlConfig();
+  // An HL event that is already gone (deleted in HL) is not a slot
+  // still held — it is already cancelled. A 404 on the cancel PUT
+  // clears the record instead of leaving it stuck confirmed (Nov 27,
+  // Mon Nov 30 "CC Booking Test": its HL event was deleted and every
+  // UI cancel 503'd on the throw). Any other HL failure still throws.
+  async function cancelHlTolerant(hlEventId) {
+    try {
+      await cancelHlAppointment(hlEventId, cfg);
+    } catch (e) {
+      if (/HL 404/.test(String((e && e.message) || e))) {
+        console.error('[cc-appointments] HL event already gone for', hlEventId, '— clearing as cancelled');
+        return;
+      }
+      throw e;
+    }
+  }
   if (bare.startsWith('hl-')) {
     // HL-only booking (no Blobs record): cancel on HL directly.
     // HL failure throws — the slot is still held, so the caller
     // must not report it cancelled.
     if (!cfg) throw new Error('HL_API_TOKEN not set — cannot cancel the HL booking');
-    await cancelHlAppointment(bare.slice(3), cfg);
+    await cancelHlTolerant(bare.slice(3));
     return { id: bare, hlEventId: bare.slice(3), status: 'cancelled' };
   }
   const rec = await readJson(s, recordKey(bare));
   if (!rec) return null;
   if (rec.hlEventId) {
     if (!cfg) throw new Error('HL_API_TOKEN not set — cannot cancel the HL booking for ' + rec.id);
-    await cancelHlAppointment(rec.hlEventId, cfg);
+    await cancelHlTolerant(rec.hlEventId);
   }
   rec.status = 'cancelled';
   await writeJson(s, recordKey(rec.id), rec);
