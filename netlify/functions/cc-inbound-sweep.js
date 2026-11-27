@@ -23,13 +23,32 @@
 //     failure and the pairing sat 'ringing' with agentAnswered set
 //     while the caller heard ringback forever. The sweep retries the
 //     missing step (capped) instead of leaving the caller ringing.
+//   * (d) an inbound pairing still 'ringing' past 2 minutes with no
+//     answer and no fallback leg in flight (Nov 26, 2026, End Call
+//     fix): every agent leg is past its 20s Telnyx timeout whether
+//     or not its hangup event arrived, and (flag off) no fallback was
+//     ever dialed — nothing on the event path will ever end it, so
+//     it would sit 'ringing' forever and the missed call would never
+//     log. The sweep ends it and logs the miss.
+//   * (e) an inbound pairing 'bridged' past 2 hours with no update
+//     (Nov 26, 2026, End Call fix): no real seller call lasts that
+//     long, and a live bridged call has no webhook events — so this
+//     is a hangup event that never arrived (both End halves failed
+//     at once). The sweep hangs both legs, closes it, logs it.
 //
 // The sweep NEVER dials when the PSTN fallback flag is off — then it
-// only logs. It never ends a call (the seller's hangup event ends it;
+// only logs. It ends a call ONLY in (d)/(e) above, where no event
+// can ever end it (the seller's hangup event ends every live call;
 // the watchdog flags a pairing that lingers past 60s). Coarseness: a
 // 1-minute schedule means a fallback can fire 20-80s after the ring
 // budget is spent; the event-driven trigger is the fast path and this
 // sweep is the safety net.
+//
+// Watchdog: the sweep also runs cc-watchdog.scan() fail-soft on every
+// tick (Nov 26, 2026, End Call fix) — the sweep already runs 1/min,
+// so this wires the watchdog with no new schedule, no new secret, no
+// new cron. The cc-workflow-tick caller scan() used to ride on was
+// never created, which is why the bell was empty all day Nov 26.
 //
 // 30s Netlify limit for scheduled functions: a sweep is a handful of
 // Blobs reads + at most a few Telnyx calls — well inside it.
@@ -51,6 +70,11 @@ const STALL_MS = 20000; // case (c): quiet this long past the last event
 // means the event-driven answer/bridge stalled — the normal path
 // completes in seconds, so a 20s-quiet agentAnswered pairing is stuck.
 const MAX_STALL_RETRIES = 3; // per missing step, per pairing
+const RING_END_MS = 120000; // case (d): ringing this long with no answer
+// and no fallback leg in flight — every agent leg is past its 20s
+// Telnyx timeout, so the pairing is definitively dead.
+const BRIDGED_END_MS = 120 * 60 * 1000; // case (e): bridged this long
+// with no update — no real seller call lasts 2 hours.
 
 async function sweep(event, opts) {
   const o = opts || {};
@@ -62,6 +86,8 @@ async function sweep(event, opts) {
   let answerRetried = 0;
   let bridgeRetried = 0;
   let skipped = 0;
+  let ringEnded = 0;
+  let bridgedEnded = 0;
   for (const [callId, rec] of Object.entries(calls)) {
     if (!rec || rec.direction !== 'inbound') continue;
     if (rec.status !== 'ringing') continue;
@@ -126,6 +152,33 @@ async function sweep(event, opts) {
     // redialedAt gets its own 20s before the sweep may intervene.
     const lastDialAt = Math.max(rec.startedAt || 0, rec.redialedAt || 0);
     const ageMs = now - lastDialAt;
+    // (d) Ringing past 2 minutes with no answer and no fallback leg
+    // in flight: every agent leg is past its 20s Telnyx timeout
+    // whether or not its hangup event arrived, and (flag off) no
+    // fallback was ever dialed — nothing on the event path will ever
+    // end this pairing, so it would sit 'ringing' forever and the
+    // missed call would never log. End it here and log the miss. A
+    // live fallback leg (fallbackLeg set and not failed, AMD not
+    // pending) owns the pairing — never touch it; a failed fallback
+    // leg (fallbackFailed) is dead, so the pairing is dead too.
+    if (!rec.agentAnswered && !rec.fallbackAwaitingAmd && (!rec.fallbackLeg || rec.fallbackFailed) && ageMs > RING_END_MS) {
+      try {
+        const v = voiceLib();
+        const legs = Array.from(new Set([rec.sellerLeg, rec.agentLeg, ...(rec.agentLegs || [])].filter(Boolean)));
+        for (const legId of legs) {
+          try { await v.hangup(legId); } catch (e) { /* already gone */ }
+        }
+      } catch (e) { /* leg hangup never blocks the close */ }
+      rec.status = 'ended';
+      rec.endedAt = now;
+      rec.updatedAt = now;
+      try {
+        const logged = await callApi._thread.logCallToThread(event, rec);
+        if (logged) rec.loggedToThread = true;
+      } catch (e) { /* thread logging never fails a sweep close */ }
+      ringEnded += 1;
+      continue;
+    }
     // (a) Answered fallback leg, AMD verdict never landed: bridge it
     // (assume human — AMD premium verdicts land within seconds of
     // answer, so past 30s the verdict is not coming).
@@ -166,8 +219,49 @@ async function sweep(event, opts) {
       if (fresh && fresh.calls && fresh.calls[callId]) pairings.calls[callId] = fresh.calls[callId];
     }
   }
+  // (e) Bridged past 2 hours with no update: no real seller call
+  // lasts that long, and a live bridged call has no webhook events
+  // (updatedAt ~= bridgedAt) — so this is a hangup event that never
+  // arrived (both End halves failed at once). Hang both legs, close
+  // it, log it. The watchdog only flags unbridged states, so it can
+  // never see this — the sweep is the only backstop.
+  for (const [callId, rec] of Object.entries(calls)) {
+    if (!rec || rec.direction !== 'inbound' || rec.status !== 'bridged') continue;
+    const quietMs = now - (rec.updatedAt || rec.bridgedAt || rec.startedAt || 0);
+    if (quietMs <= BRIDGED_END_MS) continue;
+    try {
+      const v = voiceLib();
+      const legs = Array.from(new Set([rec.sellerLeg, rec.agentLeg, ...(rec.agentLegs || [])].filter(Boolean)));
+      for (const legId of legs) {
+        try { await v.hangup(legId); } catch (e) { /* already gone */ }
+      }
+    } catch (e) { /* leg hangup never blocks the close */ }
+    rec.wasBridged = true;
+    rec.status = 'ended';
+    rec.endedAt = now;
+    rec.updatedAt = now;
+    try {
+      const logged = await callApi._thread.logCallToThread(event, rec);
+      if (logged) rec.loggedToThread = true;
+    } catch (e) { /* thread logging never fails a sweep close */ }
+    bridgedEnded += 1;
+  }
   await callApi._thread.savePairings(pairings, event);
-  return { ok: true, fallbackAttempted, fallbackBridged, answerRetried, bridgeRetried, skipped };
+  const summary = { ok: true, fallbackAttempted, fallbackBridged, answerRetried, bridgeRetried, skipped, ringEnded, bridgedEnded };
+  // Watchdog (stuck-call + unanswered-inbound flags) runs after every
+  // sweep, FAIL-SOFT — the sweep already runs 1/min, so this wires
+  // the watchdog with no new schedule, no new secret, no new cron
+  // (the cc-workflow-tick caller scan() used to ride on was never
+  // created — that is why the bell was empty all day Nov 26). A
+  // watchdog failure is reported on the summary and must never fail
+  // the sweep response.
+  try {
+    const watchdog = require('./cc-watchdog');
+    summary.watchdog = await watchdog.scan({ now }, event);
+  } catch (e) {
+    summary.watchdogError = String((e && e.message) || e);
+  }
+  return summary;
 }
 
 exports.handler = async (event) => {

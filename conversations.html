@@ -275,11 +275,18 @@
              this banner catches. -->
         <div id="inboundBanner" class="hidden" style="gap:10px;align-items:center;margin-top:10px;padding:10px 12px;border:2px solid #1f9d63;border-radius:10px;background:rgba(31,157,99,.12)">
           <div style="flex:1;min-width:0">
-            <div style="font-weight:700">📞 Incoming call</div>
+            <div style="font-weight:700" id="inboundTitle">📞 Incoming call</div>
             <div class="note" id="inboundCaller">Incoming call…</div>
           </div>
           <button class="btn small primary" id="inboundAnswerBtn" type="button">Answer</button>
           <button class="btn small" id="inboundDeclineBtn" type="button">Decline</button>
+          <!-- End call (Nov 26, 2026 — Troy, live: no hang-up button on
+               screen during a call). Red, HighLevel-style, on the
+               banner itself — the one place Troy looks during a call —
+               so it is there during ringing AND while connected, even
+               with no thread selected (the dialer pod's End button is
+               hidden then). Wired to endCurrentCall: ends BOTH legs. -->
+          <button class="btn small danger hidden" id="inboundEndBtn" type="button">End call</button>
         </div>
         <!-- Dialer pod (GoHighLevel-style): dial any number from the
              thread, pick which of our numbers it goes out from, keypad
@@ -323,7 +330,7 @@
             <!-- End call, right here in the call card (Nov 26, 2026 —
                  Troy: HighLevel's call feature has it here; the Call
                  button flipping its label is not the same thing). -->
-            <button class="btn small" id="callBoxEndBtn" type="button">End call</button>
+            <button class="btn small danger" id="callBoxEndBtn" type="button">End call</button>
           </div>
           <!-- Post-call disposition (HighLevel's six custom
                dispositions). Shows after a call ends; one tap files
@@ -1196,8 +1203,16 @@ function showInboundBanner(call) {
   __startInboundRing();
   var b = document.getElementById('inboundBanner');
   if (b) { b.classList.remove('hidden'); b.style.display = 'flex'; }
+  var t = document.getElementById('inboundTitle');
+  if (t) t.textContent = '📞 Incoming call';
   var sub = document.getElementById('inboundCaller');
   if (sub) sub.textContent = 'Incoming call…';
+  // Ringing phase: Answer / Decline AND End. End is a real hang-up
+  // (endCurrentCall, both legs) — Troy must be able to kill a ringing
+  // call from the banner, not just decline the browser leg.
+  var a = document.getElementById('inboundAnswerBtn'); if (a) a.classList.remove('hidden');
+  var d = document.getElementById('inboundDeclineBtn'); if (d) d.classList.remove('hidden');
+  var e = document.getElementById('inboundEndBtn'); if (e) e.classList.remove('hidden');
   resolveInboundCaller(call, 0);
 }
 function hideInboundBanner() {
@@ -1205,6 +1220,21 @@ function hideInboundBanner() {
   var b = document.getElementById('inboundBanner');
   if (b) { b.classList.add('hidden'); b.style.display = 'none'; }
   callState.inboundCall = null;
+}
+/* After Troy taps Answer the banner stays up as the in-call control:
+   Answer/Decline go away, the red End button stays — it is the one
+   hang-up on screen during the whole call (ringing + connected),
+   including when no thread is selected (the dialer pod's End button
+   is hidden then). Idempotent; also re-shows the banner if an adopt
+   ran after it was hidden. */
+function showInboundConnected() {
+  var b = document.getElementById('inboundBanner');
+  if (b) { b.classList.remove('hidden'); b.style.display = 'flex'; }
+  var t = document.getElementById('inboundTitle');
+  if (t) t.textContent = '📞 On call';
+  var a = document.getElementById('inboundAnswerBtn'); if (a) a.classList.add('hidden');
+  var d = document.getElementById('inboundDeclineBtn'); if (d) d.classList.add('hidden');
+  var e = document.getElementById('inboundEndBtn'); if (e) e.classList.remove('hidden');
 }
 function inboundAgentLegId(call) {
   if (!call) return '';
@@ -1378,6 +1408,11 @@ function __adoptLiveInboundCall(call) {
   __attachRemoteAudio(call);
   setCallStatus('Connected');
   showCallBox('Connected');
+  // The banner is the in-call control now (End stays on screen), and
+  // the thread Call buttons flip to "End call" too — an inbound call
+  // must not leave every button reading "📞 Call" while connected.
+  showInboundConnected();
+  setCallButtons(false, true);
   if (callState.inboundCallId) {
     callState.callId = callState.inboundCallId;
     pollCallStatus();
@@ -1432,6 +1467,10 @@ function __failInboundAnswer(legKey) {
   callState.agentCall = null;
   setCallStatus('');
   hideCallBox();
+  // The banner stays up in connected mode after Answer now — hide it
+  // on a failed answer so it does not sit there reading "On call"
+  // for a dead leg; the redial re-shows it as "Incoming call".
+  hideInboundBanner();
   toast('Could not answer that call — redialing…');
   var id = callState.inboundCallId;
   if (id) {
@@ -1483,13 +1522,13 @@ async function answerInboundCall() {
   // answering/active, adopt it: it carries the media.
   if (call.state === 'active' || call.state === 'answering') {
     call.__ccAnswered = true;
-    hideInboundBanner();
+    showInboundConnected();
     __stopInboundRing();
     __adoptLiveInboundCall(call);
     return;
   }
   call.__ccAnswered = true;
-  hideInboundBanner();
+  showInboundConnected();
   __stopInboundRing();
   // Do NOT stop the SDK ringtone here: it is the verification signal.
   // answer() stops it itself AFTER its guards pass, so a still-playing
@@ -1500,6 +1539,9 @@ async function answerInboundCall() {
   callState.active = true;
   callState.direction = 'inbound';
   callState.phone = callState.inboundPhone;
+  // Flip the thread Call buttons to "End call" now — not only on
+  // adopt — so there is a working hang-up from the moment of the tap.
+  setCallButtons(false, true);
   // NOT "Connected" yet — the leg has not been verified as answered.
   // The call box shows with its (now working) End button while we
   // verify; Connected lands only when the leg actually moves.
@@ -1522,12 +1564,25 @@ async function answerInboundCall() {
 }
 async function declineInboundCall() {
   var call = callState.inboundCall;
+  // Kill the answer watch first — a Decline during the 2.5s window
+  // must not be undone by a pending recovery redial.
+  __inboundAnswerWatch = null;
   hideInboundBanner();
   __stopInboundRing();
   __stopSdkRingtone(call);
   if (call && typeof call.hangup === 'function') {
     try { await call.hangup(); } catch (e) { /* already gone */ }
   }
+  // End the Telnyx leg too — hanging up the browser leg alone leaves
+  // the caller ringing until the leg times out. No gate: the server
+  // resolves the pairing key or the agent leg id, and hangs the leg
+  // directly even with no pairing on file.
+  var hangupBody = { action: 'hangup' };
+  var pid = callState.callId || callState.inboundCallId;
+  if (pid) hangupBody.callId = pid;
+  var legId = inboundAgentLegId(call);
+  if (legId) hangupBody.agentLeg = legId;
+  try { await callApi('', hangupBody); } catch (e) { /* already gone */ }
 }
 async function ensureRtc(cfg) {
   // A client that exists but is no longer live (token died, signaling
@@ -1697,11 +1752,15 @@ function stopCallPolling() {
    thread's Call button opens the dialer pod pre-filled (HighLevel);
    the pod's Call button is what places the call. */
 function setCallButtons(disabled, active) {
-  [['callBtn', '📞 Call'], ['dialCallBtn', '📞 Call']].forEach(function (pair) {
-    var b = document.getElementById(pair[0]);
+  [['callBtn', '📞 Call', false], ['dialCallBtn', '📞 Call', true]].forEach(function (triple) {
+    var b = document.getElementById(triple[0]);
     if (!b) return;
     b.disabled = disabled;
-    b.textContent = active ? 'End call' : pair[1];
+    b.textContent = active ? 'End call' : triple[1];
+    // An active call's buttons are hang-ups: red, like HighLevel.
+    // (dialCallBtn starts primary; callBtn never was.)
+    if (active) { b.classList.add('danger'); if (triple[2]) b.classList.remove('primary'); }
+    else { b.classList.remove('danger'); if (triple[2]) b.classList.add('primary'); }
   });
 }
 function finishCallUI(kind) {
@@ -1844,10 +1903,12 @@ function pollCallStatus() {
   // room can push a silent answer to an AMD 'machine'. Once bridged,
   // slow to 3s (only watching for the end).
   var delay = callState.bridged ? 3000 : 1000;
+  var errs = 0;
   callState.timer = setInterval(async function () {
     if (!callState.callId) { stopCallPolling(); return; }
     try {
       var data = await callApi('?action=status&callId=' + encodeURIComponent(callState.callId));
+      errs = 0;
       var st = data.status || '';
       if (st === 'bridged') {
         __stopRingback();
@@ -1868,29 +1929,59 @@ function pollCallStatus() {
       else if (st === 'ended') { finishCallUI('ended'); }
       else { setCallStatus(st === 'ringing' ? 'Ringing…' : 'Calling…'); showCallBox(st === 'ringing' ? 'Ringing…' : 'Dialing…'); __startRingback(); }
     } catch (e) {
-      finishCallUI('ended');
+      // A transient network error must not end a live call's UI —
+      // the server's explicit 'ended'/'machine' status is the end
+      // signal. Only give up after 5 consecutive failures (the
+      // pairing is gone, not the network).
+      errs += 1;
+      if (errs >= 5) finishCallUI('ended');
     }
   }, delay);
 }
 async function endCurrentCall() {
-  var id = callState.callId;
-  // End the LIVE WebRTC leg first — the server hangup alone never
-  // ends the browser leg, and for a fresh inbound call the pairing
-  // key is often still unresolved (callId null), so the server hangup
-  // below would be skipped entirely and the call would keep ringing
-  // with no way out (Troy, Nov 26 — "we need to have an end button
-  // there too to actually end the call").
-  var leg = callState.agentCall || callState.inboundCall;
+  // Kill the answer watch FIRST: a pending 2.5s check must not
+  // re-dial a call Troy just ended.
+  __inboundAnswerWatch = null;
   __stopInboundRing();
   __stopRingback();
+  // End the LIVE WebRTC leg first — the server hangup alone never
+  // ends the browser leg. Resolve the live object from the SDK
+  // registry: the held object may be stale (Attach replaced it) and
+  // hangup() on a stale object ends nothing.
+  var leg = callState.agentCall || callState.inboundCall;
+  var liveLeg = leg ? __liveCallFor(leg) : null;
+  if (liveLeg) leg = liveLeg;
   __stopSdkRingtone(leg);
   if (leg && typeof leg.hangup === 'function') {
     try { await leg.hangup(); } catch (e) { /* already gone */ }
   }
-  finishCallUI('ended');
-  if (id) {
-    try { await callApi('', { action: 'hangup', callId: id }); } catch (e) { /* already gone */ }
+  // End the Telnyx leg too — the browser hangup alone never ends
+  // the seller's leg, so without this the caller keeps ringing. For
+  // a fresh inbound call the pairing key is often still unresolved
+  // (callId null) — the old code skipped the server hangup entirely
+  // in that case and the call kept ringing with no way out (Troy,
+  // Nov 26 — "we need to have an end button there too to actually
+  // end the call"). No gate anymore: always call the server hangup,
+  // with the pairing key when known and the agent leg's
+  // call_control_id always — the server resolves either via
+  // findByLeg and hangs the leg directly even with no pairing on
+  // file.
+  var hangupBody = { action: 'hangup' };
+  var pid = callState.callId || callState.inboundCallId;
+  if (pid) hangupBody.callId = pid;
+  var legId = inboundAgentLegId(leg);
+  if (legId) hangupBody.agentLeg = legId;
+  try { await callApi('', hangupBody); } catch (e) { /* already gone */ }
+  // One final status read so a call the poll never saw bridged is
+  // still labelled "Call ended — m:ss" instead of "Missed call":
+  // the server record carries bridgedAt once the legs joined.
+  if ((callState.callId || callState.inboundCallId) && !callState.bridged) {
+    try {
+      var st = await callApi('?action=status&callId=' + encodeURIComponent(callState.callId || callState.inboundCallId));
+      if (st && st.bridgedAt) { callState.bridged = true; callState.connectedAt = st.bridgedAt; }
+    } catch (e) { /* label falls back to Missed call */ }
   }
+  finishCallUI('ended');
 }
 async function startCall(phone, from) {
   var t = state.selectedThread;
@@ -2306,6 +2397,7 @@ function init() {
   document.getElementById('podAudioBtn').addEventListener('click', function () { connectAudioNow(); });
   document.getElementById('inboundAnswerBtn').addEventListener('click', function () { answerInboundCall(); });
   document.getElementById('inboundDeclineBtn').addEventListener('click', function () { declineInboundCall(); });
+  document.getElementById('inboundEndBtn').addEventListener('click', function () { endCurrentCall(); });
   document.getElementById('dialKeypad').addEventListener('click', function (ev) {
     var b = ev.target.closest ? ev.target.closest('[data-key]') : null;
     if (b) dialKeypadPress(b.getAttribute('data-key'));

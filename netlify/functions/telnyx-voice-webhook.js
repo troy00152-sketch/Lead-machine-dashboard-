@@ -533,8 +533,13 @@ async function applyThreadCallEvent(evt, event, state) {
   // "Voicemail" + Details dialog). Once per pairing — the flag rides
   // in the saved record, so a redelivered hangup never double-logs.
   if (rec.status === 'ended' && !rec.loggedToThread) {
-    try { await callApi._thread.logCallToThread(event, rec); } catch (e) { /* thread logging never fails a webhook */ }
-    rec.loggedToThread = true;
+    // Only mark logged when the log actually landed — a transient
+    // Blobs failure used to set the flag anyway and permanently lose
+    // the thread entry (a redelivered hangup sees the flag and skips).
+    try {
+      const logged = await callApi._thread.logCallToThread(event, rec);
+      if (logged) rec.loggedToThread = true;
+    } catch (e) { /* thread logging never fails a webhook */ }
   }
   rec.lastEvent = type;
   rec.updatedAt = Date.now();
