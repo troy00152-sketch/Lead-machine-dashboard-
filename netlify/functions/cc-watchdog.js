@@ -26,11 +26,16 @@
 //                      carrying lastEvent/lastError/agentAnswered/
 //                      sellerHuman, so the next debug round starts from
 //                      the pairing's own diagnostics. Auto-resolves
-//                      when the pairing later shows 'bridged'/'ended'.
-//                      Read-only alerting: this pass never touches a
-//                      call. A dead/missing dialer store skips this
-//                      pass (best-effort) and never breaks the
-//                      unanswered-inbound scan.
+//                      when the pairing later shows 'bridged'/'ended' —
+//                      and (Nov 27, 2026 close-out) when the call is
+//                      provably over without the pairing flipping:
+//                      pairing record gone, lastEvent 'call.hangup'
+//                      + 5 quiet minutes, or 2 hours with no update.
+//                      A resolved callId never re-flags while its
+//                      pairing stays quiet. Read-only alerting: this
+//                      pass never touches a call. A dead/missing
+//                      dialer store skips this pass (best-effort) and
+//                      never breaks the unanswered-inbound scan.
 //   listFlags()  — all flags, open first then newest flaggedAt first.
 //   dismissFlag()— mark one flag 'dismissed'.
 //
@@ -60,6 +65,10 @@ const DEFAULT_THRESHOLD_MINUTES = 30;
 const DIALER_STORE = 'cc-dialer';
 const PAIRINGS_KEY = 'thread-calls';
 const DEFAULT_STUCK_CALL_SECONDS = 60;
+// Close-out bounds (Nov 27, 2026): a hangup ends the call even when
+// the pairing never flips to 'ended' — see scan().
+const STUCK_FLAG_HANGUP_QUIET_MS = 5 * 60 * 1000; // hangup + 5 quiet min
+const STUCK_FLAG_STALE_MS = 2 * 60 * 60 * 1000; // no update for 2h = dead
 
 // ---- injectable stores (tests) ----
 const deps = {
@@ -294,14 +303,52 @@ async function scan(opts, event) {
       pairingsRec && typeof pairingsRec.calls === 'object' ? pairingsRec.calls : {};
     // Auto-resolve: a stuck-call flag whose pairing has since bridged
     // or ended is done — the call got through (or was hung up).
+    // Close-out (Nov 27, 2026): a hangup must ALSO close the flag.
+    // The event path can strand a pairing in 'dialing'/'ringing'/
+    // 'answered' after the call is over — the last agent leg died
+    // with no hangup webhook, or the hangup landed on a leg the
+    // handler did not treat as call-ending — so the flag sat open
+    // for hours on calls Troy had already watched end (Nov 26: four
+    // stale 'Call stuck unbridged' flags, all with last event
+    // call.hangup). A flag resolves when the call is provably over:
+    //   * pairing 'bridged'/'ended' (existing), or
+    //   * pairing record gone — no live call exists without a record, or
+    //   * lastEvent 'call.hangup' + 5 quiet minutes — the hangup was
+    //     processed and nothing further will arrive (the quiet
+    //     window keeps a just-processed hangup from racing the
+    //     webhook's own save), or
+    //   * pairing quiet 2 hours — no unbridged call is live that
+    //     long (Telnyx legs time out in 20–30s; the sweep ends
+    //     ringing at 2 min), so a 2-hour-quiet pairing is dead
+    //     whatever its state.
+    // resolvedReason is stamped so the next debug round can tell
+    // which close-out path fired.
     for (const f of flags) {
       if (f.status !== 'open' || f.type !== 'stuck-call') continue;
       const rec = calls[f.callId];
-      if (!rec) continue; // pairing record gone — leave the flag for a human
-      if (rec.status === 'bridged' || rec.status === 'ended') {
+      const resolve = (reason) => {
         f.status = 'resolved';
         f.resolvedAt = now;
+        f.resolvedReason = reason;
         resolved += 1;
+      };
+      if (!rec) {
+        resolve('pairing-gone');
+        continue;
+      }
+      if (rec.status === 'bridged' || rec.status === 'ended') {
+        resolve('call-ended');
+        continue;
+      }
+      const quietMs =
+        now - (typeof rec.updatedAt === 'number' ? rec.updatedAt : rec.startedAt || 0);
+      if (rec.lastEvent === 'call.hangup' && quietMs > STUCK_FLAG_HANGUP_QUIET_MS) {
+        resolve('hangup');
+        continue;
+      }
+      if (quietMs > STUCK_FLAG_STALE_MS) {
+        resolve('stale');
+        continue;
       }
     }
     for (const [callId, rec] of Object.entries(calls)) {
@@ -315,6 +362,28 @@ async function scan(opts, event) {
       const ageSeconds = Math.floor((now - rec.startedAt) / 1000);
       if (ageSeconds <= stuckCallSeconds) continue;
       if (flags.some((f) => f.type === 'stuck-call' && f.callId === callId && f.status === 'open')) {
+        continue;
+      }
+      // Close-out (Nov 27, 2026): a call whose stuck-call flag
+      // already resolved stays resolved while its pairing is dead —
+      // the pairing record can linger unbridged for hours (hangup
+      // processed, status never flipped to 'ended'), and without
+      // this the next scan would re-flag the same dead call one
+      // minute after resolving it. New activity on the pairing
+      // (updatedAt past the resolution) means the call is live
+      // again and may flag afresh.
+      const recUpdatedAt =
+        typeof rec.updatedAt === 'number' ? rec.updatedAt : rec.startedAt || 0;
+      if (
+        flags.some(
+          (f) =>
+            f.type === 'stuck-call' &&
+            f.callId === callId &&
+            f.status === 'resolved' &&
+            typeof f.resolvedAt === 'number' &&
+            recUpdatedAt < f.resolvedAt
+        )
+      ) {
         continue;
       }
       const thread = rec.key ? byKey.get(rec.key) : null;
