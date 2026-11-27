@@ -390,18 +390,37 @@ exports.handler = async (event) => {
       if (!contacts || !contacts.length) return bad('No contacts to enroll.');
 
       const results = [];
+      const enrolledRecs = [];
       let enrolled = 0;
       let skipped = 0;
       for (const c of contacts) {
         const r = await engine.enroll(c, event);
         if (r.ok) {
           enrolled += 1;
+          enrolledRecs.push(r.enrollment);
           results.push({ phone: r.enrollment.phone, ok: true, market: r.enrollment.market, path: r.enrollment.path });
         } else {
           skipped += 1;
           results.push({ phone: (c && c.phone) || null, ok: false, reason: r.reason });
         }
       }
+      // INDEX REPAIR (Nov 27, 2026): per-contact read-modify-write
+      // index updates lose entries when Blobs reads lag writes — the
+      // 50-lead NC batch left only its last enrollee in the index while
+      // all 50 records survived. Write the index once from the
+      // in-memory set of enrolled keys, so the batch outcome never
+      // depends on read freshness. If this write itself misses
+      // pre-existing entries, the tick's record-scan fallback recovers
+      // them from the records; enrollments stand either way.
+      try {
+        const s = makeStore(event);
+        const idx = (await readJson(s, ENROLL_INDEX_KEY)) || { enrollments: {} };
+        for (const e of enrolledRecs) {
+          if (e && e.key) idx.enrollments[e.key] = { market: e.market, stage: e.stage };
+        }
+        idx.updatedAt = Date.now();
+        await writeJson(s, ENROLL_INDEX_KEY, idx);
+      } catch (e) { /* enrollment stands; tick scan recovers */ }
       return ok({ enrolled, skipped, results });
     }
 

@@ -166,6 +166,50 @@ function counterKey(ts) {
 }
 
 // ---- enrollments ----
+// ---- index-loss fallback (Nov 27, 2026) ----
+// The batch enroll's rapid read-modify-write index updates lose entries
+// when Blobs reads lag writes: the 50-lead NC batch left only its last
+// enrollee (Aaron Bower) in the index while all 50 records survived —
+// the Contacts list reads records, so the page showed 50 queued while
+// the tick saw zero and idled for 19 straight minutes. When the index
+// shows no queued enrollment for a market, scan the records directly
+// (index keys ∪ store listing, same pattern as cc-enroll-api
+// allRecordKeys) and repair the index entries found. Throttled to one
+// scan per market per 10 minutes; a fresh enrollment resets the
+// throttle for its market so the next tick scans promptly. The
+// duplicate-send lock (sentAt / prior outbound thread) still guards
+// every record the scan finds — a scan can never resurrect a send.
+const INDEX_SCAN_MS = 10 * 60 * 1000;
+const SCAN_CAP = 2000;
+const lastIndexScanAt = {};
+async function scanQueuedRecords(s, market) {
+  const keys = new Set(Object.keys((await loadEnrollIndex(s)).enrollments || {}));
+  if (typeof s.list === 'function') {
+    try {
+      const res = await s.list();
+      const list = (res && (res.blobs || res.keys)) || [];
+      for (const b of list) {
+        const k = typeof b === 'string' ? b : (b && b.key);
+        if (k) keys.add(String(k));
+      }
+    } catch (e) { /* index-only fallback */ }
+  }
+  const out = [];
+  for (const k of [...keys].slice(0, SCAN_CAP)) {
+    if (k === ENROLL_INDEX_KEY) continue;
+    const r = await loadEnrollment(s, k);
+    if (r && r.key === k && r.market === market && r.stage === 'queued') out.push(r);
+  }
+  out.sort((a, b) => (a.enrolledAt || 0) - (b.enrolledAt || 0) || (a.key < b.key ? -1 : 1));
+  return out;
+}
+async function repairIndexEntries(s, recs) {
+  const idx = await loadEnrollIndex(s);
+  for (const r of recs) idx.enrollments[r.key] = { market: r.market, stage: r.stage };
+  idx.updatedAt = Date.now();
+  await writeJson(s, ENROLL_INDEX_KEY, idx);
+}
+
 async function loadEnrollIndex(s) {
   return (await readJson(s, ENROLL_INDEX_KEY)) || { updatedAt: 0, enrollments: {} };
 }
@@ -326,6 +370,7 @@ async function enroll(contact, event) {
       }
       merged.updatedAt = Date.now();
       await saveEnrollment(s, merged);
+      lastIndexScanAt[workflow.id] = 0; // fresh enrollment: let the next tick scan if the index comes up empty
       return { ok: true, enrollment: merged, merged: true };
     }
 
@@ -391,6 +436,7 @@ async function enroll(contact, event) {
     }
   }
   await saveEnrollment(s, rec);
+  lastIndexScanAt[workflow.id] = 0; // fresh enrollment: let the next tick scan if the index comes up empty
   // "Create opportunity" step (Nov 27, P1-4): the HL workflow creates
   // a Lead-pipeline / New Lead opportunity per enrollment. Same
   // approach as the live bot's pipeline.js (env-or-lookup stage
@@ -622,12 +668,28 @@ async function tick(now, event) {
     }
 
     // Next due enrollment for this market: oldest queued first.
-    const queuedKeys = Object.keys(idx.enrollments).filter(
+    let queuedKeys = Object.keys(idx.enrollments).filter(
       (k) => idx.enrollments[k].market === market && idx.enrollments[k].stage === 'queued'
     );
     if (!queuedKeys.length) {
-      results.push(res);
-      continue;
+      // Index-loss fallback (Nov 27, 2026): the index can lose entries
+      // while the records survive, so an empty index must not end the
+      // search. Scan the records, repair the index, and use what the
+      // scan found. Throttled per market; a fresh enrollment resets it.
+      const lastScan = lastIndexScanAt[market] || 0;
+      if (ts - lastScan >= INDEX_SCAN_MS) {
+        lastIndexScanAt[market] = ts;
+        const scanned = await scanQueuedRecords(es, market);
+        if (scanned.length) {
+          await repairIndexEntries(es, scanned);
+          res.repairedIndex = scanned.length;
+          queuedKeys = scanned.map((r) => r.key);
+        }
+      }
+      if (!queuedKeys.length) {
+        results.push(res);
+        continue;
+      }
     }
     const recs = [];
     for (const k of queuedKeys) {
@@ -814,6 +876,7 @@ module.exports._test = {
     deps.sendSms = null;
     deps.random = null;
     deps.hlFetch = null;
+    for (const k of Object.keys(lastIndexScanAt)) delete lastIndexScanAt[k];
     pipelineCache.clear();
   },
 };
