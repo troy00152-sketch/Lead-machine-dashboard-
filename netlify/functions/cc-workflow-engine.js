@@ -720,109 +720,121 @@ async function tick(now, event) {
       results.push(res);
       continue;
     }
-    const rec = recs[0];
-    res.key = rec.key;
-    res.path = rec.path;
-    const lt = lowerTags(rec.tags);
+    // v3 (Nov 27, 2026): work through the queue in one tick. A stale
+    // index/record read can hand us a candidate the prior minute
+    // already texted (live 1:08 + 1:14 PM: the lock ended it, but the
+    // tick stopped and the minute was wasted). Ending a candidate must
+    // move to the next one, not end the tick. Still at most ONE send
+    // per market per tick — a successful send breaks the loop.
+    for (const rec of recs) {
+      res.key = rec.key;
+      res.path = rec.path;
+      const lt = lowerTags(rec.tags);
 
-    // Opt-out seal: a dnc tag means never send, ever.
-    if (lt.includes('dnc')) {
-      rec.stage = 'ended-dnc';
-      await saveEnrollment(es, rec, idx);
-      res.action = 'ended-dnc';
-      results.push(res);
-      continue;
-    }
-    // "Is Active lead?" gate — none of the gate tags -> END.
-    if (!workflow.activeLeadTags.some((t) => lt.includes(t.toLowerCase()))) {
-      rec.stage = 'ended-inactive';
-      await saveEnrollment(es, rec, idx);
-      res.action = 'ended-inactive';
-      results.push(res);
-      continue;
-    }
-    // Per-path bad-number guard — before EVERY path's send.
-    if (lt.includes(workflow.badNumberGuard.tag.toLowerCase())) {
-      rec.stage = 'ended-bad-number';
-      await saveEnrollment(es, rec, idx);
-      res.action = 'ended-bad-number';
-      results.push(res);
-      continue;
-    }
+      // Opt-out seal: a dnc tag means never send, ever.
+      if (lt.includes('dnc')) {
+        rec.stage = 'ended-dnc';
+        await saveEnrollment(es, rec, idx);
+        res.action = 'ended-dnc';
+        continue;
+      }
+      // "Is Active lead?" gate — none of the gate tags -> END.
+      if (!workflow.activeLeadTags.some((t) => lt.includes(t.toLowerCase()))) {
+        rec.stage = 'ended-inactive';
+        await saveEnrollment(es, rec, idx);
+        res.action = 'ended-inactive';
+        continue;
+      }
+      // Per-path bad-number guard — before EVERY path's send.
+      if (lt.includes(workflow.badNumberGuard.tag.toLowerCase())) {
+        rec.stage = 'ended-bad-number';
+        await saveEnrollment(es, rec, idx);
+        res.action = 'ended-bad-number';
+        continue;
+      }
 
-    // DUPLICATE-SEND LOCK (Troy, 2026-11-21): never a second first
-    // text to the same phone — not from a re-enrollment, not from
-    // another market's list, not after a manual send. Two proofs,
-    // either one ends the enrollment without sending:
-    //   1. this record already carries a sentAt (a first text went
-    //      out under an earlier enrollment for this phone), or
-    //   2. the conversation thread already holds ANY outbound
-    //      message (a manual Conversations send, a bot reply — the
-    //      person is already being talked to).
-    if (rec.sentAt != null) {
-      rec.stage = 'ended-already-texted';
-      await saveEnrollment(es, rec, idx);
-      res.action = 'ended-already-texted';
-      results.push(res);
-      continue;
-    }
-    const priorThread = await readJson(cs, rec.key);
-    if (
-      priorThread &&
-      Array.isArray(priorThread.messages) &&
-      priorThread.messages.some((m) => m && m.dir === 'out')
-    ) {
-      rec.stage = 'ended-already-texted';
-      await saveEnrollment(es, rec, idx);
-      res.action = 'ended-already-texted';
-      results.push(res);
-      continue;
-    }
+      // DUPLICATE-SEND LOCK (Troy, 2026-11-21): never a second first
+      // text to the same phone — not from a re-enrollment, not from
+      // another market's list, not after a manual send. Two proofs,
+      // either one ends the enrollment without sending:
+      //   1. this record already carries a sentAt (a first text went
+      //      out under an earlier enrollment for this phone), or
+      //   2. the conversation thread already holds ANY outbound
+      //      message (a manual Conversations send, a bot reply — the
+      //      person is already being talked to).
+      if (rec.sentAt != null) {
+        rec.stage = 'ended-already-texted';
+        await saveEnrollment(es, rec, idx);
+        res.action = 'ended-already-texted';
+        continue;
+      }
+      const priorThread = await readJson(cs, rec.key);
+      if (
+        priorThread &&
+        Array.isArray(priorThread.messages) &&
+        priorThread.messages.some((m) => m && m.dir === 'out')
+      ) {
+        // The record read lagged the send: keep the send's audit trail
+        // (sentAt / messageId) from the thread's outbound message
+        // instead of letting the stale snapshot wipe it.
+        const firstOut = priorThread.messages.find((m) => m && m.dir === 'out');
+        if (firstOut) {
+          if (rec.sentAt == null) rec.sentAt = firstOut.at || ts;
+          if (!rec.messageId) rec.messageId = firstOut.id;
+        }
+        rec.stage = 'ended-already-texted';
+        await saveEnrollment(es, rec, idx);
+        res.action = 'ended-already-texted';
+        continue;
+      }
 
-    const body = wfStore.renderFirstTextFrom(workflow, rec.path, {
-      firstName: rec.firstName,
-      address1: rec.address1,
-      city: rec.city,
-    });
+      const body = wfStore.renderFirstTextFrom(workflow, rec.path, {
+        firstName: rec.firstName,
+        address1: rec.address1,
+        city: rec.city,
+      });
 
-    let sent;
-    try {
-      sent = await sendSmsImpl()({ to: rec.phone, body, market: workflow.telnyxMarket });
-    } catch (e) {
-      // FAIL CLOSED: stay queued, record the error, append nothing.
-      rec.lastError = String((e && e.message) || e);
+      let sent;
+      try {
+        sent = await sendSmsImpl()({ to: rec.phone, body, market: workflow.telnyxMarket });
+      } catch (e) {
+        // FAIL CLOSED: stay queued, record the error, append nothing.
+        // Break, not continue — a provider error likely hits every
+        // candidate this minute; retry next tick.
+        rec.lastError = String((e && e.message) || e);
+        rec.lastAttemptAt = ts;
+        await saveEnrollment(es, rec, idx);
+        res.action = 'send-error';
+        res.error = rec.lastError;
+        break;
+      }
+
+      const msg = {
+        id: sent.id || 'pending-' + ts + '-' + Math.random().toString(36).slice(2, 8),
+        dir: 'out',
+        body,
+        status: 'queued', // webhook advances to sent/delivered/failed
+        at: ts,
+        from: sent.from || '',
+        to: rec.phone,
+      };
+      await appendOutbound(cs, rec.key, rec.phone, market, msg);
+
+      rec.stage = 'sent';
+      rec.sentAt = ts;
+      rec.messageId = msg.id;
+      rec.lastError = null;
       rec.lastAttemptAt = ts;
       await saveEnrollment(es, rec, idx);
-      res.action = 'send-error';
-      res.error = rec.lastError;
-      results.push(res);
-      continue;
+      // Thread the counter through the tick's in-memory copy, same as the
+      // index: a reload here could lose another market's bump.
+      counter.markets[market] = (counter.markets[market] || 0) + 1;
+      await writeJson(es, counterKey(ts), counter);
+      res.sentToday = counter.markets[market];
+      res.action = 'sent';
+      res.messageId = msg.id;
+      break;
     }
-
-    const msg = {
-      id: sent.id || 'pending-' + ts + '-' + Math.random().toString(36).slice(2, 8),
-      dir: 'out',
-      body,
-      status: 'queued', // webhook advances to sent/delivered/failed
-      at: ts,
-      from: sent.from || '',
-      to: rec.phone,
-    };
-    await appendOutbound(cs, rec.key, rec.phone, market, msg);
-
-    rec.stage = 'sent';
-    rec.sentAt = ts;
-    rec.messageId = msg.id;
-    rec.lastError = null;
-    rec.lastAttemptAt = ts;
-    await saveEnrollment(es, rec, idx);
-    // Thread the counter through the tick's in-memory copy, same as the
-    // index: a reload here could lose another market's bump.
-    counter.markets[market] = (counter.markets[market] || 0) + 1;
-    await writeJson(es, counterKey(ts), counter);
-    res.sentToday = counter.markets[market];
-    res.action = 'sent';
-    res.messageId = msg.id;
     results.push(res);
   }
 
