@@ -102,6 +102,13 @@
   .msg.call{align-self:center;max-width:90%;background:#e9ebef;color:#4a4f57;border:1px solid #d3d6dd;text-align:center;cursor:pointer}
   .msg.call .m-body{font-weight:600}
   .msg.call .m-meta{justify-content:center;color:#6d7280}
+  /* System notes (kind 'note' — Sam's post-call handoff — and kind
+     'suggestion' — a draft bot suggestion): grey, centered like the
+     call bubbles, never an Incoming/Outgoing bubble. They are not
+     seller texts, so they never read as one. */
+  .msg.note{align-self:center;max-width:90%;background:#e9ebef;color:#4a4f57;border:1px solid #d3d6dd;text-align:left}
+  .msg.note .m-dir{color:#6d7280}
+  .msg.note .m-meta{justify-content:flex-start;color:#6d7280}
   /* Post-call disposition row (HighLevel's six custom dispositions). */
   .disp-row{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;align-items:center}
   .disp-row .btn.sel{background:var(--accent);border-color:var(--accent);color:#fff}
@@ -600,7 +607,24 @@ function renderMessages() {
         '<div class="m-meta"><span>' + esc(fmtTime(m.at)) + '</span><span>Details ›</span></div></div>';
       return;
     }
-    html += '<div class="msg ' + (m.dir === 'out' ? 'out' : 'in') + '"><div class="m-dir">' + (m.dir === 'out' ? 'Outgoing' : 'Incoming') + '</div><div class="m-body">' + esc(m.body) + '</div>' +
+    // System notes come FIRST (before any dir-based branch): a Sam
+    // post-call note (kind 'note', via 'sam') or a draft bot
+    // suggestion (kind 'suggestion', via 'bot', status 'draft') is
+    // not a text — no Incoming/Outgoing label, grey system note.
+    // Never an unread bump or the thread preview either (server-side,
+    // cc-sam-store / _saveThread skip notes for both).
+    if (m.kind === 'note' || m.kind === 'suggestion') {
+      var noteLabel = m.kind === 'suggestion' ? 'Draft suggestion' :
+        m.via === 'sam' ? 'Sam note' : m.via === 'bot' ? 'Amber note' : 'Note';
+      html += '<div class="msg note"><div class="m-dir">' + esc(noteLabel) + '</div><div class="m-body">' + esc(m.body) + '</div>' +
+        '<div class="m-meta"><span>' + esc(fmtTime(m.at)) + '</span></div></div>';
+      return;
+    }
+    // Attribution: a bot reply must not look like Troy typed it.
+    // via 'bot' is Amber (the text bot), via 'sam' is Sam (voice).
+    // Manual sends carry no via and show no label.
+    var viaLabel = m.via === 'bot' ? 'Amber' : m.via === 'sam' ? 'Sam' : '';
+    html += '<div class="msg ' + (m.dir === 'out' ? 'out' : 'in') + '"><div class="m-dir">' + (m.dir === 'out' ? 'Outgoing' : 'Incoming') + (viaLabel ? ' · ' + viaLabel : '') + '</div><div class="m-body">' + esc(m.body) + '</div>' +
       '<div class="m-meta"><span>' + esc(fmtTime(m.at)) + '</span>' + statusTick(m) + '</div></div>';
   });
   box.innerHTML = html;
@@ -643,6 +667,22 @@ var DND_CHANNELS = [
   { id: 'email', label: 'Email' },
   { id: 'call', label: 'Calls & voicemail' },
 ];
+/* HighLevel mirror line for the DND panel: setChannels mirrors the
+   seal to HighLevel and reports the outcome on the returned state
+   (hlSync / hlError) — 'ok' | 'failed' | 'unresolved' |
+   'skipped-no-config'. The line shows only while the just-returned
+   dnd-set state is on screen; getState carries no hlSync, so a later
+   thread reload shows no (possibly stale) claim. */
+function hlSyncLine(d) {
+  if (!d || !d.hlSync) return '';
+  var line = '';
+  if (d.hlSync === 'ok') line = 'Synced to HighLevel';
+  else if (d.hlSync === 'failed') line = 'HighLevel sync failed: ' + (d.hlError || 'unknown error');
+  else if (d.hlSync === 'unresolved') line = 'HighLevel contact not found — local seal only';
+  else if (d.hlSync === 'skipped-no-config') line = 'HighLevel not configured — local seal only';
+  else return '';
+  return '<div class="dnd-state">' + esc(line) + '</div>';
+}
 function dndSection() {
   var d = state.selectedDnd;
   if (!d || !d.channels) return '';
@@ -669,6 +709,7 @@ function dndSection() {
   return '<div class="dnd-box"><h3>🚫 Do Not Contact</h3>' + pill +
     '<div class="dnd-state">' + esc(line) + '</div>' + rows +
     (actions ? '<div class="dnd-actions">' + actions + '</div>' : '') +
+    hlSyncLine(d) +
     '<div class="dnd-state">Same as the DND panel in the CRM — takes effect right away.</div></div>';
 }
 async function setDnd(channels) {
@@ -709,6 +750,14 @@ function threadText() {
   var t = state.selectedThread;
   if (!t) return '';
   return (t.messages || []).map(function (m) {
+    // A call entry is a system line, never "Us:" / "Seller:" — it is
+    // not something either side said.
+    if (m.kind === 'call') {
+      var label = m.callStatus === 'missed' ? 'Missed call' : m.callStatus === 'voicemail' ? 'Voicemail' : 'Call completed';
+      return 'Call: ' + label;
+    }
+    // A system note is not a seller text either.
+    if (m.kind === 'note' || m.kind === 'suggestion') return 'Note: ' + (m.body || '');
     return (m.dir === 'out' ? 'Us' : 'Seller') + ': ' + (m.body || '');
   }).join('\n');
 }
@@ -861,10 +910,15 @@ function renderThreadHead() {
     (t.ourNumber ? ' · Texting from: ' + fmtPhone(t.ourNumber) : '');
 }
 async function selectThread(key) {
-  state.selectedKey = key;
+  // A notification tap hands us a phone, not a thread key (a stuck-call
+  // flag's key is a callControlId, not a thread key) — resolve the
+  // thread by phone too, and canonicalize selectedKey to the thread
+  // key so the list highlight still matches.
+  var entry = state.threads.find(function (t) { return t.key === key || t.phone === key; });
+  var threadKey = entry ? entry.key : key;
+  state.selectedKey = threadKey;
   hideDispositions();
   renderThreads();
-  var entry = state.threads.find(function (t) { return t.key === key; });
   var phone = entry ? entry.phone : key;
   var data = await api('?action=thread&phone=' + encodeURIComponent(phone));
   state.selectedThread = data.thread;
@@ -882,7 +936,7 @@ async function selectThread(key) {
     if (btn) btn.dataset.state = cfg ? 'on' : 'off';
   });
   // The API marked the thread read — reflect that in the list.
-  var local = state.threads.find(function (t) { return t.key === key; });
+  var local = state.threads.find(function (t) { return t.key === threadKey; });
   if (local) local.unread = 0;
   renderThreads();
 }
@@ -2326,7 +2380,10 @@ function renderNotifPanel() {
 async function openNotifThread(item) {
   var key = item.getAttribute('data-notif-key') || '';
   var phone = item.getAttribute('data-notif-phone') || '';
-  var target = key || phone;
+  // Prefer the PHONE: it is always a real phone, while `key` may be a
+  // callControlId (a stuck-call flag's pairing key) that selectThread
+  // -> the thread API's phoneKey() rejects — the Nov 27 dead tap.
+  var target = phone || key;
   if (!target) { toast('No conversation attached to this alert.'); return; }
   document.getElementById('notifPanel').classList.add('hidden');
   try {
@@ -2517,6 +2574,13 @@ function init() {
     var deep = null;
     try { deep = new URLSearchParams(window.location.search).get('thread'); } catch (e) { deep = null; }
     if (deep) selectThread(deep).catch(handleLoadError);
+    // Bell deep link (?openNotifications=1): the index / Command
+    // Center bells link here — open the notifications panel on
+    // arrival, same as tapping the bell (refreshAll already kicked
+    // off loadNotifications, so the panel fills in as it loads).
+    var openNotifs = null;
+    try { openNotifs = new URLSearchParams(window.location.search).get('openNotifications'); } catch (e) { openNotifs = null; }
+    if (openNotifs === '1') document.getElementById('notifPanel').classList.remove('hidden');
     // Audio stays on by itself (Nov 26, 2026 — Troy: no more tapping
     // Connect audio every time): connect on load so an inbound call can
     // ring in without a tap first.

@@ -100,6 +100,7 @@
     <div class="title">👥 Contacts</div>
     <span id="authBanner" class="auth-banner"></span>
     <a class="back active" href="/contacts.html">👥 Contacts</a>
+    <a class="back" href="/pipeline.html">📊 Pipeline</a>
     <a class="back" href="/index.html">← Dashboard</a>
   </div>
 
@@ -152,7 +153,7 @@
       </div>
       <div id="listEmpty" class="empty" hidden></div>
     </div>
-    <p class="muted">Sources: Command Center contacts (workflow enrollments — the same records the bots and workflows read) merged with My Leads from the Dashboard. Rows marked “Lead only” are not in the CRM yet; tag and field edits on those save to the lead, and “Add to workflow” enrolls them for real. Delete removes the Command Center record only — it never deletes the CRM contact.</p>
+    <p class="muted">Sources: Command Center contacts (workflow enrollments — the same records the bots and workflows read) merged with My Leads from the Dashboard and with conversation threads — a phone with a thread but no enrollment or lead row appears as “Thread only”. Rows marked “Lead only” are not in the CRM yet; tag and field edits on those save to the lead, and “Add to workflow” enrolls them for real. “Thread only” rows have no enrollment yet: add one to a workflow first, then tags, notes and details save to the enrollment record. Delete removes the Command Center record only — it never deletes the CRM contact.</p>
   </section>
 
   <!-- ============ SMART LISTS TAB ============ -->
@@ -211,6 +212,14 @@ var LEADS_KEY = 'acc_leads';
 function ctDigits10(v) {
   var d = String(v == null ? '' : v).replace(/\D/g, '');
   return d.length > 10 ? d.slice(-10) : d;
+}
+/* Thread/conversation key for a phone: the 11-digit key the
+   conversation store uses (lib.phoneKey = digits of the E.164
+   number). Conversations deep-links as ?thread=<this key>. */
+function ctPhoneKey(v) {
+  var d = ctDigits10(v);
+  if (!d) return '';
+  return d.length === 10 ? '1' + d : d;
 }
 function ctNewId(prefix) {
   return prefix + '_' + Date.now().toString(36) + '_' + Math.floor(Math.random() * 1e6).toString(36);
@@ -272,14 +281,51 @@ function contactFromLead(lead) {
     enrolledAt: lead.addedAt ? (Date.parse(lead.addedAt) || 0) : 0,
     pricing: null,
     notes: Array.isArray(lead.notes) ? lead.notes : [],
+    legalDescription: String(lead.legalDescription || ''),
     dnd: null,
   };
 }
 
-/* Merge CRM contacts (cc-enroll-api list) with My Leads. Deduped by
-   phone digits — the CRM record wins and is marked source 'both'
-   with its lead id attached. */
-function mergeContacts(crmRows, leadRows) {
+/* A conversation-thread row (cc-conversations-api ?action=threads
+   index entry) in Contacts-table shape. Thread-only rows have no
+   enrollment and no lead — they exist so a phone that texted but
+   was never enrolled still shows up in the list. */
+function contactFromThread(t) {
+  t = t || {};
+  var key = String(t.key || ctPhoneKey(t.phone) || '');
+  return {
+    id: 'thread:' + key,
+    source: 'thread',
+    key: key,
+    threadKey: key,
+    leadId: '',
+    phone: String(t.phone || (key ? '+' + key : '')),
+    name: String(t.name || ''),
+    firstName: '',
+    email: '',
+    address1: '',
+    city: '',
+    state: '',
+    postalCode: '',
+    tags: [],
+    signal: '',
+    market: String(t.market || ''),
+    stage: '',
+    enrolledAt: t.lastAt || 0,
+    pricing: null,
+    notes: [],
+    legalDescription: '',
+    dnd: null,
+  };
+}
+
+/* Merge CRM contacts (cc-enroll-api list) with My Leads and with
+   conversation threads. Deduped by phone digits — the CRM record
+   wins and is marked source 'both' with its lead id attached; a
+   lead row wins over a thread-only row; a phone with a thread but
+   no enrollment/lead row appears as a lightweight 'thread' row
+   (name from the thread, phone, "Thread only" marker). */
+function mergeContacts(crmRows, leadRows, threadRows) {
   var out = [];
   var byPhone = {};
   (crmRows || []).forEach(function (r) {
@@ -294,6 +340,16 @@ function mergeContacts(crmRows, leadRows) {
     if (d && byPhone[d]) {
       byPhone[d].source = 'both';
       byPhone[d].leadId = lead.id || '';
+      return;
+    }
+    out.push(row);
+    if (d) byPhone[d] = row;
+  });
+  (threadRows || []).forEach(function (t) {
+    var row = contactFromThread(t);
+    var d = ctDigits10(row.phone);
+    if (d && byPhone[d]) {
+      byPhone[d].threadKey = row.threadKey;
       return;
     }
     out.push(row);
@@ -464,6 +520,7 @@ var state = {
   fieldDefs: [],
   detail: null,
   detailDnd: null,
+  detailHlId: null,
 };
 
 function readLeads() {
@@ -516,7 +573,14 @@ async function loadContacts() {
   } catch (e) {
     if (!e.auth) document.getElementById('listMeta').textContent = 'Could not load Command Center contacts.';
   }
-  state.contacts = mergeContacts(crm, readLeads());
+  // Third source: conversation threads. Fail-soft — a threads read
+  // failure never blocks the enrollments + leads list.
+  var threads = [];
+  try {
+    var tr = await api('cc-conversations-api?action=threads');
+    threads = (tr.data && tr.data.threads) || [];
+  } catch (e) { threads = []; }
+  state.contacts = mergeContacts(crm, readLeads(), threads);
   populateFilterOptions();
   populateTaskContacts();
   renderSmartChips();
@@ -564,6 +628,7 @@ function renderList() {
     var tagHtml = (r.tags || []).map(function (t) { return '<span class="tagchip">' + esc(t) + '</span>'; }).join('');
     if (r.signal) tagHtml += '<span class="tagchip">' + esc(r.signal) + '</span>';
     if (r.source === 'lead') tagHtml += '<span class="tagchip">Lead only</span>';
+    if (r.source === 'thread') tagHtml += '<span class="tagchip">Thread only</span>';
     return '<tr data-open="' + esc(r.id) + '">' +
       '<td><input type="checkbox" data-select="' + esc(r.id) + '"' + checked + '></td>' +
       '<td class="name">' + esc(r.name || '—') + '</td>' +
@@ -745,6 +810,7 @@ function leadRemoveTags(row, tags) {
 /* Tag write for one row: CRM records go through cc-enroll-api (the
    store the engine reads); lead-only rows update the local lead. */
 async function tagRow(row, add, remove) {
+  if (row.source === 'thread') return false; // no enrollment record to tag yet
   if (row.source === 'lead') {
     var ok = true;
     if (add.length) ok = leadAddTags(row, add) && ok;
@@ -835,6 +901,7 @@ document.getElementById('bulkExport').addEventListener('click', function () {
 });
 
 async function deleteRow(row) {
+  if (row.source === 'thread') return false; // thread lives in Conversations; nothing to delete here
   if (row.source === 'lead') {
     var leads = readLeads().filter(function (l) { return String(l.id) !== String(row.leadId); });
     writeLeads(leads);
@@ -870,9 +937,9 @@ var DND_CHANNELS = [
 function dndSectionHtml() {
   var d = state.detailDnd;
   var r = state.detail;
-  if (!r || r.source === 'lead') {
+  if (!r || r.source === 'lead' || r.source === 'thread') {
     return '<div class="dnd-box"><h3>🚫 Do Not Contact</h3>' +
-      '<div class="dnd-state">This lead is not in the CRM yet, so there is no DND record. Add it to a workflow first — DND then lives on the CRM contact, same as the CRM.</div></div>';
+      '<div class="dnd-state">This contact has no Command Center enrollment yet, so there is no DND record here. Add it to a workflow first — DND then lives on the CRM contact, same as the CRM.</div></div>';
   }
   if (!d || !d.channels) return '<div class="dnd-box"><h3>🚫 Do Not Contact</h3><div class="dnd-state">Loading…</div></div>';
   var ch = d.channels;
@@ -931,6 +998,8 @@ function renderDrawer() {
   if (r.stage) pills += ' <span class="pill">' + esc(r.stage) + '</span>';
   pills += r.source === 'lead'
     ? ' <span class="pill amber">Lead only — not in CRM</span>'
+    : r.source === 'thread'
+    ? ' <span class="pill amber">Thread only — no enrollment yet</span>'
     : ' <span class="pill green">CRM contact</span>';
   var tagChips = (r.tags || []).map(function (t) {
     return '<span class="tagchip">' + esc(t) + '<button class="x" type="button" data-untag="' + esc(t) + '" title="Remove tag">×</button></span>';
@@ -968,7 +1037,9 @@ function renderDrawer() {
       fieldInput('dState', 'State', r.state) +
       fieldInput('dZip', 'ZIP', r.postalCode) +
       fieldInput('dFirst', 'First name', r.firstName) +
+      fieldInput('dLegal', 'Legal description', r.legalDescription, true) +
     '</div>' +
+    '<div class="muted" style="margin-top:6px">Legal description is required before any contract goes out — the contract-send hard lock. It renders in the contract from this field.</div>' +
     '<div style="margin-top:10px"><button class="btn small primary" id="btnSaveFields" type="button">Save details</button></div>' +
     '<h3>Tags</h3><div id="detailTags">' + tagChips + '</div>' +
     '<div class="filters" style="margin-top:8px"><input id="dTagInput" type="text" placeholder="New tag" style="flex:1">' +
@@ -980,6 +1051,8 @@ function renderDrawer() {
     '<h3>Appointments</h3><div id="apptBox"><div class="muted">Loading…</div></div>' +
     pricing +
     '<h3>CRM record</h3><div id="hlBox"><div class="muted">Loading…</div></div>' +
+    '<h3>Conversation</h3><div id="convBox"><div class="muted">Loading…</div></div>' +
+    '<h3>Opportunities</h3><div id="oppBox"><div class="muted">Loading…</div></div>' +
     '<h3>Notes</h3><div id="notesList">' + notes + '</div>' +
     '<div class="filters" style="margin-top:8px"><input id="dNoteInput" type="text" placeholder="Add a note…" style="flex:1">' +
     '<button class="btn small" id="btnAddNote" type="button">Add note</button></div>' +
@@ -994,6 +1067,8 @@ function renderDrawer() {
   renderDetailTasks();
   loadDetailAppointments();
   loadDetailHl();
+  loadDetailConversation();
+  loadDetailOpportunities();
 }
 function wireDrawer() {
   var r = state.detail;
@@ -1001,6 +1076,7 @@ function wireDrawer() {
   document.getElementById('btnAddTagDetail').addEventListener('click', async function () {
     var t = document.getElementById('dTagInput').value.trim();
     if (!t) return;
+    if (r.source === 'thread') { toast('Add this contact to a workflow first — tags live on the enrollment record.'); return; }
     if (await tagRow(r, [t], [])) { toast('Tag added.'); await refreshDetail(); }
     else toast('Could not add the tag.');
   });
@@ -1039,6 +1115,7 @@ function wireDrawer() {
   document.getElementById('btnAddNote').addEventListener('click', async function () {
     var text = document.getElementById('dNoteInput').value.trim();
     if (!text) return;
+    if (r.source === 'thread') { toast('Add this contact to a workflow first — notes live on the enrollment record.'); return; }
     var okNote = false;
     if (r.source === 'lead') {
       okNote = mutateLead(r.leadId, function (lead) {
@@ -1063,6 +1140,7 @@ function wireDrawer() {
     toast('Task added.');
   });
   document.getElementById('btnDeleteDetail').addEventListener('click', async function () {
+    if (r.source === 'thread') { toast('Thread-only contacts live in Conversations — there is no Command Center record to delete.'); return; }
     if (!confirm('Delete this contact from the Command Center?\n\nThis removes the standalone record (or local lead). It does NOT delete the CRM contact.')) return;
     if (await deleteRow(r)) {
       state.selected.delete(r.id);
@@ -1076,6 +1154,7 @@ function wireDrawer() {
 }
 async function saveDetailFields() {
   var r = state.detail;
+  if (r.source === 'thread') { toast('Add this contact to a workflow first — details live on the enrollment record.'); return; }
   var fields = {
     name: document.getElementById('dName').value,
     firstName: document.getElementById('dFirst').value,
@@ -1084,6 +1163,7 @@ async function saveDetailFields() {
     city: document.getElementById('dCity').value,
     state: document.getElementById('dState').value,
     postalCode: document.getElementById('dZip').value,
+    legalDescription: document.getElementById('dLegal').value,
   };
   var okSave = false;
   if (r.source === 'lead') {
@@ -1097,6 +1177,7 @@ async function saveDetailFields() {
       lead.city = fields.city;
       lead.state = fields.state;
       lead.zip = fields.postalCode;
+      lead.legalDescription = fields.legalDescription;
     });
   } else {
     var res = await enrollPost({ action: 'update', phone: r.phone, fields: fields });
@@ -1121,6 +1202,7 @@ function openDetail(id) {
   if (!row) return;
   state.detail = row;
   state.detailDnd = row.dnd || null;
+  state.detailHlId = null;
   document.getElementById('drawer').hidden = false;
   document.getElementById('drawerOverlay').hidden = false;
   renderDrawer();
@@ -1181,6 +1263,8 @@ async function loadDetailHl() {
       box.innerHTML = '<div class="muted">No matching contact found in the CRM for this phone/name.</div>';
       return;
     }
+    state.detailHlId = c.id || null;
+    loadDetailOpportunities();
     var defs = {};
     state.fieldDefs.forEach(function (d) { defs[d.id] = d.name; });
     var dndBits = DND_CHANNELS.filter(function (ch) { return c.dndChannels && c.dndChannels[ch.id]; })
@@ -1199,6 +1283,93 @@ async function loadDetailHl() {
     box.innerHTML = html;
   } catch (e) {
     box.innerHTML = '<div class="muted">CRM lookup failed.</div>';
+  }
+}
+
+/* Recent thread messages for this contact, via the existing
+   cc-conversations-api ?action=thread endpoint, plus the
+   "Open conversation" deep link (conversations.html reads
+   ?thread=<phoneKey> and selects that thread). The thread read
+   also carries the contact's DND state — when present it refreshes
+   the DND box in place (no full drawer re-render, which would
+   re-fire every loader). */
+async function loadDetailConversation() {
+  var box = document.getElementById('convBox');
+  var r = state.detail;
+  if (!box || !r) return;
+  if (!r.phone) { box.innerHTML = '<div class="muted">No phone number — no conversation to show.</div>'; return; }
+  try {
+    var res = await api('cc-conversations-api?action=thread&phone=' + encodeURIComponent(r.phone));
+    if (state.detail !== r) return;
+    var t = res.data && res.data.thread;
+    if (res.data && res.data.dnd) {
+      state.detailDnd = res.data.dnd;
+      var dndBox = document.getElementById('dndBox');
+      if (dndBox) dndBox.innerHTML = dndSectionHtml();
+    }
+    var key = (t && t.key) || ctPhoneKey(r.phone);
+    var link = '<div style="margin-bottom:8px"><a href="/conversations.html?thread=' + encodeURIComponent(key) + '" style="color:var(--accent);font-weight:700;font-size:13px">Open conversation →</a></div>';
+    if (!t || !t.messages || !t.messages.length) {
+      box.innerHTML = link + '<div class="muted">No messages in this thread yet.</div>';
+      return;
+    }
+    var msgs = t.messages.slice(-20);
+    box.innerHTML = link + msgs.map(function (m) {
+      var label = m.kind === 'call' ? 'Call' : m.kind === 'note' ? 'Note' : (m.dir === 'in' ? 'Incoming' : 'Outgoing');
+      var when = m.at ? new Date(m.at).toLocaleString() : '';
+      return '<div class="note-item"><b>' + esc(label) + '</b> ' + esc(m.body || '') +
+        '<div class="when">' + esc(when) + '</div></div>';
+    }).join('');
+  } catch (e) {
+    box.innerHTML = '<div class="muted">Conversation could not be loaded.</div>';
+  }
+}
+
+function fmtMoneyShort(v) {
+  var n = Number(v);
+  if (!Number.isFinite(n) || !n) return '—';
+  return '$' + Math.round(n).toLocaleString('en-US');
+}
+
+/* The contact's HL opportunities, from the existing cc-data
+   overview feed (stage names resolved server-side via the pipelines
+   endpoint; the feed returns the top new leads + under-contract
+   deals). Matched by HL contact id when the CRM lookup found one,
+   otherwise by exact contact name. Shows stage, value and status;
+   "No opportunities" when none match. */
+async function loadDetailOpportunities() {
+  var box = document.getElementById('oppBox');
+  var r = state.detail;
+  if (!box || !r) return;
+  try {
+    var res = await dataGet('overview');
+    if (state.detail !== r) return;
+    var d = res.data || {};
+    if (d.ok === false) {
+      box.innerHTML = '<div class="muted">Opportunities unavailable: ' + esc(d.error || 'no response') + '</div>';
+      return;
+    }
+    var pool = ((d.newLeads || []).concat(d.underContractDeals || []));
+    var hlId = state.detailHlId;
+    var myName = String(r.name || '').trim().toLowerCase();
+    var mine = pool.filter(function (o) {
+      if (hlId && o.contactId && String(o.contactId) === String(hlId)) return true;
+      if (!hlId && myName && String(o.name || '').trim().toLowerCase() === myName) return true;
+      return false;
+    });
+    if (!mine.length) {
+      box.innerHTML = '<div class="muted">No opportunities.</div>';
+      return;
+    }
+    box.innerHTML = mine.map(function (o) {
+      var status = String(o.stage || '').toLowerCase().indexOf('under contract') !== -1 ? 'Under contract' : 'Open';
+      return '<div class="note-item"><b>' + esc(o.name || 'Opportunity') + '</b>' +
+        '<div class="when">' + esc(o.stage || 'No stage') + ' · ' + esc(status) + ' · Value ' + esc(fmtMoneyShort(o.monetaryValue)) + '</div>' +
+        (o.address ? '<div class="when">' + esc(o.address) + '</div>' : '') + '</div>';
+    }).join('') +
+      '<div class="muted" style="margin-top:6px">From the Command Center overview feed (top new leads + under-contract deals).</div>';
+  } catch (e) {
+    box.innerHTML = '<div class="muted">Opportunities could not be loaded.</div>';
   }
 }
 

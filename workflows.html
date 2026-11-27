@@ -137,6 +137,7 @@ const $ = (id) => document.getElementById(id);
 const PATHS = ['A','B','C','D','E'];
 const DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 let workflows = [];
+let wfCounts = null; // cc-enroll-api counts byMarket, or null when the fetch fails
 let current = null; // effective definition open in the builder
 
 function esc(s){
@@ -194,13 +195,39 @@ function renderList(){
     box.innerHTML = '<div class="muted">No workflows yet.</div>';
     return;
   }
-  box.innerHTML = workflows.map((w) => `
+  box.innerHTML = workflows.map((w) => {
+    // Read-only "Custom Bot Reply" rows (Nov 27, P0-3): the live HL
+    // bot hook per market. Published in HighLevel, no builder
+    // controls here — no Open, no Publish/Unpublish, no Duplicate.
+    if (w.kind === 'bot-reply') {
+      return `
+    <div class="wf-row">
+      <div class="grow">
+        <div class="wf-name">${esc(w.name)} <span class="pill pub">PUBLISHED</span> <span class="chip">read-only · lives in HighLevel</span></div>
+        <div class="muted small" style="margin-top:3px">
+          Trigger <span class="chip">${esc(w.tag || 'Inbound SMS')}</span>
+          · the live bot hook — replies to inbound SMS in HighLevel. Edit it in HighLevel, not here.
+        </div>
+      </div>
+    </div>`;
+    }
+    // Enrollment / active counts (Nov 27, P1-3): active = queued
+    // (enrolled, not yet sent or ended). Shown only when the counts
+    // fetch landed; a failed fetch leaves the row unadorned.
+    let countsTxt = '';
+    if (wfCounts) {
+      const c = wfCounts[w.id] || {};
+      const total = Object.values(c).reduce((a, b) => a + (Number(b) || 0), 0);
+      const active = Number(c.queued) || 0;
+      countsTxt = ' · ' + total + ' enrolled · ' + active + ' active';
+    }
+    return `
     <div class="wf-row">
       <div class="grow">
         <div class="wf-name">${esc(w.name)} ${statusPill(w)}</div>
         <div class="muted small" style="margin-top:3px">
           Trigger tag <span class="chip">${esc(w.tag)}</span>
-          · drip ${esc(w.dripPerDay)}/day · ${winSummary(w)}
+          · drip ${esc(w.dripPerDay)}/day · ${winSummary(w)}${countsTxt}
           ${w.source === 'stored' ? '· <span style="color:var(--info)">customized</span>' : ''}
         </div>
       </div>
@@ -211,12 +238,17 @@ function renderList(){
           : `<button class="warnb" onclick="togglePublish('${esc(w.id)}','draft')">Unpublish</button>`}
         <button onclick="duplicateWorkflow('${esc(w.id)}')">⧉ Duplicate</button>
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 async function loadList(){
   try {
     const data = await api('cc-workflows-api?action=list');
     workflows = data.workflows || [];
+    try {
+      const c = await api('cc-enroll-api?action=counts');
+      wfCounts = (c && c.byMarket) || {};
+    } catch (e) { wfCounts = null; }
     renderList();
   } catch(e){ handleErr(e); }
 }

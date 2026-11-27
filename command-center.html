@@ -181,6 +181,7 @@ a{color:var(--accent)}
   border-radius:8px;padding:6px 10px;cursor:pointer;font-size:12px;font-weight:700;white-space:nowrap;
 }
 .mini-btn:hover{background:rgba(0,212,255,.22)}
+#ccNotifCount{background:var(--accent);color:#fff;font-size:11px;font-weight:700;border-radius:99px;padding:1px 7px;margin-left:4px}
 /* ============ MODALS: OFFER MODE + DEAL SHEET (Nov 11) ============ */
 .cc-modal{
   display:none;position:fixed;inset:0;z-index:200;background:rgba(2,6,16,.82);
@@ -320,17 +321,20 @@ a{color:var(--accent)}
     <span class="live-dot" id="liveDot"></span> <span id="liveLabel">LIVE</span>
     <span id="ccBrandName">Direct Property Buyers</span>
     <span id="ccClock"></span>
+    <button class="mini-btn" id="ccNotifBtn" type="button" title="Notifications — open Conversations">🔔 <span id="ccNotifCount"></span></button>
     <span style="margin-left:auto"><a href="/index.html" style="color:var(--muted);font-size:13px">← Back to Dashboard</a></span>
   </div>
 </div>
 <nav class="cc-nav">
   <a href="/index.html">🏠 Dashboard</a>
   <a href="/contacts.html">👥 Contacts</a>
+  <a href="/pipeline.html">📊 Pipeline</a>
   <a href="/closing-tracker.html">📝 Closing Tracker</a>
   <a href="/live-call.html">📞 Live Call</a>
   <a href="/index.html" title="Master Buyers lives on the dashboard">📋 Master Buyers</a>
   <a href="/index.html" title="Deal Rooms live on the dashboard">🏘️ Deal Rooms</a>
   <a href="/bread-hl.html">🍞 Bread AI</a>
+  <a href="/clients-admin.html">🏢 Resale Clients</a>
   <button class="mini-btn" onclick="cmdkOpen()" title="Quick search — leads, deals, buyers (Cmd/Ctrl+K)">⌘K Search</button>
 </nav>
 <div id="feedErrors" class="err" style="display:none;padding:12px 28px 0"></div>
@@ -560,6 +564,25 @@ function setFeedHealth(errors){
   label.textContent='DEGRADED';
   banner.style.display='block';
   banner.textContent='⚠️ Feed issue ('+bad.join(', ')+') — numbers below may be stale. '+(errors[bad[0]]||'');
+}
+
+/* ---------- notification bell (mirrors conversations.html) ----------
+   Badge: open-alert count from cc-conversations-api
+   ?action=notifications (same endpoint + grouping as the
+   Conversations panel). Tap goes to Conversations, where the
+   notifications panel lives. Fail-soft: the badge never breaks
+   the page. */
+async function loadCcBell(){
+  var btn=document.getElementById('ccNotifBtn');
+  var c=document.getElementById('ccNotifCount');
+  if(!btn||!c)return;
+  try{
+    var r=await fetch('/.netlify/functions/cc-conversations-api?action=notifications',{credentials:'include'});
+    var d=await r.json();
+    var n=(d&&typeof d.openCount==='number')?d.openCount:(Array.isArray(d&&d.flags)?d.flags.length:0);
+    c.textContent=n?String(n):'';
+    c.style.display=n?'':'none';
+  }catch(e){c.textContent='';c.style.display='none';}
 }
 
 /* ============ OVERVIEW DATA ============ */
@@ -1603,8 +1626,11 @@ document.addEventListener('DOMContentLoaded',()=>{
   initMap();
   loadOverview();
   loadAlerts();
+  loadCcBell();
+  var ccNb=document.getElementById('ccNotifBtn');
+  if(ccNb)ccNb.addEventListener('click',function(){window.location.href='/conversations.html';});
   // Refresh every 60s
-  setInterval(()=>{loadOverview();loadAlerts();},60000);
+  setInterval(()=>{loadOverview();loadAlerts();loadCcBell();},60000);
   // ⌘K / Ctrl+K opens quick search; Esc closes overlays.
   document.addEventListener('keydown',function(e){
     if((e.metaKey||e.ctrlKey)&&String(e.key||'').toLowerCase()==='k'){

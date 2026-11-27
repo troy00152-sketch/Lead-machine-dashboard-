@@ -137,16 +137,17 @@
   <div class="topbar">
     <div class="title">🤖 Conversation AI</div>
     <span class="brand-name" id="brandName"></span>
+    <span class="pill" id="saveState" hidden></span>
     <a class="back active" href="/conversation-ai.html">🤖 Conversation AI</a>
     <a class="back" href="/command-center.html">🎯 Command Center</a>
     <a class="back" href="/index.html">← Dashboard</a>
   </div>
 
   <p class="muted" style="margin:0 0 14px;line-height:1.6">
-    Your AI conversation team comes pre-configured and ready to work: <b data-bot-ref="ashley">Ashley</b> handles seller
+    Your AI conversation team comes pre-configured and ready to work: <b data-bot-ref="ashley">Amber</b> handles seller
     text conversations and <b data-bot-ref="sam">Sam</b> answers inbound calls. Review the setup below, adjust the
     wording to fit your business, and add your own knowledge — changes save automatically to your
-    account on this device.
+    account.
   </p>
 
   <!-- ============ BOT PICKER ============ -->
@@ -189,13 +190,13 @@
       <div class="bot-card" id="ashleyCard">
         <div class="bot-head">
           <span class="bot-avatar" data-avatar-slot="ashley"></span>
-          <span class="bot-name">💬 <span data-bot-ref="ashley">Ashley</span></span>
+          <span class="bot-name">💬 <span data-bot-ref="ashley">Amber</span></span>
           <span class="pill green" id="ashleyState">On · Auto-Pilot</span>
           <span style="margin-left:auto"></span>
-          <label class="switch" title="Turn Ashley on or off"><input type="checkbox" id="ashleyOn"><span class="track"></span></label>
+          <label class="switch" title="Turn Amber on or off"><input type="checkbox" id="ashleyOn"><span class="track"></span></label>
           <span class="switch-label" id="ashleyOnLabel">On</span>
         </div>
-        <div class="bot-role">Text-message seller bot. <span data-bot-ref="ashley">Ashley</span> qualifies sellers over text — motivation, condition, timeframe, price — and books them onto your Seller Calls calendar.</div>
+        <div class="bot-role">Text-message seller bot. <span data-bot-ref="ashley">Amber</span> qualifies sellers over text — motivation, condition, timeframe, price — and books them onto your Seller Calls calendar.</div>
         <div class="mode-row">
           <span class="lbl">Mode</span>
           <select id="ashleyMode">
@@ -223,7 +224,7 @@
           <label class="switch" title="Turn Sam on or off"><input type="checkbox" id="samOn"><span class="track"></span></label>
           <span class="switch-label" id="samOnLabel">On</span>
         </div>
-        <div class="bot-role">Inbound voice bot. <span data-bot-ref="sam">Sam</span> answers incoming calls only — <span data-bot-ref="sam">Sam</span> never places outbound calls — and works from the same knowledge base and booking rules as <span data-bot-ref="ashley">Ashley</span>.</div>
+        <div class="bot-role">Inbound voice bot. <span data-bot-ref="sam">Sam</span> answers incoming calls only — <span data-bot-ref="sam">Sam</span> never places outbound calls — and works from the same knowledge base and booking rules as <span data-bot-ref="ashley">Amber</span>.</div>
         <div class="mode-row">
           <span class="lbl">Mode</span>
           <select id="samMode">
@@ -336,7 +337,8 @@
       <div><label for="bkLength">Call length (minutes)</label><input id="bkLength" type="number" min="5" max="120" step="5"></div>
     </div>
     <p class="muted" style="margin:12px 0 0">
-      If no open time fits inside the seller's stated window, the bot hands the conversation to you
+      Business hours are 8:00 AM – 4:30 PM Eastern, Monday–Saturday — the live slot engine only
+      offers times inside those hours. If no open time fits inside the seller's stated window, the bot hands the conversation to you
       instead of offering times outside it. A month a seller names as their moving timeline is a
       closing fact, never a call time — the bot offers near-term call times now.
     </p>
@@ -396,6 +398,15 @@ function caiLoadJson(storage, key, fallback) {
 }
 function caiSaveJson(storage, key, value) {
   storage.setItem(key, JSON.stringify(value));
+  /* Server sync hook (Nov 27, 2026): the page script sets
+     window.caiSaveHook to schedule a debounced POST of the whole
+     state to the cc-bot-config endpoint. localStorage is ONLY an
+     offline fallback cache now — the server is the source of truth.
+     The hook is optional (undefined in tests) and must never break a
+     save; the page suppresses it while applying a server load. */
+  if (typeof caiSaveHook === 'function') {
+    try { caiSaveHook(key); } catch (e) { /* sync must never break a save */ }
+  }
 }
 function caiNewId(prefix) {
   return prefix + '_' + Date.now().toString(36) + '_' + Math.floor(Math.random() * 1e6).toString(36);
@@ -454,7 +465,7 @@ var CAI_DEFAULT_FAQS = [
   "id": "faq-1",
   "n": 1,
   "question": "What company is this? Who are you with?",
-  "answer": "Ashley works with Direct Property Buyers, a local home-buying team that works directly with owners. Keep the identity simple and friendly. Never mention any LLC, parent company, or investment-firm framing. Example reply: \"I'm Ashley with Direct Property Buyers — a local team that works directly with owners around here.\""
+  "answer": "Amber works with Direct Property Buyers, a local home-buying team that works directly with owners. Keep the identity simple and friendly. Never mention any LLC, parent company, or investment-firm framing. Example reply: \"I'm Amber with Direct Property Buyers — a local team that works directly with owners around here.\""
  },
  {
   "id": "faq-2",
@@ -634,7 +645,7 @@ var CAI_DEFAULT_FAQS = [
   "id": "faq-31",
   "n": 31,
   "question": "Who is this?",
-  "answer": "Identify immediately: Ashley with Direct Property Buyers. Reference the street of the place you reached out about, and state the reason in one breath — no mystery, no games. Example reply: \"This is Ashley with Direct Property Buyers — I reached out about your place on [street] to see if you'd ever consider moving on from it.\""
+  "answer": "Identify immediately: Amber with Direct Property Buyers. Reference the street of the place you reached out about, and state the reason in one breath — no mystery, no games. Example reply: \"This is Amber with Direct Property Buyers — I reached out about your place on [street] to see if you'd ever consider moving on from it.\""
  }
 ];
 function caiDefaultFaqs() {
@@ -643,16 +654,21 @@ function caiDefaultFaqs() {
   });
 }
 /* The company name baked into the starter answers above is the
-   OWNER's — CAI_DEFAULT_FAQS is the verbatim source of truth and
-   never changes. Every other account sees the same starter answers
-   with that name swapped for the business name from its OWN account
-   setup (the same name the branding hook loads from the account
-   config), so no account ever carries another account's name and no
-   name is ever guessed: no configured name, no swap. Only the exact
-   company-name strings in ANSWER text are swapped — questions and
-   every other word stay verbatim. Once an account edits and saves
-   its knowledge base, the saved version wins untouched (see
-   caiLoadFaqs): the swap applies to the starter/default set only. */
+   OWNER's. The persona name baked in is the SHIPPED text-bot name,
+   Amber (Troy, Nov 26, 2026 — the bot stays Amber): the starter set
+   is knowledge/kb.json with that name rendered as Amber, NOT a
+   verbatim copy — kb.json itself stays Ashley-canonical and the live
+   bot swaps Ashley -> Amber at load, exactly as this page's
+   caiSwapPersona does at reply time. Every other account sees the
+   same starter answers with the company name swapped for the
+   business name from its OWN account setup (the same name the
+   branding hook loads from the account config), so no account ever
+   carries another account's name and no name is ever guessed: no
+   configured name, no swap. Only the exact company-name strings in
+   ANSWER text are swapped — questions and every other word stay
+   verbatim. Once an account edits and saves its knowledge base, the
+   saved version wins untouched (see caiLoadFaqs): the swap applies
+   to the starter/default set only. */
 var CAI_SOURCE_COMPANY = 'Direct Property Buyers';
 function caiSwapCompanyName(text, name) {
   var s = String(text == null ? '' : text);
@@ -726,7 +742,7 @@ function caiDefaultInstructions() {
     {
       id: 'role', title: 'Role & voice',
       hint: 'Who the bot is and how it sounds.',
-      body: 'Ashley is the acquisitions assistant for the business. She texts with homeowners who might want to sell their place directly. She sounds like a real person texting: warm, brief, natural — one or two sentences per reply, never like a script or a press release. Sam covers inbound calls with the same voice and the same knowledge.',
+      body: 'Amber is the acquisitions assistant for the business. She texts with homeowners who might want to sell their place directly. She sounds like a real person texting: warm, brief, natural — one or two sentences per reply, never like a script or a press release. Sam covers inbound calls with the same voice and the same knowledge.',
     },
     {
       id: 'job', title: 'The job: qualify and book',
@@ -761,7 +777,7 @@ function caiDefaultInstructions() {
     {
       id: 'language', title: 'Spam-safe language',
       hint: 'Plain words that keep texts deliverable.',
-      body: 'Carrier filters flag salesy trigger words. In every message, avoid: buy, buying, purchase, offer, cash, investor, loan, credit, debt, free, urgent, guarantee, property, homeowner, mortgage, listing, interested. Say it the plain way instead — "we work directly with owners", "the place" or the street address, "a straight number", "open to a chat". The first reply to any new conversation is only: who the bot is (Ashley with the business, a local team that works directly with owners) plus ONE question. Fees and closing costs are only mentioned if the seller asks directly, in one plain sentence.',
+      body: 'Carrier filters flag salesy trigger words. In every message, avoid: buy, buying, purchase, offer, cash, investor, loan, credit, debt, free, urgent, guarantee, property, homeowner, mortgage, listing, interested. Say it the plain way instead — "we work directly with owners", "the place" or the street address, "a straight number", "open to a chat". The first reply to any new conversation is only: who the bot is (Amber with the business, a local team that works directly with owners) plus ONE question. Fees and closing costs are only mentioned if the seller asks directly, in one plain sentence.',
     },
     {
       id: 'buyers', title: 'When a buyer replies',
@@ -771,7 +787,7 @@ function caiDefaultInstructions() {
     {
       id: 'hours', title: 'Hours & manners',
       hint: 'When the bot engages, and how it leaves.',
-      body: 'Only engage between the business hours on this screen (default 8:00 AM – 9:00 PM Eastern). Outside that window, do not reply. Never be pushy: one gentle follow-up at most if a seller goes quiet mid-conversation, then leave them alone. If a seller is hostile, abusive, or clearly not a fit, exit politely and stop.',
+      body: 'Only engage between the business hours on this screen (default 8:00 AM – 4:30 PM Eastern, Monday through Saturday). Outside that window, do not reply. Never be pushy: one gentle follow-up at most if a seller goes quiet mid-conversation, then leave them alone. If a seller is hostile, abusive, or clearly not a fit, exit politely and stop.',
     },
   ];
 }
@@ -798,7 +814,10 @@ function caiSaveInstructions(storage, tenant, sections) {
 
 /* ---- Booking rule ---- */
 function caiDefaultBooking() {
-  return { calendar: 'Seller Calls', windowDays: 3, slots: 3, minGapHours: 3, hoursStart: '08:00', hoursEnd: '21:00', callMinutes: 30 };
+  /* hoursEnd '16:30' is the LIVE truth (Nov 27, 2026): the slot engine
+     (cc-slots.js) only ever generates 08:00–16:30 ET Mon–Sat. The old
+     '21:00' default promised 9 PM offers the engine could never make. */
+  return { calendar: 'Seller Calls', windowDays: 3, slots: 3, minGapHours: 3, hoursStart: '08:00', hoursEnd: '16:30', callMinutes: 30 };
 }
 function caiClampInt(v, lo, hi, dflt) {
   var n = parseInt(v, 10);
@@ -855,7 +874,7 @@ function caiSaveGuardrails(storage, tenant, guards) {
   return caiLoadGuardrails(storage, tenant);
 }
 /* ---- Bot names (editable per account) ---- */
-/* The two original bots ship as Ashley (text) and Sam (voice).
+/* The two original bots ship as Amber (text) and Sam (voice).
    An account can rename either — the new name is theirs alone,
    saved with their account, and used everywhere the screen refers
    to that bot. Names are plain text: tags and angle brackets are
@@ -863,7 +882,7 @@ function caiSaveGuardrails(storage, tenant, guards) {
    through escaping/textContent, never as markup. */
 var CAI_BOT_NAME_MAX = 40;
 function caiDefaultBotNames() {
-  return { ashley: 'Ashley', sam: 'Sam' };
+  return { ashley: 'Amber', sam: 'Sam' };
 }
 function caiSanitizeBotName(v, dflt) {
   var s = String(v == null ? '' : v)
@@ -958,11 +977,11 @@ var CAI_AVATAR_OPTIONS = [
   { id: 'ava-kofi', label: 'Kofi', gender: 'male', bg: '#fff4d9', skin: '#5c3a21', hair: '#0f0d0c', hairStyle: 'buzz', shirt: '#7a3b12', accessory: 'none' },
 ];
 /* Photo faces (Troy's pick, Nov 19): a generated photo headshot
-   matched to each real voice, plus Ashley's own. Files live in
+   matched to each real voice, plus Amber's own. Files live in
    /avatars/<name>.webp (256px). An option with a `photo` renders
    the image clipped to the avatar circle instead of a drawn face. */
 var CAI_PHOTO_AVATARS = [
-  { id: 'ph-ashley', label: 'Ashley', gender: 'female', photo: '/avatars/ashley.webp' },
+  { id: 'ph-ashley', label: 'Amber', gender: 'female', photo: '/avatars/ashley.webp' },
   { id: 'ph-sarah', label: 'Sarah', gender: 'female', photo: '/avatars/sarah.webp' },
   { id: 'ph-bella', label: 'Bella', gender: 'female', photo: '/avatars/bella.webp' },
   { id: 'ph-jessica', label: 'Jessica', gender: 'female', photo: '/avatars/jessica.webp' },
@@ -1002,7 +1021,7 @@ function caiHeadsetAvatarId() {
 }
 /* Shipped faces (photo style, Troy's pick Nov 19): the voice bot
    wears Roger's photo — the face that matches his voice — and the
-   text bot wears Ashley's photo. Saved picks always win; these
+   text bot wears Amber's photo. Saved picks always win; these
    are only the out-of-the-box faces. */
 function caiDefaultAvatar(botId) {
   return botId === 'sam' ? 'ph-roger' : 'ph-ashley';
@@ -1618,15 +1637,18 @@ function caiBookingReply(booking, now) {
    the shipped names in knowledge answers become the tested bot's
    current name — the same treatment the starter set gets for the
    business name. Applies to the preview only, never to stored
-   knowledge. */
+   knowledge. Both shipped text-bot names are swapped: 'Amber' (the
+   name since Nov 26, 2026 — Troy: the bot stays Amber) and the
+   legacy 'Ashley', which saved knowledge bases written before the
+   rename still carry. */
 function caiSwapPersona(text, currentName) {
   var s = String(text == null ? '' : text);
   var n = caiSanitizeBotName(currentName, '');
   if (!n) return s;
-  return s.replace(/\bAshley\b/g, n).replace(/\bSam\b/g, n);
+  return s.replace(/\bAshley\b/g, n).replace(/\bAmber\b/g, n).replace(/\bSam\b/g, n);
 }
 function caiDefaultReply(botName, bizName) {
-  var n = caiSanitizeBotName(botName, 'Ashley');
+  var n = caiSanitizeBotName(botName, 'Amber');
   var biz = String(bizName || '').trim();
   return 'Hi there! This is ' + n + (biz ? ' with ' + biz : '') + ' — we work directly with homeowners in the area. Are you the owner of the place? If you might ever consider selling it as-is, I can set up a quick call to talk it over.';
 }
@@ -1636,7 +1658,7 @@ function caiTestReply(text, ctx) {
   ctx = ctx || {};
   var raw = String(text == null ? '' : text);
   if (!raw.trim()) return { type: 'empty', text: '', note: '', faqId: '' };
-  var botName = caiSanitizeBotName(ctx.botName, 'Ashley');
+  var botName = caiSanitizeBotName(ctx.botName, 'Amber');
   if (caiIsOptOut(raw)) {
     return { type: 'silence', text: '', note: 'The AI stays silent on opt-outs.', faqId: '' };
   }
@@ -1652,6 +1674,118 @@ function caiTestReply(text, ctx) {
     return { type: 'reply', text: caiBookingReply(ctx.booking || caiDefaultBooking(), ctx.now), note: '', faqId: '' };
   }
   return { type: 'reply', text: caiDefaultReply(botName, ctx.bizName), note: '', faqId: '' };
+}
+/* ---- Server config sync (Nov 27, 2026) ---- */
+/* The screen's edits live on the SERVER (cc-bot-config endpoint), not
+   just in this browser. These pure mappers translate between the
+   page's local state and the server config shape; the DOM script
+   below does the fetching. localStorage stays ONLY as an offline
+   fallback cache. Avatars, added-bot profiles and the picker
+   selection are presentation state with no server field — they stay
+   localStorage-only, clearly separated from the server-backed fields
+   below. */
+/* The instruction sections as one joined text per bot (the shape the
+   server stores as instructions.{ashley,sam}); Sam's copy reads as
+   Sam, Amber's as Amber. */
+function caiInstructionsText(sections, botName) {
+  var name = caiSanitizeBotName(botName, 'Amber');
+  var text = (sections || []).map(function (s) {
+    return String(s.id || '').toUpperCase() + '\n' + String(s.body || '');
+  }).join('\n\n');
+  if (name !== 'Amber') text = text.replace(/\bAmber\b/g, name);
+  return text;
+}
+/* Split the knowledge base into what the server stores: answers that
+   differ from the starter set (keyed by starter id), questions the
+   account added, and starter ids the account deleted. */
+function caiFaqsToServer(faqs, brandName) {
+  var starter = caiStarterFaqs(brandName);
+  var starterById = {};
+  starter.forEach(function (f) { starterById[f.id] = f.answer; });
+  var overrides = {};
+  var additions = [];
+  var seen = {};
+  (faqs || []).forEach(function (f) {
+    if (!f || !f.id) return;
+    seen[f.id] = 1;
+    if (Object.prototype.hasOwnProperty.call(starterById, f.id)) {
+      if (String(f.answer) !== starterById[f.id]) overrides[f.id] = String(f.answer);
+    } else {
+      additions.push({ id: f.id, question: f.question, answer: f.answer });
+    }
+  });
+  var deleted = starter.filter(function (f) { return !seen[f.id]; }).map(function (f) { return f.id; });
+  return { faqs: overrides, faqAdditions: additions, faqsDeleted: deleted };
+}
+/* Rebuild the full knowledge base from the server parts: starter set,
+   minus deletions, with overrides applied, plus additions. */
+function caiFaqsFromServer(cfg, brandName) {
+  cfg = cfg || {};
+  var deleted = {};
+  (cfg.faqsDeleted || []).forEach(function (id) { deleted[String(id)] = 1; });
+  var list = caiStarterFaqs(brandName).filter(function (f) { return !deleted[f.id]; });
+  var overrides = cfg.faqs || {};
+  list = list.map(function (f) {
+    return Object.prototype.hasOwnProperty.call(overrides, f.id)
+      ? { id: f.id, n: f.n, question: f.question, answer: String(overrides[f.id]) }
+      : f;
+  });
+  (cfg.faqAdditions || []).forEach(function (a) {
+    if (!a || !a.question || !a.answer) return;
+    var exists = false;
+    list.forEach(function (f) { if (f.id === a.id) exists = true; });
+    if (!exists) list.push({ id: String(a.id || caiNewId('faq')), n: null, question: a.question, answer: a.answer });
+  });
+  return list;
+}
+/* Page state -> server config shape (cc-bot-config.js). */
+function caiServerConfigFromState(state, brandName) {
+  state = state || {};
+  var bots = caiSanitizeBots(state.bots);
+  var faqParts = caiFaqsToServer(state.faqs, brandName);
+  var guards = {};
+  (state.guardrails || []).forEach(function (g) { if (g && g.id) guards[g.id] = !!g.on; });
+  return {
+    ashley: { on: bots.ashley.on, mode: bots.ashley.mode },
+    sam: { on: bots.sam.on, mode: bots.sam.mode },
+    faqs: faqParts.faqs,
+    faqAdditions: faqParts.faqAdditions,
+    faqsDeleted: faqParts.faqsDeleted,
+    instructions: {
+      ashley: caiInstructionsText(state.instructions, 'Amber'),
+      sam: caiInstructionsText(state.instructions, 'Sam'),
+    },
+    instructionSections: (state.instructions || []).map(function (s) { return { id: s.id, body: s.body }; }),
+    booking: caiSanitizeBooking(state.booking),
+    guardrails: guards,
+    voice: { sam: caiSanitizeVoiceSel(state.voice) },
+    names: caiSanitizeBotNames(state.names),
+  };
+}
+/* Server config -> a state patch (only the server-backed fields).
+   Instruction sections round-trip when the server stored them; if it
+   only has joined text, the local sections are kept untouched. */
+function caiApplyServerToState(cfg, brandName) {
+  cfg = cfg || {};
+  var patch = {};
+  if (cfg.ashley || cfg.sam) patch.bots = caiSanitizeBots({ ashley: cfg.ashley, sam: cfg.sam });
+  if (cfg.names) patch.names = caiSanitizeBotNames(cfg.names);
+  if (cfg.faqs || cfg.faqAdditions || cfg.faqsDeleted) patch.faqs = caiFaqsFromServer(cfg, brandName);
+  if (Array.isArray(cfg.instructionSections) && cfg.instructionSections.length) {
+    var byId = {};
+    cfg.instructionSections.forEach(function (s) { if (s && s.id) byId[String(s.id)] = String(s.body || ''); });
+    patch.instructions = caiDefaultInstructions().map(function (d) {
+      return { id: d.id, title: d.title, hint: d.hint, body: Object.prototype.hasOwnProperty.call(byId, d.id) ? byId[d.id] : d.body };
+    });
+  }
+  if (cfg.booking) patch.booking = caiSanitizeBooking(cfg.booking);
+  if (cfg.guardrails && typeof cfg.guardrails === 'object') {
+    patch.guardrails = caiDefaultGuardrails().map(function (d) {
+      return { id: d.id, title: d.title, desc: d.desc, on: Object.prototype.hasOwnProperty.call(cfg.guardrails, d.id) ? !!cfg.guardrails[d.id] : d.on };
+    });
+  }
+  if (cfg.voice && typeof cfg.voice.sam === 'string') patch.voice = caiSanitizeVoiceSel(cfg.voice.sam);
+  return patch;
 }
 /* ==/PURE== */
 </script>
@@ -1753,6 +1887,81 @@ function selectedBot() {
       .catch(function () { /* keep host-derived tenant + default accent */ });
   } catch (e) { /* branding must never break the page */ }
 })();
+
+/* ---- server sync (Nov 27, 2026) ---- */
+/* The screen's edits live on the SERVER (cc-bot-config endpoint).
+   localStorage is ONLY an offline fallback cache now: every caiSave*
+   still writes it, and the hook below POSTs the same state to the
+   server (debounced 800ms). The pill in the topbar shows the save
+   state. Server sync runs for the OWNER account only (tenant 'troy')
+   — the server holds one config; other tenants keep the previous
+   localStorage-only behavior until per-tenant config exists. */
+var CAI_CONFIG_URL = '/.netlify/functions/cc-bot-config';
+var caiApplyingServer = false;
+var caiSaveTimer = null;
+function setSaveState(text, cls) {
+  var el = document.getElementById('saveState');
+  if (!el) return;
+  el.hidden = !text;
+  el.textContent = text || '';
+  el.className = 'pill' + (cls ? ' ' + cls : '');
+}
+function scheduleServerSave() {
+  if (caiApplyingServer || TENANT !== 'troy') return;
+  setSaveState('Saving…', 'amber');
+  clearTimeout(caiSaveTimer);
+  caiSaveTimer = setTimeout(postServerConfig, 800);
+}
+async function postServerConfig() {
+  if (TENANT !== 'troy') return;
+  try {
+    var res = await fetch(CAI_CONFIG_URL, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ config: caiServerConfigFromState(state, BRAND_NAME) }),
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    setSaveState('Saved to your account', 'green');
+  } catch (e) {
+    /* Offline: the localStorage fallback cache already holds the edit. */
+    setSaveState('Offline — saved on this device', 'amber');
+  }
+}
+async function loadServerConfig() {
+  if (TENANT !== 'troy') return;
+  var tenantAtFetch = TENANT;
+  setSaveState('Loading…', 'amber');
+  try {
+    var res = await fetch(CAI_CONFIG_URL, { credentials: 'same-origin', cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    var data = await res.json();
+    if (!data || !data.config) throw new Error('empty config');
+    /* The branding hook may have switched tenants mid-flight — never
+       apply one account's config to another account's cache. */
+    if (TENANT !== 'troy' || TENANT !== tenantAtFetch) return;
+    var patch = caiApplyServerToState(data.config, BRAND_NAME);
+    caiApplyingServer = true;
+    try {
+      if (patch.bots) state.bots = caiSaveBots(localStorage, TENANT, patch.bots);
+      if (patch.names) state.names = caiSaveBotNames(localStorage, TENANT, patch.names);
+      if (patch.faqs) state.faqs = caiSaveFaqs(localStorage, TENANT, patch.faqs);
+      if (patch.instructions) state.instructions = caiSaveInstructions(localStorage, TENANT, patch.instructions);
+      if (patch.booking) state.booking = caiSaveBooking(localStorage, TENANT, patch.booking);
+      if (patch.guardrails) state.guardrails = caiSaveGuardrails(localStorage, TENANT, patch.guardrails);
+      if (patch.voice) state.voice = caiSaveVoice(localStorage, TENANT, patch.voice);
+    } finally {
+      caiApplyingServer = false;
+    }
+    setSaveState('Saved to your account', 'green');
+    renderAll();
+  } catch (e) {
+    /* Offline: keep the localStorage fallback cache, say so. */
+    setSaveState('Offline — using saved copy on this device', 'amber');
+  }
+}
+/* The hook the pure storage layer calls after every local save. */
+window.caiSaveHook = function () { scheduleServerSave(); };
 
 /* ---- bots ---- */
 function renderBot(bot, prefix) {
@@ -2637,6 +2846,7 @@ wireBot('sam', 'sam');
 wireBotName('ashley', 'ashleyName');
 wireBotName('sam', 'samName');
 refreshSpeechVoices();
+loadServerConfig();
 renderAll();
 </script>
 </body>

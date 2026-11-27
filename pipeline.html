@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pipeline — Lead Machine</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#0d1117">
+<link rel="apple-touch-icon" href="/assets/icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<script src="/assets/pwa.js" defer></script>
+<style>
+  :root{ --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --line:#2b3444; --text:#e8eef4; --muted:#9aa7b5; --accent:#ff6b1a; --green:#2ea043; --red:#e5534b; --amber:#e0a53a; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--text); }
+  .wrap{ max-width:1280px; margin:0 auto; padding:18px 14px 60px; }
+  .topbar{ display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
+  .title{ font-size:22px; font-weight:700; }
+  .back{ margin-left:auto; background:var(--panel2); border:1px solid var(--line); color:var(--text); border-radius:24px; padding:9px 16px; font-size:13px; font-weight:600; text-decoration:none; white-space:nowrap; }
+  .back + .back{ margin-left:0; }
+  .back.active{ border-color:var(--accent); color:var(--accent); }
+  .muted{ color:var(--muted); font-size:13px; }
+  .empty{ color:var(--muted); padding:18px 6px; text-align:center; font-size:14px; }
+  .board{ display:flex; gap:12px; align-items:flex-start; overflow-x:auto; padding-bottom:8px; }
+  .col{ flex:1 1 240px; min-width:240px; background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:12px; }
+  .col h2{ margin:0 0 4px; font-size:15px; }
+  .col .count{ color:var(--muted); font-size:12px; margin-bottom:10px; }
+  .card{ background:var(--panel2); border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin-bottom:8px; font-size:13px; }
+  .card .name{ font-weight:700; }
+  .card .sub{ color:var(--muted); font-size:12px; margin-top:3px; }
+  .card .val{ font-weight:700; margin-top:6px; }
+  .card a{ color:var(--accent); font-size:12px; font-weight:600; text-decoration:none; }
+  .pill{ display:inline-block; border:1px solid var(--line); background:var(--panel2); color:var(--muted); border-radius:20px; padding:2px 9px; font-size:11px; font-weight:600; }
+  .pill.green{ border-color:var(--green); color:#7ee2a0; }
+  .pill.amber{ border-color:var(--amber); color:#f2cd8a; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <div class="title">📊 Pipeline</div>
+    <a class="back active" href="/pipeline.html">📊 Pipeline</a>
+    <a class="back" href="/contacts.html">👥 Contacts</a>
+    <a class="back" href="/conversations.html">💬 Conversations</a>
+    <a class="back" href="/index.html">← Dashboard</a>
+  </div>
+  <p class="muted" id="pipeMeta">Loading pipeline…</p>
+  <div class="board" id="board"></div>
+  <p class="muted">Read-only board — no drag, no status changes in this pass. Deals come from the Command Center overview feed (cc-data ?action=overview), which resolves stage names server-side via the HighLevel pipelines endpoint. The feed returns the top 9 new leads and the top 10 under-contract deals, so columns below show those deals only — not the whole pipeline. Closed deals show as count + gross volume only: the overview feed returns no closed rows.</p>
+  <p class="muted">Follow-up (needs a cc-data change, not this page): a dedicated cc-data getOpportunities action returning every opportunity with its stage, value, contact phone and contact id would give this board the full pipeline, per-stage columns for empty stages, closed rows, and a direct thread deep-link per deal.</p>
+</div>
+
+<script>
+/* ==PURE== */
+/* Pure pipeline-board logic — no DOM access in this block.
+   pipeline-board tests extract and unit-test these functions. */
+function pipeMoney(v) {
+  var n = Number(v);
+  if (!Number.isFinite(n) || !n) return '—';
+  return '$' + Math.round(n).toLocaleString('en-US');
+}
+/* Group overview deals (newLeads + underContractDeals) by stage
+   name. Returns [{ stage, deals }] sorted by deal count desc,
+   then stage name asc. Deals with no stage name land in
+   'No stage'. The input list is never mutated. */
+function groupOppsByStage(deals) {
+  var byStage = {};
+  (deals || []).forEach(function (o) {
+    if (!o || typeof o !== 'object') return;
+    var stage = String(o.stage || '').trim() || 'No stage';
+    if (!byStage[stage]) byStage[stage] = [];
+    byStage[stage].push(o);
+  });
+  return Object.keys(byStage).sort(function (a, b) {
+    var d = byStage[b].length - byStage[a].length;
+    return d !== 0 ? d : (a < b ? -1 : (a > b ? 1 : 0));
+  }).map(function (stage) {
+    return { stage: stage, deals: byStage[stage] };
+  });
+}
+/* ==/PURE== */
+</script>
+
+<script>
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+function dealCardHtml(o) {
+  var addr = esc(o.address || '');
+  return '<div class="card"><div class="name">' + esc(o.name || 'Opportunity') + '</div>' +
+    (addr ? '<div class="sub">' + addr + '</div>' : '') +
+    '<div class="val">' + esc(pipeMoney(o.monetaryValue)) + '</div>' +
+    (o.contactId ? '<div class="sub">CRM contact ' + esc(o.contactId) + '</div>' : '') +
+    '<div style="margin-top:6px"><a href="/contacts.html">View in Contacts →</a></div></div>';
+}
+async function loadPipeline() {
+  var meta = document.getElementById('pipeMeta');
+  var board = document.getElementById('board');
+  try {
+    var res = await fetch('/.netlify/functions/cc-data?action=overview', { credentials: 'include' });
+    var d = await res.json();
+    if (!d || d.ok === false) throw new Error((d && d.error) || ('HTTP ' + res.status));
+    var deals = ((d.newLeads || []).concat(d.underContractDeals || []));
+    var cols = groupOppsByStage(deals);
+    var fetchedNote = (d.oppsFetched != null)
+      ? 'Showing ' + deals.length + ' deals from ' + d.oppsFetched + ' fetched opportunities' +
+        (d.oppsTotal ? ' of ' + d.oppsTotal + ' total' : '') +
+        (d.closeRateCapped ? ' — list capped at the fetched set' : '') + '.'
+      : 'Showing ' + deals.length + ' deals.';
+    meta.textContent = fetchedNote +
+      (d.fetchedAt ? ' As of ' + new Date(d.fetchedAt).toLocaleString() + '.' : '') +
+      ((d.errors && d.errors.opps) ? ' Pipeline feed issue: ' + d.errors.opps : '');
+    var html = cols.map(function (c) {
+      return '<div class="col"><h2>' + esc(c.stage) + '</h2>' +
+        '<div class="count">' + c.deals.length + ' deal' + (c.deals.length === 1 ? '' : 's') + '</div>' +
+        c.deals.map(dealCardHtml).join('') + '</div>';
+    }).join('');
+    // Closed / Won: count + gross volume only — the overview feed
+    // returns no closed rows to list.
+    html += '<div class="col"><h2>Closed / Won</h2>' +
+      '<div class="count">' + (d.closedCount || 0) + ' closed · ' + esc(pipeMoney(d.closedVolume)) + ' gross volume</div>' +
+      '<div class="empty">Closed rows are not returned by the overview feed — count + volume only. See the follow-up note below.</div></div>';
+    board.innerHTML = html || '<div class="empty">No open deals in the overview feed.</div>';
+  } catch (e) {
+    meta.textContent = 'Pipeline could not be loaded.';
+    board.innerHTML = '<div class="empty">Could not load the pipeline: ' + esc(e.message || e) + '</div>';
+  }
+}
+loadPipeline();
+</script>
+</body>
+</html>

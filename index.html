@@ -274,6 +274,7 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,-ap
 .nav-item.active{background:var(--panel2);color:var(--accent);font-weight:600}
 .nav-item .ico{width:20px;text-align:center;font-size:16px}
 .nav-item .cnt{margin-left:auto;background:var(--accent);color:#fff;font-size:10px;font-weight:700;border-radius:99px;padding:2px 8px}
+#ccNotifCount{background:var(--accent);color:#fff;font-size:11px;font-weight:700;border-radius:99px;padding:1px 7px;margin-left:4px}
 .main{flex:1;margin-left:230px;min-width:0;display:flex;flex-direction:column}
 /* Top search bar */
 .topbar{background:linear-gradient(135deg,#0a1628 0%,#12233d 60%,#0d1a2e 100%);border-bottom:1px solid var(--line);padding:22px 24px;position:relative;overflow:hidden}
@@ -544,6 +545,7 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
       <a class="nav-item" href="/command-center.html" style="text-decoration:none"><span class="ico">🎯</span> Command Center</a>
       <a class="nav-item" href="/conversations.html" style="text-decoration:none"><span class="ico">📱</span> Conversations</a>
       <a class="nav-item" href="/contacts.html" style="text-decoration:none"><span class="ico">👥</span> Contacts</a>
+      <a class="nav-item" href="/pipeline.html" style="text-decoration:none"><span class="ico">📊</span> Pipeline</a>
       <a class="nav-item" href="/conversation-ai.html" style="text-decoration:none"><span class="ico">🤖</span> Conversation AI</a>
       <a class="nav-item" href="/calendar.html" style="text-decoration:none"><span class="ico">📅</span> Calendar</a>
       <a class="nav-item" href="/dialer.html" style="text-decoration:none"><span class="ico">☎️</span> Dialer</a>
@@ -581,6 +583,8 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
       <div style="display:flex;align-items:center;gap:12px;position:relative">
         <h2 style="margin-bottom:0;flex:1">Where would you like to invest?</h2>
         <button class="crm-btn" data-crm-btn title="Open CRM">← Back to CRM</button>
+        <button class="btn" id="ccNotifBtn" type="button" title="Notifications — open Conversations">🔔 <span id="ccNotifCount"></span></button>
+        <span id="ccPushHealth" style="font-size:12px;color:var(--muted)">Push: checking…</span>
         <button class="theme-toggle" id="themeToggleTop" onclick="cycleTheme()" title="Toggle dark/light mode">🌙</button>
       </div>
       <div class="search-row">
@@ -6655,12 +6659,51 @@ function cycleTheme(){ const t = getEffectiveTheme(); setTheme(t === 'light' ? '
 if(window.matchMedia){ try{ window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', ()=>{ if(getThemePref()==='system') applyTheme(); }); }catch(e){} }
 
 /* ============ INIT ============ */
+/* ---------- notification bell + push health (mirrors
+   conversations.html) ---------- */
+/* Bell badge: open-alert count from cc-conversations-api
+   ?action=notifications (same endpoint + grouping as the
+   Conversations panel). Tap goes to Conversations, where the
+   notifications panel lives. Fail-soft: the badge never breaks
+   the page. */
+async function loadCcBell(){
+  var btn = document.getElementById('ccNotifBtn');
+  var c = document.getElementById('ccNotifCount');
+  if (!btn || !c) return;
+  try {
+    var res = await fetch('/.netlify/functions/cc-conversations-api?action=notifications', { credentials: 'include' });
+    var d = await res.json();
+    var n = (d && typeof d.openCount === 'number') ? d.openCount : (Array.isArray(d && d.flags) ? d.flags.length : 0);
+    c.textContent = n ? String(n) : '';
+    c.style.display = n ? '' : 'none';
+  } catch (e) { c.textContent = ''; c.style.display = 'none'; }
+}
+/* Push-health line: cc-push-api ?action=status reports whether
+   VAPID push is configured. Any failure (including not signed
+   in) reads as "Push not configured" — the line never breaks the
+   page and never claims push is on without the endpoint saying so. */
+async function loadCcPushHealth(){
+  var el = document.getElementById('ccPushHealth');
+  if (!el) return;
+  try {
+    var res = await fetch('/.netlify/functions/cc-push-api?action=status', { credentials: 'include' });
+    var d = await res.json();
+    if (res.ok && d && d.configured) {
+      el.textContent = 'Push on' + (typeof d.subscriptions === 'number' ? ' · ' + d.subscriptions + ' phone' + (d.subscriptions === 1 ? '' : 's') : '');
+    } else {
+      el.textContent = 'Push not configured';
+    }
+  } catch (e) { el.textContent = 'Push not configured'; }
+}
 document.addEventListener('DOMContentLoaded', function(){
   applyTheme(); // theme before anything renders
   loadState();
   updateProviderStatus();
   document.querySelectorAll('.defview-btn').forEach(b=>b.classList.toggle('active', b.dataset.mode===getDefaultImgView()));
   buildSignalFilter(); renderSignalChips(); renderLeads(); renderRecentLeads(); renderRecentSearches(); renderTraceHistory(); updateStats();
+  loadCcBell(); loadCcPushHealth();
+  var nb = document.getElementById('ccNotifBtn');
+  if (nb) nb.addEventListener('click', function(){ window.location.href = '/conversations.html'; });
 });
 
 /* ============ XLEADS-STYLE FILTER DRAWER ============ */
