@@ -4,13 +4,18 @@
 // lets a hot reply sit silent.
 //
 //   scan()       — one pass over the 'cc-conversations' store:
-//                    * FLAG: a thread whose LAST message is inbound,
-//                      older than the threshold (default 30 min), not
-//                      suppressed (thread.dnd === true, or the matching
-//                      'cc-enrollments' record has dnd === true), with
-//                      no existing flag for that inbound and no outbound
-//                      after it -> a new 'open' flag in
-//                      'cc-notifications' (key 'flags' -> {flags: []}).
+//                    * FLAG: a thread whose LAST TEXT message is
+//                      inbound, older than the threshold (default
+//                      30 min), not suppressed (thread.dnd === true,
+//                      or the matching 'cc-enrollments' record has
+//                      dnd === true), with no existing flag for that
+//                      inbound and no outbound after it -> a new
+//                      'open' flag in 'cc-notifications' (key 'flags'
+//                      -> {flags: []}). Call-history entries
+//                      (kind 'call': the 'Missed call' / 'Call
+//                      completed' bubbles logCallToThread appends)
+//                      are NOT texts and are never the flagged
+//                      inbound — a call is not an unreplied text.
 //                    * AUTO-RESOLVE: an 'open' flag whose thread now has
 //                      an outbound message after the flagged inbound ->
 //                      'resolved' (resolvedAt stamped).
@@ -254,6 +259,28 @@ async function scan(opts, event) {
       f.resolvedAt = now;
       resolved += 1;
     }
+    // Call-history entries are not texts (Nov 27, 2026): an open
+    // unreplied flag whose flagged inbound IS a call entry was
+    // created by the same bug the flag pass below now skips — the
+    // old pass flagged ANY last-dir-'in' message, and logCallToThread
+    // writes inbound calls with dir 'in'. Resolve it so the false
+    // flag clears from Troy's list instead of sitting open until a
+    // human dismisses it. Stuck-call flags (f.type) are excluded —
+    // their close-out lives in the stuck-call pass below. Call
+    // entries carry no id, so these flags have no inboundId; match
+    // on inboundAt, which the flag copies verbatim from the entry.
+    if (f.status === 'open' && !f.type) {
+      const flaggedCall = t.messages.some(
+        (m) => m && m.kind === 'call' && m.at === f.inboundAt
+      );
+      if (flaggedCall) {
+        f.status = 'resolved';
+        f.resolvedAt = now;
+        f.resolvedReason = 'not-a-text';
+        resolved += 1;
+        continue;
+      }
+    }
   }
 
   // Flag newly-stale unanswered inbounds.
@@ -261,7 +288,25 @@ async function scan(opts, event) {
   for (const t of threads) {
     const msgs = Array.isArray(t.messages) ? t.messages : [];
     if (!msgs.length) continue;
-    const last = msgs[msgs.length - 1];
+    // Call-history entries are not texts (Nov 27, 2026): a
+    // 'Missed call' / 'Call completed' / 'Voicemail' bubble
+    // (kind 'call', written by logCallToThread with dir 'in' for
+    // inbound calls) is not a seller text waiting on a reply, so
+    // it must never be the flagged inbound. Scan back to the
+    // latest TEXT message instead; a thread whose messages are
+    // all call entries has no unreplied text. (The old code took
+    // msgs[msgs.length - 1] outright, so every missed/completed
+    // call older than the threshold raised an unreplied-text flag
+    // with preview 'Missed call' / 'Call completed' — Troy's
+    // Nov 27 Conversations rows.)
+    let last = null;
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = msgs[i];
+      if (m && m.kind !== 'call') {
+        last = m;
+        break;
+      }
+    }
     if (!last || last.dir !== 'in') continue;
     if (typeof last.at !== 'number') continue;
     if (!(now - last.at > thresholdMs)) continue;
