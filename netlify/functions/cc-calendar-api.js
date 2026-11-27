@@ -271,7 +271,12 @@ exports.handler = async (event) => {
 
     return bad('Unknown action.');
   } catch (e) {
-    return serverError(String((e && e.message) || e));
+    const msg = String((e && e.message) || e);
+    // HL failures must surface as HL failures (Nov 27: a duplicate-contact
+    // 400 was relabelled "Calendar storage is not ready yet" and cost a
+    // retest round). Only genuine store failures get the 503.
+    if (/^HL \d{3}:/.test(msg)) return json(502, { error: msg.slice(0, 300) });
+    return serverError(msg);
   }
 };
 

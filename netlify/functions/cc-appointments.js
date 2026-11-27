@@ -47,8 +47,11 @@ const INDEX_KEY = 'index';
 const HL_API_BASE = 'https://services.leadconnectorhq.com';
 const HL_VERSION_CALENDARS = '2021-04-15';
 // Contacts ride 2021-07-28 (per-endpoint versions — Nov 5 lesson). Nov 27
-// live proof: the lookup below ran on the calendars version, missed an
-// existing contact, and the fallback create 400'd "duplicated contacts".
+// live proof: the lookup missed an existing contact on the wrong
+// (calendars) version, and the fallback create 400'd "duplicated
+// contacts". The lookup is documented OAuth-only and 403s under the
+// Private Integration Token — the GET contact list (query=phone) is
+// the PIT path that works (proven by cc-dnd.js, same token, Nov 27).
 const HL_VERSION_CONTACTS = '2021-07-28';
 const HL_TIMEOUT_MS = 20000;
 
@@ -160,6 +163,14 @@ function digitsOnly(v) {
   return String(v == null ? '' : v).replace(/\D/g, '');
 }
 
+// Last 10 digits of a phone — the exact-match key for contact
+// resolution (cc-dnd.js uses the same rule): HL stores phones in
+// mixed formats, so only the last 10 digits are comparable.
+function phoneDigits10(v) {
+  const d = digitsOnly(v);
+  return d.length > 10 ? d.slice(-10) : d;
+}
+
 // An HL contact/event id (20-char alphanumeric) vs a CC phone-key
 // (11 digits). The CC stores phone-keys as contactId; HL needs its
 // own contact id — the two are never interchangeable.
@@ -187,23 +198,37 @@ function extractHlContactId(found) {
   return null;
 }
 
-// Search fallback for contact resolution (Nov 27, 2026): the
-// /contacts/lookup endpoint is documented OAuth-only, and the live
-// function calls HL with a Private Integration Token — the lookup
-// missed an existing contact live (Paula Test Seller) and the create
-// fallback 400'd on duplicates. The free-text search is the second
-// path before falling back to create. Returns the contact id or null.
-// Never throws.
+// Search fallback for contact resolution (Nov 27, 2026 — fixed the
+// same day after the live retest proved the first version dead): the
+// /contacts/lookup endpoint is documented OAuth-only, and POST
+// /contacts/search behaves the same way under the Private Integration
+// Token — the lookup missed an existing contact live (Paula Test
+// Seller), the search missed her too, and the create fallback 400'd
+// on duplicates. The working PIT path is the GET contact list with a
+// `query` — proven live by cc-dnd.js (the DND mirror resolves the
+// same token's contacts by phone on it, Nov 27). Exact-phone filter:
+// the list `query` is free-text, so only a unique last-10-digits
+// match counts — zero or multiple exact matches return null, never a
+// guess. Returns the contact id or null. Never throws.
 async function searchHlContactByPhone(phone, cfg) {
   try {
-    const found = await hlFetch(cfg, `/contacts/search?locationId=${encodeURIComponent(cfg.locationId)}`, {
-      method: 'POST',
+    const found = await hlFetch(cfg, `/contacts/?locationId=${encodeURIComponent(cfg.locationId)}&query=${encodeURIComponent(phone)}&limit=10`, {
       version: HL_VERSION_CONTACTS,
-      body: { query: phone },
     });
-    return extractHlContactId(found);
+    const d = found && (found.data || found);
+    const list = (d && (d.contacts || d.data)) || [];
+    const target = phoneDigits10(phone);
+    if (!target) return null;
+    const exact = (Array.isArray(list) ? list : []).filter(
+      (c) => c && c.id && phoneDigits10(c.phone || c.phoneNumber || '') === target
+    );
+    if (exact.length !== 1) {
+      if (exact.length > 1) console.error('[cc-appointments] HL contact list search ambiguous for', phone, '-', exact.length, 'exact matches');
+      return null;
+    }
+    return String(exact[0].id);
   } catch (e) {
-    console.error('[cc-appointments] HL contact search failed:', String((e && e.message) || e).slice(0, 150));
+    console.error('[cc-appointments] HL contact list search failed:', String((e && e.message) || e).slice(0, 150));
     return null;
   }
 }
