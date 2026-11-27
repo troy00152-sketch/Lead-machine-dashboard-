@@ -24,7 +24,17 @@
 const crypto = require('crypto');
 
 const store = require('./cc-workflows-store');
+const cfg = require('./cc-workflows-config');
 const ccAuth = require('./cc-auth');
+
+// HL workflow status mirroring (Nov 27, P0-3): checked the pinned
+// ghl CLI catalog (`ghl list-operations`, grep workflow) — there is
+// NO status-update operation for workflows. The catalog offers only
+// get-workflow (GET /workflows/, read-only) plus add/remove-contact-
+// to-workflow. So publish/unpublish below flips the LOCAL status
+// only; the matching HighLevel workflow must be published/unpublished
+// in the HighLevel UI. This is un-mirrorable via API, not a missing
+// wire — do not "fix" it by guessing an endpoint.
 
 const COOKIE_NAME = 'lm_auth';
 const JSON_HEADERS = {
@@ -90,7 +100,25 @@ exports.handler = async (event) => {
 
     if (action === 'list') {
       const eff = await store.loadEffective(event);
-      return ok({ workflows: eff.list });
+      const rows = eff.list.slice();
+      // Read-only "Custom Bot Reply" rows (Nov 27, P0-3): the six live
+      // HL bot hooks, shown as Published with no builder controls.
+      // They are NOT in loadEffective (the engine must never enroll
+      // into or send for them) — appended here for the list only.
+      for (const b of (cfg.BOT_REPLY_WORKFLOWS || [])) {
+        rows.push({
+          id: b.id,
+          name: b.name,
+          tag: b.trigger,
+          status: 'published',
+          kind: 'bot-reply',
+          hlWorkflowId: b.hlWorkflowId,
+          market: b.market,
+          source: 'highlevel',
+          readOnly: true,
+        });
+      }
+      return ok({ workflows: rows });
     }
 
     if (action === 'get') {
@@ -104,6 +132,7 @@ exports.handler = async (event) => {
     if (action === 'save') {
       const wf = body && body.workflow;
       if (!wf || typeof wf !== 'object') return bad('Missing workflow.');
+      if (String(wf.id || '').startsWith('bot-reply-')) return bad('Custom Bot Reply workflows are read-only — they run in HighLevel.');
       try {
         const def = await store.upsertWorkflow(event, wf);
         return ok({ ok: true, workflow: def });
@@ -124,6 +153,7 @@ exports.handler = async (event) => {
     if (action === 'duplicate') {
       const id = String((body && body.id) || '');
       if (!id) return bad('Missing workflow id.');
+      if (id.startsWith('bot-reply-')) return bad('Custom Bot Reply workflows are read-only — they run in HighLevel.');
       try {
         const def = await store.duplicateWorkflow(event, id, body && body.name);
         return ok({ ok: true, workflow: def });
@@ -135,9 +165,13 @@ exports.handler = async (event) => {
     if (action === 'publish' || action === 'unpublish') {
       const id = String((body && body.id) || params.id || '');
       if (!id) return bad('Missing workflow id.');
+      if (id.startsWith('bot-reply-')) return bad('Custom Bot Reply workflows are read-only — they run in HighLevel.');
+      // Local status flip ONLY (see header note): no HL workflow
+      // status operation exists in the API catalog, so the HL side
+      // is untouched here — flip it in the HighLevel UI.
       const def = await store.setStatus(event, id, action === 'publish' ? 'published' : 'draft');
       if (!def) return notFound('Unknown workflow: ' + id);
-      return ok({ ok: true, workflow: def });
+      return ok({ ok: true, workflow: def, hlStatusMirrored: false, hlStatusNote: 'No HL workflow status API exists — publish/unpublish the matching workflow in HighLevel.' });
     }
 
     return bad('Unknown action.');

@@ -241,6 +241,26 @@ async function scan(opts, event) {
   for (const t of threads) {
     if (t && t.key) byKey.set(t.key, t);
   }
+  // Phone-keyed lookup alongside byKey: stuck-call pairing records
+  // key by callControlId, NOT by thread key, so a flag (or a pairing)
+  // that only carries a callControlId + a phone must still resolve to
+  // its thread by phone. Digits of the thread phone (falling back to
+  // the thread key, which in production IS the phone digits).
+  const digitsOf = (v) => String(v || '').replace(/\D/g, '');
+  const byPhone = new Map();
+  for (const t of threads) {
+    if (!t) continue;
+    const d = digitsOf(t.phone) || digitsOf(t.key);
+    if (d && !byPhone.has(d)) byPhone.set(d, t);
+  }
+  // Resolve a flag to its thread: exact key first, then phone — so
+  // legacy flags stamped with a callControlId key still find their
+  // thread (and still auto-resolve) by the phone they carry.
+  const threadForFlag = (f) =>
+    (f && f.key && byKey.get(f.key)) ||
+    (f && f.phone && byPhone.get(digitsOf(f.phone))) ||
+    null;
+  const threadForPhone = (phone) => (phone && byPhone.get(digitsOf(phone))) || null;
 
   let flags = await loadFlags(ns);
 
@@ -249,7 +269,7 @@ async function scan(opts, event) {
   let resolved = 0;
   for (const f of flags) {
     if (f.status !== 'open') continue;
-    const t = byKey.get(f.key);
+    const t = threadForFlag(f);
     if (!t || !Array.isArray(t.messages)) continue;
     const answered = t.messages.some(
       (m) => m && m.dir === 'out' && typeof m.at === 'number' && m.at > f.inboundAt
@@ -269,11 +289,18 @@ async function scan(opts, event) {
     // their close-out lives in the stuck-call pass below. Call
     // entries carry no id, so these flags have no inboundId; match
     // on inboundAt, which the flag copies verbatim from the entry.
+    // Same for a Sam note / draft suggestion (kind 'note' /
+    // 'suggestion'): the pre-fix Sam notes carried dir 'in', so the
+    // old pass could flag one as an unreplied inbound — a note is
+    // not a seller text either.
     if (f.status === 'open' && !f.type) {
-      const flaggedCall = t.messages.some(
-        (m) => m && m.kind === 'call' && m.at === f.inboundAt
+      const flaggedNonText = t.messages.some(
+        (m) =>
+          m &&
+          (m.kind === 'call' || m.kind === 'note' || m.kind === 'suggestion') &&
+          m.at === f.inboundAt
       );
-      if (flaggedCall) {
+      if (flaggedNonText) {
         f.status = 'resolved';
         f.resolvedAt = now;
         f.resolvedReason = 'not-a-text';
@@ -292,9 +319,13 @@ async function scan(opts, event) {
     // 'Missed call' / 'Call completed' / 'Voicemail' bubble
     // (kind 'call', written by logCallToThread with dir 'in' for
     // inbound calls) is not a seller text waiting on a reply, so
-    // it must never be the flagged inbound. Scan back to the
-    // latest TEXT message instead; a thread whose messages are
-    // all call entries has no unreplied text. (The old code took
+    // it must never be the flagged inbound. Same for kind 'note'
+    // (a Sam post-call note) and kind 'suggestion' (a draft bot
+    // suggestion): neither is a seller text, and a trailing note
+    // must not become the flagged inbound — nor reset the clock on
+    // the real inbound underneath it. Scan back to the latest TEXT
+    // message instead; a thread whose messages are all call entries
+    // / notes has no unreplied text. (The old code took
     // msgs[msgs.length - 1] outright, so every missed/completed
     // call older than the threshold raised an unreplied-text flag
     // with preview 'Missed call' / 'Call completed' — Troy's
@@ -302,7 +333,7 @@ async function scan(opts, event) {
     let last = null;
     for (let i = msgs.length - 1; i >= 0; i--) {
       const m = msgs[i];
-      if (m && m.kind !== 'call') {
+      if (m && m.kind !== 'call' && m.kind !== 'note' && m.kind !== 'suggestion') {
         last = m;
         break;
       }
@@ -431,7 +462,15 @@ async function scan(opts, event) {
       ) {
         continue;
       }
-      const thread = rec.key ? byKey.get(rec.key) : null;
+      // Thread lookup by PHONE first: rec.key is the pairing's
+      // callControlId, not a thread key — byKey.get(rec.key) never
+      // matches, so name/market were always blank on stuck-call
+      // flags. Fall back to the key for legacy pairings whose key
+      // already is the phone digits.
+      const thread =
+        threadForPhone(rec.phone) ||
+        (rec.key ? byKey.get(rec.key) : null) ||
+        null;
       const detail = [
         rec.lastEvent ? 'last event: ' + rec.lastEvent : 'no webhook event recorded',
         rec.lastError ? 'error: ' + rec.lastError : null,
@@ -441,10 +480,21 @@ async function scan(opts, event) {
       ]
         .filter(Boolean)
         .join('; ');
+      // The flag's `key` is the PHONE key (digits) — that is what the
+      // Conversations tap path opens on (groupNotifFlags groups by
+      // phone, openNotifThread prefers the phone). The callControlId
+      // stays in `callId` only, so the stuck-call auto-resolve /
+      // dedupe above still match the pairing. A callControlId's
+      // digits are junk as a key, so it is never used as one.
+      const phoneKey =
+        digitsOf(rec.phone) ||
+        digitsOf(thread && thread.phone) ||
+        digitsOf(thread && thread.key) ||
+        (/^\d{10,11}$/.test(String(rec.key || '')) ? String(rec.key) : '');
       flags.push({
         id: crypto.randomUUID(),
         type: 'stuck-call',
-        key: rec.key || '',
+        key: phoneKey,
         phone: rec.phone || (thread && thread.phone) || '',
         name: (thread && thread.name) || '',
         market: (thread && thread.market) || '',

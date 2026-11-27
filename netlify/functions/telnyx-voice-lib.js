@@ -188,6 +188,83 @@ async function createAgentLeg(opts) {
   };
 }
 
+// ---- Sam (ElevenLabs voice agent) ----
+// Sam answers inbound seller calls on the five Carolina numbers
+// (Nov 27, 2026). Same shape as createAgentLeg — a top-level
+// POST /v2/calls to a SIP URI — but the destination is ElevenLabs'
+// SIP trunk, the caller id is the SELLER (verified via `diversion`:
+// Telnyx treats `from` as verified when an active inbound call
+// matches to=diversion + from=from), and the leg carries digest-auth
+// credentials for the ElevenLabs trunk (generated at import time,
+// stored in Netlify env — never the Telnyx/ElevenLabs API keys).
+//
+// The leg is NOT bridged by the dial: on call.answered the webhook
+// answers the inbound leg and bridges explicitly — Telnyx's own
+// outbound-dialer flow (Dial -> answered -> Bridge command). The
+// Nov 26 plan's "plain Dial auto-bridges" claim is wrong, verified
+// against the Telnyx API reference (call-commands/dial) + the Node
+// SDK types Nov 27: auto-bridging needs link_to + bridge_on_answer,
+// and the Bridge command is the documented step after answer.
+//
+// Fail closed: SAM_SIP_AUTH_USER / SAM_SIP_AUTH_PASS must be set;
+// without them the Dial would fail SIP auth and Sam would never
+// answer, so refuse instead of dialing a dead leg.
+// time_limit_secs 900 matches Sam's HighLevel maxCallDuration (15 min).
+function samSipConfig() {
+  const user = process.env.SAM_SIP_AUTH_USER || '';
+  const pass = process.env.SAM_SIP_AUTH_PASS || '';
+  const missing = [];
+  if (!user) missing.push('SAM_SIP_AUTH_USER');
+  if (!pass) missing.push('SAM_SIP_AUTH_PASS');
+  return { user, pass, missing, configured: missing.length === 0 };
+}
+async function dialSamLeg(opts) {
+  const o = opts || {};
+  const cfg = requireConfig();
+  const sam = samSipConfig();
+  if (!sam.configured) {
+    throw new Error(
+      'Sam SIP auth is not configured — missing env: ' + sam.missing.join(', ') + '. Refusing to dial Sam.'
+    );
+  }
+  if (!o.callControlId) throw new Error('callControlId (the inbound seller leg) is required to dial Sam.');
+  if (!o.dialedNumber) throw new Error('dialedNumber (the 252 number the seller called) is required to dial Sam.');
+  const dialed = lib.toE164(o.dialedNumber);
+  const from = lib.toE164(o.from);
+  const body = {
+    connection_id: o.appId || cfg.appId,
+    to: 'sip:' + dialed + '@sip.rtc.elevenlabs.io:5061;transport=tls;secure=srtp',
+    from,
+    diversion: dialed,
+    custom_headers: [
+      { name: 'X-Caller-ID', value: from },
+      { name: 'X-Call-ID', value: String(o.callControlId) },
+      { name: 'X-Dialed-Number', value: dialed },
+    ],
+    client_state: encodeClientState(o.clientState || {}),
+    sip_transport_protocol: 'TLS',
+    media_encryption: 'SRTP',
+    preferred_codecs: 'PCMU,PCMA',
+    timeout_secs: 30,
+    time_limit_secs: 900,
+    sip_auth_username: sam.user,
+    sip_auth_password: sam.pass,
+  };
+  if (o.commandId) body.command_id = String(o.commandId);
+  const wu = webhookUrl();
+  if (wu) body.webhook_url = wu;
+  const data = await apiCall('/calls', { body, fetchImpl: o.fetchImpl, apiKey: o.apiKey });
+  const d = data || {};
+  return {
+    callControlId: d.call_control_id || null,
+    callLegId: d.call_leg_id || null,
+    callSessionId: d.call_session_id || null,
+    from,
+    to: body.to,
+    raw: d,
+  };
+}
+
 function callAction(callControlId, action, body, opts) {
   if (!callControlId) throw new Error('callControlId is required for action ' + action);
   const o = opts || {};
@@ -244,6 +321,8 @@ module.exports = {
   pickVoiceSender,
   createCall,
   createAgentLeg,
+  dialSamLeg,
+  samSipConfig,
   hangup,
   answer,
   bridge,

@@ -151,7 +151,17 @@ async function loadThread(s, key) {
 async function saveThread(s, thread) {
   await writeJson(s, thread.key, thread);
   const idx = await loadIndex(s);
-  const last = thread.messages[thread.messages.length - 1] || null;
+  // The list preview is a TEXT preview: a Sam note / draft suggestion
+  // (kind 'note' / 'suggestion') is never the preview — the last real
+  // message is, even when a note is newer.
+  let last = null;
+  for (let i = thread.messages.length - 1; i >= 0; i--) {
+    const m = thread.messages[i];
+    if (m && m.kind !== 'note' && m.kind !== 'suggestion') {
+      last = m;
+      break;
+    }
+  }
   idx.threads[thread.key] = {
     phone: thread.phone,
     name: thread.name || '',
@@ -192,16 +202,20 @@ function cleanStr(v, max) {
 function groupNotifFlags(flags) {
   const byPhone = new Map();
   for (const f of flags || []) {
+    // Phone digits FIRST: a stuck-call flag's `key` is the pairing's
+    // callControlId (not a phone), so keying on it splits one
+    // conversation's flags across junk groups — and the row's key
+    // would be unopenable. Fall back to `key` only when no phone.
     const key =
-      String(f.key || '').replace(/\D/g, '') ||
       String(f.phone || '').replace(/\D/g, '') ||
+      String(f.key || '').replace(/\D/g, '') ||
       'unknown';
     if (!byPhone.has(key)) byPhone.set(key, []);
     byPhone.get(key).push(f);
   }
   const atOf = (f) => (typeof f.flaggedAt === 'number' ? f.flaggedAt : (f.at || 0));
   const groups = [];
-  for (const list of byPhone.values()) {
+  for (const [groupKey, list] of byPhone.entries()) {
     const sorted = list.slice().sort((a, b) => atOf(b) - atOf(a));
     const open = sorted.filter((f) => f.status !== 'resolved');
     const rep = open[0] || sorted[0];
@@ -209,6 +223,7 @@ function groupNotifFlags(flags) {
     const preview = String(rep.preview || '');
     groups.push({
       ...rep,
+      key: groupKey,
       id: ids.join(','),
       flagIds: ids,
       count: open.length,

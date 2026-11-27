@@ -24,7 +24,8 @@
 //   POST {action:'note', phone, body}           append a note to the
 //                                                record's notes[]
 //   POST {action:'update', phone, fields:{}}    edit name / email /
-//                                                address fields
+//                                                address / legal
+//                                                description fields
 //   POST {action:'delete', phone}               remove the standalone
 //                                                record + its index
 //                                                entry (does NOT touch
@@ -56,8 +57,17 @@ try {
 // ---- enrollments store plumbing (same pattern as cc-dnd.js) ----
 const ENROLL_STORE = 'cc-enrollments';
 const ENROLL_INDEX_KEY = 'index';
+// Conversation-thread store (cc-conversations) — the note action
+// mirrors a note into the thread here (same store + index shape as
+// cc-conversations-api.js saveThread / cc-call-api.js
+// logCallToThread), so the note shows in the thread timeline.
+// Read-only from this file's point of view except the note append.
+const CONV_STORE = 'cc-conversations';
+const THREAD_INDEX_KEY = 'index';
+const MAX_THREAD_MESSAGES = 500;
 const LIST_CAP = 2000;
 let storeFactory = null; // (name) -> store; tests only
+let convStoreFactory = null; // () -> conversations store; tests only
 function makeStore(event) {
   if (storeFactory) return storeFactory(ENROLL_STORE);
   if (!blobs) throw new Error('The @netlify/blobs module is not installed.');
@@ -65,6 +75,14 @@ function makeStore(event) {
     if (typeof blobs.connectLambda === 'function' && event) blobs.connectLambda(event);
   } catch (e) { /* best-effort */ }
   return blobs.getStore(ENROLL_STORE);
+}
+function makeConvStore(event) {
+  if (convStoreFactory) return convStoreFactory();
+  if (!blobs) throw new Error('The @netlify/blobs module is not installed.');
+  try {
+    if (typeof blobs.connectLambda === 'function' && event) blobs.connectLambda(event);
+  } catch (e) { /* best-effort */ }
+  return blobs.getStore(CONV_STORE);
 }
 async function readJson(s, key) {
   try {
@@ -115,6 +133,12 @@ function normalizeContact(rec) {
     updatedAt: rec.updatedAt || null,
     pricing: rec.pricing && typeof rec.pricing === 'object' ? rec.pricing : null,
     notes: Array.isArray(rec.notes) ? rec.notes : [],
+    // Legal description — the field the contract-send hard lock
+    // depends on (Troy, Nov 17): no contract goes out without it
+    // rendered in the document. Stored on the standalone record so
+    // the Contacts drawer can show/edit it; HL custom fields carry
+    // their own copy through the CRM-record box.
+    legalDescription: String(rec.legalDescription || rec.legal_description || ''),
     dnd: ccDnd.stateFrom(rec, null),
     source: 'crm',
   };
@@ -123,6 +147,58 @@ function normalizeContact(rec) {
 async function loadRecord(s, key) {
   const rec = await readJson(s, key);
   return rec && typeof rec === 'object' ? rec : null;
+}
+
+// Append a note to the contact's conversation thread as
+// {kind:'note', body, at, via:'note'} — the write side of the
+// thread timeline (rendering lives in conversations.html, owned
+// elsewhere). Mirrors cc-conversations-api.js saveThread (thread
+// record + 'index' entry) and cc-call-api.js logCallToThread
+// (create the thread when none exists yet). Fail-soft: returns
+// false on any thread-store failure so the enrollment note itself
+// (already saved) still succeeds.
+async function appendNoteToThread(event, rec, text) {
+  try {
+    const key = phoneKeyOf(rec.phone);
+    const cs = makeConvStore(event);
+    let thread = await readJson(cs, key);
+    if (!thread || !Array.isArray(thread.messages)) {
+      let phone = String(rec.phone || '');
+      try { phone = lib.toE164(rec.phone); } catch (e) { /* keep raw phone */ }
+      thread = {
+        phone: (thread && thread.phone) || phone,
+        key,
+        name: (thread && thread.name) || String(rec.name || ''),
+        market: (thread && thread.market) || String(rec.market || ''),
+        unread: (thread && thread.unread) || 0,
+        updatedAt: 0,
+        messages: [],
+      };
+    }
+    const entry = { kind: 'note', body: text, at: Date.now(), via: 'note' };
+    thread.messages.push(entry);
+    if (thread.messages.length > MAX_THREAD_MESSAGES) {
+      thread.messages = thread.messages.slice(-MAX_THREAD_MESSAGES);
+    }
+    thread.updatedAt = Date.now();
+    await writeJson(cs, key, thread);
+    const idx = (await readJson(cs, THREAD_INDEX_KEY)) || { updatedAt: 0, threads: {} };
+    if (!idx.threads || typeof idx.threads !== 'object') idx.threads = {};
+    idx.threads[key] = {
+      phone: thread.phone,
+      name: thread.name || '',
+      market: thread.market || '',
+      preview: String(text).slice(0, 120),
+      lastAt: entry.at,
+      lastDir: null,
+      unread: thread.unread || 0,
+    };
+    idx.updatedAt = Date.now();
+    await writeJson(cs, THREAD_INDEX_KEY, idx);
+    return true;
+  } catch (e) {
+    return false;
+  }
 }
 
 // Every record key: the engine index first, unioned with a store
@@ -261,14 +337,17 @@ exports.handler = async (event) => {
         rec.notes = notes;
         rec.updatedAt = Date.now();
         await writeJson(s, key, rec);
-        return ok({ ok: true, key, notes });
+        // Also mirror the note into the conversation thread timeline
+        // (fail-soft — a thread-store failure never fails the note).
+        const threadNote = await appendNoteToThread(event, rec, text);
+        return ok({ ok: true, key, notes, threadNote });
       }
 
       if (action === 'update') {
         const f = (body && body.fields) || {};
         const editable = {
           name: 200, firstName: 100, email: 200, address1: 300,
-          city: 100, state: 40, postalCode: 20,
+          city: 100, state: 40, postalCode: 20, legalDescription: 2000,
         };
         for (const [field, max] of Object.entries(editable)) {
           if (f[field] !== undefined) rec[field] = cleanStr(f[field], max);
@@ -335,7 +414,11 @@ exports.handler = async (event) => {
 // Test hooks (not part of the deployed surface).
 exports._test = {
   normalizeContact,
+  appendNoteToThread,
   setStoreFactory(fn) {
     storeFactory = fn || null;
+  },
+  setConvStoreFactory(fn) {
+    convStoreFactory = fn || null;
   },
 };

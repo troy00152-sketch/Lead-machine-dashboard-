@@ -356,7 +356,16 @@ class CcClient {
     // Refresh the store 'index' entry — same shape as telnyx-webhook.js.
     const idx = (await readJson(cs, 'index')) || { updatedAt: 0, threads: {} };
     if (!idx.threads || typeof idx.threads !== 'object') idx.threads = {};
-    const last = thread.messages[thread.messages.length - 1] || null;
+    // Preview/lastDir come from the last REAL message, never a Sam
+    // note / draft suggestion (kind 'note' / 'suggestion').
+    let last = null;
+    for (let i = thread.messages.length - 1; i >= 0; i--) {
+      const cand = thread.messages[i];
+      if (cand && cand.kind !== 'note' && cand.kind !== 'suggestion') {
+        last = cand;
+        break;
+      }
+    }
     idx.threads[thread.key] = {
       phone: thread.phone,
       name: thread.name || '',
@@ -484,12 +493,18 @@ class CcClient {
     return thread ? key : null;
   }
 
-  async getMessages(conversationId, limit = 20, event) {
+  async getMessages(conversationId, limit = 100, event) {
     const key = keyOf(conversationId);
     const thread = await this._loadThread(key, event);
     if (!thread) return [];
-    const lim = limit == null ? 20 : Number(limit);
-    const msgs = thread.messages || [];
+    const lim = limit == null ? 100 : Number(limit);
+    // System notes (kind 'note' — Sam's post-call handoff — and kind
+    // 'suggestion' — a draft bot suggestion) are NOT history: Amber
+    // must never see a Sam note as a seller text, and a note must
+    // never be the "latest inbound" the guards act on.
+    const msgs = (thread.messages || []).filter(
+      (m) => m && m.kind !== 'note' && m.kind !== 'suggestion'
+    );
     const slice = lim > 0 ? msgs.slice(-lim) : msgs.slice();
     return slice.map((m) => ({
       id: m.id,
@@ -583,7 +598,16 @@ class CcClient {
     const telnyxId = (sent && (sent.id || sent.telnyxId)) || null;
     const effectiveFrom = from || (sent && sent.from) || '';
     msg.status = 'sent';
-    if (telnyxId) msg.telnyxId = telnyxId;
+    // The stored id IS the Telnyx id — that is what telnyx-webhook's
+    // applyEvent matches delivery/failure updates by, so a reply that
+    // kept its 'cc-<uuid>' id could never advance past "Sent". The
+    // local id is kept in `localId` for dedupe. (Same shape as the
+    // manual-send path in cc-conversations-api.js.)
+    if (telnyxId) {
+      msg.localId = msg.id;
+      msg.id = telnyxId;
+      msg.telnyxId = telnyxId;
+    }
     if (effectiveFrom) {
       msg.from = effectiveFrom;
       thread.ourNumber = effectiveFrom;

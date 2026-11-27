@@ -5,10 +5,18 @@
 // hl-workflow-steps.md).
 //
 // What HL does per enrollment (and what this engine mirrors):
-//   market tag added -> opportunity (Phase 5/bot territory, not here)
+//   market tag added -> Create Opportunity (Pipeline: Lead, Stage:
+//   New Lead, value 0, status Open — implemented in enroll() below,
+//   same approach as the live bot's pipeline.js: env-or-lookup stage
+//   resolution, open-opportunity dedupe, HL contact resolved by phone
+//   first; any failure is logged and never blocks the enrollment or
+//   the send)
 //   -> drip 300/day -> Wait window Mon–Sat 11:00–17:00 America/New_York
 //   -> drip 1 send/minute -> "Is Active lead?" gate -> round-robin
-//   assign (n/a standalone) -> Random Split A–E (20% each)
+//   assign (DISPLAY-ONLY standalone: the engine has no HL users to
+//   assign to — the enrollment records the market; assignment happens
+//   when the seller engages)
+//   -> Random Split A–E (20% each)
 //   -> per-path bad-number guard -> ONE first-text SMS -> END
 //
 // This engine models ONE first text per enrollment, exactly like HL:
@@ -60,6 +68,7 @@ try {
 }
 
 const lib = require('./telnyx-lib');
+const libClient = require('./lib-client');
 const cfg = require('./cc-workflows-config');
 // Workflow definitions resolve through cc-workflows-store: builder
 // edits stored in Blobs override the static seeds above, sanitized
@@ -83,6 +92,7 @@ const deps = {
   convStoreFactory: null,
   sendSms: null,
   random: null,
+  hlFetch: null,
 };
 function sendSmsImpl() {
   return deps.sendSms || lib.sendSms;
@@ -303,6 +313,7 @@ async function enroll(contact, event) {
       else delete merged.pricing;
       if (listingVerified || existing.listingVerified === true) merged.listingVerified = true;
       if (c.phoneType != null && c.phoneType !== '') merged.phoneType = c.phoneType;
+      if (c.legalDescription != null && String(c.legalDescription).trim() !== '') merged.legalDescription = String(c.legalDescription);
       if (dndInput) merged.dnd = true;
       if (sealed) {
         // Seal persistence: dnd + seal stamps + the 'dnc' tag all
@@ -346,11 +357,18 @@ async function enroll(contact, event) {
   if (Object.keys(newPricing).length) rec.pricing = newPricing;
   if (listingVerified) rec.listingVerified = true;
   if (c.phoneType != null && c.phoneType !== '') rec.phoneType = c.phoneType;
+  // Legal description (Nov 27): cc-enroll-api.js carries it on the
+  // contact record and the drawer edits it — the fresh enrollment
+  // record must carry it through too, or a fresh enroll drops it.
+  if (c.legalDescription != null && String(c.legalDescription).trim() !== '') rec.legalDescription = String(c.legalDescription);
   if (dndInput) rec.dnd = true;
   if (terminalExisting) {
     if (!Object.keys(newPricing).length) {
       const keptPricing = extractPricing(terminalExisting);
       if (Object.keys(keptPricing).length) rec.pricing = keptPricing;
+    }
+    if (rec.legalDescription == null && terminalExisting.legalDescription != null && String(terminalExisting.legalDescription).trim() !== '') {
+      rec.legalDescription = String(terminalExisting.legalDescription);
     }
     if (terminalSealed) {
       rec.dnd = true;
@@ -373,7 +391,153 @@ async function enroll(contact, event) {
     }
   }
   await saveEnrollment(s, rec);
+  // "Create opportunity" step (Nov 27, P1-4): the HL workflow creates
+  // a Lead-pipeline / New Lead opportunity per enrollment. Same
+  // approach as the live bot's pipeline.js (env-or-lookup stage
+  // resolution, open-opportunity dedupe) — but GUARDED: HL token
+  // required, the HL contact must resolve by phone first (exactly one
+  // match or skip — a contact is never created here), and ANY failure
+  // is logged and the enrollment stands. Only for fresh queued
+  // enrollments; an already-texted re-enrollment gets no opportunity.
+  if (rec.stage === 'queued' && !rec.dnd) {
+    try {
+      const opp = await createLeadOpportunity(rec, workflow);
+      if (opp && opp.opportunityId) {
+        rec.hlOpportunityId = opp.opportunityId;
+        await saveEnrollment(s, rec);
+      }
+    } catch (e) {
+      console.error('[cc-workflow-engine] Lead opportunity skipped for', rec.key, String((e && e.message) || e).slice(0, 150));
+    }
+  }
   return { ok: true, enrollment: rec };
+}
+
+// ---- HighLevel "Create opportunity" (Lead / New Lead) ----
+// Per-endpoint HL versions (AGENTS.md): Opportunities + Contacts ride
+// 2021-07-28; the search GET takes snake_case location_id /
+// contact_id / pipeline_id (the raw DTO forbids camelCase there),
+// while the POST body is camelCase — both exactly as the live bot's
+// hl.js does it (searchOpportunities / createOpportunity).
+const HL_API_BASE = 'https://services.leadconnectorhq.com';
+const HL_VERSION_OPPORTUNITIES = '2021-07-28';
+const HL_VERSION_CONTACTS = '2021-07-28';
+const HL_TIMEOUT_MS = 20000;
+// Troy's own test contact — bookings from these never create
+// opportunities (same skip as the live bot's pipeline.js).
+const TEST_CONTACT_PHONES = new Set(['12035657810']); // Troy's own cell
+
+function hlOppConfig() {
+  const token = String(process.env.HL_API_TOKEN || '').trim();
+  if (!token) return null;
+  return {
+    token,
+    locationId: String(process.env.HL_LOCATION_ID || '').trim() || libClient.defaultLocationId(),
+  };
+}
+
+async function hlFetchReal(cfgHl, path, opts) {
+  const o = opts || {};
+  const method = o.method || 'GET';
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), HL_TIMEOUT_MS);
+  try {
+    const res = await fetch(HL_API_BASE + path, {
+      method,
+      signal: controller.signal,
+      headers: {
+        'Authorization': 'Bearer ' + cfgHl.token,
+        'Version': o.version || HL_VERSION_OPPORTUNITIES,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      ...(o.body ? { body: JSON.stringify(o.body) } : {}),
+    });
+    const text = await res.text().catch(() => '');
+    let data = null;
+    try { data = text ? JSON.parse(text) : null; } catch (e) { /* non-JSON body */ }
+    if (!res.ok) throw new Error(`HL ${res.status}: ${(data && data.message) || text.slice(0, 150)}`);
+    return data;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+function hlFetch(cfgHl, path, opts) {
+  return (deps.hlFetch || hlFetchReal)(cfgHl, path, opts);
+}
+
+// In-memory pipeline cache per location (same as the live bot —
+// Netlify functions are short-lived, so this mostly saves repeat
+// lookups inside warm invocations).
+const pipelineCache = new Map();
+
+// Resolve the Lead pipeline id + its New Lead stage id. Env override
+// wins (HL_LEAD_PIPELINE_ID / HL_LEAD_NEW_LEAD_STAGE_ID, no API call);
+// otherwise one live lookup per location, cached. Throws when the
+// pipeline or stage cannot be found — the caller treats that as "no
+// opportunity", never as an enrollment failure.
+async function resolveLeadPipelineNewLead(cfgHl) {
+  const envPipe = String(process.env.HL_LEAD_PIPELINE_ID || '').trim();
+  const envStage = String(process.env.HL_LEAD_NEW_LEAD_STAGE_ID || '').trim();
+  if (envPipe && envStage) return { pipelineId: envPipe, stageId: envStage, source: 'env' };
+  const cached = pipelineCache.get(cfgHl.locationId);
+  if (cached) return { pipelineId: cached.pipelineId, stageId: cached.stageId, source: 'cache' };
+  const data = await hlFetch(cfgHl, `/opportunities/pipelines?locationId=${encodeURIComponent(cfgHl.locationId)}`, { version: HL_VERSION_OPPORTUNITIES });
+  const pipes = (data && data.pipelines) || [];
+  const pipe = pipes.find((p) => String(p.name || '').toLowerCase() === 'lead');
+  if (!pipe) throw new Error('Lead pipeline not found among location pipelines');
+  const stage = (pipe.stages || []).find((s) => String(s.name || '').toLowerCase() === 'new lead');
+  if (!stage) throw new Error('New Lead stage not found in the Lead pipeline');
+  const resolved = { pipelineId: pipe.id, stageId: stage.id };
+  pipelineCache.set(cfgHl.locationId, resolved);
+  return { pipelineId: resolved.pipelineId, stageId: resolved.stageId, source: 'lookup' };
+}
+
+// Resolve the HL contact id for a phone via /contacts/lookup — a
+// lookup returns a single contact (or 404), so a hit IS exactly one
+// match. Returns null on miss: the caller SKIPS (never creates a
+// contact here — an SMS-list enrollment must not mint HL contacts).
+async function resolveHlContactIdByPhone(phoneE164, cfgHl) {
+  const data = await hlFetch(cfgHl, `/contacts/lookup?phone=${encodeURIComponent(phoneE164)}&locationId=${encodeURIComponent(cfgHl.locationId)}`, { version: HL_VERSION_CONTACTS }).catch(() => null);
+  if (!data) return null;
+  const hit = data.contact || data;
+  const id = hit && (hit.id || (Array.isArray(hit.contacts) && hit.contacts[0] && hit.contacts[0].id));
+  return id ? String(id) : null;
+}
+
+// Create (or find) the Lead / New Lead opportunity for a fresh
+// enrollment. Returns {opportunityId} on create-or-dedupe, or
+// {skipped: reason} when there is nothing to do. THROWS on HL
+// failure — the caller catches and keeps the enrollment.
+async function createLeadOpportunity(rec, workflow) {
+  const cfgHl = hlOppConfig();
+  if (!cfgHl) return { skipped: 'no-hl-token' };
+  const digits = String(rec.key || '').replace(/\D/g, '');
+  if (TEST_CONTACT_PHONES.has(digits) || /troy final test/i.test(String(rec.name || ''))) return { skipped: 'test-contact' };
+  const contactId = await resolveHlContactIdByPhone(rec.phone, cfgHl);
+  if (!contactId) return { skipped: 'no-hl-contact' };
+  const { pipelineId, stageId } = await resolveLeadPipelineNewLead(cfgHl);
+  const found = await hlFetch(cfgHl, `/opportunities/search?location_id=${encodeURIComponent(cfgHl.locationId)}&contact_id=${encodeURIComponent(contactId)}&pipeline_id=${encodeURIComponent(pipelineId)}`, { version: HL_VERSION_OPPORTUNITIES });
+  const opps = (found && found.opportunities) || [];
+  const open = opps.find((o) => String(o.status || '').toLowerCase() === 'open' && String(o.pipelineId || o.pipeline_id || '') === String(pipelineId));
+  if (open) return { existing: true, opportunityId: String(open.id) };
+  const who = rec.firstName || rec.name || rec.address1 || 'Seller';
+  const created = await hlFetch(cfgHl, '/opportunities/', {
+    method: 'POST',
+    version: HL_VERSION_OPPORTUNITIES,
+    body: {
+      locationId: cfgHl.locationId,
+      pipelineId,
+      pipelineStageId: stageId,
+      contactId,
+      name: who + ' — ' + (workflow.name || workflow.id) + ' lead',
+      status: 'open',
+    },
+  });
+  const c = created || {};
+  const id = c.id || (c.opportunity && c.opportunity.id);
+  if (!id) throw new Error('HL opportunity create returned no id');
+  return { created: true, opportunityId: String(id) };
 }
 
 // ---- conversation store append (mirrors cc-conversations-api send) ----
@@ -639,10 +803,17 @@ module.exports._test = {
   setRandom(fn) {
     deps.random = fn || null;
   },
+  // Fake the HL API (cfg, path, opts) -> parsed JSON, or throw to
+  // simulate an HL failure. Null restores the real fetch.
+  setHlFetch(fn) {
+    deps.hlFetch = fn || null;
+  },
   reset() {
     deps.enrollStoreFactory = null;
     deps.convStoreFactory = null;
     deps.sendSms = null;
     deps.random = null;
+    deps.hlFetch = null;
+    pipelineCache.clear();
   },
 };

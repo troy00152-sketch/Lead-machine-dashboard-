@@ -47,6 +47,7 @@
 const crypto = require('crypto');
 
 const voice = require('./telnyx-voice-lib');
+const telnyxLib = require('./telnyx-lib');
 const dialer = require('./cc-dialer-api');
 const engine = dialer._engine;
 const callApi = require('./cc-call-api');
@@ -105,6 +106,70 @@ async function safeVoice(fn, label) {
 
 function legFor(session, callControlId) {
   return callControlId ? session.legs[callControlId] || null : null;
+}
+
+// ---- missed-call backstop (Nov 27, gap 8) ----
+// An event that reaches the unknown-leg / no-session fall-through has
+// no pairing and no thread-call client_state — the call was never
+// tracked, so without this the caller never appears in Conversations
+// even though Telnyx delivered the event (initiation failed, the
+// session expired, the leg was never created). For call.initiated /
+// call.hangup with a caller phone present, log a missed-call entry
+// into the thread via the existing logCallToThread path (the same
+// shape cc-call-api.js logCallToThread expects — it creates the thread
+// for a first-time caller). Pairing events never reach here (they
+// route to applyThreadCallEvent, which logs once via loggedToThread),
+// so a paired call is never double-logged. An in-memory 15-minute
+// dedupe per phone+direction also stops the initiated+hangup pair for
+// the same call from writing two entries (Telnyx redelivery hits the
+// same warm instance within seconds).
+const MISSED_LOG_TTL_MS = 15 * 60 * 1000;
+const recentMissLogs = new Map(); // phoneKey|in|out -> ms
+function phoneStr(v) {
+  if (typeof v === 'string') return v;
+  if (v && typeof v === 'object') return v.number || v.phone_number || '';
+  return '';
+}
+async function logMissedCallBackstop(evt, event) {
+  try {
+    const type = evt && evt.event_type;
+    if (type !== 'call.initiated' && type !== 'call.hangup') return false;
+    const payload = (evt && evt.payload) || {};
+    const dir = String(payload.direction || '').toLowerCase();
+    const inbound = dir === 'incoming' || dir === 'inbound';
+    const fromStr = phoneStr(payload.from);
+    const toStr = phoneStr(payload.to);
+    // Inbound: the caller is `from`. Outbound (an orphaned dialer
+    // leg): the seller is `to` — `from` is our own number.
+    const phone = inbound ? fromStr : toStr;
+    if (!phone) return false;
+    let key = '';
+    try {
+      key = telnyxLib.phoneKey(phone);
+    } catch (e) {
+      return false;
+    }
+    const now = Date.now();
+    const dedupeKey = key + '|' + (inbound ? 'in' : 'out');
+    const last = recentMissLogs.get(dedupeKey);
+    if (last && now - last < MISSED_LOG_TTL_MS) return false;
+    const rec = {
+      phone,
+      from: fromStr,
+      to: toStr,
+      direction: inbound ? 'inbound' : 'outbound',
+      status: 'ended',
+      endedAt: now,
+      sellerAnswered: false,
+      agentAnswered: false,
+      wasBridged: false,
+    };
+    const logged = await callApi._thread.logCallToThread(event, rec);
+    if (logged) recentMissLogs.set(dedupeKey, now);
+    return !!logged;
+  } catch (e) {
+    return false;
+  }
 }
 
 // AMD verdicts, normalized across standard + premium events (premium
@@ -265,7 +330,7 @@ async function applyThreadCallEvent(evt, event, state) {
     found = {
       callId: state.sellerCallControlId,
       rec: pairings.calls[state.sellerCallControlId],
-      role: state.kind === 'thread-call-agent' ? 'agent' : 'seller',
+      role: (state.kind === 'thread-call-agent' || state.kind === 'sam-call') ? 'agent' : 'seller',
     };
   }
   if (!found) {
@@ -275,9 +340,9 @@ async function applyThreadCallEvent(evt, event, state) {
     // used to deadlock the bridge forever (ringback on, seller
     // unheard). 'start' and the merge below pick the stash up.
     let sellerId = state && state.sellerCallControlId;
-    if (!sellerId && state && state.kind === 'thread-call-agent' && state.key) sellerId = state.key; // inbound: key IS the inbound leg id
+    if (!sellerId && state && (state.kind === 'thread-call-agent' || state.kind === 'sam-call') && state.key) sellerId = state.key; // inbound: key IS the inbound leg id
     if (!sellerId) sellerId = callControlId; // seller-leg events are keyed by their own call_control_id
-    const isAgentLeg = (state && state.kind === 'thread-call-agent') || (callControlId && sellerId && callControlId !== sellerId);
+    const isAgentLeg = (state && (state.kind === 'thread-call-agent' || state.kind === 'sam-call')) || (callControlId && sellerId && callControlId !== sellerId);
     const pending = (await callApi._thread.loadPending(event, sellerId)) || {};
     if (type === 'call.answered') {
       if (isAgentLeg) { pending.agentAnswered = true; pending.agentLeg = callControlId; }
@@ -448,6 +513,7 @@ async function applyThreadCallEvent(evt, event, state) {
         rec.fallbackAwaitingAmd = true;
       } else {
         rec.agentAnswered = true;
+        if (rec.route === 'sam') rec.samAnswered = true;
         // Inbound: the caller is still ringing — answer their leg now;
         // their call.answered lands next and the bridge forms then.
         // Record a failed answer (see the pending-merge note above):
@@ -482,6 +548,10 @@ async function applyThreadCallEvent(evt, event, state) {
     rec.status = 'bridged';
     rec.wasBridged = true;
     rec.bridgedAt = rec.bridgedAt || Date.now();
+    // A bridge that formed clears a stale bridge-failed error: the
+    // explicit bridge can 422 when Telnyx already bridged the legs,
+    // and that transient failure must not flag a working call.
+    if (rec.lastError === 'bridge-failed') rec.lastError = '';
   } else if (type === 'call.hangup') {
     if (found.role === 'agent') {
       // A losing agent leg hanging up (inbound rang several) is not
@@ -547,11 +617,68 @@ async function applyThreadCallEvent(evt, event, state) {
   return { handled: true, threadCall: true, status: rec.status };
 }
 
+// ---- Sam inbound routing (Nov 27, 2026) ----
+// Inbound calls on the five new Carolina (252) numbers go to Sam, the
+// ElevenLabs voice agent — NOT to Troy's browser. Troy authorized the
+// cutover Nov 26 ~11:39 PM for the Greenville pilot. Exceptions — the
+// call rings Troy's browser instead of Sam:
+//   * the caller is Troy or Paula (his personal mobile, his Google
+//     Voice callback number, Paula's mobile) — Troy's hard rule
+//     (Nov 27): his own test calls must ring Troy, never Sam, so he
+//     can verify the browser path any time. Sam is tested from a
+//     genuinely unknown number — Halima's phone.
+//   * the caller IS one of the five numbers (a dialer/Mac test call
+//     presents a 252 CLI) — also Troy testing, never Sam.
+//   * the dialed number is not one of the five — every other number
+//     keeps the proven browser path (scope: Carolina five only).
+// The people bypass list is env-overridable (SAM_BYPASS_NUMBERS,
+// comma separated digits) so Troy can add/remove test numbers without
+// a code change; the default is Troy personal + GV + Paula. NOTE: an
+// env value REPLACES the default — include all three numbers in it.
+// The five numbers are the Carolina sender pool (telnyx-lib
+// SENDER_POOLS.carolina) — one source of truth, not a second list.
+const SAM_BYPASS_DEFAULT = ['12035657810', '18604526497', '12034196726']; // Troy personal + Google Voice (860) 452-6497 + Paula
+function samBypassNumbers() {
+  const raw = String(process.env.SAM_BYPASS_NUMBERS || '').trim();
+  if (!raw) return SAM_BYPASS_DEFAULT.slice();
+  return raw.split(',').map((s) => telnyxLib.digitsOnly(s)).filter(Boolean);
+}
+function isSamCall(fromStr, toStr) {
+  let toKey = '';
+  try {
+    toKey = telnyxLib.phoneKey(toStr || '');
+  } catch (e) {
+    return false;
+  }
+  const pool = (telnyxLib.SENDER_POOLS && telnyxLib.SENDER_POOLS.carolina) || [];
+  const samKeys = pool.map((n) => {
+    try {
+      return telnyxLib.phoneKey(n);
+    } catch (e) {
+      return '';
+    }
+  });
+  if (!samKeys.includes(toKey)) return false;
+  let fromKey = '';
+  try {
+    fromKey = telnyxLib.phoneKey(fromStr || '');
+  } catch (e) {
+    return false;
+  }
+  if (samBypassNumbers().includes(fromKey)) return false;
+  // A call FROM one of the five numbers is Troy testing from the
+  // dialer/Mac (which presents a 252 CLI) — rings Troy, never Sam.
+  if (samKeys.includes(fromKey)) return false;
+  return true;
+}
+
 // ---- inbound calls (someone dials one of our numbers) ----
 // An inbound call.initiated carries no client_state and no pairing.
 // We ring the agent's browser (the stored voice credential's SIP URI)
 // and record a pairing with direction 'inbound'. When the agent leg
 // answers, applyThreadCallEvent answers the inbound leg and bridges.
+// Sam route (Nov 27, 2026): inbound on the five Carolina numbers
+// goes to Sam instead — see isSamCall + handleInboundCallSam below.
 //
 // Nov 26, 2026 inbound fix (Layers F1 / 0 / 1):
 //   * Dedupe by event id: a retried/redelivered call.initiated must
@@ -591,7 +718,6 @@ async function handleInboundCall(evt, event) {
   // on objects and the leg fails silently (Nov 26 local repro).
   const fromStr = typeof payload.from === 'string' ? payload.from : (payload.from && (payload.from.number || payload.from.phone_number)) || '';
   const toStr = typeof payload.to === 'string' ? payload.to : (payload.to && (payload.to.number || payload.to.phone_number)) || '';
-  const v = voiceLib();
   const now = Date.now();
   const pairings = await callApi._thread.loadPairings(event);
   if (pairings.calls[callControlId]) {
@@ -602,6 +728,24 @@ async function handleInboundCall(evt, event) {
       status: pairings.calls[callControlId].status || 'ringing',
     };
   }
+  // Sam route (Nov 27, 2026): real seller calls on the five Carolina
+  // numbers go to Sam; Troy's own calls + every other number keep the
+  // browser path below. The duplicate check above covers both paths —
+  // a retried call.initiated must never dial Sam (or the browser)
+  // twice.
+  if (isSamCall(fromStr, toStr)) {
+    return handleInboundCallSam(evt, event, fromStr, toStr, callControlId, pairings, now);
+  }
+  return handleInboundCallBrowser(evt, event, fromStr, toStr, callControlId, pairings, now);
+}
+
+// The browser path (Nov 26, 2026): ring every known voice credential
+// at once — the Conversations tab and the Dialer tab each hold their
+// own credential, and an inbound call must reach whichever tab Troy
+// is looking at. First answer wins; the losers are hung up when the
+// winner answers.
+async function handleInboundCallBrowser(evt, event, fromStr, toStr, callControlId, pairings, now) {
+  const v = voiceLib();
   // Ring EVERY known voice credential at once (Nov 26, 2026): the
   // Conversations tab and the Dialer tab each hold their own
   // credential now, and an inbound call must reach whichever tab Troy
@@ -736,6 +880,93 @@ async function handleInboundCall(evt, event) {
   return { handled: true, inbound: true, status: 'ringing', agentLegs: agentLegs.length, noAgentUri: rec.noAgentUri };
 }
 
+// The Sam path (Nov 27, 2026): dial ElevenLabs' Sam for the seller.
+// Same two-step shape as the browser path (dial a leg, then answer +
+// bridge on its call.answered) — only the leg is Sam's SIP trunk,
+// not a WebRTC credential. The Sam leg is stored in agentLeg /
+// agentLegs too, so findByLeg + the hangup/bridge logic treat it as
+// the agent leg; `route: 'sam'` marks the pairing so the PSTN
+// fallback never fires on it (see tryPstnFallback) and the sweep
+// closes a dead Sam dial faster (see cc-inbound-sweep.js).
+// No inbound push: Sam is answering, so there is nobody to wake —
+// Troy learns about the call from Sam's post-call note in the thread
+// (cc-sam-webhook.js). A failed Dial never routes to Troy's browser
+// or the PSTN fallback mid-call: the caller is hung up cleanly, the
+// miss is logged, and the watchdog flags it (samDialFailed).
+async function handleInboundCallSam(evt, event, fromStr, toStr, callControlId, pairings, now) {
+  const v = voiceLib();
+  let samLeg = null;
+  let dialError = '';
+  for (let attempt = 0; attempt < 2 && !samLeg; attempt++) {
+    if (attempt) await sleep(1000);
+    try {
+      const leg = await v.dialSamLeg({
+        callControlId,
+        from: fromStr,
+        dialedNumber: toStr,
+        commandId: 'sam-' + String(callControlId).slice(-8) + '-' + now.toString(36),
+        clientState: { kind: 'sam-call', key: callControlId, sellerCallControlId: callControlId },
+      });
+      if (leg && leg.callControlId) samLeg = leg.callControlId;
+    } catch (e) {
+      dialError = String((e && e.message) || e);
+      console.error('[telnyx-voice-webhook] Sam dial attempt ' + (attempt + 1) + ' failed for ' + callControlId + ': ' + dialError);
+    }
+  }
+  const rec = {
+    key: callControlId,
+    phone: fromStr || '',
+    to: toStr || null,
+    sellerLeg: callControlId,
+    samLeg: samLeg,
+    agentLeg: samLeg,
+    agentLegs: samLeg ? [samLeg] : [],
+    status: 'ringing',
+    direction: 'inbound',
+    route: 'sam',
+    samAnswered: false,
+    agentAnswered: false,
+    sellerHuman: false,
+    sellerAnswered: false,
+    startedAt: now,
+    updatedAt: now,
+    hunt: samLeg ? 'sam' : 'sam-dial-failed',
+    noAgentUri: false,
+  };
+  if (!samLeg) {
+    rec.samDialFailed = true;
+    rec.lastError = 'sam-dial-failed: ' + dialError;
+  }
+  pairings.calls[callControlId] = rec;
+  // The Sam leg can answer before this save lands — merge any signal
+  // stashed while the pairing did not exist yet, and if Sam already
+  // answered, answer the inbound leg now (same as the browser path).
+  await callApi._thread.mergePending(event, callControlId, rec);
+  if (rec.agentAnswered && !rec.sellerAnswered) {
+    const answered = await safeVoice(() => v.answer(rec.sellerLeg), 'answer inbound leg (pending merge)');
+    if (answered === null) rec.lastError = 'inbound-answer-failed';
+  }
+  rec.updatedAt = Date.now();
+  await callApi._thread.savePairings(pairings, event);
+  if (!samLeg) {
+    // Nobody is coming: end the call now instead of leaving the
+    // seller ringing into nothing. The seller-leg hangup event closes
+    // the pairing out (status ended + missed-call thread entry); the
+    // sweep's Sam ring-end is the backstop if that event never lands.
+    console.error(
+      '[telnyx-voice-webhook] INBOUND CALL WITH NO SAM LEG — caller ' +
+        (rec.phone || '?') +
+        ' to ' +
+        (rec.to || '?') +
+        ' call ' +
+        callControlId +
+        ' (' + dialError + ')'
+    );
+    await safeVoice(() => v.hangup(rec.sellerLeg), 'hangup inbound leg (Sam dial failed)');
+  }
+  return { handled: true, inbound: true, route: 'sam', status: 'ringing', samLeg: samLeg || null, samDialFailed: !samLeg };
+}
+
 // ---- PSTN fallback (Layer 2, Nov 26, 2026) ----
 // The GHL-equivalent safety net: when no browser answers an inbound
 // call inside the ~20s ring budget, dial Troy's real mobile from the
@@ -771,6 +1002,13 @@ async function tryPstnFallback(pairings, rec, event, opts) {
   if (!cfg.enabled) return { attempted: false, reason: 'disabled' };
   if (!cfg.number) return { attempted: false, reason: 'no-number-configured' };
   if (!rec || rec.direction !== 'inbound') return { attempted: false, reason: 'not-inbound' };
+  // Sam route (Nov 27, 2026): a Sam call that never connects ends as
+  // a missed call with a flag — it NEVER falls back to Troy's mobile
+  // (or browser) mid-call. The seller hangs up cleanly and Troy calls
+  // back from the thread note. This guard is the single choke point:
+  // both the event path (agent-leg hangup) and the sweep's forced
+  // attempt go through here.
+  if (rec.route === 'sam') return { attempted: false, reason: 'sam-route-no-fallback' };
   if (rec.status !== 'ringing') return { attempted: false, reason: 'not-ringing' };
   if (rec.agentAnswered) return { attempted: false, reason: 'already-answered' };
   if (rec.fallbackAttempted) return { attempted: false, reason: 'already-attempted' };
@@ -864,7 +1102,7 @@ async function applyCallEvent(evt, event) {
   // client_state kind, or by a pairing match when client_state is
   // absent. Everything else falls through to the dialer session logic.
   const threadState = voice.decodeClientState(payload.client_state);
-  if (threadState.kind === 'thread-call' || threadState.kind === 'thread-call-agent') {
+  if (threadState.kind === 'thread-call' || threadState.kind === 'thread-call-agent' || threadState.kind === 'sam-call') {
     return applyThreadCallEvent(evt, event, threadState);
   }
   if (callControlId) {
@@ -887,7 +1125,12 @@ async function applyCallEvent(evt, event) {
   }
 
   const session = await engine.loadSession(event);
-  if (!session) return { handled: false, reason: 'no active session' };
+  if (!session) {
+    // Missed-call backstop (Nov 27, gap 8): no session, no pairing —
+    // log the miss so the caller still appears in Conversations.
+    const missedLogged = await logMissedCallBackstop(evt, event);
+    return { handled: false, reason: 'no active session', ...(missedLogged ? { missedLogged: true } : {}) };
+  }
   const state = voice.decodeClientState(payload.client_state);
   // Correlate by call_control_id first; fall back to client_state ids.
   let leg = legFor(session, callControlId);
@@ -895,7 +1138,10 @@ async function applyCallEvent(evt, event) {
     leg = Object.values(session.legs).find((l) => l.leadKey === state.leadKey && l.state !== 'ended') || null;
   }
   if (!leg && type !== 'call.initiated') {
-    return { handled: false, reason: 'unknown leg: ' + callControlId };
+    // Missed-call backstop (Nov 27, gap 8): unknown leg, no pairing —
+    // log the miss so the caller still appears in Conversations.
+    const missedLogged = await logMissedCallBackstop(evt, event);
+    return { handled: false, reason: 'unknown leg: ' + callControlId, ...(missedLogged ? { missedLogged: true } : {}) };
   }
 
   if (type === 'call.initiated') {
@@ -1123,6 +1369,7 @@ exports._test = {
   attemptPstnFallback,
   tryPstnFallback,
   verifySignature,
+  logMissedCallBackstop,
   setVoiceLib(v) {
     deps.voiceLib = v || null;
   },
@@ -1136,6 +1383,7 @@ exports._test = {
     deps.voiceLib = null;
     deps.pushLib = null;
     deps.voiceToken = null;
+    recentMissLogs.clear();
   },
 };
 // The scheduled sweep (cc-inbound-sweep.js) drives the PSTN fallback

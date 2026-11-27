@@ -161,7 +161,11 @@ async function sweep(event, opts) {
     // live fallback leg (fallbackLeg set and not failed, AMD not
     // pending) owns the pairing — never touch it; a failed fallback
     // leg (fallbackFailed) is dead, so the pairing is dead too.
-    if (!rec.agentAnswered && !rec.fallbackAwaitingAmd && (!rec.fallbackLeg || rec.fallbackFailed) && ageMs > RING_END_MS) {
+    // Sam route (Nov 27, 2026): the Sam leg times out at 30s, so a
+    // Sam pairing still ringing past 45s is definitively dead — end
+    // it on the faster clock instead of the 2-minute one.
+    const ringEndMs = rec.route === 'sam' ? 45000 : RING_END_MS;
+    if (!rec.agentAnswered && !rec.fallbackAwaitingAmd && (!rec.fallbackLeg || rec.fallbackFailed) && ageMs > ringEndMs) {
       try {
         const v = voiceLib();
         const legs = Array.from(new Set([rec.sellerLeg, rec.agentLeg, ...(rec.agentLegs || [])].filter(Boolean)));

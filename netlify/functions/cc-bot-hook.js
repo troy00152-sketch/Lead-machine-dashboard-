@@ -246,7 +246,11 @@ function assembleBotInput(key, thread, enrollment, inbound) {
     },
     pricing,
     tags,
-    history: (thread.messages || []).map((m) => ({
+    // Notes and draft suggestions are Troy-facing, not seller turns:
+    // they must never reach the model as inbound/outbound history.
+    history: (thread.messages || [])
+      .filter((m) => m.kind !== 'note' && m.kind !== 'suggestion')
+      .map((m) => ({
       id: m.id || null,
       direction: m.dir === 'in' ? 'inbound' : 'outbound',
       body: String(m.body || ''),

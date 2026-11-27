@@ -168,6 +168,31 @@ const WORKFLOWS = {
 function getWorkflow(id) {
   return WORKFLOWS[id] || null;
 }
+
+// ---- "Custom Bot Reply" workflows (Nov 27, P0-3 partial) ----
+// HighLevel holds six Published "Custom Bot Reply" workflows — the
+// live bot hook that replies to inbound SMS, one per market. There is
+// no mirror of them in the Command Center (the engine only runs the
+// five market SMS workflows above), so they are represented here as
+// READ-ONLY rows: the list shows them as live in HighLevel, with no
+// edit / publish / duplicate controls anywhere. HL workflow ids are
+// from the Nov 27 mirror audit (~/workspace/
+// hl-mirror-audit-2026-11-27.md).
+//
+// REMAINING GAP (documented, not built): there is NO visual workflow
+// builder that can clone an arbitrary HL trigger/action graph — HL's
+// workflow definitions have no status-update or definition-read
+// operation in the API catalog (see cc-workflows-api.js), so the five
+// market shapes above + these six read-only bot-reply rows are the
+// supported set. Editing a bot-reply workflow happens in HighLevel.
+const BOT_REPLY_WORKFLOWS = [
+  { id: 'bot-reply-carolina', market: 'carolina', name: 'Custom Bot Reply — Carolina', hlWorkflowId: '5f2494ce-34bb-4572-be3f-cdbce139a011', trigger: 'Inbound SMS', status: 'published', kind: 'bot-reply', readOnly: true },
+  { id: 'bot-reply-cleveland', market: 'cleveland', name: 'Custom Bot Reply — Cleveland', hlWorkflowId: 'c85b6e10-9a75-4cf6-8d13-b781434a9788', trigger: 'Inbound SMS', status: 'published', kind: 'bot-reply', readOnly: true },
+  { id: 'bot-reply-dayton', market: 'dayton', name: 'Custom Bot Reply — Dayton', hlWorkflowId: 'e0f83643-142b-485f-bd35-f6e4d2f8e492', trigger: 'Inbound SMS', status: 'published', kind: 'bot-reply', readOnly: true },
+  { id: 'bot-reply-florida', market: 'florida', name: 'Custom Bot Reply — Florida', hlWorkflowId: 'be29fef3-0f58-4be4-82e2-2c23324b09c4', trigger: 'Inbound SMS', status: 'published', kind: 'bot-reply', readOnly: true },
+  { id: 'bot-reply-indianapolis', market: 'indianapolis', name: 'Custom Bot Reply — Indianapolis', hlWorkflowId: 'bb60ca93-c43b-4e23-ad52-474e9b0ec14d', trigger: 'Inbound SMS', status: 'published', kind: 'bot-reply', readOnly: true },
+  { id: 'bot-reply-kansascity', market: 'kansascity', name: 'Custom Bot Reply — Kansas City', hlWorkflowId: '3406182f-c0ef-4cf3-b2b2-e8b8789aaad0', trigger: 'Inbound SMS', status: 'published', kind: 'bot-reply', readOnly: true },
+];
 function workflowByTag(tag) {
   const t = String(tag || '').trim().toLowerCase();
   for (const w of Object.values(WORKFLOWS)) {
@@ -196,4 +221,4 @@ function renderFirstText(workflowId, path, contact) {
 
 // `market` is exported for cc-workflows-store.js: the workflow builder
 // builds NEW workflow definitions from the same shared structure.
-module.exports = { WORKFLOWS, WAIT_WINDOW, ACTIVE_LEAD_TAGS, getWorkflow, workflowByTag, renderFirstText, market };
+module.exports = { WORKFLOWS, BOT_REPLY_WORKFLOWS, WAIT_WINDOW, ACTIVE_LEAD_TAGS, getWorkflow, workflowByTag, renderFirstText, market };

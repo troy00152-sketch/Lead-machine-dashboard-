@@ -10,7 +10,13 @@
 //   GET  ?action=list&from=<ms>&to=<ms>   appointments overlapping the
 //                                         range, mapped for the page
 //   POST {action:'create', name, phone, startISO, minutes?, title?}
+//         (double-booking guard: merged Blobs + HL check first;
+//          conflict -> 409 {error:'slot_taken', alternatives:[...]})
 //   POST {action:'cancel', id}
+//   POST {action:'reconcile'}  stamp hlEventId/hlSync on pre-Nov-27
+//         Blobs-only bookings that match an HL event by phone + start
+//         time; returns {matched, matchedIds, unmatched} — report only,
+//         never auto-cancels.
 //
 // Store failures -> 503, like the other cc APIs.
 'use strict';
@@ -18,6 +24,7 @@
 const crypto = require('crypto');
 
 const lib = require('./telnyx-lib');
+const slots = require('./cc-slots');
 
 // cc-appointments.js is required lazily so this module still loads
 // before that file lands; tests may inject a fake via
@@ -87,6 +94,13 @@ function publicAppt(a) {
     endISO: a.endISO,
     status: a.status || '',
     source: a.source || '',
+    // HL sync state (Nov 27, P0-4): the page renders a badge from
+    // these — a Blobs-only booking must be visibly different from a
+    // synced one. hlSync: 'ok' | 'failed' | 'skipped-no-config' |
+    // undefined (pre-sync records); hlError carries the failure.
+    hlSync: a.hlSync || null,
+    hlError: a.hlError || null,
+    hlEventId: a.hlEventId || null,
   };
 }
 
@@ -135,6 +149,32 @@ exports.handler = async (event) => {
       const minutes = Number(body.minutes) > 0 ? Number(body.minutes) : 30;
       const startISO = new Date(startMs).toISOString();
       const endISO = new Date(startMs + minutes * 60000).toISOString();
+      const endMs = startMs + minutes * 60000;
+      // Double-booking guard (Nov 27, P1-5): check the requested time
+      // against the MERGED (Blobs + HL) appointments before creating
+      // — an HL-native booking blocks the slot exactly like a CC one.
+      // Cancelled / invalid records never block. On conflict the
+      // caller gets slot_taken + the next 2–3 free times (same helper
+      // the slot engine uses), never a silent double-book.
+      const dayParts = slots.zonedParts(startMs);
+      const rangeStart = slots.zonedTimeToUtc({ year: dayParts.year, month: dayParts.month, day: dayParts.day, hour: 0, minute: 0 });
+      const rangeEnd = rangeStart + 3 * 24 * 60 * 60 * 1000;
+      const windowAppts = await store.listAppointments({ fromMs: rangeStart, toMs: rangeEnd }, event);
+      const live = (Array.isArray(windowAppts) ? windowAppts : []).filter((a) => {
+        const st = String(a.status || '').toLowerCase();
+        return st !== 'cancelled' && st !== 'invalid';
+      });
+      const clash = live.some((a) => {
+        const s = a.startMs != null ? Number(a.startMs) : Date.parse(a.startISO || a.startTime || '');
+        const e = a.endMs != null ? Number(a.endMs) : Date.parse(a.endISO || a.endTime || '');
+        return Number.isFinite(s) && Number.isFinite(e) && startMs < e && s < endMs;
+      });
+      if (clash) {
+        const alternatives = slots.generateFreeSlots(live, rangeStart, rangeEnd)
+          .filter((iso) => Date.parse(iso) > startMs)
+          .slice(0, 3);
+        return json(409, { error: 'slot_taken', message: 'That time is already booked.', alternatives });
+      }
       const appointment = await store.createAppointment(
         {
           contactId,
@@ -144,13 +184,73 @@ exports.handler = async (event) => {
           startISO,
           endISO,
           startMs,
-          endMs: startMs + minutes * 60000,
+          endMs,
           source: 'manual',
           calendarId: store.CALENDAR_ID || 'seller-calls',
         },
         event
       );
       return ok({ ok: true, appointment });
+    }
+
+    if (action === 'reconcile') {
+      // Reconcile pre-Nov-27 Blobs-only bookings (Nov 27, P1-7): for
+      // every Blobs booking with no hlEventId, search the HL events
+      // in the booking's day window and match by contact phone + start
+      // time; matches get hlEventId + hlSync 'ok' stamped. REPORT
+      // ONLY — nothing is ever auto-cancelled here; unmatched
+      // bookings are returned for a human to chase.
+      const listBlobs = typeof store.listBlobsAppointments === 'function'
+        ? (r) => store.listBlobsAppointments(r, event)
+        : async (r) => (await store.listAppointments(r, event)).filter((a) => a.source !== 'highlevel');
+      const stamp = typeof store.stampHlSync === 'function'
+        ? (id, patch) => store.stampHlSync(id, patch, event)
+        : null;
+      if (!stamp) return serverError('cc-appointments.js does not expose stampHlSync yet');
+      const allBlobs = await listBlobs({ fromMs: 0, toMs: Date.now() + 366 * 24 * 60 * 60 * 1000 });
+      const claimed = new Set((allBlobs || []).map((r) => r.hlEventId).filter(Boolean));
+      const pending = (allBlobs || []).filter((r) => {
+        if (r.hlEventId) return false;
+        const st = String(r.status || '').toLowerCase();
+        return st !== 'cancelled' && st !== 'invalid' && r.startMs != null;
+      });
+      // Group by ET calendar day so each day costs one HL list call.
+      const byDay = new Map();
+      for (const r of pending) {
+        const p = slots.zonedParts(Number(r.startMs));
+        const dayStart = slots.zonedTimeToUtc({ year: p.year, month: p.month, day: p.day, hour: 0, minute: 0 });
+        if (!byDay.has(dayStart)) byDay.set(dayStart, []);
+        byDay.get(dayStart).push(r);
+      }
+      const matchedIds = [];
+      const unmatched = [];
+      for (const [dayStart, recs] of byDay) {
+        let merged = [];
+        try {
+          merged = await store.listAppointments({ fromMs: dayStart, toMs: dayStart + 24 * 60 * 60 * 1000 }, event);
+        } catch (e) {
+          merged = [];
+        }
+        const hlEvents = (merged || []).filter((r) => r.source === 'highlevel' && r.hlEventId && !claimed.has(r.hlEventId));
+        for (const rec of recs) {
+          const recPhone = lib.digitsOnly(rec.phone || '');
+          const hit = hlEvents.find((h) => {
+            if (claimed.has(h.hlEventId)) return false;
+            const hp = lib.digitsOnly(h.phone || '');
+            if (!hp || !recPhone || hp !== recPhone) return false;
+            // Same start, allowing 60s of HL timestamp rounding.
+            return Math.abs(Number(h.startMs) - Number(rec.startMs)) <= 60000;
+          });
+          if (hit) {
+            claimed.add(hit.hlEventId);
+            await stamp(rec.id, { hlEventId: hit.hlEventId, hlSync: 'ok', hlError: null });
+            matchedIds.push(rec.id);
+          } else {
+            unmatched.push({ id: rec.id, phone: rec.phone || '', name: rec.name || '', startISO: rec.startISO || null });
+          }
+        }
+      }
+      return ok({ matched: matchedIds.length, matchedIds, unmatched });
     }
 
     if (action === 'cancel') {
