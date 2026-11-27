@@ -2,7 +2,7 @@
 // In-dashboard e-sign for the Command Center — HighLevel signing surfaced
 // in the dashboard. FREE ONLY (Troy, Nov 11, 2026): no paid e-sign vendor,
 // no per-envelope fees, no new subscription. HighLevel Documents &
-// Contracts is already included in Troy's $97/mo Starter plan, his 9
+// Contracts is already included in Troy's $97/mo Starter plan, his 10
 // templates already live there, and the signing itself happens on HL's
 // signing page via HL's own links. The dashboard is the cockpit:
 // pick template -> validate contract fields -> create a DRAFT first ->
@@ -126,10 +126,17 @@ const FIELD_IDS = {
   lao: 'JUPzLFhe7VG0PCJqL0n8',
 };
 
-// ---- The 9 templates, verified live Nov 11, 2026 (GET /proposals/templates,
-// total 9). Used ONLY as a fallback when the live list call fails — the
-// picker always prefers the live list. Never invent a template id. ----
+// ---- The 10 templates, verified live Nov 27, 2026 (GET /proposals/templates,
+// total 10 — up from 9 on Nov 11: "Assignment Agreement TO BUYER — FINAL"
+// landed Nov 15, the renamed "New Template" Troy pasted Nov 14 after an
+// "internal server error" on save. Its body is NOT verifiable by API:
+// the templates list returns id/name/type/totals only, no fields, no
+// text — so the FINAL copy's token/field state is unconfirmed until
+// someone opens it in the HL editor. Used ONLY as a fallback when the
+// live list call fails — the picker always prefers the live list.
+// Never invent a template id. ----
 const KNOWN_TEMPLATES = [
+  { id: '6af9153bdd96ec7856121790', name: 'Assignment Agreement TO BUYER — FINAL', type: 'proposal', states: [] },
   { id: '6ada7e831e0a127d47066353', name: 'AGREEMENT TO PURCHASE REAL ESTATE  NC', type: 'proposal', states: ['NC'] },
   { id: '6ada9a7f1e0a127d470b0376', name: 'BACK UP', type: 'proposal', states: [] },
   { id: '6ada994a1e0a127d470adb0b', name: 'Real Estate Agreement Addendum', type: 'proposal', states: [] },
@@ -750,10 +757,38 @@ async function resolveEnvelopeDocumentId(token, store, envelope, opts) {
 }
 
 // ---- HL wrappers (thin; injectable impls exist so tests never hit live HL) ----
+// Per-template notes the Contracts page shows in the template
+// detail view. These are VERIFIED facts, not guesses:
+//  - 6ad1168a4bf151249d3e873a ("Assignment Agreement TO BUYER", Oct
+//    22): read in the HL editor Nov 14 — the live copy DIFFERS from
+//    the local master (~/workspace/user/files/contracts/
+//    assignment-agreement-template.md): no Direct Property Buyers
+//    letterhead, no legal description line, no APN line, no $749
+//    administrative fee anywhere, §3 still says "designated Title
+//    Agency". Do not send from this copy until those are fixed in
+//    the editor (Nov 14 gate, still open).
+//  - 6af9153bdd96ec7856121790 ("Assignment Agreement TO BUYER —
+//    FINAL", Nov 15): created from the text Troy pasted Nov 14
+//    after an "internal server error" on save (it first landed as
+//    "New Template", then was renamed). Its fields have never been
+//    verified by any tool — the HighLevel API cannot return template
+//    text or fields — so signature placement is unconfirmed until
+//    someone opens it in the editor.
+const TEMPLATE_NOTES = {
+  '6ad1168a4bf151249d3e873a': 'Live copy differs from the local master (checked in the HighLevel editor Nov 14): no letterhead, no legal description line, no APN line, no $749 administrative fee, and §3 still says "designated Title Agency". Do not send from this copy until those are fixed in the editor.',
+  '6af9153bdd96ec7856121790': 'Created Nov 15 from the text Troy pasted Nov 14. Its fields have never been verified by any tool — the HighLevel API cannot return template text or fields — so confirm the signature fields in the HighLevel editor before the first send.',
+};
+function attachTemplateNotes(templates) {
+  const list = Array.isArray(templates) ? templates : [];
+  return list.map((t) => {
+    const note = TEMPLATE_NOTES[t.id || t._id || ''] || '';
+    return note ? Object.assign({}, t, { note }) : t;
+  });
+}
 async function hlListTemplates(token, impl) {
   const parsed = await hlJson(token, 'GET', `/proposals/templates?locationId=${encodeURIComponent(HL_LOCATION_ID)}&limit=20`, null, impl);
   const data = parsed.data || parsed.templates || [];
-  return data.map((t) => ({ id: t.id || t._id || '', name: t.name || '', type: t.type || 'proposal', states: (KNOWN_TEMPLATES.find((k) => k.id === (t.id || t._id)) || {}).states || [] }));
+  return data.map((t) => ({ id: t.id || t._id || '', name: t.name || '', type: t.type || 'proposal', states: (KNOWN_TEMPLATES.find((k) => k.id === (t.id || t._id)) || {}).states || [], createdAt: t.createdAt || '', updatedAt: t.updatedAt || '' }));
 }
 async function hlListDocuments(token, query, impl) {
   const q = new URLSearchParams({ locationId: HL_LOCATION_ID, limit: '20' });
@@ -814,6 +849,123 @@ function sellerAddressOf(contact) {
     .filter(Boolean)
     .join(', ');
 }
+// HighLevel grandTotal varies by projection: an object { amount:
+// "0.00", currency } on templates, a bare number or "0.00" string on
+// documents, or absent. Normalize to a number (0 when unusable) —
+// never throw on a shape the feed invents.
+function grandTotalAmount(v) {
+  if (v == null) return 0;
+  if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
+  if (typeof v === 'object') return grandTotalAmount(v.amount);
+  const n = parseFloat(String(v).replace(/[$,\s]/g, ''));
+  return Number.isFinite(n) ? n : 0;
+}
+// Contract kind, from the document/template NAME only — the feed
+// carries no kind field. The buyer contract IS an assignment to the
+// buyer, so "Assignment … TO BUYER" classifies as buyer, while a
+// plain "Assignment …" is the assignment itself. Anything else is
+// purchase / disclosure / addendum / other by the same name rule.
+// Used by the Contracts page grouping + the resend gate (Ohio + the
+// fields advisory apply to purchase sends; a buyer-contract resend
+// is the same HL send call, so the gate does not branch on kind —
+// the kind only labels the row).
+function contractKind(name) {
+  const n = String(name || '').toUpperCase();
+  if (/ASSIGNMENT/.test(n) && /TO BUYER/.test(n)) return 'buyer';
+  if (/ASSIGNMENT/.test(n)) return 'assignment';
+  if (/DISCLOSURE/.test(n)) return 'disclosure';
+  if (/ADDENDUM/.test(n)) return 'addendum';
+  if (/AGREEMENT TO PURCHASE/.test(n)) return 'purchase';
+  return 'other';
+}
+function contractKindLabel(kind) {
+  return { purchase: 'Purchase contract', assignment: 'Assignment', buyer: 'Buyer contract', disclosure: 'Disclosure', addendum: 'Addendum', other: 'Other' }[String(kind || '')] || 'Other';
+}
+// Market from the template/document name: IN / NC / KC / OH / FL.
+// KC is Kansas City; FLORIDA reads as FL. Buyer/disclosure/addendum
+// names carry no market — ''. Never guessed from anything else.
+function marketOf(name) {
+  const n = String(name || '').toUpperCase();
+  if (/\bNC\b/.test(n)) return 'NC';
+  if (/\bKC\b/.test(n)) return 'KC';
+  if (/\bOH\b/.test(n)) return 'OH';
+  if (/\bFLORIDA\b/.test(n) || /\bFL\b/.test(n)) return 'FL';
+  if (/\bIN\b/.test(n)) return 'IN';
+  return '';
+}
+// The price shown on the Contracts list. Source order (never
+// invented): (1) the seller contact's contract_price custom field —
+// the same field the e-sign sheet validates as THE contract price
+// and writes back at prepare; (2) the document's own grandTotal
+// when it is greater than zero (drafts read 0.00 — verified Nov 11
+// — so a zero grandTotal is "no price", not "$0"); (3) nothing —
+// the page renders "—". Returns { amount, source } with amount a
+// number or null.
+function docPrice(doc) {
+  const d = doc || {};
+  const fromContact = parseFloat(String(d.contractPrice == null ? '' : d.contractPrice).replace(/[$,\s]/g, ''));
+  if (Number.isFinite(fromContact) && fromContact > 0) return { amount: fromContact, source: 'contact' };
+  const gt = grandTotalAmount(d.grandTotal);
+  if (gt > 0) return { amount: gt, source: 'document' };
+  return { amount: null, source: 'none' };
+}
+// Whether the Contracts page may offer Send on this document at
+// all: only a document that is not signed. Completed/accepted, or a
+// recipient record showing a signature, means the signing is done —
+// there is nothing left to send.
+function canSendDoc(doc) {
+  return !isSignedDoc(doc);
+}
+function isSignedDoc(doc) {
+  const s = String((doc && doc.status) || '').toLowerCase();
+  if (s === 'completed' || s === 'accepted') return true;
+  const recips = (doc && Array.isArray(doc.recipients)) ? doc.recipients : [];
+  return recips.some((r) => r && (r.hasCompleted === true || r.signedDate || r.signedAt));
+}
+// Send button label: a draft has never gone out ("Send contract");
+// a sent/viewed document goes out again ("Re-send signing link").
+// Signed documents get no button (see canSendDoc).
+function sendLabelDoc(doc) {
+  const s = String((doc && doc.status) || '').toLowerCase();
+  if (s === 'draft') return 'Send contract';
+  if (s === 'sent' || s === 'viewed') return 'Re-send signing link';
+  return '';
+}
+// Pure gate for POST action=resend (the handler enforces it; the
+// Contracts page reads the same decision to decide which
+// confirmations to ask for). Rules:
+//  - signed/completed/accepted -> never send (nothing left to send).
+//  - draft (never sent) -> the full sheet gates: the fields check
+//    (verified, or advisory + Troy's two confirmations) AND the
+//    Ohio SB 155 disclosure check when one applies.
+//  - sent/viewed (already out once) -> re-send: Troy's in-page
+//    confirm tap is the guard. No fields re-confirmation — he
+//    already sent this document once; HL re-emails the same signing
+//    links. The Ohio check is also draft-only for the same reason:
+//    the disclosure question was already Troy's call when the
+//    document first went out.
+//  - any other status -> blocked (unknown state, fail closed).
+// disclosure is the disclosureStatus() result object (or null when
+// the check does not apply); confirmations is the request body.
+function resendGateDecision(opts) {
+  const o = opts || {};
+  const doc = o.doc || {};
+  const status = String(doc.status || '').toLowerCase();
+  if (isSignedDoc(doc)) return { allowed: false, error: 'This contract is already signed — there is nothing left to send.' };
+  if (status === 'draft') {
+    const gate = fieldsGateDecision(o.fieldsCheck, o.confirmations || {});
+    if (!gate.allowed) return { allowed: false, error: gate.error, missing: gate.missing || [] };
+    const disc = o.disclosure || {};
+    if (disc.required && !disc.signed) {
+      return { allowed: false, error: disc.error || 'Ohio SB 155: the wholesaler disclosure must be SIGNED by the seller before this purchase contract can be sent.', code: disc.code || 'ohio_disclosure_unsigned', disclosure: disc };
+    }
+    return { allowed: true, mode: gate.mode === 'verified' ? 'send-verified' : 'send-advisory-confirmed' };
+  }
+  if (status === 'sent' || status === 'viewed') {
+    return { allowed: true, mode: 'resend' };
+  }
+  return { allowed: false, error: 'This document is in an unknown state (' + (doc.status || 'no status') + ') — it cannot be sent from the Contracts page. Send it from HighLevel instead.' };
+}
 function projectDocumentLinks(doc) {
   const links = (doc && Array.isArray(doc.links)) ? doc.links : [];
   return links.map((l) => ({
@@ -849,6 +1001,13 @@ async function enrichDocuments(token, docs, impl) {
       updatedAt: d.updatedAt,
       links: projectDocumentLinks(d),
       createdAt: d.createdAt || '',
+      // grandTotal is 0.00 on drafts (verified Nov 11) — the page
+      // treats a zero grandTotal as "no price on the document", not
+      // "$0". docPrice() prefers the seller contact's contract_price
+      // custom field and falls back to this.
+      grandTotal: grandTotalAmount(d.grandTotal),
+      kind: contractKind(d.name),
+      market: marketOf(d.name),
     };
     const seller = sellerRecipientOf(d);
     if (seller && seller.id) {
@@ -862,6 +1021,13 @@ async function enrichDocuments(token, docs, impl) {
         }
         const address = sellerAddressOf(contact);
         if (address) projected.sellerAddress = address;
+        // The contract price lives on the SELLER CONTACT (custom
+        // field contract_price), not on the document — the same field
+        // the e-sign sheet validates as THE contract price. Stored
+        // as the raw field string; docPrice() normalizes it.
+        const price = customField(contact, FIELD_IDS.contractPrice);
+        if (price) projected.contractPrice = price;
+        if (contact.state) projected.sellerState = String(contact.state);
       }
     }
     out.push(projected);
@@ -910,9 +1076,9 @@ exports.handler = async (event) => {
       if (!token) return unavailable('HighLevel is not connected (HL_API_TOKEN missing) — cannot list templates.');
       try {
         const live = await hlListTemplates(token);
-        return ok({ templates: live, source: 'highlevel', stale: false });
+        return ok({ templates: attachTemplateNotes(live), source: 'highlevel', stale: false, hlDocumentsUrl: hlDocumentsUrl() });
       } catch (e) {
-        return ok({ templates: KNOWN_TEMPLATES, source: 'fallback-known-list', stale: true, warning: 'Live template list failed; showing the 9 templates verified Nov 11, 2026. Verify in HighLevel before sending.' });
+        return ok({ templates: attachTemplateNotes(KNOWN_TEMPLATES), source: 'fallback-known-list', stale: true, hlDocumentsUrl: hlDocumentsUrl(), warning: 'Live template list failed; showing the 10 templates verified Nov 27, 2026. Verify in HighLevel before sending.' });
       }
     }
     if (action === 'documents') {
@@ -1156,6 +1322,119 @@ exports.handler = async (event) => {
     return ok({ envelope, sms, hlDocumentsUrl: hlDocumentsUrl() });
   }
 
+  // ---- resend: send / re-send an EXISTING HighLevel document from
+  // the Contracts page. This is the Contracts-page twin of the sheet's
+  // send, for documents that were NOT prepared through the sheet
+  // (every one of the 13 live documents — Troy sent them in HL, so
+  // no envelope exists for them). The HL call is the same one the
+  // sheet uses: POST /proposals/document/send with documentId +
+  // sentBy + medium email + Troy CC'd.
+  //
+  // Safety, in order:
+  //  1. Troy's in-page confirm tap is what reaches this branch at
+  //     all — the page never calls resend on load, on a timer, or
+  //     for more than the one document id in the request. No batch.
+  //  2. The document must exist in HL and must not be signed.
+  //  3. Drafts (never sent) get the FULL sheet gates via
+  //     resendGateDecision: the fields check (verified, or advisory
+  //     + Troy's two confirmations that he checked the Signature
+  //     fields in HighLevel) and the Ohio SB 155 disclosure check.
+  //     Sent/viewed documents get a re-send on the confirm tap
+  //     alone — Troy already sent that document once.
+  //  4. The send is recorded in the same esign-log Blobs store the
+  //     sheet uses: an envelope is adopted when one already holds
+  //     this documentId, otherwise one is created for the document
+  //     (state from the HL status, price from the seller contact).
+  //  5. The SMS nudge mirrors the sheet exactly: the signing link
+  //     is texted only when the seller is not DND/dnc, has a phone,
+  //     and HL returned a link. A failed text never blocks the email
+  //     send, which already succeeded.
+  // Sends fail CLOSED when the log cannot be opened (an untracked
+  // send must never happen).
+  if (action === 'resend' || body.action === 'resend') {
+    const documentId = String(body.documentId || '').trim();
+    if (!documentId) return bad('A HighLevel document id is required — resend never starts without one.');
+    const store = getLogStore(event);
+    if (!store) return unavailable('Signature log is unavailable — cannot send without an audit trail.');
+    if (!senderUserId) return unavailable('ESIGN_SENDER_USER_ID is not set — the HighLevel sender user must be configured before any contract can be sent.');
+    let docs = [];
+    try { docs = await hlListDocuments(token); } catch (e) { return unavailable('HighLevel document list failed: ' + (e.message || 'unknown error')); }
+    const doc = docs.find((d) => (d.documentId || d._id) === documentId) || null;
+    if (!doc) return json(404, { error: 'No HighLevel document with that id — it may have been deleted.' });
+    const seller = sellerRecipientOf(doc);
+    if (!seller || !seller.id) return bad('This document has no seller recipient with a HighLevel contact id — it cannot be sent from the Contracts page. Send it from HighLevel instead.');
+    let contact = null;
+    try { contact = await hlGetContact(token, String(seller.id)); } catch (e) { return unavailable('HighLevel contact lookup failed: ' + (e.message || 'unknown error')); }
+    if (!contact) return json(404, { error: 'HighLevel contact not found for the seller on this document.' });
+    const fieldsCheck = fieldsReadyCheck(doc);
+    const disclosure = await readDisclosureStatus(token, (contactSummary(contact) || {}).state || '', doc.name || '', String(seller.id));
+    const gate = resendGateDecision({ doc, fieldsCheck, disclosure, confirmations: body });
+    if (!gate.allowed) {
+      return json(409, { error: gate.error, code: gate.code || 'resend_blocked', missing: gate.missing || [], disclosure: gate.disclosure || undefined });
+    }
+    // Adopt or create the envelope for the audit trail.
+    const allEnvelopes = await scanEnvelopes(store);
+    let envelope = allEnvelopes.find((e) => e && e.documentId === documentId) || null;
+    if (!envelope) {
+      const price = customField(contact, FIELD_IDS.contractPrice);
+      envelope = {
+        id: newEnvelopeId(),
+        leadId: '',
+        contactId: String(seller.id),
+        sellerState: (contactSummary(contact) || {}).state || '',
+        templateId: '',
+        templateName: doc.name || '',
+        documentId,
+        draftResolution: { via: 'contracts-page-resend', at: new Date().toISOString() },
+        state: HL_STATUS_TO_STATE[String(doc.status || '').toLowerCase()] || 'draft',
+        contract: { price: (price || '').replace(/[$,\s]/g, ''), emd: '', apn: '', legal: '', county: '', closingDate: '', contractDate: '' },
+        signers: buildSigners(contact),
+        draftRecipients: doc.recipients || [],
+        fieldsCheck,
+        fieldsConfirmedByTroy: false,
+        links: [],
+        events: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      appendEvent(envelope, 'adopted', 'Contract adopted from the HighLevel document list by the Contracts page (no sheet envelope existed for it).', 'dashboard');
+    }
+    envelope.fieldsCheck = fieldsCheck;
+    envelope.fieldsGateMode = gate.mode;
+    const ccRecipients = [];
+    if (troyContactId) ccRecipients.push({ id: troyContactId, email: OPERATOR.email, imageUrl: '', contactName: OPERATOR.name, firstName: OPERATOR.firstName, lastName: OPERATOR.lastName });
+    let sent;
+    try {
+      sent = await hlJson(token, 'POST', '/proposals/document/send', buildSendDocumentBody({ documentId, sentBy: senderUserId, medium: 'email', ccRecipients }));
+    } catch (e) { return json(503, { error: 'HighLevel could not send the contract: ' + (e.message || 'unknown error'), hlStatus: e.status || null, hlError: e.body || null }); }
+    envelope.state = 'sent';
+    envelope.fieldsConfirmedByTroy = true;
+    envelope.sentAt = new Date().toISOString();
+    envelope.sendResponse = { links: sent.links || [] };
+    appendEvent(envelope, gate.mode === 'resend' ? 'resent' : 'sent', gate.mode === 'resend'
+      ? 'Signing link re-sent by email from the Contracts page to the seller, Troy CC’d (document had already gone out once).'
+      : `Contract sent by email from the Contracts page to the seller, Troy CC’d. Fields gate: ${gate.mode === 'send-advisory-confirmed' ? 'advisory — Troy confirmed he checked the Signature fields in HighLevel (the API cannot expose them)' : 'signatures verified via the API'}.`, 'dashboard');
+    // Text the seller their HL signing link — email is the delivery
+    // channel, SMS is a nudge. Never text a DND/dnc contact.
+    let sms = { attempted: false, sent: false, reason: '' };
+    try {
+      const link = (sent.links || []).find((l) => l && l.recipientId === String(seller.id));
+      const linkUrl = link ? (link.url || link.link || link.href || '') : '';
+      if (isSmsDnd(contact)) { sms.reason = 'Seller is DND/dnc — signing link sent by email only, no text.'; }
+      else if (!contact.phone) { sms.reason = 'No mobile on file — signing link sent by email only.'; }
+      else if (!linkUrl) { sms.reason = 'HighLevel did not return a signing link to text.'; }
+      else {
+        sms.attempted = true;
+        await hlSendSms(token, String(seller.id), `Hi ${contactSummary(contact).firstName || 'there'} — your purchase contract is ready to sign: ${linkUrl} — ${BRAND_NAME}`);
+        sms.sent = true;
+        appendEvent(envelope, 'sms-link-sent', 'Signing link texted to the seller.', 'dashboard');
+      }
+    } catch (e) { sms.reason = 'SMS link send failed (email send already succeeded): ' + (e.message || 'unknown error'); }
+    envelope.sms = sms;
+    await writeEnvelope(store, envelope);
+    return ok({ envelope, sms, state: 'sent', sentAt: envelope.sentAt, hlDocumentsUrl: hlDocumentsUrl() });
+  }
+
   // ---- refresh: poll HL for the envelope's current status. ----
   if (action === 'refresh' || body.action === 'refresh') {
     const envelopeId = body.envelopeId || '';
@@ -1187,7 +1466,7 @@ exports.handler = async (event) => {
     return ok({ envelope, hlStatus: doc.status, hlDocumentsUrl: hlDocumentsUrl() });
   }
 
-  return bad('Unknown action. Use action=prepare|send|refresh (POST) or action=status|templates|documents|envelope (GET).');
+  return bad('Unknown action. Use action=prepare|send|resend|refresh (POST) or action=status|templates|documents|envelope (GET).');
 };
 
 module.exports = {
@@ -1217,6 +1496,15 @@ module.exports = {
   buildSendDocumentBody,
   signingLinkFor,
   hlDocumentsUrl,
+  grandTotalAmount,
+  contractKind,
+  contractKindLabel,
+  marketOf,
+  docPrice,
+  canSendDoc,
+  isSignedDoc,
+  sendLabelDoc,
+  resendGateDecision,
   docIdOf,
   extractCreatedDocumentId,
   matchDraftInList,
@@ -1227,6 +1515,9 @@ module.exports = {
   hlErrorText,
   hlListDocuments,
   hlGetContact,
+  hlListTemplates,
+  attachTemplateNotes,
+  TEMPLATE_NOTES,
   enrichDocuments,
   sellerRecipientOf,
   projectDocumentLinks,
