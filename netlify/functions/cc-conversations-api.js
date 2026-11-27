@@ -181,6 +181,48 @@ function cleanStr(v, max) {
   return s.length > max ? s.slice(0, max) : s;
 }
 
+// Notifications panel: one row per conversation (phone), like GoHighLevel —
+// NOT one row per flag. The watchdog can raise several flags for the same
+// phone (e.g. an unreplied text + a completed-call entry + a stuck-call
+// flag for Paula's number), and the panel showed each as its own row.
+// Grouping happens here, server-side, so the page needs no change: the
+// grouped row keeps the newest open flag's fields, carries `count` (open
+// flags in the group) and `flagIds`, and its `id` is the comma-joined flag
+// ids so one X dismiss clears the whole group.
+function groupNotifFlags(flags) {
+  const byPhone = new Map();
+  for (const f of flags || []) {
+    const key =
+      String(f.key || '').replace(/\D/g, '') ||
+      String(f.phone || '').replace(/\D/g, '') ||
+      'unknown';
+    if (!byPhone.has(key)) byPhone.set(key, []);
+    byPhone.get(key).push(f);
+  }
+  const atOf = (f) => (typeof f.flaggedAt === 'number' ? f.flaggedAt : (f.at || 0));
+  const groups = [];
+  for (const list of byPhone.values()) {
+    const sorted = list.slice().sort((a, b) => atOf(b) - atOf(a));
+    const open = sorted.filter((f) => f.status !== 'resolved');
+    const rep = open[0] || sorted[0];
+    const ids = sorted.map((f) => f.id).filter(Boolean);
+    const preview = String(rep.preview || '');
+    groups.push({
+      ...rep,
+      id: ids.join(','),
+      flagIds: ids,
+      count: open.length,
+      preview: open.length > 1 ? preview + ' · ' + open.length + ' alerts' : preview,
+    });
+  }
+  // Groups with open flags first (newest open first), then resolved-only.
+  groups.sort((a, b) => {
+    if ((a.count > 0) !== (b.count > 0)) return a.count > 0 ? -1 : 1;
+    return atOf(b) - atOf(a);
+  });
+  return groups;
+}
+
 exports.handler = async (event) => {
   try {
     if (event.httpMethod === 'OPTIONS') return json(200, {});
@@ -369,9 +411,11 @@ exports.handler = async (event) => {
       }
       const result = await wd.listFlags(event);
       const flags = result && Array.isArray(result.flags) ? result.flags : [];
-      const openCount =
-        result && typeof result.openCount === 'number' ? result.openCount : flags.length;
-      return ok({ flags, openCount });
+      const grouped = groupNotifFlags(flags);
+      // Badge counts grouped rows with open alerts, so it matches the
+      // number of rows the panel shows.
+      const openCount = grouped.reduce((n, g) => n + (g.count > 0 ? 1 : 0), 0);
+      return ok({ flags: grouped, openCount });
     }
 
     if (action === 'notification-dismiss') {
@@ -381,8 +425,10 @@ exports.handler = async (event) => {
       if (!wd || typeof wd.dismissFlag !== 'function') {
         return serverError('cc-watchdog is not available yet.');
       }
-      await wd.dismissFlag(id, event);
-      return ok({ ok: true, id });
+      // A grouped row's id is comma-joined flag ids — dismiss them all.
+      const ids = String(id).split(',').map((s) => s.trim()).filter(Boolean);
+      for (const one of ids) await wd.dismissFlag(one, event);
+      return ok({ ok: true, id, dismissed: ids.length });
     }
 
     return bad('Unknown action.');
