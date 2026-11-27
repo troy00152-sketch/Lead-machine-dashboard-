@@ -265,6 +265,20 @@ async function sweep(event, opts) {
   } catch (e) {
     summary.watchdogError = String((e && e.message) || e);
   }
+  // Workflow engine tick (Nov 27, 2026, NC test run): same pattern as
+  // the watchdog above — the sweep already runs 1/min, so this wires
+  // the workflow tick with no new schedule, no new secret, no new
+  // cron. The tick had no caller in production (no Netlify schedule,
+  // no cron job), so enrolled contacts queued forever and nothing ever
+  // sent. The tick's HTTP endpoint stays secret-gated for external
+  // callers; this in-process call needs no header. A tick failure is
+  // reported on the summary and must never fail the sweep response.
+  try {
+    const engine = require('./cc-workflow-engine');
+    summary.workflowTick = await engine.tick(now, event);
+  } catch (e) {
+    summary.workflowTickError = String((e && e.message) || e);
+  }
   return summary;
 }
 
