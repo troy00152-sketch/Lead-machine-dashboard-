@@ -675,13 +675,29 @@ class CcClient {
       { fromMs: now, toMs: now + 365 * 24 * 60 * 60 * 1000 }, this._eventOr(event));
     // Overlap listing from `now` includes in-progress appointments
     // (endMs > now); the filter below drops already-ended ones.
+    // HARDENED (Nov 27, 2026 — Paula booked-silent): the old filter
+    // let records with missing status / contactId / calendarId pass
+    // EVERY check, so a cancelled-then-recreated (or otherwise
+    // half-written) row silenced the bot for a seller with no live
+    // booking. Now: the contact must POSITIVELY match this seller
+    // (a missing contactId is not a match), the calendar must match
+    // when the query names one, and the status must be present and
+    // non-terminal after trim + lowercase — a record with NO status
+    // is not a provable booking and must not silence the bot. (HL
+    // twins always carry contactId + status 'confirmed' by default
+    // and calendarId = CALENDAR_ID, so the strict filter cannot drop
+    // a real HL booking; getPastAppointments deliberately keeps its
+    // looser email/phone/address matching — it is a history lookup,
+    // not the booked-silence gate.)
     return (appts || [])
       .filter((a) => {
         if (!a.id) return false;
-        if (a.contactId && String(a.contactId) !== String(key)) return false;
-        if (a.calendarId && calendarId && String(a.calendarId) !== String(calendarId)) return false;
-        const st = String(a.status || '').toLowerCase();
-        if (st === 'cancelled' || st === 'invalid') return false;
+        if (!a.contactId || String(a.contactId).trim() !== String(key)) return false;
+        if (calendarId) {
+          if (!a.calendarId || String(a.calendarId).trim() !== String(calendarId).trim()) return false;
+        }
+        const st = String(a.status || '').trim().toLowerCase();
+        if (!st || st === 'cancelled' || st === 'invalid') return false;
         const end = a.endMs != null ? a.endMs : Date.parse(a.endISO || a.endTime || '');
         if (!Number.isFinite(end) || end <= now) return false;
         return true;

@@ -71,6 +71,33 @@ const BOT_HOOK_TIMEOUT_MS = 22000;
 // Test-only bot-hook override (see _test.setBotHook below).
 let botHookOverride = null;
 
+// Test-only Telnyx lookup fetch (see _test.setTelnyxFetch): the
+// reconciliation sweep calls lib.getMessage with it when set.
+const deps = { telnyxFetch: null };
+
+// hasBotDecisionFor (FIX D, Nov 27 2026): did the bot already
+// evaluate this inbound? True when ANY of these hold:
+//   (a) a botLog entry carries this message's id (every entry the
+//       hook writes now carries messageId — FIX A/B/C);
+//   (b) a PRE-FIX botLog entry matches by body + recency (entries
+//       land within seconds of processing, so a 5-minute window is
+//       generous; two different texts with the same body inside the
+//       window are the known false-positive — it fails toward a
+//       skipped re-evaluation, never toward a double reply);
+//   (c) a bot outbound already sits after this inbound on the thread.
+// Anything else means "not yet evaluated" — a Telnyx retry must
+// re-run the hook instead of being dropped as a duplicate.
+function hasBotDecisionFor(thread, msg) {
+  if (!thread || !msg || !msg.id) return false;
+  const log = Array.isArray(thread.botLog) ? thread.botLog : [];
+  if (log.some((e) => e && e.messageId && String(e.messageId) === String(msg.id))) return true;
+  const body = String(msg.body || '');
+  const at = msg.at || 0;
+  if (body && log.some((e) => e && !e.messageId && String(e.inbound || '') === body && Math.abs((e.at || 0) - at) <= 5 * 60 * 1000)) return true;
+  if (Array.isArray(thread.messages) && thread.messages.some((m) => m && m.dir === 'out' && m.via === 'bot' && (m.at || 0) >= at)) return true;
+  return false;
+}
+
 // Bounded await — same race pattern as cc-push.withTimeout: the
 // timeout resolves {timedOut:true} while the underlying promise keeps
 // running; a rejection is reported as {timedOut:false, error} so the
@@ -244,9 +271,25 @@ async function applyEvent(s, evt) {
       if (m) thread.market = m;
     }
     if (msgId && thread.messages.some((m) => m.id === msgId)) {
-      return { handled: true, duplicate: true }; // Telnyx retries webhooks
+      // Telnyx retries webhooks — but a retry is NOT always a
+      // duplicate evaluation (FIX D, Nov 27 2026): the first attempt
+      // may have stored the message and then never run the hook (or
+      // run it and left no botLog — the Stephanie '325k' class). Run
+      // the hook again when no bot decision exists for this message
+      // id; dedupe on 'already evaluated', not 'already stored'.
+      const inboundMsg = thread.messages.find((m) => m.id === msgId);
+      const evaluated = hasBotDecisionFor(thread, inboundMsg);
+      return {
+        handled: true,
+        duplicate: true,
+        thread: key,
+        needsBotRetry: !evaluated,
+        message: inboundMsg
+          ? { id: inboundMsg.id, body: inboundMsg.body, at: inboundMsg.at, to: inboundMsg.to, from: inboundMsg.from }
+          : null,
+      };
     }
-    thread.messages.push({
+    const appended = {
       id: msgId || 'in-' + Date.now(),
       dir: 'in',
       body: String(payload.text || ''),
@@ -254,11 +297,21 @@ async function applyEvent(s, evt) {
       at: Date.parse(payload.received_at || '') || Date.now(),
       from: thread.phone,
       to: to0 || '',
-    });
+    };
+    thread.messages.push(appended);
     thread.unread = (thread.unread || 0) + 1;
     thread.updatedAt = Date.now();
     await saveThread(s, thread);
-    return { handled: true, thread: key, name: thread.name, phone: thread.phone, preview: String(payload.text || '').slice(0, 120) };
+    return {
+      handled: true,
+      thread: key,
+      name: thread.name,
+      phone: thread.phone,
+      preview: String(payload.text || '').slice(0, 120),
+      // FIX A: the exact inbound just stored — processInbound trusts
+      // this instead of re-reading a possibly lagging replica.
+      message: { id: appended.id, body: appended.body, at: appended.at, to: appended.to, from: appended.from },
+    };
   }
 
   if (type === 'message.sent' || type === 'message.finalized' || type === 'message.failed') {
@@ -294,6 +347,88 @@ async function applyEvent(s, evt) {
   }
 
   return { handled: false, reason: 'unhandled event type: ' + type };
+}
+
+// ---- delivery reconciliation (FIX E, Nov 27 2026) ----
+// Stored outbounds never advance past 'queued' when the
+// message.sent / message.finalized webhook never lands — the "0
+// SENT TODAY" class. The status branch above is verified correct in
+// code, so the likely break is upstream (the webhook URL configured
+// on the Telnyx messaging profile — that portal check is still owed
+// and cannot be fixed from code) plus a race with no retry: a
+// receipt that arrives before the send is stored, or a lost webhook,
+// leaves the message 'queued' forever. This sweep re-checks
+// stuck-queued messages against Telnyx directly (GET /v2/messages/{id})
+// and advances them through the same finalizedStatus/applyStatus path
+// the webhook uses. Bounded per tick (the 1/min cc-inbound-sweep
+// calls it): only messages 'queued' longer than STALE_MS, only
+// recent traffic, at most MAX_PER_TICK lookups, and a message is not
+// re-asked more often than RECHECK_MS — a Telnyx-side 'queued' that
+// never terminalizes must not burn a lookup every minute forever.
+// Messages whose id never reached Telnyx ('pending-*' / 'in-*'
+// placeholders) are skipped — there is nothing to look up.
+const RECONCILE_STALE_MS = 10 * 60 * 1000;
+const RECONCILE_RECHECK_MS = 60 * 60 * 1000;
+const RECONCILE_MAX_PER_TICK = 10;
+const RECONCILE_WINDOW_MS = 48 * 60 * 60 * 1000;
+
+async function reconcileQueuedStatuses(event, opts) {
+  const o = opts || {};
+  const now = typeof o.now === 'number' ? o.now : Date.now();
+  const maxPerTick = typeof o.maxPerTick === 'number' ? o.maxPerTick : RECONCILE_MAX_PER_TICK;
+  const fetchImpl = o.fetchImpl || deps.telnyxFetch || globalThis.fetch;
+  const apiKey = o.apiKey || process.env.TELNYX_API_KEY;
+  if (!apiKey) return { ok: false, reason: 'TELNYX_API_KEY not configured', checked: 0, advanced: 0, stillQueued: 0, failed: 0, checkedIds: [] };
+  const s = convStore(event);
+  const idx = (await readJson(s, INDEX_KEY)) || { threads: {} };
+  const keys = Object.keys(idx.threads || {});
+  let checked = 0;
+  let advanced = 0;
+  let stillQueued = 0;
+  let failed = 0;
+  const checkedIds = [];
+  for (const key of keys) {
+    if (checked >= maxPerTick) break;
+    const thread = await loadThread(s, key);
+    let dirty = false;
+    for (const m of thread.messages) {
+      if (checked >= maxPerTick) break;
+      if (!m || m.dir !== 'out' || m.status !== 'queued') continue;
+      if (!m.id || /^(pending|in)-/.test(String(m.id))) continue;
+      const at = m.at || 0;
+      if (!at || now - at < RECONCILE_STALE_MS) continue;
+      if (now - at > RECONCILE_WINDOW_MS) continue;
+      if (m.reconciledAt && now - m.reconciledAt < RECONCILE_RECHECK_MS) continue;
+      checked += 1;
+      checkedIds.push(m.id);
+      try {
+        const data = await lib.getMessage({ id: m.id, apiKey, fetchImpl });
+        m.reconciledAt = now;
+        const target = finalizedStatus(data);
+        if (target && applyStatus(m, target.status, target.failureReason)) {
+          advanced += 1;
+        } else {
+          // Telnyx still says queued/sending (or an unmapped state):
+          // leave the message queued — the re-check backoff below
+          // keeps this from burning a lookup every minute.
+          stillQueued += 1;
+        }
+      } catch (e) {
+        // A failed lookup (auth, outage, deleted message) is logged
+        // and stamped too — retrying it every minute cannot fix it,
+        // and it must not starve the rest of the batch.
+        m.reconciledAt = now;
+        failed += 1;
+        console.error('[telnyx-webhook] reconcile lookup failed for ' + m.id + ':', String((e && e.message) || e));
+      }
+      dirty = true;
+    }
+    if (dirty) {
+      thread.updatedAt = Math.max(thread.updatedAt || 0, now);
+      await saveThread(s, thread);
+    }
+  }
+  return { ok: true, checked, advanced, stillQueued, failed, checkedIds };
 }
 
 // ---- signature verification (Ed25519) ----
@@ -350,18 +485,31 @@ exports.handler = async (event) => {
     // stayed silent on two live Paula texts (10:37 + 10:44 PM) even
     // though both reached the thread. Duplicates (Telnyx retries) are
     // skipped — applyEvent already deduped them, and the bot must
-    // never answer the same text twice.
+    // never answer the same text twice — EXCEPT when the first
+    // attempt never evaluated the message (FIX D): then
+    // needsBotRetry is true and the hook runs, deduping on 'already
+    // evaluated' instead of 'already stored'. The exact inbound just
+    // stored is passed through (FIX A) so the hook never has to
+    // re-read a lagging replica to find it.
     if (
       evt && evt.event_type === 'message.received' &&
-      result && result.handled && result.thread && !result.duplicate
+      result && result.handled && result.thread &&
+      (!result.duplicate || result.needsBotRetry)
     ) {
       try {
         const hook = botHookOverride || botHook.processInbound;
-        const timed = await withTimeout(hook(result.thread, event), BOT_HOOK_TIMEOUT_MS);
+        const timed = await withTimeout(hook(result.thread, event, result.message || null), BOT_HOOK_TIMEOUT_MS);
         if (timed.timedOut) {
           console.error('[telnyx-webhook] bot hook timed out after ' + BOT_HOOK_TIMEOUT_MS + 'ms — reply may not have sent');
         } else if (timed.error) {
           console.error('[telnyx-webhook] bot hook failed:', timed.error);
+        } else if (timed.value && timed.value.handled === false) {
+          // FIX A: an unhandled hook result used to vanish — the Nov 27
+          // 'no inbound message on thread' silence had no trail here
+          // either. Log it with the message id so the miss is findable.
+          console.error('[telnyx-webhook] bot hook returned unhandled for thread ' + result.thread
+            + ' message ' + (result.message && result.message.id)
+            + ' — reason: ' + (timed.value.reason || 'unknown'));
         }
       } catch (e) {
         console.error('[telnyx-webhook] bot hook failed:', e);
@@ -396,14 +544,23 @@ exports.handler = async (event) => {
   }
 };
 
+exports.reconcileQueuedStatuses = reconcileQueuedStatuses;
+
 // Test hooks (not part of the deployed surface).
 exports._test = {
   applyEvent,
   finalizedStatus,
   applyStatus,
   verifySignature,
+  hasBotDecisionFor,
+  reconcileQueuedStatuses,
   setStoreFactory(fn) {
     storeFactory = fn;
+  },
+  // Test-only Telnyx lookup fetch for the reconciliation sweep
+  // (null restores global fetch).
+  setTelnyxFetch(fn) {
+    deps.telnyxFetch = fn || null;
   },
   // Test-only bot-hook override: setBotHook(fn) replaces the
   // processInbound call the handler awaits (null restores the real
@@ -411,5 +568,10 @@ exports._test = {
   // responding 200.
   setBotHook(fn) {
     botHookOverride = typeof fn === 'function' ? fn : null;
+  },
+  reset() {
+    storeFactory = null;
+    deps.telnyxFetch = null;
+    botHookOverride = null;
   },
 };

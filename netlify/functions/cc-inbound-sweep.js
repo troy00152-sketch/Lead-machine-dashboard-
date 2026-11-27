@@ -50,12 +50,20 @@
 // new cron. The cc-workflow-tick caller scan() used to ride on was
 // never created, which is why the bell was empty all day Nov 26.
 //
+// Delivery reconciliation: the sweep also runs
+// telnyx-webhook.reconcileQueuedStatuses() fail-soft on every tick
+// (FIX E, Nov 27 2026) — outbounds stuck 'queued' when the
+// sent/finalized webhook never lands get re-checked against Telnyx
+// directly, bounded per tick. Same pattern as the watchdog and the
+// workflow tick below: no new schedule, no new secret, no new cron.
+//
 // 30s Netlify limit for scheduled functions: a sweep is a handful of
 // Blobs reads + at most a few Telnyx calls — well inside it.
 'use strict';
 
 const callApi = require('./cc-call-api');
 const webhook = require('./telnyx-voice-webhook');
+const msgWebhook = require('./telnyx-webhook');
 const voiceDefault = require('./telnyx-voice-lib');
 
 // ---- injectable voice actions (tests) ----
@@ -278,6 +286,20 @@ async function sweep(event, opts) {
     summary.workflowTick = await engine.tick(now, event);
   } catch (e) {
     summary.workflowTickError = String((e && e.message) || e);
+  }
+  // Delivery reconciliation (FIX E, Nov 27 2026 — "0 SENT TODAY"):
+  // stored outbounds never advance past 'queued' when the
+  // message.sent / message.finalized webhook never lands (likely
+  // the webhook URL on the Telnyx messaging profile — that portal
+  // check is still owed). Re-check stuck-queued messages against
+  // Telnyx directly, bounded per tick (10 lookups, 10-min staleness,
+  // 1-hour re-check backoff). Same fail-soft pattern as the watchdog
+  // and the workflow tick above: a reconcile failure is reported on
+  // the summary and must never fail the sweep response.
+  try {
+    summary.deliveryReconcile = await msgWebhook.reconcileQueuedStatuses(event, { now });
+  } catch (e) {
+    summary.deliveryReconcileError = String((e && e.message) || e);
   }
   return summary;
 }
