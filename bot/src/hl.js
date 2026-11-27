@@ -21,6 +21,48 @@ function normalizePhoneDigits(value) {
   return d.length === 10 ? d : null;
 }
 
+/** One dndSettings channel entry; the key case varies (SMS/Sms/sms). */
+function dndSetting(contact, channel) {
+  const ds = contact && contact.dndSettings;
+  if (!ds || typeof ds !== 'object') return null;
+  const want = String(channel).toLowerCase();
+  for (const k of Object.keys(ds)) {
+    if (k.toLowerCase() === want) return ds[k];
+  }
+  return null;
+}
+
+/**
+ * True when the contact's SMS DND is permanent (STOP_KEYWORD opt-out).
+ * HL 401s the WHOLE contact PUT when the body includes `sms` for such
+ * a contact (proven Nov 24–26, DND API repair) — the seal body must
+ * OMIT sms entirely. The permanent block is already the strongest
+ * outbound SMS block and stays untouched.
+ */
+function isSmsDndPermanent(contact) {
+  const s = dndSetting(contact, 'sms');
+  if (!s || typeof s !== 'object') return false;
+  if (String(s.status || '').toLowerCase() === 'permanent') return true;
+  return /STOP_KEYWORD/i.test(String(s.message || ''));
+}
+
+/**
+ * The proven HL seal form: master toggle OFF + per-channel boxes
+ * CHECKED + inbound block ON. A bare PUT {dnd:true} does NOT seal in
+ * HL — workflows, the bot guard, and the HL UI all still see the
+ * contact as reachable. When SMS is permanent the `sms` key is
+ * omitted entirely (see isSmsDndPermanent) — never touched, never 401'd.
+ */
+function hlSealBody(smsPermanent) {
+  const dndSettings = { Call: { status: 'active' }, Email: { status: 'active' } };
+  if (!smsPermanent) dndSettings.SMS = { status: 'active' };
+  return {
+    dnd: false,
+    dndSettings,
+    inboundDndSettings: { all: { status: 'active' } },
+  };
+}
+
 /** First present (non-empty) value among the given keys of an object. */
 function firstPresent(obj, keys) {
   for (const k of keys) {
@@ -93,13 +135,36 @@ class HighLevelClient {
     return data && data.contact ? data.contact : data;
   }
 
-  /** Set DND on the contact (global flag). Used by the guard layer. */
+  /**
+   * Full HL seal — replaces the old bare PUT {dnd:true}, which HL
+   * ignores for workflows / the bot guard / the UI, leaving the
+   * contact textable after a seal. GETs the contact first, then PUTs
+   * master-OFF + per-channel active (omitting `sms` when SMS DND is
+   * permanent — including it 401s the whole PUT) + inbound block ON,
+   * then adds the `dnc` tag. The tag write is best-effort: a tag
+   * failure is logged, never allowed to fail a seal that already
+   * landed (handler.js applySilenceWithDnd also tags `dnc`
+   * separately, so the tag is attempted twice — redundant, harmless).
+   * Contacts version 2021-07-28 throughout.
+   */
   async setDnd(contactId) {
-    return this.request(`/contacts/${contactId}`, {
+    const contact = await this.getContact(contactId);
+    const permanentSms = isSmsDndPermanent(contact);
+    const sealed = await this.request(`/contacts/${contactId}`, {
       method: 'PUT',
       version: this.config.hlVersionContacts,
-      body: { dnd: true },
+      body: hlSealBody(permanentSms),
     });
+    try {
+      await this.addTags(contactId, ['dnc']);
+    } catch (e) {
+      console.log(
+        '[custom-bot] setDnd tag dnc failed (seal itself landed)',
+        contactId,
+        e && e.message ? e.message : e
+      );
+    }
+    return sealed;
   }
 
   /** Add tags to a contact (e.g. `dnc`). */
@@ -132,7 +197,7 @@ class HighLevelClient {
    * docs, so candidates are read defensively and normalized to digits;
    * toNumber/fromNumber are null when no usable value is present.
    */
-  async getMessages(conversationId, limit = 20) {
+  async getMessages(conversationId, limit = 100) {
     const data = await this.request(`/conversations/${conversationId}/messages`, {
       version: this.config.hlVersionConversations,
       query: { limit },
@@ -630,4 +695,4 @@ function getVerifiedPrice(contact, config) {
   return { lao: ballpark.lao, mao: ballpark.mao, arv };
 }
 
-module.exports = { HighLevelClient, customFieldValue, getBallpark, getVerifiedPrice, contactListingVerified, normalizePhoneDigits };
+module.exports = { HighLevelClient, customFieldValue, getBallpark, getVerifiedPrice, contactListingVerified, normalizePhoneDigits, isSmsDndPermanent, hlSealBody };

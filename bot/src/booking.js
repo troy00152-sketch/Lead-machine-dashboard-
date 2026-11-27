@@ -143,6 +143,27 @@ async function getDaySlots(hl, config, namedDay, now = new Date()) {
  * opts.excludeDays: weekday names (e.g. ['Monday']) to skip — used when the
  * seller just declined those days, so the next offer is genuinely new days.
  */
+/**
+ * Space offer slots by the HL booking rule (Nov 27 mirror, Conversation AI
+ * booking rules: N slots, each at least minGapHours apart). Greedy from the
+ * earliest slot: keep a slot only if it starts at least minGapHours after
+ * the last kept slot. A missing gap defaults to 3 (the HL rule); an
+ * explicit 0 disables spacing. Applied ONLY to offers (getOfferSlots /
+ * getWindowSlots) — NEVER to getBookableSlots, which is the pick-
+ * verification window and must accept any free slot the seller names.
+ */
+function spaceSlots(isoList, minGapHours) {
+  const gapMs = (minGapHours == null ? 3 : minGapHours) * 60 * 60 * 1000;
+  if (!gapMs) return (isoList || []).slice();
+  const kept = [];
+  let last = -Infinity;
+  for (const iso of isoList || []) {
+    const t = new Date(iso).getTime();
+    if (t - last >= gapMs) { kept.push(iso); last = t; }
+  }
+  return kept;
+}
+
 async function getOfferSlots(hl, config, now = new Date(), opts = {}) {
   if (!config.calendarId) return [];
   const start = now.getTime();
@@ -160,7 +181,8 @@ async function getOfferSlots(hl, config, now = new Date(), opts = {}) {
         return !excluded.has(day);
       })
     : inWindow;
-  return kept.slice(0, config.slotOfferCount || 4).map((iso) => ({
+  const spaced = spaceSlots(kept, config.slotMinGapHours);
+  return spaced.slice(0, config.slotOfferCount || 4).map((iso) => ({
     startISO: iso,
     // HL calendars here run 30-minute slots (Paula Thomas calendar spec).
     endISO: new Date(new Date(iso).getTime() + 30 * 60 * 1000).toISOString(),
@@ -813,7 +835,8 @@ async function getWindowSlots(hl, config, window, now = new Date(), opts = {}) {
     }
     return true;
   });
-  return kept.slice(0, config.slotOfferCount || 4).map((iso) => ({
+  const spaced = spaceSlots(kept, config.slotMinGapHours);
+  return spaced.slice(0, config.slotOfferCount || 4).map((iso) => ({
     startISO: iso,
     endISO: new Date(new Date(iso).getTime() + 30 * 60 * 1000).toISOString(),
     label: formatSlot(iso, tz, now),
@@ -848,4 +871,4 @@ function formatOfferQuestion(slots) {
   return `I have ${listed} — which works for you?`;
 }
 
-module.exports = { getOfferSlots, getBookableSlots, getDaySlots, getMonthSlots, getSyntheticDaySlots, getSyntheticMonthSlots, verifySyntheticDatePick, zonedTimeToUtc, resolveNamedDay, resolveNamedMonth, resolveSchedulingMonth, isMoveMonthMention, hasSchedulingMonthIntent, findDatePick, findInboundPickSlot, formatSlot, inBookingWindow, displayTimeZoneFor, tzShortName, relabelSlots, resolveAvailabilityWindow, resolveWindowFromHistory, getWindowSlots, formatOfferQuestion };
+module.exports = { getOfferSlots, getBookableSlots, getDaySlots, getMonthSlots, getSyntheticDaySlots, getSyntheticMonthSlots, verifySyntheticDatePick, zonedTimeToUtc, resolveNamedDay, resolveNamedMonth, resolveSchedulingMonth, isMoveMonthMention, hasSchedulingMonthIntent, findDatePick, findInboundPickSlot, formatSlot, inBookingWindow, displayTimeZoneFor, tzShortName, relabelSlots, resolveAvailabilityWindow, resolveWindowFromHistory, getWindowSlots, formatOfferQuestion, spaceSlots };

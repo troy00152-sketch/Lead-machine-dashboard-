@@ -391,7 +391,7 @@ function createHandler(deps) {
     let history = [];
     try {
       if (!conversationId) conversationId = await hl.findConversationId(evt.contactId);
-      if (conversationId) history = await hl.getMessages(conversationId, 20);
+      if (conversationId) history = await hl.getMessages(conversationId, 100);
     } catch (e) {
       log(`history load failed: ${e.message}`);
     }

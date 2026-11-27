@@ -273,7 +273,7 @@ function createWatchdogCheck({ config, hl, nowMs = () => Date.now() }) {
 
     let messages;
     try {
-      messages = await hl.getMessages(evt.conversationId, 20);
+      messages = await hl.getMessages(evt.conversationId, 100);
     } catch (e) {
       console.error('[watchdog-check] messages load failed:', e && e.message ? e.message : e);
       return fail('error');
