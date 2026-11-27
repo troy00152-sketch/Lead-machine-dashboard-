@@ -41,6 +41,18 @@
 // 16:30 ET Mon-Sat. The default here is hoursEnd '16:30' and the screen
 // copy says so.
 //
+// Booking hours are the CALL window only — they are NOT the bot's reply
+// hours. The reply gate is the vendored 8-21 in bot/src/config.js
+// (Troy's rule: the bot answers 8 AM-9 PM ET), and cc-bot-runner.js
+// must never copy booking hours onto it: the Nov 27 9:15 AM deploy did
+// exactly that (16:30 + 30-min skew -> gate 17) and silenced Paula's
+// 5:12 PM retest with 'after-hours'. The slot engine caps offers at
+// 16:30 by itself (inBookingWindow + cc-slots.js), so the two windows
+// stay decoupled. Do NOT "restore" this default to '21:00' to fix reply
+// hours — replies are gated by the vendored 8-21, not by this field;
+// 21:00 here would only make the screen preview offer evening call
+// times the live engine can never make.
+//
 // Routes:
 //   GET  /.netlify/functions/cc-bot-config
 //        -> {config} (merged defaults + stored overrides)
@@ -106,7 +118,9 @@ async function writeJson(s, key, obj) {
 // ---- defaults ----
 // Booking default hoursEnd '16:30' is the LIVE truth (cc-slots.js:
 // 08:00-16:30 ET Mon-Sat). The screen used to ship '21:00' and promise
-// 9 PM offers the engine could never make.
+// 9 PM offers the engine could never make. This is the call window
+// only — the bot's REPLY window is the vendored 8-21 and lives nowhere
+// in this config; see the Booking-truth note above.
 function defaultConfig() {
   return {
     ashley: { on: true, mode: 'auto' },

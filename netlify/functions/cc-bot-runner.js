@@ -218,39 +218,34 @@ function clampInt(v, lo, hi, dflt) {
   if (Number.isNaN(n)) return dflt;
   return Math.min(hi, Math.max(lo, n));
 }
-function parseHours(hhmm) {
-  const m = /^(\d{2}):(\d{2})$/.exec(String(hhmm || ''));
-  if (!m) return null;
-  return { hour: Number(m[1]), minute: Number(m[2]), minutes: Number(m[1]) * 60 + Number(m[2]) };
-}
 
 // applyBookingConfig(liveConfig, botConfig, log) — feed the screen's
 // booking rule into the slot engine through the knobs the vendored
 // booking.js ALREADY reads per call:
 //   windowDays  -> config.slotDaysAhead (offer/bookable horizon)
 //   slots       -> config.slotOfferCount (offer cap)
-//   hoursStart  -> config.hoursStart (getWindowSlots gate)
-//   hoursEnd    -> config.hoursEnd (getWindowSlots gate). NOTE the
-//     30-minute skew: getWindowSlots treats hoursEnd as an EXCLUSIVE
-//     bound on slot STARTS, while cc-slots' hoursEnd IS the last start
-//     (16:30 starts, ends 17:00). The gate is therefore set 30 min
-//     past the configured end, or the 16:30 slot would be clipped.
 //   minGapHours -> config.slotMinGapHours. booking.js spaces offers by
 //     this gap in getOfferSlots/getWindowSlots (Nov 27 mirror close-out);
 //     getBookableSlots is deliberately NOT spaced (pick verification).
+// DECOUPLED (Nov 27, 2026 — Paula's 5:12 PM retest): the stored booking
+// hours (hoursStart/hoursEnd, the CALL window, last start 16:30) are
+// NEVER copied onto config.hoursStart/hoursEnd. Those fields are the
+// REPLY gate (vendored 8-21 in bot/src/config.js — Troy's rule: the bot
+// answers 8 AM-9 PM ET). The Nov 27 9:15 AM deploy overwrote them with
+// the booking hours (+30-min skew: 16:30 -> 17), so every inbound after
+// 5 PM hit step 7 'after-hours' and the bot stayed silent. The slot
+// engine does not need the copy: getOfferSlots/getBookableSlots hard-clip
+// to inBookingWindow (8 AM-5 PM) and cc-slots.js only generates starts
+// 08:00-16:30, so no evening slot can ever be offered.
 function applyBookingConfig(liveConfig, botConfig, log) {
   if (!liveConfig || !botConfig || !botConfig.booking) return false;
   const b = botConfig.booking;
   liveConfig.slotDaysAhead = clampInt(b.windowDays, 1, 14, liveConfig.slotDaysAhead);
   liveConfig.slotOfferCount = clampInt(b.slots, 1, 6, liveConfig.slotOfferCount);
-  const start = parseHours(b.hoursStart);
-  const end = parseHours(b.hoursEnd);
-  if (start) liveConfig.hoursStart = start.hour;
-  if (end) liveConfig.hoursEnd = (end.minutes + 30) / 60;
   liveConfig.slotMinGapHours = clampInt(b.minGapHours, 0, 12, 3);
   log('cc-bot-runner: booking rules applied (window ' + liveConfig.slotDaysAhead
-    + 'd, ' + liveConfig.slotOfferCount + ' slots, hours '
-    + liveConfig.hoursStart + '-' + liveConfig.hoursEnd + ')');
+    + 'd, ' + liveConfig.slotOfferCount + ' slots, gap ' + liveConfig.slotMinGapHours
+    + 'h; reply gate stays ' + liveConfig.hoursStart + '-' + liveConfig.hoursEnd + ')');
   return true;
 }
 
