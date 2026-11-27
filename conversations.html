@@ -158,12 +158,14 @@
   /* notifications dropdown */
   .topbar{position:relative}
   #notifPanel{position:absolute;top:52px;right:16px;z-index:50;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:8px;min-width:280px;max-width:360px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
-  .notif-item{display:flex;gap:8px;align-items:flex-start;padding:8px;border-bottom:1px solid var(--line)}
+  .notif-item{display:flex;gap:8px;align-items:flex-start;padding:8px;border-bottom:1px solid var(--line);cursor:pointer}
+  .notif-item:hover{background:var(--panel)}
   .notif-item:last-child{border-bottom:0}
   .notif-item .n-body{flex:1;min-width:0}
   .notif-item .n-name{font-weight:700}
   .notif-item .n-prev{color:var(--muted);font-size:13px;word-break:break-word}
   .notif-item .n-time{color:var(--muted2);font-size:11px}
+  .notif-item .n-go{color:var(--muted2);font-size:18px;line-height:1;padding:4px 0 0 2px}
   .notif-item .n-x{background:none;border:1px solid var(--line);border-radius:6px;color:var(--text);cursor:pointer;padding:2px 8px}
 </style>
 <!-- PWA (v1): manifest, theme, iOS install support, service worker -->
@@ -2305,11 +2307,39 @@ function renderNotifPanel() {
     var who = f.name || (f.phone ? fmtPhone(f.phone) : '') || 'Alert';
     var prev = f.preview || f.message || f.reason || '';
     var when = f.at || f.createdAt || f.updatedAt || 0;
-    return '<div class="notif-item"><div class="n-body"><div class="n-name">' + esc(who) + '</div>' +
+    // Tap anywhere on the row opens its conversation (Nov 27, 2026 —
+    // Troy: rows were dead on tap; GoHighLevel opens the thread on
+    // tap). data-notif-key/phone carry the thread; the ✕ still dismisses.
+    return '<div class="notif-item" role="button" tabindex="0" data-notif-key="' + esc(f.key || '') + '" data-notif-phone="' + esc(f.phone || '') + '" title="Tap to open conversation"><div class="n-body"><div class="n-name">' + esc(who) + '</div>' +
       (prev ? '<div class="n-prev">' + esc(prev) + '</div>' : '') +
       (when ? '<div class="n-time">' + esc(fmtTime(when)) + '</div>' : '') +
-      '</div><button type="button" class="n-x" data-dismiss="' + esc(f.id) + '" title="Dismiss">✕</button></div>';
+      '</div><span class="n-go" aria-hidden="true">›</span><button type="button" class="n-x" data-dismiss="' + esc(f.id) + '" title="Dismiss">✕</button></div>';
   }).join('');
+}
+/* Tapping a notification opens its conversation. A flag always carries
+   the thread key and/or the phone, and the thread API returns an empty
+   thread (never an error) for a number with no messages yet — so the
+   tap always lands somewhere, never a dead tap. If the thread turns
+   out empty (a call-only number, e.g. a stuck-call flag on a number
+   that never texted), fall through to Dialer recents, where the call
+   itself is listed. */
+async function openNotifThread(item) {
+  var key = item.getAttribute('data-notif-key') || '';
+  var phone = item.getAttribute('data-notif-phone') || '';
+  var target = key || phone;
+  if (!target) { toast('No conversation attached to this alert.'); return; }
+  document.getElementById('notifPanel').classList.add('hidden');
+  try {
+    await selectThread(target);
+  } catch (e) {
+    handleLoadError(e);
+    return;
+  }
+  var t = state.selectedThread;
+  if (t && (!t.messages || !t.messages.length)) {
+    toast('No message thread for this number yet — opening Dialer recents.');
+    window.location.href = 'dialer.html';
+  }
 }
 async function loadNotifications() {
   try {
@@ -2419,11 +2449,24 @@ function init() {
   });
   document.getElementById('notifPanel').addEventListener('click', function (ev) {
     var btn = ev.target.closest ? ev.target.closest('[data-dismiss]') : null;
-    if (!btn) return;
-    var id = btn.getAttribute('data-dismiss');
-    api('', { action: 'notification-dismiss', id: id })
-      .then(loadNotifications)
-      .catch(function (e) { toast('Could not dismiss: ' + (e && e.message ? e.message : e)); });
+    if (btn) {
+      var id = btn.getAttribute('data-dismiss');
+      api('', { action: 'notification-dismiss', id: id })
+        .then(loadNotifications)
+        .catch(function (e) { toast('Could not dismiss: ' + (e && e.message ? e.message : e)); });
+      return;
+    }
+    var item = ev.target.closest ? ev.target.closest('.notif-item') : null;
+    if (!item) return;
+    openNotifThread(item).catch(handleLoadError);
+  });
+  document.getElementById('notifPanel').addEventListener('keydown', function (ev) {
+    if (ev.key !== 'Enter' && ev.key !== ' ') return;
+    var item = ev.target.closest ? ev.target.closest('.notif-item') : null;
+    if (!item) return;
+    if (ev.target.closest && ev.target.closest('[data-dismiss]')) return;
+    ev.preventDefault();
+    openNotifThread(item).catch(handleLoadError);
   });
   var contactPanel = document.getElementById('contactPanel');
   contactPanel.addEventListener('change', function (ev) {
