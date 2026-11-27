@@ -338,7 +338,8 @@
     </div>
     <p class="muted" style="margin:12px 0 0">
       Business hours are 8:00 AM – 4:30 PM Eastern, Monday–Saturday — the live slot engine only
-      offers times inside those hours. If no open time fits inside the seller's stated window, the bot hands the conversation to you
+      offers times inside those hours. The bot itself replies to sellers 8:00 AM – 9:00 PM Eastern:
+      a seller texting after 4:30 PM still gets an answer, just no evening call time. If no open time fits inside the seller's stated window, the bot hands the conversation to you
       instead of offering times outside it. A month a seller names as their moving timeline is a
       closing fact, never a call time — the bot offers near-term call times now.
     </p>
@@ -787,7 +788,7 @@ function caiDefaultInstructions() {
     {
       id: 'hours', title: 'Hours & manners',
       hint: 'When the bot engages, and how it leaves.',
-      body: 'Only engage between the business hours on this screen (default 8:00 AM – 4:30 PM Eastern, Monday through Saturday). Outside that window, do not reply. Never be pushy: one gentle follow-up at most if a seller goes quiet mid-conversation, then leave them alone. If a seller is hostile, abusive, or clearly not a fit, exit politely and stop.',
+      body: 'Reply to sellers between 8:00 AM and 9:00 PM Eastern, Monday through Saturday — that is the reply window, and it is NOT the same as the call-booking hours. Book calls only inside business hours (8:00 AM – 4:30 PM Eastern) — never offer a call time outside them, and a seller texting after 4:30 PM still gets an answer, just no evening call time. Outside the reply window, do not reply. Never be pushy: one gentle follow-up at most if a seller goes quiet mid-conversation, then leave them alone. If a seller is hostile, abusive, or clearly not a fit, exit politely and stop.',
     },
   ];
 }
