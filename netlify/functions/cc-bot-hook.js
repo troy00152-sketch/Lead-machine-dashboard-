@@ -59,6 +59,16 @@ try {
 
 const lib = require('./telnyx-lib');
 
+// cc-dnd owns the per-channel DND shapes a seal must write
+// (dndChannels). Guarded: a seal must still land its legacy markers
+// even if that module cannot load.
+let dndMod = null;
+try {
+  dndMod = require('./cc-dnd');
+} catch (e) {
+  dndMod = null;
+}
+
 const CONV_STORE = 'cc-conversations';
 const ENROLL_STORE = 'cc-enrollments';
 const MAX_MESSAGES_PER_THREAD = 500;
@@ -122,6 +132,52 @@ async function loadThread(s, key) {
   return { phone: '+' + key, key, name: '', market: '', unread: 0, updatedAt: 0, messages: [] };
 }
 async function saveThread(s, thread) {
+  // Merge-atomic (§3): re-read immediately before writing and union
+  // messages by id + botLog entries, so a concurrent writer's messages
+  // (e.g. the webhook appending an inbound while the bot appends its
+  // reply) are never wiped by this write. In-memory entries win on an
+  // id conflict; dnd is OR (a seal is never unwritten here); unread
+  // takes the max (never lose an unread bump).
+  const fresh = await readJson(s, thread.key);
+  if (fresh && Array.isArray(fresh.messages)) {
+    const byId = new Map();
+    for (const m of fresh.messages) if (m && m.id) byId.set(m.id, m);
+    for (const m of thread.messages) if (m && m.id) byId.set(m.id, m);
+    const merged = [...byId.values()];
+    const tripleOf = (m) => (m.dir || '') + '|' + (m.at || '') + '|' + String(m.body || '');
+    const seenTriples = new Set(merged.map(tripleOf));
+    for (const src of [fresh.messages, thread.messages]) {
+      for (const m of src) {
+        if (!m || m.id) continue;
+        const t = tripleOf(m);
+        if (!seenTriples.has(t)) {
+          merged.push(m);
+          seenTriples.add(t);
+        }
+      }
+    }
+    merged.sort((a, b) => (a.at || 0) - (b.at || 0));
+    thread.messages = merged;
+    if (Array.isArray(fresh.botLog)) {
+      if (!Array.isArray(thread.botLog)) thread.botLog = [];
+      const seenLog = new Set(thread.botLog.map((e) => (e.at || '') + '|' + (e.type || '') + '|' + String(e.decision || '')));
+      for (const e of fresh.botLog) {
+        const k = (e.at || '') + '|' + (e.type || '') + '|' + String(e.decision || '');
+        if (!seenLog.has(k)) {
+          thread.botLog.push(e);
+          seenLog.add(k);
+        }
+      }
+      thread.botLog.sort((a, b) => (a.at || 0) - (b.at || 0));
+    }
+    if (fresh.dnd === true) thread.dnd = true;
+    thread.unread = Math.max(fresh.unread || 0, thread.unread || 0);
+    thread.updatedAt = Math.max(fresh.updatedAt || 0, thread.updatedAt || 0);
+    if (!thread.phone && fresh.phone) thread.phone = fresh.phone;
+    if (!thread.market && fresh.market) thread.market = fresh.market;
+    if (!thread.name && fresh.name) thread.name = fresh.name;
+    if (!thread.ourNumber && fresh.ourNumber) thread.ourNumber = fresh.ourNumber;
+  }
   if (thread.messages.length > MAX_MESSAGES_PER_THREAD) {
     thread.messages = thread.messages.slice(-MAX_MESSAGES_PER_THREAD);
   }
@@ -157,6 +213,29 @@ function isSealed(rec) {
   if (!rec) return false;
   return rec.dnd === true || lowerTags(rec.tags).includes('dnc');
 }
+// Preserve any NEWER seal / send-audit markers from a freshly
+// re-read record onto the copy about to be written — the same rule as
+// cc-workflow-engine.preserveNewerMarkers (duplicated, not imported:
+// the engine pulls in the Telnyx/send deps this adapter must not).
+// A stale whole-record write must never wipe a seal that landed after
+// this copy was loaded (§3).
+function preserveNewerMarkers(rec, fresh) {
+  if (!fresh || typeof fresh !== 'object') return rec;
+  if (fresh.dnd === true) rec.dnd = true;
+  if (lowerTags(fresh.tags).includes('dnc')) {
+    if (!Array.isArray(rec.tags)) rec.tags = [];
+    if (!lowerTags(rec.tags).includes('dnc')) rec.tags.push('dnc');
+  }
+  if (fresh.sealedAt != null && rec.sealedAt == null) rec.sealedAt = fresh.sealedAt;
+  if (fresh.sealReason != null && rec.sealReason == null) rec.sealReason = fresh.sealReason;
+  if (fresh.dndChannels && typeof fresh.dndChannels === 'object') {
+    if (!rec.dndChannels || typeof rec.dndChannels !== 'object') rec.dndChannels = { ...fresh.dndChannels };
+    else for (const ch of ['sms', 'email', 'call']) if (fresh.dndChannels[ch] === true) rec.dndChannels[ch] = true;
+  }
+  if (fresh.sentAt != null && rec.sentAt == null) rec.sentAt = fresh.sentAt;
+  if (fresh.messageId != null && !rec.messageId) rec.messageId = fresh.messageId;
+  return rec;
+}
 // Seal = `dnc` tag + dnd flag on the enrollment record (+ a dnd flag on
 // the thread so the Conversations UI can show it). Written directly to
 // the record key: the enrollments index only carries {market, stage},
@@ -174,10 +253,29 @@ async function sealEnrollment(es, key, thread, reason) {
       enrolledAt: null,
     };
   }
-  const tags = Array.isArray(rec.tags) ? rec.tags.map((t) => String(t)) : [];
-  if (!lowerTags(tags).includes('dnc')) tags.push('dnc');
-  rec.tags = tags;
-  rec.dnd = true;
+  // Merge-atomic (§3): re-read immediately before writing and preserve
+  // any newer seal markers — a seal must never be wiped by a stale
+  // whole-record write landing after it.
+  try {
+    const fresh = await readJson(es, key);
+    if (fresh) preserveNewerMarkers(rec, fresh);
+  } catch (e) { /* best-effort: the write below still happens */ }
+  // Per-channel DND (§3): a seal is all-three-channels, in the exact
+  // shapes cc-dnd.applyChannels writes — dndChannels {sms, email,
+  // call} all true, dnd=true, 'dnc' tag, sealedAt/sealReason stamps.
+  // The legacy markers below stay as the fallback when cc-dnd cannot
+  // load. NOTE — HighLevel sync is NOT done here yet (remaining work):
+  // cc-dnd.syncHlDnd exists and fits the manual path, but the hot
+  // inbound path cannot afford its synchronous HL calls inside the
+  // 22s bot-hook budget; see fixes-report.md.
+  if (dndMod && typeof dndMod.applyChannels === 'function') {
+    dndMod.applyChannels(rec, { sms: true, email: true, call: true }, Date.now());
+  } else {
+    const tags = Array.isArray(rec.tags) ? rec.tags.map((t) => String(t)) : [];
+    if (!lowerTags(tags).includes('dnc')) tags.push('dnc');
+    rec.tags = tags;
+    rec.dnd = true;
+  }
   rec.sealedAt = Date.now();
   rec.sealReason = reason;
   await writeJson(es, key, rec);
@@ -196,6 +294,18 @@ async function addTagsToEnrollment(es, key, newTags) {
       have.push(tag.toLowerCase());
     }
   }
+  // Merge-atomic (§3): re-read immediately before writing; preserve
+  // any newer seal markers and union the tag lists, so a concurrent
+  // seal's 'dnc' (or any concurrent tag) survives this write.
+  try {
+    const fresh = await readJson(es, key);
+    if (fresh) {
+      preserveNewerMarkers(rec, fresh);
+      for (const t of Array.isArray(fresh.tags) ? fresh.tags : []) {
+        if (!lowerTags(tags).includes(String(t).trim().toLowerCase())) tags.push(String(t));
+      }
+    }
+  } catch (e) { /* best-effort */ }
   rec.tags = tags;
   await writeJson(es, key, rec);
   return rec;

@@ -219,15 +219,123 @@ async function scanQueuedRecords(s, market, idx) {
 }
 async function repairIndexEntries(s, recs, idx) {
   const target = idx || (await loadEnrollIndex(s));
-  for (const r of recs) target.enrollments[r.key] = { market: r.market, stage: r.stage };
+  for (const r of recs) {
+    target.enrollments[r.key] = { market: r.market, stage: r.stage };
+    markIndexTouched(target, r.key);
+  }
   target.updatedAt = Date.now();
-  await writeJson(s, ENROLL_INDEX_KEY, target);
+  // No store write here: inside a tick the threaded index flushes ONCE
+  // at the end of the tick (flushEnrollIndex, merge-atomic). Writing
+  // the tick-start snapshot here would clobber a concurrent tick's
+  // entries — the v3 cross-tick last-write-wins the flush fixes.
+  // Callers outside a tick do not use this function.
+}
+
+// ---- merge-atomic writes (Nov 27, 2026, §1/§3) ----
+// Whole-object read-modify-write against eventually-consistent Blobs
+// loses concurrent writes: tick N+1 loads a stale index snapshot and
+// writes it back, reverting N's stage updates (the §1 stall), and a
+// stale record write landing after a seal wipes the seal markers (§3).
+// Two guards, applied to every writer below:
+//   * index: a tick threads ONE in-memory index, records every key it
+//     touches (markIndexTouched), and flushes ONCE at the end by
+//     re-loading the index fresh and overlaying ONLY the touched keys
+//     (flushEnrollIndex). Untouched entries — including a concurrent
+//     tick's — survive.
+//   * records: saveEnrollment re-reads the record immediately before
+//     writing and preserves any newer seal / send-audit markers
+//     (preserveNewerMarkers).
+const indexTouched = new WeakMap();
+function markIndexTouched(idx, key) {
+  if (!idx || typeof idx !== 'object' || !key) return;
+  let set = indexTouched.get(idx);
+  if (!set) {
+    set = new Set();
+    indexTouched.set(idx, set);
+  }
+  set.add(key);
+}
+async function flushEnrollIndex(s, idx) {
+  const touched = indexTouched.get(idx);
+  if (!touched || !touched.size) return 0;
+  const fresh = await loadEnrollIndex(s);
+  for (const k of touched) {
+    if (idx.enrollments[k]) fresh.enrollments[k] = idx.enrollments[k];
+    else delete fresh.enrollments[k]; // verification dropped a gone record
+  }
+  fresh.updatedAt = Date.now();
+  await writeJson(s, ENROLL_INDEX_KEY, fresh);
+  return touched.size;
+}
+
+// Preserve any NEWER seal / send-audit markers from a freshly re-read
+// record onto the copy about to be written. Engine writers never
+// intentionally unseal (unseal is cc-dnd.setChannels, which writes
+// directly), so a newer seal marker on the fresh copy always wins.
+function preserveNewerMarkers(rec, fresh) {
+  if (!fresh || typeof fresh !== 'object') return rec;
+  if (fresh.dnd === true) rec.dnd = true;
+  if (lowerTags(fresh.tags).includes('dnc')) {
+    if (!Array.isArray(rec.tags)) rec.tags = [];
+    if (!lowerTags(rec.tags).includes('dnc')) rec.tags.push('dnc');
+  }
+  if (fresh.sealedAt != null && rec.sealedAt == null) rec.sealedAt = fresh.sealedAt;
+  if (fresh.sealReason != null && rec.sealReason == null) rec.sealReason = fresh.sealReason;
+  if (fresh.dndChannels && typeof fresh.dndChannels === 'object') {
+    if (!rec.dndChannels || typeof rec.dndChannels !== 'object') rec.dndChannels = { ...fresh.dndChannels };
+    else for (const ch of ['sms', 'email', 'call']) if (fresh.dndChannels[ch] === true) rec.dndChannels[ch] = true;
+  }
+  // Send-audit trail: a sentAt/messageId that landed after this copy
+  // was loaded must survive — it is what the duplicate-send lock reads.
+  if (fresh.sentAt != null && rec.sentAt == null) rec.sentAt = fresh.sentAt;
+  if (fresh.messageId != null && !rec.messageId) rec.messageId = fresh.messageId;
+  return rec;
+}
+
+// Verification pass (§1): the index can claim 'queued' for records
+// that are already terminal (or gone) — the Nov 27 Carolina case: 4
+// records terminal in the record store but still 'queued' in the
+// index, and the tick loaded them, found none queued, and idled with
+// NO scan. Unlike scanQueuedRecords (which only reads records the
+// index does NOT know — its known-set exclusion must NOT apply here),
+// this pass loads exactly the index-known queued entries for the
+// market and corrects the threaded index in place: the record's true
+// stage, or deletion when the record is gone.
+async function verifyQueuedEntries(s, market, idx) {
+  let checked = 0;
+  let corrected = 0;
+  for (const [k, entry] of Object.entries(idx.enrollments)) {
+    if (!entry || entry.market !== market || entry.stage !== 'queued') continue;
+    checked += 1;
+    const r = await loadEnrollment(s, k);
+    if (!r) {
+      delete idx.enrollments[k];
+      corrected += 1;
+      markIndexTouched(idx, k);
+      continue;
+    }
+    if (r.stage && r.stage !== 'queued') {
+      idx.enrollments[k] = { market: r.market || entry.market, stage: r.stage };
+      corrected += 1;
+      markIndexTouched(idx, k);
+    }
+  }
+  if (corrected) idx.updatedAt = Date.now();
+  return { checked, corrected };
 }
 
 async function loadEnrollIndex(s) {
   return (await readJson(s, ENROLL_INDEX_KEY)) || { updatedAt: 0, enrollments: {} };
 }
 async function saveEnrollment(s, rec, idxOpt) {
+  // Merge-atomic record write (§3): re-read immediately before
+  // writing and preserve any newer seal / send-audit markers, so a
+  // stale whole-record write can never wipe a seal that landed after
+  // this copy was loaded.
+  try {
+    const fresh = await readJson(s, rec.key);
+    if (fresh) preserveNewerMarkers(rec, fresh);
+  } catch (e) { /* best-effort: the write below still happens */ }
   await writeJson(s, rec.key, rec);
   // idxOpt (the tick's in-memory index): use it instead of re-reading.
   // A re-read here can return a snapshot older than a repair written
@@ -237,6 +345,14 @@ async function saveEnrollment(s, rec, idxOpt) {
   const idx = idxOpt || (await loadEnrollIndex(s));
   idx.enrollments[rec.key] = { market: rec.market, stage: rec.stage };
   idx.updatedAt = Date.now();
+  if (idxOpt) {
+    // Threaded tick index: mutate in memory only and record the touch
+    // — the tick flushes once at the end (flushEnrollIndex). Writing
+    // the index to the store on every save is the cross-tick
+    // last-write-wins that reverted the other tick's stage updates.
+    markIndexTouched(idxOpt, rec.key);
+    return;
+  }
   await writeJson(s, ENROLL_INDEX_KEY, idx);
 }
 async function loadEnrollment(s, key) {
@@ -620,6 +736,23 @@ async function appendOutbound(cs, key, phoneE164, market, msg) {
     thread.messages = thread.messages.slice(-MAX_MESSAGES_PER_THREAD);
   }
   thread.updatedAt = Date.now();
+  // Merge-atomic (§3): re-read immediately before writing and union
+  // messages by id — a concurrent tick / webhook append landing
+  // between this call's load and its write must not be wiped.
+  try {
+    const fresh = await readJson(cs, key);
+    if (fresh && Array.isArray(fresh.messages)) {
+      const byId = new Map();
+      for (const m of fresh.messages) if (m && m.id) byId.set(m.id, m);
+      for (const m of thread.messages) if (m && m.id) byId.set(m.id, m);
+      const merged = [...byId.values()];
+      merged.sort((a, b) => (a.at || 0) - (b.at || 0));
+      thread.messages = merged.slice(-MAX_MESSAGES_PER_THREAD);
+      if (fresh.dnd === true) thread.dnd = true;
+      thread.unread = Math.max(fresh.unread || 0, thread.unread || 0);
+      thread.updatedAt = Math.max(fresh.updatedAt || 0, thread.updatedAt || 0);
+    }
+  } catch (e) { /* best-effort: the write below still happens */ }
   await writeJson(cs, key, thread);
   const idx = (await readJson(cs, 'index')) || { updatedAt: 0, threads: {} };
   const last = thread.messages[thread.messages.length - 1] || null;
@@ -638,6 +771,10 @@ async function appendOutbound(cs, key, phoneE164, market, msg) {
 }
 
 // ---- daily counter ----
+// Merge-atomic bump (§4): the counter is ALWAYS re-loaded fresh,
+// incremented, and written — never threaded through a tick's stale
+// in-memory copy. The old threaded write lost a concurrent tick's
+// bump when it wrote its stale snapshot back.
 async function loadCounter(s, ts) {
   const key = counterKey(ts);
   return (await readJson(s, key)) || { date: etDateString(ts), markets: {} };
@@ -647,6 +784,19 @@ async function bumpCounter(s, ts, market) {
   c.markets[market] = (c.markets[market] || 0) + 1;
   await writeJson(s, counterKey(ts), c);
   return c.markets[market];
+}
+
+// Load the queued records for a set of index keys, oldest first.
+// Records whose stage moved on since the index was read (a concurrent
+// tick already sent/ended them) are not queued and are skipped.
+async function loadQueuedRecs(s, keys) {
+  const recs = [];
+  for (const k of keys) {
+    const r = await loadEnrollment(s, k);
+    if (r && r.stage === 'queued') recs.push(r);
+  }
+  recs.sort((a, b) => (a.enrolledAt || 0) - (b.enrolledAt || 0) || (a.key < b.key ? -1 : 1));
+  return recs;
 }
 
 // ---- tick ----
@@ -710,15 +860,34 @@ async function tick(now, event) {
         continue;
       }
     }
-    const recs = [];
-    for (const k of queuedKeys) {
-      const r = await loadEnrollment(es, k);
-      if (r && r.stage === 'queued') recs.push(r);
-    }
-    recs.sort((a, b) => (a.enrolledAt || 0) - (b.enrolledAt || 0) || (a.key < b.key ? -1 : 1));
+    let recs = await loadQueuedRecs(es, queuedKeys);
     if (!recs.length) {
-      results.push(res);
-      continue;
+      // §1 (Nov 27, 2026): an index that CLAIMS queued entries whose
+      // records are all terminal (or gone) idled the tick with NO scan
+      // — the Carolina case (4 records terminal, index still 'queued').
+      // Treat exactly like an empty index: verify the index-known
+      // queued entries (correcting stale stages / dropping gone
+      // records), then scan for orphans the index never knew. Same
+      // 2-minute throttle as the scan branch above.
+      const lastScan = lastIndexScanAt[market] || 0;
+      if (ts - lastScan >= INDEX_SCAN_MS) {
+        lastIndexScanAt[market] = ts;
+        const verified = await verifyQueuedEntries(es, market, idx);
+        if (verified.corrected) res.verifiedIndex = verified.corrected;
+        const scanned = await scanQueuedRecords(es, market, idx);
+        if (scanned.length) {
+          await repairIndexEntries(es, scanned, idx);
+          res.repairedIndex = (res.repairedIndex || 0) + scanned.length;
+        }
+        queuedKeys = Object.keys(idx.enrollments).filter(
+          (k) => idx.enrollments[k].market === market && idx.enrollments[k].stage === 'queued'
+        );
+        recs = await loadQueuedRecs(es, queuedKeys);
+      }
+      if (!recs.length) {
+        results.push(res);
+        continue;
+      }
     }
     // v3 (Nov 27, 2026): work through the queue in one tick. A stale
     // index/record read can hand us a candidate the prior minute
@@ -788,6 +957,28 @@ async function tick(now, event) {
         continue;
       }
 
+      // Merge-atomic guard (§3): re-read the record immediately before
+      // sending — a seal (opt-out / bot seal) that landed after this
+      // tick loaded the candidate must end it, never send into it.
+      // preserveNewerMarkers carries any newer seal markers onto the
+      // candidate first, so the check below sees the freshest truth.
+      const freshBeforeSend = await loadEnrollment(es, rec.key);
+      if (freshBeforeSend) preserveNewerMarkers(rec, freshBeforeSend);
+      if (isSealedRecord(rec)) {
+        rec.stage = 'ended-dnc';
+        await saveEnrollment(es, rec, idx);
+        res.action = 'ended-dnc';
+        continue;
+      }
+      // Fresh cap check: a concurrent tick may have spent the daily
+      // cap since this tick's start-of-tick read — never send past it.
+      const freshCounter = await loadCounter(es, ts);
+      if ((freshCounter.markets[market] || 0) >= workflow.dripPerDay) {
+        res.action = 'cap-reached';
+        res.sentToday = freshCounter.markets[market] || 0;
+        break;
+      }
+
       const body = wfStore.renderFirstTextFrom(workflow, rec.path, {
         firstName: rec.firstName,
         address1: rec.address1,
@@ -826,11 +1017,10 @@ async function tick(now, event) {
       rec.lastError = null;
       rec.lastAttemptAt = ts;
       await saveEnrollment(es, rec, idx);
-      // Thread the counter through the tick's in-memory copy, same as the
-      // index: a reload here could lose another market's bump.
-      counter.markets[market] = (counter.markets[market] || 0) + 1;
-      await writeJson(es, counterKey(ts), counter);
-      res.sentToday = counter.markets[market];
+      // Merge-atomic counter bump (§4): re-load fresh, increment,
+      // write — never write back a tick-start snapshot that would lose
+      // a concurrent tick's bump.
+      res.sentToday = await bumpCounter(es, ts, market);
       res.action = 'sent';
       res.messageId = msg.id;
       break;
@@ -838,7 +1028,20 @@ async function tick(now, event) {
     results.push(res);
   }
 
-  return { at: ts, dateET: etDateString(ts), results };
+  // Merge-atomic index flush (§1): re-load the index fresh, overlay
+  // ONLY the keys this tick touched, write once. A tick that wrote its
+  // tick-start snapshot back (the old saveEnrollment-per-write) reverted
+  // a concurrent tick's stage updates — the cross-tick last-write-wins.
+  // A failed flush never fails the tick response: the records are the
+  // source of truth and the next tick's scan/verify repairs the index.
+  const ret = { at: ts, dateET: etDateString(ts), results };
+  try {
+    const flushed = await flushEnrollIndex(es, idx);
+    if (flushed) ret.indexFlushed = flushed;
+  } catch (e) {
+    ret.indexFlushError = String((e && e.message) || e);
+  }
+  return ret;
 }
 
 // ---- stampPricing (the auto-pricing writer's write path) ----
@@ -890,6 +1093,7 @@ module.exports._test = {
   windowOpen,
   counterKey,
   loadCounter,
+  bumpCounter,
   setStores(stores) {
     deps.enrollStoreFactory = stores && stores.enrollments ? () => stores.enrollments : null;
     deps.convStoreFactory = stores && stores.conversations ? () => stores.conversations : null;

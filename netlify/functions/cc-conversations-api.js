@@ -129,6 +129,18 @@ function store(event) {
   } catch (e) { /* best-effort */ }
   return blobs.getStore(STORE_NAME);
 }
+// cc-enrollments store (engine daily counter) — same lazy pattern.
+// The stats action reads counter-<ET date> from it (§4).
+const ENROLL_STORE_NAME = 'cc-enrollments';
+let enrollStoreFactory = null;
+function enrollStore(event) {
+  if (enrollStoreFactory) return enrollStoreFactory();
+  if (!blobs) throw new Error('The @netlify/blobs module is not installed.');
+  try {
+    if (typeof blobs.connectLambda === 'function') blobs.connectLambda(event);
+  } catch (e) { /* best-effort */ }
+  return blobs.getStore(ENROLL_STORE_NAME);
+}
 async function readJson(s, key) {
   try {
     const v = await s.get(key, { type: 'json' });
@@ -149,6 +161,41 @@ async function loadThread(s, key) {
   return { phone: '+' + key, key, name: '', market: '', unread: 0, updatedAt: 0, messages: [] };
 }
 async function saveThread(s, thread) {
+  // Merge-atomic (§3): re-read immediately before writing and union
+  // messages by id, so a concurrent writer's messages (e.g. a webhook
+  // inbound landing while the operator sends) are never wiped by this
+  // write. In-memory entries win on an id conflict; dnd is OR (a seal
+  // is never unwritten here). `unread` is intentionally NOT maxed:
+  // the thread action marks a thread read by setting unread=0, and a
+  // max() would resurrect the pre-read count — the writer's unread
+  // value stands; a concurrent bump is re-surfaced on the next load.
+  const fresh = await readJson(s, thread.key);
+  if (fresh && Array.isArray(fresh.messages)) {
+    const byId = new Map();
+    for (const m of fresh.messages) if (m && m.id) byId.set(m.id, m);
+    for (const m of thread.messages) if (m && m.id) byId.set(m.id, m);
+    const merged = [...byId.values()];
+    const tripleOf = (m) => (m.dir || '') + '|' + (m.at || '') + '|' + String(m.body || '');
+    const seenTriples = new Set(merged.map(tripleOf));
+    for (const src of [fresh.messages, thread.messages]) {
+      for (const m of src) {
+        if (!m || m.id) continue;
+        const t = tripleOf(m);
+        if (!seenTriples.has(t)) {
+          merged.push(m);
+          seenTriples.add(t);
+        }
+      }
+    }
+    merged.sort((a, b) => (a.at || 0) - (b.at || 0));
+    thread.messages = merged;
+    if (fresh.dnd === true) thread.dnd = true;
+    thread.updatedAt = Math.max(fresh.updatedAt || 0, thread.updatedAt || 0);
+    if (!thread.phone && fresh.phone) thread.phone = fresh.phone;
+    if (!thread.market && fresh.market) thread.market = fresh.market;
+    if (!thread.name && fresh.name) thread.name = fresh.name;
+    if (!thread.ourNumber && fresh.ourNumber) thread.ourNumber = fresh.ourNumber;
+  }
   await writeJson(s, thread.key, thread);
   const idx = await loadIndex(s);
   // The list preview is a TEXT preview: a Sam note / draft suggestion
@@ -421,6 +468,32 @@ exports.handler = async (event) => {
           else if (m.status === 'failed') bump(thread.market, 'failed');
         }
       }
+      // §4: `sent` comes from the engine's daily counter
+      // (counter-<ET date> in the cc-enrollments store), NOT from
+      // message statuses. Engine sends sit at status 'queued' until a
+      // Telnyx message.sent/finalized webhook advances them — zero
+      // have ever advanced, so the status-derived count read "0 SENT
+      // TODAY" while sends were landing. The status-derived 'queued'
+      // bucket is left as-is (the page relabels it "Awaiting delivery
+      // confirmation"); only `sent` is replaced — as the MAX of the
+      // counter and the status-derived count, so a manual
+      // Conversations send (which never touches the engine counter)
+      // is still counted once its delivery confirms. Fail-soft: an
+      // unreadable enrollments store keeps the status-derived count
+      // rather than failing stats.
+      try {
+        const es = enrollStore(event);
+        const counter = (await readJson(es, 'counter-' + today)) || null;
+        const markets = (counter && counter.markets) || {};
+        let sentTotal = 0;
+        for (const [m, n] of Object.entries(markets)) {
+          const count = Number(n) || 0;
+          if (!perMarket[m]) perMarket[m] = { sent: 0, queued: 0, failed: 0, replies: 0 };
+          perMarket[m].sent = Math.max(perMarket[m].sent, count);
+        }
+        for (const m of Object.keys(perMarket)) sentTotal += perMarket[m].sent;
+        totals.sent = sentTotal;
+      } catch (e) { /* keep status-derived sent */ }
       return ok({ date: today, perMarket, totals });
     }
 
@@ -462,6 +535,9 @@ exports._test = {
   etDateString,
   setStoreFactory(fn) {
     storeFactory = fn;
+  },
+  setEnrollStoreFactory(fn) {
+    enrollStoreFactory = fn || null;
   },
   setWatchdog(wd) {
     watchdogOverride = wd || null;

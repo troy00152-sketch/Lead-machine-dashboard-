@@ -773,6 +773,101 @@ async function hlGetContact(token, contactId, impl) {
   const parsed = await hlJson(token, 'GET', `/contacts/${encodeURIComponent(contactId)}?locationId=${encodeURIComponent(HL_LOCATION_ID)}`, null, impl);
   return parsed.contact || parsed || null;
 }
+
+// ---- documents enrichment (Nov 27, 2026) ----
+// The documents feed projection stripped links[] / createdAt and
+// carried no phone or address, so contracts.html rendered "—" for
+// Property / Sent / Viewed / signing link / thread deep-link. This
+// enrichment is ADDITIVE ONLY: the old five fields pass through
+// untouched, each document additionally carries its HL links[] +
+// createdAt, and (best-effort, per document) the seller contact's
+// phone + address joined via hlGetContact — the same GET
+// /contacts/:id helper the prepare flow already uses, so no new HL
+// call shape is invented here. The seller is the first signer
+// recipient who is not the buyer signer (Paula Thomas) or Troy — the
+// same rule contracts.html sellerOf() uses. A failed contact read
+// never fails the list: that document simply carries no seller
+// fields. Contact reads are cached per request (one GET per seller
+// even when they hold several documents). Nothing here sends, signs,
+// or changes a document — the send/sign flow is untouched.
+const DOCS_SELLER_SKIP_NAMES = ['paula thomas', 'troy thomas'];
+function sellerRecipientOf(doc) {
+  const recips = (doc && Array.isArray(doc.recipients)) ? doc.recipients : [];
+  for (const r of recips) {
+    const name = String((r && r.contactName) || '').trim();
+    if (!name) continue;
+    if (DOCS_SELLER_SKIP_NAMES.includes(name.toLowerCase())) continue;
+    if (r.role && String(r.role).toLowerCase() !== 'signer') continue;
+    return r;
+  }
+  return null;
+}
+function sellerPhoneKeyOf(phone) {
+  const d = String(phone || '').replace(/\D/g, '');
+  if (d.length === 10) return '1' + d;
+  return d;
+}
+function sellerAddressOf(contact) {
+  const c = contact || {};
+  return [c.address1, c.city, c.state, c.postalCode]
+    .map((v) => String(v == null ? '' : v).trim())
+    .filter(Boolean)
+    .join(', ');
+}
+function projectDocumentLinks(doc) {
+  const links = (doc && Array.isArray(doc.links)) ? doc.links : [];
+  return links.map((l) => ({
+    recipientId: (l && l.recipientId) || '',
+    documentId: (l && l.documentId) || '',
+    // HL link URL field varies (url / link / href) — signingLinkFor
+    // in this file reads the same three.
+    url: (l && (l.url || l.link || l.href)) || '',
+  }));
+}
+async function enrichDocuments(token, docs, impl) {
+  const list = Array.isArray(docs) ? docs : [];
+  const contactCache = new Map();
+  async function sellerContact(contactId) {
+    if (!contactId) return null;
+    if (contactCache.has(contactId)) return contactCache.get(contactId);
+    let contact = null;
+    try {
+      contact = await hlGetContact(token, contactId, impl);
+    } catch (e) {
+      contact = null;
+    }
+    contactCache.set(contactId, contact);
+    return contact;
+  }
+  const out = [];
+  for (const d of list) {
+    const projected = {
+      id: d.documentId || d._id,
+      name: d.name,
+      status: d.status,
+      recipients: d.recipients || [],
+      updatedAt: d.updatedAt,
+      links: projectDocumentLinks(d),
+      createdAt: d.createdAt || '',
+    };
+    const seller = sellerRecipientOf(d);
+    if (seller && seller.id) {
+      const contact = await sellerContact(String(seller.id));
+      if (contact) {
+        projected.sellerContactId = String(seller.id);
+        const phone = String(contact.phone || '').trim();
+        if (phone) {
+          projected.sellerPhone = phone;
+          projected.sellerPhoneKey = sellerPhoneKeyOf(phone);
+        }
+        const address = sellerAddressOf(contact);
+        if (address) projected.sellerAddress = address;
+      }
+    }
+    out.push(projected);
+  }
+  return out;
+}
 async function hlUpdateContactFields(token, contactId, fields, impl) {
   await hlJson(token, 'PUT', `/contacts/${encodeURIComponent(contactId)}`, { customFields: fields }, impl);
 }
@@ -824,7 +919,7 @@ exports.handler = async (event) => {
       if (!token) return unavailable('HighLevel is not connected (HL_API_TOKEN missing).');
       try {
         const docs = await hlListDocuments(token, qs.query || '');
-        return ok({ documents: docs.map((d) => ({ id: d.documentId || d._id, name: d.name, status: d.status, recipients: d.recipients || [], updatedAt: d.updatedAt })) });
+        return ok({ documents: await enrichDocuments(token, docs) });
       } catch (e) { return unavailable('HighLevel document list failed: ' + (e.message || 'unknown error')); }
     }
     if (action === 'envelope') {
@@ -1131,6 +1226,10 @@ module.exports = {
   resolveEnvelopeDocumentId,
   hlErrorText,
   hlListDocuments,
+  hlGetContact,
+  enrichDocuments,
+  sellerRecipientOf,
+  projectDocumentLinks,
   FIELD_IDS,
   KNOWN_TEMPLATES,
   ENVELOPE_STATES,
