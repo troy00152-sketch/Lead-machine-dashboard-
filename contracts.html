@@ -25,10 +25,13 @@
   .filters button{ background:var(--panel2); border:1px solid var(--line); color:var(--text); border-radius:20px; padding:7px 14px; font-size:13px; font-weight:600; cursor:pointer; }
   .filters button.active{ border-color:var(--accent); color:var(--accent); }
   .tablewrap{ overflow-x:auto; background:var(--panel); border:1px solid var(--line); border-radius:14px; }
-  table{ width:100%; border-collapse:collapse; font-size:13px; min-width:900px; }
+  table{ width:100%; border-collapse:collapse; font-size:13px; min-width:1100px; }
   th, td{ text-align:left; padding:10px 12px; border-bottom:1px solid var(--line); vertical-align:top; }
   th{ color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
   tr:last-child td{ border-bottom:0; }
+  tr.clickable{ cursor:pointer; }
+  tr.clickable:hover td{ background:var(--panel2); }
+  tr.clickable:focus{ outline:2px solid var(--accent); outline-offset:-2px; }
   .name{ font-weight:700; }
   .sub{ color:var(--muted); font-size:12px; margin-top:3px; }
   td a{ color:var(--accent); font-size:12px; font-weight:600; text-decoration:none; }
@@ -36,6 +39,21 @@
   .pill.green{ border-color:var(--green); color:#7ee2a0; }
   .pill.amber{ border-color:var(--amber); color:#f2cd8a; }
   .pill.red{ border-color:var(--red); color:#f2a49e; }
+  .section{ font-size:18px; font-weight:700; margin:26px 0 8px; }
+  .detail{ background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:18px; }
+  .detail h2{ margin:0 0 4px; font-size:19px; }
+  .kv{ width:100%; border-collapse:collapse; font-size:13px; margin:12px 0; }
+  .kv th, .kv td{ text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+  .kv th{ color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.04em; width:170px; }
+  .btn{ display:inline-block; background:var(--accent); border:0; color:#fff; border-radius:24px; padding:10px 20px; font-size:14px; font-weight:700; cursor:pointer; }
+  .btn:disabled{ opacity:.45; cursor:default; }
+  .btn.ghost{ background:var(--panel2); border:1px solid var(--line); color:var(--text); }
+  .sendbox{ background:var(--panel2); border:1px solid var(--amber); border-radius:12px; padding:14px; margin:14px 0; font-size:13px; }
+  .sendbox label{ display:flex; gap:8px; align-items:flex-start; margin:8px 0; cursor:pointer; }
+  .sendmsg{ margin:12px 0; font-size:13px; }
+  .sendmsg.err{ color:#f2a49e; }
+  .sendmsg.ok{ color:#7ee2a0; }
+  .note{ background:var(--panel2); border:1px solid var(--line); border-radius:12px; padding:12px 14px; margin:12px 0; font-size:13px; }
 </style>
 </head>
 <body>
@@ -47,28 +65,58 @@
     <a class="back" href="/conversations.html">💬 Conversations</a>
     <a class="back" href="/index.html">← Dashboard</a>
   </div>
-  <p class="muted" id="contractMeta">Loading contracts…</p>
-  <div class="filters" id="filters" style="display:none">
-    <button data-filter="all" class="active">All</button>
-    <button data-filter="draft">Draft</button>
-    <button data-filter="sent">Sent</button>
-    <button data-filter="viewed">Viewed</button>
-    <button data-filter="signed">Signed</button>
+
+  <div id="listView">
+    <p class="muted" id="contractMeta">Loading contracts…</p>
+    <div class="filters" id="filters" style="display:none">
+      <button data-filter="all" class="active">All</button>
+      <button data-filter="draft">Draft</button>
+      <button data-filter="sent">Sent</button>
+      <button data-filter="viewed">Viewed</button>
+      <button data-filter="signed">Signed</button>
+    </div>
+    <div class="filters" id="typeFilters" style="display:none">
+      <button data-type="all" class="active">All types</button>
+      <button data-type="purchase">Purchase</button>
+      <button data-type="assignment">Assignment</button>
+      <button data-type="buyer">Buyer</button>
+    </div>
+    <div class="tablewrap" id="tablewrap" style="display:none">
+      <table>
+        <thead><tr>
+          <th>Seller / Contact</th><th>Property</th><th>Price</th><th>Type</th><th>Document</th><th>Status</th>
+          <th>Sent</th><th>Viewed</th><th>Signed</th><th>Signing link</th><th>Contact / Thread</th>
+        </tr></thead>
+        <tbody id="contractRows"></tbody>
+      </table>
+    </div>
+    <div class="empty" id="emptyState" style="display:none">No contracts in HighLevel yet — documents appear here once a contract is prepared or sent from the e-sign sheet.</div>
+    <div class="empty" id="errorState" style="display:none"></div>
+
+    <div class="section">📋 Templates</div>
+    <p class="muted" id="templateMeta">Loading templates…</p>
+    <div class="tablewrap" id="templateWrap" style="display:none">
+      <table style="min-width:760px">
+        <thead><tr>
+          <th>Template</th><th>Type</th><th>Market</th><th>Updated</th><th>Created</th><th>Open in HighLevel</th>
+        </tr></thead>
+        <tbody id="templateRows"></tbody>
+      </table>
+    </div>
+    <div class="empty" id="templateEmpty" style="display:none">No templates in HighLevel yet.</div>
+    <div class="empty" id="templateError" style="display:none"></div>
   </div>
-  <div class="tablewrap" id="tablewrap" style="display:none">
-    <table>
-      <thead><tr>
-        <th>Seller / Contact</th><th>Property</th><th>Document</th><th>Status</th>
-        <th>Sent</th><th>Viewed</th><th>Signed</th><th>Signing link</th><th>Contact / Thread</th>
-      </tr></thead>
-      <tbody id="contractRows"></tbody>
-    </table>
+
+  <div id="detailView" style="display:none">
+    <p><button class="btn ghost" id="backBtn">← Back to contracts</button></p>
+    <div class="detail" id="detailBody"></div>
   </div>
-  <div class="empty" id="emptyState" style="display:none">No contracts in HighLevel yet — documents appear here once a contract is prepared or sent from the e-sign sheet.</div>
-  <div class="empty" id="errorState" style="display:none"></div>
-  <p class="muted">Read-only list — nothing here sends, signs or changes a contract. Contracts come live from HighLevel via <b>/.netlify/functions/esign?action=documents</b> (HL GET /proposals/document), the same list the e-sign sheet reads. No rows are ever invented: if the call fails, this page says so instead of showing old or made-up contracts.</p>
-  <p class="muted">What this list shows now (enriched Nov 27, 2026): the documents feed returns links[] + createdAt per document, and the server joins the seller contact's phone + address — so the Property column shows the seller's address, Sent shows the created date, the Signing link column shows the seller's own signing link (drafts carry no links at all; links are minted at send), and the Contact / Thread column links straight into the Conversations thread (?thread=&lt;phoneKey&gt;) when the seller has a phone. What it still cannot show: <b>viewed date</b> — the feed returns only one timestamp per document (last updated), so Viewed shows “—” and the Status column shows last-updated instead; <b>signed date</b> shows only when a recipient record carries signedDate / signedAt; the document record itself carries no APN or legal description — the Property column is the seller contact's mailing address, not the legal description. Any field the feed does not carry shows an honest “—” — nothing is invented. The seller is the first signer recipient who is not the buyer signer (Paula Thomas) or Troy — co-sellers after the first are listed under the seller name.</p>
-  <p class="muted">Enrichment live (Nov 27, 2026): the documents action now returns links[] + createdAt per document and joins the seller contact's phone + address (sellerPhoneKey is the digits-only phone key the thread link uses). Remaining gap: contacts.html has no per-contact URL deep-link today, so the Contact link below opens Contacts and the CRM contact id is printed for search.</p>
+
+  <p class="muted">Contracts come live from HighLevel via <b>/.netlify/functions/esign?action=documents</b> (HL GET /proposals/document) and templates via <b>action=templates</b> (HL GET /proposals/templates) — the same lists the e-sign sheet reads. No rows are ever invented: if a call fails, this page says so instead of showing old or made-up contracts. Click any row to open it. Nothing sends on its own: a contract goes out only when Troy taps Send on that one contract's detail view and confirms — never automatically, never in a batch.</p>
+  <p class="muted">What this list shows now (enriched Nov 27, 2026): the documents feed returns links[] + createdAt per document, and the server joins the seller contact's phone + address + contract price — so the Property column shows the seller's address, Sent shows the created date, Price shows the seller contact's contract_price field (the same price the e-sign sheet validates; a document grandTotal above $0 is the fallback — drafts read $0.00, which means "no price on the document", not $0), the Signing link column shows the seller's own signing link (drafts carry no links at all; links are minted at send), and the Contact / Thread column links straight into the Conversations thread (?thread=&lt;phoneKey&gt;) when the seller has a phone. What it still cannot show: <b>viewed date</b> — the feed returns only one timestamp per document (last updated), so Viewed shows “—” and the Status column shows last-updated instead; <b>signed date</b> shows only when a recipient record carries signedDate / signedAt; the document record itself carries no APN or legal description — the Property column is the seller contact's mailing address, not the legal description. Any field the feed does not carry shows an honest “—” — nothing is invented. The seller is the first signer recipient who is not the buyer signer (Paula Thomas) or Troy — co-sellers after the first are listed under the seller name.</p>
+  <p class="muted">Assignment &amp; buyer contracts: HighLevel's document list holds purchase agreements only — all 13 live documents are purchase agreements, and no assignment or buyer contract has been sent from HighLevel yet. Assignment agreements live as templates below (and as the local master in the workspace) until one is created and sent. Google Drive could not be checked for executed copies — it is not connected to this workspace — so if a signed assignment PDF lives there, it is not on this page yet.</p>
+  <p class="muted">Templates: the HighLevel templates list returns id / name / type / dates only — no template text and no field data — so a template row opens its details on this page (kind, market, dates, what using it needs) plus a link into HighLevel's Documents &amp; Contracts section, where the template itself opens. "Create a contract from a template and send it" is the e-sign sheet's prepare flow (pick a seller lead on the Dashboard, prepare, then send) — it works today for purchase-agreement templates only. Assignment and buyer templates need the sheet extended to them plus the buyer-signer mapping before they can go out from here; the template detail says exactly what is missing for each one.</p>
+  <p class="muted">Enrichment live (Nov 27, 2026): the documents action now returns links[] + createdAt per document and joins the seller contact's phone + address + contract price (sellerPhoneKey is the digits-only phone key the thread link uses). Remaining gap: contacts.html has no per-contact URL deep-link today, so the Contact link below opens Contacts and the CRM contact id is printed for search.</p>
 </div>
 
 <script>
@@ -86,6 +134,37 @@ function docStatusPill(status) {
   var s = String(status || '').toLowerCase();
   if (s === 'completed' || s === 'accepted') return 'green';
   if (s === 'viewed' || s === 'sent') return 'amber';
+  return '';
+}
+/* Contract kind, from the document/template NAME only — the feed
+   carries no kind field. Same rule as esign.js contractKind(), so
+   the page and the server never disagree on a row's type. The buyer
+   contract IS an assignment to the buyer, so "Assignment … TO
+   BUYER" is buyer; a plain "Assignment …" is the assignment
+   itself. */
+function contractKind(name) {
+  var n = String(name || '').toUpperCase();
+  if (/ASSIGNMENT/.test(n) && /TO BUYER/.test(n)) return 'buyer';
+  if (/ASSIGNMENT/.test(n)) return 'assignment';
+  if (/DISCLOSURE/.test(n)) return 'disclosure';
+  if (/ADDENDUM/.test(n)) return 'addendum';
+  if (/AGREEMENT TO PURCHASE/.test(n)) return 'purchase';
+  return 'other';
+}
+function contractKindLabel(kind) {
+  var map = { purchase: 'Purchase contract', assignment: 'Assignment', buyer: 'Buyer contract', disclosure: 'Disclosure', addendum: 'Addendum', other: 'Other' };
+  return map[String(kind || '')] || 'Other';
+}
+/* Market from the name: IN / NC / KC / OH / FL. KC is Kansas City;
+   FLORIDA reads as FL. Buyer/disclosure/addendum names carry no
+   market — ''. Never guessed from anything else. */
+function marketOf(name) {
+  var n = String(name || '').toUpperCase();
+  if (/\bNC\b/.test(n)) return 'NC';
+  if (/\bKC\b/.test(n)) return 'KC';
+  if (/\bOH\b/.test(n)) return 'OH';
+  if (/\bFLORIDA\b/.test(n) || /\bFL\b/.test(n)) return 'FL';
+  if (/\bIN\b/.test(n)) return 'IN';
   return '';
 }
 /* The seller is the first signer recipient who is NOT the buyer signer
@@ -130,6 +209,62 @@ function isSigned(doc) {
   if (s === 'completed' || s === 'accepted') return true;
   return signedDateOf(doc) !== '';
 }
+/* Price shown on the list — mirror of esign.js docPrice(). Source
+   order, never invented: (1) the seller contact's contract_price
+   custom field (a string that may carry $ / commas); (2) the
+   document's own grandTotal when it is above zero (drafts read
+   0.00 — "no price", not "$0"); (3) null, which renders "—".
+   Returns { amount, source } with amount a number or null. */
+function priceOf(doc) {
+  var d = doc || {};
+  var raw = String(d.contractPrice == null ? '' : d.contractPrice).replace(/[$,\s]/g, '');
+  var fromContact = parseFloat(raw);
+  if (Number.isFinite(fromContact) && fromContact > 0) return { amount: fromContact, source: 'contact' };
+  var gt = d.grandTotal;
+  if (gt != null && typeof gt === 'object') gt = gt.amount;
+  var fromDoc = parseFloat(String(gt == null ? '' : gt).replace(/[$,\s]/g, ''));
+  if (Number.isFinite(fromDoc) && fromDoc > 0) return { amount: fromDoc, source: 'document' };
+  return { amount: null, source: 'none' };
+}
+/* "$64,000" — whole dollars with commas; cents only when present. */
+function fmtMoney(n) {
+  if (n == null || !Number.isFinite(Number(n))) return '—';
+  var v = Number(n);
+  return '$' + v.toLocaleString('en-US', { minimumFractionDigits: (v % 1 === 0 ? 0 : 2), maximumFractionDigits: 2 });
+}
+/* Whether the detail view may offer Send on this document: only a
+   document that is not signed. Mirrors esign.js canSendDoc(). */
+function canSendDoc(doc) {
+  return !isSigned(doc);
+}
+/* Send button label: a draft has never gone out ("Send contract");
+   a sent/viewed document goes out again ("Re-send signing link").
+   Signed documents get no button. */
+function sendLabelDoc(doc) {
+  var s = String((doc && doc.status) || '').toLowerCase();
+  if (s === 'draft') return 'Send contract';
+  if (s === 'sent' || s === 'viewed') return 'Re-send signing link';
+  return '';
+}
+/* What "use this template" needs, by kind. Purchase + disclosure
+   templates are creatable from the e-sign sheet on the Dashboard
+   today. Assignment / buyer templates are NOT — the sheet only
+   sends purchase agreements — and the Nov 14 editor gate still
+   stands on the buyer copies (see the per-template note the server
+   attaches). Anything else opens in HighLevel only. */
+function templateActionInfo(t) {
+  var kind = contractKind(t && t.name);
+  if (kind === 'purchase') {
+    return { use: 'sheet', note: 'Creatable from the e-sign sheet on the Dashboard — open the seller lead there, prepare from this template, then send. The sheet validates the contract fields and checks signature placement before Send unlocks.' };
+  }
+  if (kind === 'buyer' || kind === 'assignment') {
+    return { use: 'sheet-extension', note: 'Not creatable from the e-sign sheet yet — the sheet only sends purchase agreements. To use it needs: the sheet extended to this template, the buyer-signer mapping (assignor Fitness Lead Machine LLC / Paula Thomas, assignee the end buyer), and the template fields checked in the HighLevel editor before the first send.' };
+  }
+  if (kind === 'disclosure') {
+    return { use: 'sheet', note: 'A companion document — sendable from the e-sign sheet like a purchase contract. For Ohio sellers it goes first: the purchase contract stays blocked until the disclosure shows signed.' };
+  }
+  return { use: 'hl-only', note: 'Open it in HighLevel to use it — the e-sign sheet does not send this template.' };
+}
 function fmtDate(iso) {
   if (!iso) return '—';
   var d = new Date(iso);
@@ -148,14 +283,38 @@ function sortDocsDesc(docs) {
   });
   return list;
 }
+/* Counts by kind for the meta line — purchase / assignment / buyer /
+   disclosure / addendum / other. Never invents a row. */
+function docTypeCounts(docs) {
+  var counts = { purchase: 0, assignment: 0, buyer: 0, disclosure: 0, addendum: 0, other: 0 };
+  (Array.isArray(docs) ? docs : []).forEach(function (d) {
+    var k = contractKind(d && d.name);
+    counts[k] = (counts[k] || 0) + 1;
+  });
+  return counts;
+}
 /* Status filter: all | draft | sent | viewed | signed (signed =
-   completed/accepted status OR a signed recipient record). */
-function filterDocs(docs, filter) {
+   completed/accepted status OR a signed recipient record), AND a
+   type filter: all | purchase | assignment | buyer (other kinds
+   never match a type filter — they show under All types only). */
+function filterDocs(docs, filter, typeFilter) {
   var list = Array.isArray(docs) ? docs : [];
   var f = String(filter || 'all').toLowerCase();
-  if (f === 'all') return list.slice();
-  if (f === 'signed') return list.filter(function (d) { return isSigned(d); });
-  return list.filter(function (d) { return String((d && d.status) || '').toLowerCase() === f; });
+  var tf = String(typeFilter || 'all').toLowerCase();
+  return list.filter(function (d) {
+    var statusOk = true;
+    if (f === 'signed') statusOk = isSigned(d);
+    else if (f !== 'all') statusOk = String((d && d.status) || '').toLowerCase() === f;
+    var typeOk = tf === 'all' || contractKind(d && d.name) === tf;
+    return statusOk && typeOk;
+  });
+}
+/* Templates carry no status — only the kind filter applies. */
+function filterTemplates(templates, typeFilter) {
+  var list = Array.isArray(templates) ? templates : [];
+  var tf = String(typeFilter || 'all').toLowerCase();
+  if (tf === 'all') return list.slice();
+  return list.filter(function (t) { return contractKind(t && t.name) === tf; });
 }
 /* Seller's signing link: the links[] entry whose recipientId is the
    seller's contact id (page rule first, server-joined
@@ -195,7 +354,12 @@ function esc(s) {
   });
 }
 var allDocs = [];
+var allTemplates = [];
+var hlDocumentsUrl = '';
 var activeFilter = 'all';
+var activeType = 'all';
+var detailDoc = null;      // { kind: 'doc'|'template', id } when the detail view is open
+var sendBusy = false;
 
 function rowHtml(d) {
   var seller = sellerOf(d);
@@ -210,9 +374,12 @@ function rowHtml(d) {
   // recipient record when it carries one. Property is the seller
   // contact's joined address; the signing link is the links[] entry
   // for the seller; the thread link needs the joined sellerPhoneKey.
+  // Price comes from the seller contact's contract_price field, or
+  // the document grandTotal when that is above zero — never invented.
   var signed = signedDateOf(d);
   var signingUrl = sellerSigningUrl(d);
   var thread = threadUrl(d);
+  var price = priceOf(d);
   var contactCell = '';
   if (seller.contactId) {
     contactCell += '<a href="/contacts.html">View in Contacts ↗</a><div class="sub">CRM contact ' + esc(seller.contactId) + '</div>';
@@ -225,11 +392,13 @@ function rowHtml(d) {
   } else {
     contactCell += '<div class="sub">Thread: — (no seller phone on the document — a thread deep-link needs a phone key)</div>';
   }
-  return '<tr>' +
+  return '<tr data-doc-id="' + esc(d.id || '') + '" class="clickable" tabindex="0" title="Click to open">' +
     '<td><div class="name">' + esc(seller.name || '—') + '</div>' +
       (others.length ? '<div class="sub">Also on doc: ' + esc(others.join(', ')) + '</div>' : '') +
       (seller.contactId ? '<div class="sub">CRM contact ' + esc(seller.contactId) + '</div>' : '') + '</td>' +
     '<td>' + (d.sellerAddress ? esc(d.sellerAddress) : '—') + '</td>' +
+    '<td>' + (price.amount != null ? esc(fmtMoney(price.amount)) : '—') + '</td>' +
+    '<td><span class="pill">' + esc(contractKindLabel(contractKind(d.name))) + '</span></td>' +
     '<td><div class="name">' + esc(d.name || 'Untitled document') + '</div><div class="sub">Doc ' + esc(d.id || '—') + '</div></td>' +
     '<td><span class="pill ' + esc(docStatusPill(status)) + '">' + esc(docStatusLabel(status)) + '</span>' +
       '<div class="sub">Updated ' + esc(fmtDate(d.updatedAt)) + '</div></td>' +
@@ -240,16 +409,226 @@ function rowHtml(d) {
     '<td>' + contactCell + '</td>' +
     '</tr>';
 }
+function templateRowHtml(t) {
+  return '<tr data-template-id="' + esc(t.id || '') + '" class="clickable" tabindex="0" title="Click to open">' +
+    '<td><div class="name">' + esc(t.name || 'Untitled template') + '</div><div class="sub">Template ' + esc(t.id || '—') + '</div></td>' +
+    '<td><span class="pill">' + esc(contractKindLabel(contractKind(t.name))) + '</span></td>' +
+    '<td>' + esc(marketOf(t.name) || '—') + '</td>' +
+    '<td>' + esc(fmtDate(t.updatedAt)) + '</td>' +
+    '<td>' + esc(fmtDate(t.createdAt)) + '</td>' +
+    '<td>' + (hlDocumentsUrl ? '<a href="' + esc(hlDocumentsUrl) + '" target="_blank" rel="noopener">Open in HighLevel ↗</a>' : '—') + '</td>' +
+    '</tr>';
+}
 function render() {
   var rows = document.getElementById('contractRows');
-  var shown = filterDocs(allDocs, activeFilter);
-  rows.innerHTML = shown.map(rowHtml).join('') ||
-    '<tr><td colspan="9" class="empty">No contracts match this filter.</td></tr>';
+  var shown = filterDocs(allDocs, activeFilter, activeType);
+  var counts = docTypeCounts(allDocs);
+  if (!shown.length && allDocs.length) {
+    var why = activeType !== 'all'
+      ? 'No ' + contractKindLabel(activeType).toLowerCase() + ' contracts in HighLevel yet — ' + (activeType === 'assignment' || activeType === 'buyer' ? 'they live as templates below until one is created and sent.' : 'none have been sent or drafted.')
+      : 'No contracts match this filter.';
+    rows.innerHTML = '<tr><td colspan="11" class="empty">' + esc(why) + '</td></tr>';
+  } else {
+    rows.innerHTML = shown.map(rowHtml).join('') ||
+      '<tr><td colspan="11" class="empty">No contracts match this filter.</td></tr>';
+  }
   document.getElementById('contractMeta').textContent =
     'Showing ' + shown.length + ' of ' + allDocs.length + ' contracts from HighLevel' +
-    (allDocs.length ? ' (newest first by last updated).' : '.');
+    (allDocs.length ? ' (newest first by last updated). ' + counts.purchase + ' purchase · ' + counts.assignment + ' assignment · ' + counts.buyer + ' buyer.' : '.');
 }
-async function loadContracts() {
+function renderTemplates() {
+  var rows = document.getElementById('templateRows');
+  var shown = filterTemplates(allTemplates, activeType);
+  rows.innerHTML = shown.map(templateRowHtml).join('') ||
+    '<tr><td colspan="6" class="empty">No templates match this filter.</td></tr>';
+  document.getElementById('templateMeta').textContent =
+    'Showing ' + shown.length + ' of ' + allTemplates.length + ' templates from HighLevel (live list, newest first by last updated).';
+}
+function detailHtml(d) {
+  var seller = sellerOf(d);
+  var recips = Array.isArray(d.recipients) ? d.recipients : [];
+  var others = recips
+    .map(function (r) { return String((r && r.contactName) || '').trim(); })
+    .filter(function (n) { return n && n !== seller.name; });
+  var price = priceOf(d);
+  var signed = signedDateOf(d);
+  var signingUrl = sellerSigningUrl(d);
+  var thread = threadUrl(d);
+  var status = String(d.status || '');
+  var canSend = canSendDoc(d);
+  var label = sendLabelDoc(d);
+  var html = '<h2>' + esc(d.name || 'Untitled document') + '</h2>' +
+    '<p class="muted">Doc ' + esc(d.id || '—') + ' · <span class="pill">' + esc(contractKindLabel(contractKind(d.name))) + '</span> ' +
+    '<span class="pill ' + esc(docStatusPill(status)) + '">' + esc(docStatusLabel(status)) + '</span></p>' +
+    '<table class="kv">' +
+    '<tr><th>Seller</th><td>' + esc(seller.name || '—') + (others.length ? '<div class="sub">Also on doc: ' + esc(others.join(', ')) + '</div>' : '') + '</td></tr>' +
+    '<tr><th>Property</th><td>' + (d.sellerAddress ? esc(d.sellerAddress) : '—') + '</td></tr>' +
+    '<tr><th>Price</th><td>' + (price.amount != null ? esc(fmtMoney(price.amount)) + ' <span class="sub">(from the ' + (price.source === 'contact' ? 'seller contact’s contract price' : 'document') + ')</span>' : '—') + '</td></tr>' +
+    '<tr><th>Sent</th><td>' + esc(fmtDate(d.createdAt)) + '</td></tr>' +
+    '<tr><th>Viewed</th><td>— <span class="sub">(HighLevel returns only one timestamp per document, so the viewed date is not available)</span></td></tr>' +
+    '<tr><th>Signed</th><td>' + esc(fmtDate(signed)) + '</td></tr>' +
+    '<tr><th>Last updated</th><td>' + esc(fmtDate(d.updatedAt)) + '</td></tr>' +
+    '<tr><th>Signing link</th><td>' + (signingUrl ? '<a href="' + esc(signingUrl) + '" target="_blank" rel="noopener">Open seller signing link ↗</a>' : '— <span class="sub">(drafts carry no links — links are minted at send)</span>') + '</td></tr>' +
+    '<tr><th>Contact / Thread</th><td>' + (seller.contactId ? '<a href="/contacts.html">View in Contacts ↗</a> <span class="sub">CRM contact ' + esc(seller.contactId) + '</span><br>' : '') +
+      (thread ? '<a href="' + esc(thread) + '">Open thread ↗</a>' + (d.sellerPhone ? ' <span class="sub">' + esc(d.sellerPhone) + '</span>' : '') : '—') + '</td></tr>' +
+    '</table>';
+  if (canSend) {
+    html += '<p><button class="btn" id="sendBtn">' + esc(label) + '</button></p>' +
+      '<div class="sendbox" id="sendConfirm" style="display:none"></div>' +
+      '<div class="sendmsg" id="sendMsg"></div>';
+  } else {
+    html += '<p class="muted">This contract is signed — there is nothing left to send.</p>';
+  }
+  return html;
+}
+function templateDetailHtml(t) {
+  var info = templateActionInfo(t);
+  var html = '<h2>' + esc(t.name || 'Untitled template') + '</h2>' +
+    '<p class="muted">Template ' + esc(t.id || '—') + ' · <span class="pill">' + esc(contractKindLabel(contractKind(t.name))) + '</span></p>' +
+    '<table class="kv">' +
+    '<tr><th>Type</th><td>' + esc(contractKindLabel(contractKind(t.name))) + '</td></tr>' +
+    '<tr><th>Market</th><td>' + esc(marketOf(t.name) || '—') + '</td></tr>' +
+    '<tr><th>Created</th><td>' + esc(fmtDate(t.createdAt)) + '</td></tr>' +
+    '<tr><th>Updated</th><td>' + esc(fmtDate(t.updatedAt)) + '</td></tr>' +
+    '<tr><th>Open in HighLevel</th><td>' + (hlDocumentsUrl ? '<a href="' + esc(hlDocumentsUrl) + '" target="_blank" rel="noopener">Open Documents &amp; Contracts in HighLevel ↗</a> <span class="sub">(Templates tab — the template itself opens there)</span>' : '—') + '</td></tr>' +
+    '</table>';
+  if (t.note) html += '<div class="note"><b>Note on this template:</b> ' + esc(t.note) + '</div>';
+  html += '<div class="note"><b>Using this template:</b> ' + esc(info.note) + '</div>';
+  if (info.use === 'sheet') {
+    html += '<p><a class="btn" href="/index.html" style="text-decoration:none">Open the Dashboard e-sign sheet →</a></p>';
+  }
+  return html;
+}
+function openDetail(kind, id) {
+  var body = document.getElementById('detailBody');
+  if (kind === 'doc') {
+    var d = null;
+    for (var i = 0; i < allDocs.length; i++) { if (String(allDocs[i].id || '') === String(id)) { d = allDocs[i]; break; } }
+    if (!d) return;
+    detailDoc = { kind: 'doc', id: String(id) };
+    body.innerHTML = detailHtml(d);
+    wireSend(d);
+  } else {
+    var t = null;
+    for (var j = 0; j < allTemplates.length; j++) { if (String(allTemplates[j].id || '') === String(id)) { t = allTemplates[j]; break; } }
+    if (!t) return;
+    detailDoc = { kind: 'template', id: String(id) };
+    body.innerHTML = templateDetailHtml(t);
+  }
+  document.getElementById('listView').style.display = 'none';
+  document.getElementById('detailView').style.display = 'block';
+  window.scrollTo(0, 0);
+}
+function closeDetail() {
+  detailDoc = null;
+  document.getElementById('detailView').style.display = 'none';
+  document.getElementById('listView').style.display = 'block';
+}
+/* The confirm panel content for a document send. Pure string
+   building (tested) — wireSend only shows it and binds the
+   buttons. Drafts ask for the two signature-field confirmations
+   the e-sign sheet asks for (the HighLevel API cannot show
+   signature fields); re-sends ask for one plain confirm tap. */
+function sendConfirmHtml(d) {
+  var seller = sellerOf(d);
+  var isDraft = String(d.status || '').toLowerCase() === 'draft';
+  var html = '';
+  if (isDraft) {
+    html += '<b>Send this contract for signature?</b><p>This emails the signing link to ' + esc(seller.name || 'the seller') + ' and CCs Troy. ' +
+      'HighLevel’s API cannot show signature fields, so before you confirm: open this contract in HighLevel and check the Signature field for every signer is placed.' +
+      (String(d.sellerState || '').toUpperCase() === 'OH' ? ' <b>Ohio:</b> this send stays blocked until the seller’s wholesaler disclosure shows signed in HighLevel (SB 155).' : '') + '</p>' +
+      '<label><input type="checkbox" id="sendFieldsConfirmed"> I checked in HighLevel — the Signature field for every signer is placed on this contract.</label>' +
+      '<label><input type="checkbox" id="sendAdvisoryAccepted"> I understand HighLevel’s API cannot show signature fields, so this confirmation is the check.</label>';
+  } else {
+    html += '<b>Re-send the signing link?</b><p>This re-emails the signing link to ' + esc(seller.name || 'the seller') + ' and CCs Troy. Nothing else changes.</p>';
+  }
+  html += '<p><button class="btn" id="sendConfirmBtn"' + (isDraft ? ' disabled' : '') + '>Confirm — send it</button> ' +
+    '<button class="btn ghost" id="sendCancelBtn">Cancel</button></p>';
+  return html;
+}
+/* Send wiring for a document detail view. The confirm panel is the
+   only path to a send: nothing here fires on load, on open, or on a
+   timer. Drafts ask for the two signature-field confirmations the
+   e-sign sheet asks for (the HighLevel API cannot show signature
+   fields); re-sends ask for one plain confirm tap. */
+function wireSend(d) {
+  var btn = document.getElementById('sendBtn');
+  if (!btn) return;
+  var isDraft = String(d.status || '').toLowerCase() === 'draft';
+  var box = document.getElementById('sendConfirm');
+  var msg = document.getElementById('sendMsg');
+  btn.addEventListener('click', function () {
+    if (sendBusy) return;
+    box.innerHTML = sendConfirmHtml(d);
+    box.style.display = 'block';
+    msg.textContent = '';
+    if (isDraft) {
+      var c1 = document.getElementById('sendFieldsConfirmed');
+      var c2 = document.getElementById('sendAdvisoryAccepted');
+      var confirmBtn = document.getElementById('sendConfirmBtn');
+      var sync = function () { confirmBtn.disabled = !(c1.checked && c2.checked); };
+      c1.addEventListener('change', sync);
+      c2.addEventListener('change', sync);
+    }
+    document.getElementById('sendCancelBtn').addEventListener('click', function () {
+      box.style.display = 'none';
+      box.innerHTML = '';
+    });
+    document.getElementById('sendConfirmBtn').addEventListener('click', function () { doResend(d); });
+  });
+}
+async function doResend(d) {
+  if (sendBusy) return;
+  sendBusy = true;
+  var msg = document.getElementById('sendMsg');
+  var confirmBtn = document.getElementById('sendConfirmBtn');
+  if (confirmBtn) confirmBtn.disabled = true;
+  msg.className = 'sendmsg';
+  msg.textContent = 'Sending…';
+  var isDraft = String(d.status || '').toLowerCase() === 'draft';
+  var body = { action: 'resend', documentId: d.id || '' };
+  if (isDraft) {
+    body.fieldsConfirmed = !!(document.getElementById('sendFieldsConfirmed') || {}).checked;
+    body.fieldsAdvisoryAccepted = !!(document.getElementById('sendAdvisoryAccepted') || {}).checked;
+  }
+  try {
+    var res = await fetch('/.netlify/functions/esign?action=resend', {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    var data = null;
+    try { data = await res.json(); } catch (e) { data = null; }
+    if (!res.ok) throw new Error((data && data.error) || ('Send failed (HTTP ' + res.status + ').'));
+    var seller = sellerOf(d);
+    var note = 'Sent — the signing link was emailed to ' + (seller.name || 'the seller') + ' (Troy CC’d).';
+    if (data && data.sms) {
+      if (data.sms.sent) note += ' The link was also texted to the seller.';
+      else if (data.sms.reason) note += ' ' + data.sms.reason;
+    }
+    msg.className = 'sendmsg ok';
+    msg.textContent = note + ' Refreshing status…';
+    var box = document.getElementById('sendConfirm');
+    if (box) { box.style.display = 'none'; box.innerHTML = ''; }
+    // Refresh the list from HighLevel, then re-open this document's
+    // detail view with the fresh status.
+    await loadContracts(true);
+    var fresh = null;
+    for (var i = 0; i < allDocs.length; i++) { if (String(allDocs[i].id || '') === String(d.id || '')) { fresh = allDocs[i]; break; } }
+    if (fresh) {
+      document.getElementById('detailBody').innerHTML = detailHtml(fresh);
+      wireSend(fresh);
+      var m2 = document.getElementById('sendMsg');
+      if (m2) { m2.className = 'sendmsg ok'; m2.textContent = note + ' Status now: ' + docStatusLabel(fresh.status) + '.'; }
+    }
+  } catch (e) {
+    msg.className = 'sendmsg err';
+    msg.textContent = 'Could not send: ' + (e.message || e) + ' Nothing was changed — try again, or send it from HighLevel.';
+  } finally {
+    sendBusy = false;
+  }
+}
+async function loadContracts(keepDetail) {
   var meta = document.getElementById('contractMeta');
   var errBox = document.getElementById('errorState');
   try {
@@ -260,18 +639,42 @@ async function loadContracts() {
     if (!data || !Array.isArray(data.documents)) throw new Error('Unexpected response from the document list — no documents array.');
     allDocs = sortDocsDesc(data.documents);
     document.getElementById('filters').style.display = 'flex';
+    document.getElementById('typeFilters').style.display = 'flex';
     document.getElementById('tablewrap').style.display = 'block';
     if (!allDocs.length) {
       document.getElementById('tablewrap').style.display = 'none';
       document.getElementById('emptyState').style.display = 'block';
       meta.textContent = 'No contracts in HighLevel yet.';
-      return;
+    } else {
+      document.getElementById('emptyState').style.display = 'none';
     }
     render();
   } catch (e) {
     meta.textContent = 'Contracts could not be loaded.';
     errBox.style.display = 'block';
     errBox.textContent = 'Could not load contracts: ' + (e.message || e) + ' Nothing is shown instead of stale or made-up rows — retry from the dashboard, or check the signing list in HighLevel.';
+  }
+  // Templates load independently — a templates failure never blocks
+  // the contracts list.
+  try {
+    var tres = await fetch('/.netlify/functions/esign?action=templates', { credentials: 'include' });
+    var tdata = null;
+    try { tdata = await tres.json(); } catch (e) { tdata = null; }
+    if (!tres.ok) throw new Error((tdata && tdata.error) || ('HighLevel template list failed (HTTP ' + tres.status + ').'));
+    if (!tdata || !Array.isArray(tdata.templates)) throw new Error('Unexpected response from the template list — no templates array.');
+    allTemplates = sortDocsDesc(tdata.templates);
+    hlDocumentsUrl = String((tdata && tdata.hlDocumentsUrl) || '');
+    document.getElementById('templateWrap').style.display = 'block';
+    document.getElementById('templateEmpty').style.display = allTemplates.length ? 'none' : 'block';
+    renderTemplates();
+  } catch (e) {
+    document.getElementById('templateMeta').textContent = 'Templates could not be loaded.';
+    var tErr = document.getElementById('templateError');
+    tErr.style.display = 'block';
+    tErr.textContent = 'Could not load templates: ' + (e.message || e) + ' The contracts list above is unaffected.';
+  }
+  if (keepDetail && detailDoc && detailDoc.kind === 'doc') {
+    // detail re-open is handled by the caller (doResend); nothing to do here.
   }
 }
 document.getElementById('filters').addEventListener('click', function (ev) {
@@ -282,6 +685,42 @@ document.getElementById('filters').addEventListener('click', function (ev) {
   for (var i = 0; i < btns.length; i++) btns[i].classList.toggle('active', btns[i] === btn);
   render();
 });
+document.getElementById('typeFilters').addEventListener('click', function (ev) {
+  var btn = ev.target && ev.target.closest ? ev.target.closest('button[data-type]') : null;
+  if (!btn) return;
+  activeType = btn.getAttribute('data-type');
+  var btns = document.getElementById('typeFilters').querySelectorAll('button');
+  for (var i = 0; i < btns.length; i++) btns[i].classList.toggle('active', btns[i] === btn);
+  render();
+  renderTemplates();
+});
+document.getElementById('contractRows').addEventListener('click', function (ev) {
+  if (ev.target && ev.target.closest && ev.target.closest('a')) return; // inner links work on their own
+  var tr = ev.target && ev.target.closest ? ev.target.closest('tr[data-doc-id]') : null;
+  if (!tr) return;
+  openDetail('doc', tr.getAttribute('data-doc-id'));
+});
+document.getElementById('contractRows').addEventListener('keydown', function (ev) {
+  if (ev.key !== 'Enter' && ev.key !== ' ') return;
+  var tr = ev.target && ev.target.closest ? ev.target.closest('tr[data-doc-id]') : null;
+  if (!tr) return;
+  ev.preventDefault();
+  openDetail('doc', tr.getAttribute('data-doc-id'));
+});
+document.getElementById('templateRows').addEventListener('click', function (ev) {
+  if (ev.target && ev.target.closest && ev.target.closest('a')) return;
+  var tr = ev.target && ev.target.closest ? ev.target.closest('tr[data-template-id]') : null;
+  if (!tr) return;
+  openDetail('template', tr.getAttribute('data-template-id'));
+});
+document.getElementById('templateRows').addEventListener('keydown', function (ev) {
+  if (ev.key !== 'Enter' && ev.key !== ' ') return;
+  var tr = ev.target && ev.target.closest ? ev.target.closest('tr[data-template-id]') : null;
+  if (!tr) return;
+  ev.preventDefault();
+  openDetail('template', tr.getAttribute('data-template-id'));
+});
+document.getElementById('backBtn').addEventListener('click', closeDetail);
 loadContracts();
 </script>
 </body>
