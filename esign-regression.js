@@ -248,8 +248,8 @@ t('template: MO picks the KC agreement', esign.templateForState(esign.KNOWN_TEMP
 t('template: unknown state picks nothing (never guesses)', esign.templateForState(esign.KNOWN_TEMPLATES, 'TX') === null);
 t('disclosure: OH needs the SB 155 reminder', esign.needsDisclosureReminder('OH') === true);
 t('disclosure: IN does not', esign.needsDisclosureReminder('IN') === false);
-t('templates: exactly the 9 verified live Nov 11', esign.KNOWN_TEMPLATES.length === 9);
-t('templates: ids unique', new Set(esign.KNOWN_TEMPLATES.map((x) => x.id)).size === 9);
+t('templates: exactly the 10 verified live Nov 27', esign.KNOWN_TEMPLATES.length === 10);
+t('templates: ids unique', new Set(esign.KNOWN_TEMPLATES.map((x) => x.id)).size === 10);
 
 // ---- 11. audit trail + ids + links ----
 (function () {

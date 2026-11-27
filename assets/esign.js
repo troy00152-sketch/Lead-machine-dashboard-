@@ -66,7 +66,7 @@
     html += '<p style="color:var(--muted);font-size:13px;margin-top:0">HighLevel signing — <b>$0, no per-signature fee</b>. The seller signs on HighLevel\'s signing page from the link they are emailed; you watch it here. Contract text comes only from your HighLevel template — nothing is invented.</p>';
     html += '<p style="background:#fff3cd;border:1px solid #e6c34d;border-radius:8px;padding:10px 12px;font-size:13px;margin:8px 0"><b>⚠️ A send is REAL.</b> HighLevel signing has no test mode. Preparing a draft sends nothing; sending emails a legally binding signing request to the seller and Troy.</p>';
     if (current.staleTemplates) {
-      html += '<p style="color:#a60;font-size:13px">Live template list failed — showing the 9 templates verified Nov 11, 2026. Verify in HighLevel before sending.</p>';
+      html += '<p style="color:#a60;font-size:13px">Live template list failed — showing the 10 templates verified Nov 27, 2026. Verify in HighLevel before sending.</p>';
     }
     // Unlinked lead — manual HighLevel contact link (Nov 11 fix: nothing
     // in the repo ever set lead.ghlContactId, so the v1 sheet dead-ended
