@@ -154,6 +154,17 @@
       <div id="listEmpty" class="empty" hidden></div>
     </div>
     <p class="muted">Sources: Command Center contacts (workflow enrollments — the same records the bots and workflows read) merged with My Leads from the Dashboard and with conversation threads — a phone with a thread but no enrollment or lead row appears as “Thread only”. Rows marked “Lead only” are not in the CRM yet; tag and field edits on those save to the lead, and “Add to workflow” enrolls them for real. “Thread only” rows have no enrollment yet: add one to a workflow first, then tags, notes and details save to the enrollment record. Delete removes the Command Center record only — it never deletes the CRM contact.</p>
+
+    <div class="card" id="enrollCard">
+      <h2>Enroll CSV — add leads to a workflow</h2>
+      <p class="muted">Paste or upload a CSV with header <code>name,firstName,lastName,phone,email,address1,city,state,postalCode,tags</code> (tags separated by <code>;</code>). Each row must carry the market's trigger tag (e.g. <code>carolina sms</code>) plus a send tag (e.g. <code>lead - sms</code>) or the engine ends it without sending. Enrolling only queues the contacts — the 1-minute tick sends them inside the market window.</p>
+      <div class="filters">
+        <input id="enrollFile" type="file" accept=".csv,text/csv">
+        <button class="btn small primary" id="btnEnrollCsv" type="button">Enroll CSV</button>
+      </div>
+      <textarea id="enrollText" rows="4" placeholder="…or paste CSV text here (header + rows)" style="width:100%;margin-top:8px"></textarea>
+      <div class="muted" id="enrollResult" style="margin-top:8px"></div>
+    </div>
   </section>
 
   <!-- ============ SMART LISTS TAB ============ -->
@@ -692,6 +703,89 @@ document.getElementById('btnClearFilters').addEventListener('click', function ()
   state.activeSmartId = '';
   renderSmartChips();
   renderList();
+});
+
+/* ---- enroll CSV (Nov 27, 2026, NC test run): the enroll API existed
+   but no UI ever called it — list loads had no path into the engine.
+   Paste or upload a CSV (header name,firstName,lastName,phone,email,
+   address1,city,state,postalCode,tags — tags separated by ';'), then
+   enroll in one batch. Rows must carry the market trigger tag plus a
+   send tag (lead - sms) or the tick ends them without sending. */
+function parseCsvText(text) {
+  var rows = [];
+  var row = [];
+  var cur = '';
+  var inQ = false;
+  for (var i = 0; i < text.length; i++) {
+    var ch = text[i];
+    if (inQ) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') { cur += '"'; i++; } else { inQ = false; }
+      } else { cur += ch; }
+    } else if (ch === '"') { inQ = true; }
+    else if (ch === ',') { row.push(cur); cur = ''; }
+    else if (ch === '\n' || ch === '\r') {
+      if (ch === '\r' && text[i + 1] === '\n') i++;
+      row.push(cur); cur = '';
+      if (row.length > 1 || row[0] !== '') rows.push(row);
+      row = [];
+    } else { cur += ch; }
+  }
+  if (cur !== '' || row.length) { row.push(cur); rows.push(row); }
+  return rows;
+}
+function enrollCsvToContacts(text) {
+  var rows = parseCsvText(text).filter(function (r) { return r.some(function (c) { return String(c || '').trim() !== ''; }); });
+  if (!rows.length) return { error: 'No rows found in the CSV.' };
+  var header = rows[0].map(function (h) { return String(h || '').trim(); });
+  var need = ['name', 'firstName', 'lastName', 'phone', 'email', 'address1', 'city', 'state', 'postalCode', 'tags'];
+  var idx = {};
+  need.forEach(function (n) { idx[n] = header.indexOf(n); });
+  if (idx.phone < 0) return { error: 'CSV header must include phone (expected: ' + need.join(',') + ').' };
+  var contacts = [];
+  var skipped = 0;
+  for (var i = 1; i < rows.length; i++) {
+    var r = rows[i];
+    var phone = String(r[idx.phone] || '').trim();
+    if (!phone) { skipped++; continue; }
+    var tags = idx.tags >= 0 ? String(r[idx.tags] || '').split(';').map(function (t) { return t.trim(); }).filter(Boolean) : [];
+    var c = { phone: phone, tags: tags };
+    ['name', 'firstName', 'lastName', 'email', 'address1', 'city', 'state', 'postalCode'].forEach(function (n) {
+      if (idx[n] >= 0) c[n] = String(r[idx[n]] || '').trim();
+    });
+    if (!c.name && c.firstName) c.name = c.firstName + (c.lastName ? ' ' + c.lastName : '');
+    contacts.push(c);
+  }
+  return { contacts: contacts, skipped: skipped };
+}
+document.getElementById('btnEnrollCsv').addEventListener('click', async function () {
+  var out = document.getElementById('enrollResult');
+  var text = '';
+  var file = document.getElementById('enrollFile').files[0];
+  try {
+    if (file) { text = await file.text(); }
+    else { text = document.getElementById('enrollText').value; }
+  } catch (e) { out.textContent = 'Could not read the CSV: ' + String((e && e.message) || e); return; }
+  if (!String(text || '').trim()) { out.textContent = 'Choose a CSV file or paste CSV text first.'; return; }
+  var parsed = enrollCsvToContacts(text);
+  if (parsed.error) { out.textContent = parsed.error; return; }
+  if (!parsed.contacts.length) { out.textContent = 'No contacts with a phone number in the CSV.'; return; }
+  var btn = document.getElementById('btnEnrollCsv');
+  btn.disabled = true;
+  out.textContent = 'Enrolling ' + parsed.contacts.length + ' contacts…';
+  try {
+    var r = await enrollPost({ action: 'enroll', contacts: parsed.contacts });
+    var d = r.data || {};
+    var results = Array.isArray(d.results) ? d.results : [];
+    var bad = results.filter(function (x) { return x && !x.ok; });
+    out.textContent = 'Enrolled ' + (d.enrolled != null ? d.enrolled : results.filter(function (x) { return x && x.ok; }).length) + ' of ' + parsed.contacts.length +
+      ' (skipped ' + (parsed.skipped + (d.skipped || 0)) + ' rows).' +
+      (bad.length ? ' Not enrolled: ' + bad.slice(0, 5).map(function (x) { return (x.phone || '') + ' — ' + (x.reason || x.error || 'rejected'); }).join('; ') + (bad.length > 5 ? ' (+' + (bad.length - 5) + ' more)' : '') : '') +
+      ' They queue for the 1-minute tick inside the market window.';
+    loadContacts();
+  } catch (e) {
+    out.textContent = 'Enroll failed: ' + String((e && e.message) || e);
+  } finally { btn.disabled = false; }
 });
 
 /* ---- selection ---- */
