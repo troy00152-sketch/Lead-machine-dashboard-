@@ -56,14 +56,16 @@ const STORE_NAME = 'cc-conversations';
 const INDEX_KEY = 'index';
 const MAX_MESSAGES_PER_THREAD = 500;
 
-// Bound on the bot-hook await (Nov 26, 2026 silent-bot fix). A real
-// LLM reply aborts at 25s (bot/src/llm.js llmTimeoutMs) + ~1s for the
-// Telnyx send, so 22s covers every realistic reply; the push await
-// below is bounded ~3s inside cc-push, so the worst case (25s) stays
-// inside the 26s function budget (netlify.toml
-// [functions."telnyx-webhook"]). On timeout the webhook still acks
-// 200 — Telnyx retries are deduped by applyEvent, so a slow first
-// attempt can never double-reply.
+// Bound on the bot-hook await (Nov 26, 2026 silent-bot fix). Budget
+// math (Nov 27, 2026 fix): cold build ~3–5s + LLM abort at 15s
+// (bot/src/llm.js llmTimeoutMs, default 15000 — the old 25s default
+// is why a slow reply was abandoned at 22s with no reply and no
+// botLog entry: 25s + ~1s send > 22s) + ~1s for the Telnyx send fits
+// inside 22s with margin; the push await below is bounded ~3s inside
+// cc-push, so the worst case stays inside the 26s function budget
+// (netlify.toml [functions."telnyx-webhook"]). On timeout the webhook
+// still acks 200 — Telnyx retries are deduped by applyEvent, so a slow
+// first attempt can never double-reply.
 const BOT_HOOK_TIMEOUT_MS = 22000;
 
 // Test-only bot-hook override (see _test.setBotHook below).
@@ -118,6 +120,40 @@ async function loadThread(s, key) {
   return emptyThread('+' + key, key);
 }
 async function saveThread(s, thread) {
+  // Merge-atomic (§3): re-read immediately before writing and union
+  // messages by id, so a concurrent writer's messages (e.g. the bot
+  // appending its reply while a delivery receipt lands) are never
+  // wiped by this write. In-memory entries win on an id conflict;
+  // dnd is OR (a seal is never unwritten here); unread takes the max
+  // (the webhook only ever bumps it — never lower it here).
+  const fresh = await readJson(s, thread.key);
+  if (fresh && Array.isArray(fresh.messages)) {
+    const byId = new Map();
+    for (const m of fresh.messages) if (m && m.id) byId.set(m.id, m);
+    for (const m of thread.messages) if (m && m.id) byId.set(m.id, m);
+    const merged = [...byId.values()];
+    const tripleOf = (m) => (m.dir || '') + '|' + (m.at || '') + '|' + String(m.body || '');
+    const seenTriples = new Set(merged.map(tripleOf));
+    for (const src of [fresh.messages, thread.messages]) {
+      for (const m of src) {
+        if (!m || m.id) continue;
+        const t = tripleOf(m);
+        if (!seenTriples.has(t)) {
+          merged.push(m);
+          seenTriples.add(t);
+        }
+      }
+    }
+    merged.sort((a, b) => (a.at || 0) - (b.at || 0));
+    thread.messages = merged;
+    if (fresh.dnd === true) thread.dnd = true;
+    thread.unread = Math.max(fresh.unread || 0, thread.unread || 0);
+    thread.updatedAt = Math.max(fresh.updatedAt || 0, thread.updatedAt || 0);
+    if (!thread.phone && fresh.phone) thread.phone = fresh.phone;
+    if (!thread.market && fresh.market) thread.market = fresh.market;
+    if (!thread.name && fresh.name) thread.name = fresh.name;
+    if (!thread.ourNumber && fresh.ourNumber) thread.ourNumber = fresh.ourNumber;
+  }
   if (thread.messages.length > MAX_MESSAGES_PER_THREAD) {
     thread.messages = thread.messages.slice(-MAX_MESSAGES_PER_THREAD);
   }
@@ -231,12 +267,24 @@ async function applyEvent(s, evt) {
     const key = lib.phoneKey(to0);
     const thread = await loadThread(s, key);
     const msg = thread.messages.find((m) => m.id === msgId);
-    if (!msg) return { handled: false, reason: 'message not in store yet', thread: key };
+    if (!msg) {
+      // Log, don't swallow (§4): an unmatched status event means a
+      // delivery receipt arrived for a message the store never saw —
+      // a send that raced the webhook, or an id that was never stored
+      // — and until Nov 27 this returned handled:false in silence, so
+      // "0 SENT TODAY" had no trail at all. The return shape is
+      // unchanged (handled:false); only the silence is gone.
+      console.error('[telnyx-webhook] ' + type + ' for unknown message id ' + msgId + ' to ' + to0 + ' — message not in store yet');
+      return { handled: false, reason: 'message not in store yet', thread: key };
+    }
     let target = null;
     if (type === 'message.sent') target = { status: 'sent' };
     else if (type === 'message.failed') target = { status: 'failed', failureReason: failureReasonFrom(payload) };
     else target = finalizedStatus(payload);
-    if (!target) return { handled: false, reason: 'unmapped finalized status' };
+    if (!target) {
+      console.error('[telnyx-webhook] ' + type + ' for message id ' + msgId + ' to ' + to0 + ' — unmapped finalized status: ' + JSON.stringify((payload.to && payload.to[0] && payload.to[0].status) || payload.status || ''));
+      return { handled: false, reason: 'unmapped finalized status' };
+    }
     const changed = applyStatus(msg, target.status, target.failureReason);
     if (changed) {
       thread.updatedAt = Date.now();

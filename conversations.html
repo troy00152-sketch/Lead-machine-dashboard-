@@ -506,7 +506,7 @@ function statCard(label, s) {
   s = s || { sent: 0, queued: 0, failed: 0, replies: 0 };
   return '<div class="statcard"><div class="mkt">' + esc(label) + '</div><div class="nums">' +
     '<div><div class="n green">' + s.sent + '</div><div class="k">Sent today</div></div>' +
-    '<div><div class="n">' + s.queued + '</div><div class="k">Queued</div></div>' +
+    '<div><div class="n">' + s.queued + '</div><div class="k">Awaiting delivery confirmation</div></div>' +
     '<div><div class="n blue">' + s.replies + '</div><div class="k">Replies</div></div>' +
     '<div><div class="n red">' + s.failed + '</div><div class="k">Failed</div></div>' +
     '</div></div>';

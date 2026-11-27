@@ -64,6 +64,17 @@
 //                      the whole pass is wrapped so a dead workflows
 //                      store or enroll store can never break the
 //                      unanswered-inbound / stuck-call passes.
+//                    * BOT NOT CONFIGURED (Nov 27, 2026, §2): a
+//                      'bot-skipped: no transport configured' decision
+//                      in thread.botLog — which nobody watches —
+//                      becomes a 'bot-not-configured' flag, one per
+//                      thread, keyed on the thread so the bell row
+//                      opens the conversation. 'bot-skipped: contact
+//                      sealed' is routine and is never flagged.
+//                      AUTO-RESOLVE: the bot later runs on the thread
+//                      (bot-local / bot-actions / bot-error). A
+//                      dismissed flag is not re-raised for the same
+//                      skip entry.
 //   listFlags()  — all flags, open first then newest flaggedAt first.
 //   dismissFlag()— mark one flag 'dismissed'.
 //
@@ -488,6 +499,81 @@ async function scan(opts, event) {
       inboundId: last.id,
       preview: String(last.body || '').slice(0, 120),
       inboundAt: last.at,
+      flaggedAt: now,
+      status: 'open',
+    });
+    flagged += 1;
+  }
+
+  // ---- bot not configured (Nov 27, 2026, §2) ----
+  // A 'bot-skipped: no transport configured' decision lives only in
+  // thread.botLog, which nobody watches — a market can sit with the
+  // bot silently off and nothing flags it. Surface it as a flag of
+  // type 'bot-not-configured', keyed on the thread so the bell row
+  // groups with (and opens) that conversation. 'bot-skipped: contact
+  // sealed' is routine and is NOT flagged. Auto-resolve when the bot
+  // later runs on the thread (a bot-local / bot-actions / bot-error
+  // entry proves a transport exists and was attempted). Same-episode
+  // dedupe: an open or dismissed flag for the same skip entry (same
+  // botLog `at`) is not re-raised. Counts fold into the same
+  // flagged/resolved/open summary as the other passes.
+  for (const t of threads) {
+    const log = Array.isArray(t.botLog) ? t.botLog : [];
+    if (!log.length) continue;
+    let latestSkip = null;
+    for (const e of log) {
+      if (
+        e &&
+        e.type === 'bot-skipped' &&
+        /no transport configured|not-configured/i.test(String(e.decision || ''))
+      ) {
+        if (!latestSkip || (e.at || 0) >= (latestSkip.at || 0)) latestSkip = e;
+      }
+    }
+    if (!latestSkip) continue;
+    const skipAt = latestSkip.at || 0;
+    const botRanAfter = log.some(
+      (e) =>
+        e &&
+        (e.type === 'bot-local' || e.type === 'bot-actions' || e.type === 'bot-error') &&
+        (e.at || 0) > skipAt
+    );
+    // Auto-resolve: the transport exists now — the bot ran after the skip.
+    for (const f of flags) {
+      if (f.type !== 'bot-not-configured' || f.status !== 'open' || f.key !== t.key) continue;
+      if (botRanAfter) {
+        f.status = 'resolved';
+        f.resolvedAt = now;
+        f.resolvedReason = 'bot-configured';
+        resolved += 1;
+      }
+    }
+    if (botRanAfter) continue;
+    if (
+      flags.some(
+        (f) =>
+          f.type === 'bot-not-configured' &&
+          f.key === t.key &&
+          (f.status === 'open' || f.status === 'dismissed') &&
+          f.inboundAt === skipAt
+      )
+    ) {
+      continue;
+    }
+    flags.push({
+      id: crypto.randomUUID(),
+      type: 'bot-not-configured',
+      key: t.key,
+      phone: t.phone || '',
+      name: t.name || '',
+      market: t.market || '',
+      inboundId: null,
+      inboundAt: skipAt,
+      preview: (
+        'Bot not configured — seller text got no bot reply (' +
+        String(latestSkip.decision || 'bot-skipped: no transport configured') +
+        ')'
+      ).slice(0, 200),
       flaggedAt: now,
       status: 'open',
     });

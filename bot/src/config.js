@@ -80,7 +80,7 @@ function loadConfig(env = process.env) {
     llmBaseUrl: env.LLM_BASE_URL || 'https://api.openai.com/v1',
     llmApiKey: env.LLM_API_KEY || env.OPENAI_API_KEY || '',
     llmModel: env.LLM_MODEL || 'gpt-4.1',
-    llmTimeoutMs: parseInt(env.LLM_TIMEOUT_MS || '25000', 10),
+    llmTimeoutMs: parseInt(env.LLM_TIMEOUT_MS || '15000', 10), // Nov 27, 2026: 22s bot-hook budget — cold build ~3–5s + LLM <=15s + ~1s send; the old 25000 default meant slow replies were abandoned at 22s with no reply and no botLog entry.
 
     // Persona: 'ashley' (default) or 'amber'. The bot introduces itself by
     // this name; the knowledge base swaps the name in self-introductions
