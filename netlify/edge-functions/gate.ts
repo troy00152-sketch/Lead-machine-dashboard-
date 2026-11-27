@@ -241,9 +241,19 @@ export default async function handler(req: Request, context: any) {
   // unverified and warn (pre-launch TODO: set the key). NEVER re-gate
   // these paths — gating them breaks SMS-in, SMS status updates, and
   // inbound calls with no visible error in the app.
+  // Sam (added Nov 27, 2026): ElevenLabs posts here with no dashboard
+  // cookie either — the initiation webhook (cc-sam-init), the post-call
+  // webhook (cc-sam-webhook), and the server tools (cc-sam-tools).
+  // Each verifies its own secret (SAM_INIT_SECRET / ElevenLabs HMAC /
+  // SAM_TOOL_SECRET) in-function. NEVER re-gate these paths — gating
+  // them breaks Sam's greeting context, call transcripts, and booking
+  // with no visible error in the app.
   if (
     url.pathname === "/.netlify/functions/telnyx-webhook" ||
-    url.pathname === "/.netlify/functions/telnyx-voice-webhook"
+    url.pathname === "/.netlify/functions/telnyx-voice-webhook" ||
+    url.pathname === "/.netlify/functions/cc-sam-init" ||
+    url.pathname === "/.netlify/functions/cc-sam-webhook" ||
+    url.pathname === "/.netlify/functions/cc-sam-tools"
   ) {
     const res = await context.next();
     res.headers.set("x-robots-tag", "noindex, nofollow");
