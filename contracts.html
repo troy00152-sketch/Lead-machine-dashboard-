@@ -67,8 +67,8 @@
   <div class="empty" id="emptyState" style="display:none">No contracts in HighLevel yet — documents appear here once a contract is prepared or sent from the e-sign sheet.</div>
   <div class="empty" id="errorState" style="display:none"></div>
   <p class="muted">Read-only list — nothing here sends, signs or changes a contract. Contracts come live from HighLevel via <b>/.netlify/functions/esign?action=documents</b> (HL GET /proposals/document), the same list the e-sign sheet reads. No rows are ever invented: if the call fails, this page says so instead of showing old or made-up contracts.</p>
-  <p class="muted">What this list cannot show (the documents feed does not carry it): <b>property address</b> — the document record has no address, APN or legal description, so the Property column is always “—” until a server enrichment joins the seller contact's address; <b>sent and viewed dates</b> — the feed returns only one timestamp per document (last updated), so Sent / Viewed show “—” unless a document's own status proves it; <b>signing links</b> — the feed strips the links array (drafts carry no links at all; links are minted at send), so the link lives in HighLevel / the seller's email, not here; <b>signed date</b> shows only when a recipient record carries signedDate / signedAt. The seller is the first signer recipient who is not the buyer signer (Paula Thomas) or Troy — co-sellers after the first are listed under the seller name.</p>
-  <p class="muted">Follow-ups (need a server change, not this page): (1) have the documents action also return each document's links[] + createdAt so Sent date and the signing link can render; (2) join the seller contact's phone + address so the Property column and a Conversations thread deep-link (?thread=&lt;phoneKey&gt;) work — contacts.html also has no per-contact URL deep-link today, so the Contact link below opens Contacts and the CRM contact id is printed for search.</p>
+  <p class="muted">What this list shows now (enriched Nov 27, 2026): the documents feed returns links[] + createdAt per document, and the server joins the seller contact's phone + address — so the Property column shows the seller's address, Sent shows the created date, the Signing link column shows the seller's own signing link (drafts carry no links at all; links are minted at send), and the Contact / Thread column links straight into the Conversations thread (?thread=&lt;phoneKey&gt;) when the seller has a phone. What it still cannot show: <b>viewed date</b> — the feed returns only one timestamp per document (last updated), so Viewed shows “—” and the Status column shows last-updated instead; <b>signed date</b> shows only when a recipient record carries signedDate / signedAt; the document record itself carries no APN or legal description — the Property column is the seller contact's mailing address, not the legal description. Any field the feed does not carry shows an honest “—” — nothing is invented. The seller is the first signer recipient who is not the buyer signer (Paula Thomas) or Troy — co-sellers after the first are listed under the seller name.</p>
+  <p class="muted">Enrichment live (Nov 27, 2026): the documents action now returns links[] + createdAt per document and joins the seller contact's phone + address (sellerPhoneKey is the digits-only phone key the thread link uses). Remaining gap: contacts.html has no per-contact URL deep-link today, so the Contact link below opens Contacts and the CRM contact id is printed for search.</p>
 </div>
 
 <script>
@@ -157,6 +157,34 @@ function filterDocs(docs, filter) {
   if (f === 'signed') return list.filter(function (d) { return isSigned(d); });
   return list.filter(function (d) { return String((d && d.status) || '').toLowerCase() === f; });
 }
+/* Seller's signing link: the links[] entry whose recipientId is the
+   seller's contact id (page rule first, server-joined
+   sellerContactId as fallback). Anything else — no links, no
+   recipientId match, empty or non-http(s) url — is NOT the seller's
+   link: return '' and the row renders "—" instead of guessing.
+   A links entry with no recipientId never matches, even if it is the
+   only link on the document. */
+function sellerSigningUrl(doc) {
+  var seller = sellerOf(doc);
+  var id = seller.contactId || String((doc && doc.sellerContactId) || '');
+  if (!id) return '';
+  var links = (doc && Array.isArray(doc.links)) ? doc.links : [];
+  for (var i = 0; i < links.length; i++) {
+    var l = links[i] || {};
+    if (String(l.recipientId || '') !== id) continue;
+    var url = String(l.url || '').trim();
+    if (/^https?:\/\//i.test(url)) return url;
+  }
+  return '';
+}
+/* Conversations thread deep-link for the seller's phone key
+   (?thread=<digits>). Only the server-joined sellerPhoneKey is used;
+   absent or non-digits renders no link. */
+function threadUrl(doc) {
+  var key = String((doc && doc.sellerPhoneKey) || '');
+  if (!/^[0-9]+$/.test(key)) return '';
+  return '/conversations.html?thread=' + key;
+}
 /* ==/PURE== */
 </script>
 
@@ -176,29 +204,39 @@ function rowHtml(d) {
     .map(function (r) { return String((r && r.contactName) || '').trim(); })
     .filter(function (n) { return n && n !== seller.name; });
   var status = String(d.status || '');
-  // Sent / Viewed dates: the documents feed carries NO per-status
-  // timestamps (only updatedAt), so these are honestly "—". Signed
-  // comes from the recipient record when it carries one.
+  // Sent comes from the enriched createdAt; Viewed has no per-status
+  // timestamp in the feed (only updatedAt, shown as last-updated under
+  // Status), so it stays an honest "—". Signed comes from the
+  // recipient record when it carries one. Property is the seller
+  // contact's joined address; the signing link is the links[] entry
+  // for the seller; the thread link needs the joined sellerPhoneKey.
   var signed = signedDateOf(d);
+  var signingUrl = sellerSigningUrl(d);
+  var thread = threadUrl(d);
   var contactCell = '';
   if (seller.contactId) {
     contactCell += '<a href="/contacts.html">View in Contacts ↗</a><div class="sub">CRM contact ' + esc(seller.contactId) + '</div>';
   } else {
     contactCell += '<a href="/contacts.html">View in Contacts ↗</a>';
   }
-  contactCell += '<div class="sub">Thread: — (no phone in the document feed — a thread deep-link needs a phone key)</div>';
+  if (thread) {
+    contactCell += '<div><a href="' + esc(thread) + '">Open thread ↗</a></div>';
+    if (d.sellerPhone) contactCell += '<div class="sub">' + esc(d.sellerPhone) + '</div>';
+  } else {
+    contactCell += '<div class="sub">Thread: — (no seller phone on the document — a thread deep-link needs a phone key)</div>';
+  }
   return '<tr>' +
     '<td><div class="name">' + esc(seller.name || '—') + '</div>' +
       (others.length ? '<div class="sub">Also on doc: ' + esc(others.join(', ')) + '</div>' : '') +
       (seller.contactId ? '<div class="sub">CRM contact ' + esc(seller.contactId) + '</div>' : '') + '</td>' +
-    '<td>—</td>' +
+    '<td>' + (d.sellerAddress ? esc(d.sellerAddress) : '—') + '</td>' +
     '<td><div class="name">' + esc(d.name || 'Untitled document') + '</div><div class="sub">Doc ' + esc(d.id || '—') + '</div></td>' +
     '<td><span class="pill ' + esc(docStatusPill(status)) + '">' + esc(docStatusLabel(status)) + '</span>' +
       '<div class="sub">Updated ' + esc(fmtDate(d.updatedAt)) + '</div></td>' +
-    '<td>—</td>' +
+    '<td>' + esc(fmtDate(d.createdAt)) + '</td>' +
     '<td>—</td>' +
     '<td>' + esc(fmtDate(signed)) + '</td>' +
-    '<td>—</td>' +
+    '<td>' + (signingUrl ? '<a href="' + esc(signingUrl) + '" target="_blank" rel="noopener">Open signing link ↗</a>' : '—') + '</td>' +
     '<td>' + contactCell + '</td>' +
     '</tr>';
 }
