@@ -41,6 +41,29 @@
 //                      pass never touches a call. A dead/missing
 //                      dialer store skips this pass (best-effort) and
 //                      never breaks the unanswered-inbound scan.
+//                    * ENGINE STALL (Nov 27, 2026): the send engine
+//                      can idle with a non-empty queue and nothing
+//                      notices — Nov 27 the Carolina 50-lead run sat
+//                      with 4 stale 'queued' index entries (records
+//                      already finished) and the tick idled, because
+//                      the index-scan repair only runs when the index
+//                      shows ZERO queued. Once per scan, per market:
+//                      queue non-empty + no send in ENGINE_STALL
+//                      minutes (default 15) inside the live send
+//                      window -> a new 'open' flag of type
+//                      'engine-stall' (market, queued count,
+//                      lastSendAt, and the stale index-vs-records
+//                      detail when a sample of the queued records
+//                      proves the index stale). No flag outside the
+//                      window, on an empty queue, at the daily cap,
+//                      or for a 'draft' workflow (draft never sends).
+//                      AUTO-RESOLVE: a send landing after the flag,
+//                      or the queue draining. A dismissed flag is
+//                      not re-raised for the same stall episode
+//                      (episode = since the last send). BEST-EFFORT:
+//                      the whole pass is wrapped so a dead workflows
+//                      store or enroll store can never break the
+//                      unanswered-inbound / stuck-call passes.
 //   listFlags()  — all flags, open first then newest flaggedAt first.
 //   dismissFlag()— mark one flag 'dismissed'.
 //
@@ -61,8 +84,21 @@ try {
   blobs = null;
 }
 
+// Effective workflow defs (market list, status, window, daily cap)
+// come from cc-workflows-store — the same resolution the engine
+// runs, so a builder draft/publish flip is honored here with no
+// second source of truth. Guarded: a missing module must never
+// break the watchdog in an environment without it.
+let wfStore = null;
+try {
+  wfStore = require('./cc-workflows-store');
+} catch (e) {
+  wfStore = null;
+}
+
 const CONV_STORE = 'cc-conversations';
 const ENROLL_STORE = 'cc-enrollments';
+const ENROLL_INDEX_KEY = 'index';
 const NOTIF_STORE = 'cc-notifications';
 const FLAGS_KEY = 'flags';
 const MAX_FLAGS = 200;
@@ -70,6 +106,22 @@ const DEFAULT_THRESHOLD_MINUTES = 30;
 const DIALER_STORE = 'cc-dialer';
 const PAIRINGS_KEY = 'thread-calls';
 const DEFAULT_STUCK_CALL_SECONDS = 60;
+// Engine-stall watch (Nov 27, 2026): the tick sends at most ONE
+// enrollment per market per minute while a queue exists, so 15
+// minutes with a non-empty queue and no send is 15 consecutive
+// missed ticks — far beyond Blobs read lag or one send-error retry,
+// and short enough to catch a stall inside the 11:00–17:00 window
+// the same day it happens. The window/cap defaults below mirror
+// cc-workflows-config.js (WAIT_WINDOW / dripPerDay 300); the live
+// per-market values always come from the effective workflow defs.
+const DEFAULT_ENGINE_STALL_MINUTES = 15;
+const DEFAULT_WINDOW = {
+  days: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
+  start: '11:00',
+  end: '17:00',
+};
+const DEFAULT_DRIP_PER_DAY = 300;
+const STALL_DETAIL_SAMPLE = 25; // queued records probed per flag
 // Close-out bounds (Nov 27, 2026): a hangup ends the call even when
 // the pairing never flips to 'ended' — see scan().
 const STUCK_FLAG_HANGUP_QUIET_MS = 5 * 60 * 1000; // hangup + 5 quiet min
@@ -81,6 +133,9 @@ const deps = {
   enrollStoreFactory: null,
   notifStoreFactory: null,
   dialerStoreFactory: null,
+  // Tests only: () => ({ list: [workflow defs] }). Production uses
+  // cc-workflows-store.loadEffective(event) instead.
+  workflowsProvider: null,
 };
 
 function makeStore(name, factory, event) {
@@ -182,6 +237,82 @@ async function isSuppressed(es, thread) {
     if (rec && rec.dnd === true) return true;
   }
   return false;
+}
+
+// ---- engine-stall helpers (Nov 27, 2026) ----
+// ET clock + send-window check, mirroring cc-workflow-engine.js
+// (etDateString / etParts / windowOpen) — duplicated, not imported,
+// so the watchdog never pulls in the engine's Telnyx/send deps.
+// The engine is the source of truth; if its window rules change,
+// change these to match.
+function etDateString(ts) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(ts));
+}
+function etParts(ts) {
+  const parts = {};
+  const fmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    weekday: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  });
+  for (const p of fmt.formatToParts(new Date(ts))) parts[p.type] = p.value;
+  return {
+    weekday: parts.weekday, // Mon, Tue, ...
+    hour: parseInt(parts.hour, 10) % 24,
+    minute: parseInt(parts.minute, 10),
+  };
+}
+function windowOpen(window, ts) {
+  const w = window && typeof window === 'object' ? window : DEFAULT_WINDOW;
+  const days = Array.isArray(w.days) && w.days.length ? w.days : DEFAULT_WINDOW.days;
+  const p = etParts(ts);
+  if (!days.includes(p.weekday)) return false;
+  const [sh, sm] = String(w.start || DEFAULT_WINDOW.start).split(':').map(Number);
+  const [eh, em] = String(w.end || DEFAULT_WINDOW.end).split(':').map(Number);
+  const mins = p.hour * 60 + p.minute;
+  return mins >= sh * 60 + (sm || 0) && mins < eh * 60 + (em || 0);
+}
+// Minutes the window has been open at `ts` (window is open —
+// windowOpen() was checked first — so this is >= 0).
+function windowOpenMinutes(window, ts) {
+  const w = window && typeof window === 'object' ? window : DEFAULT_WINDOW;
+  const [sh, sm] = String(w.start || DEFAULT_WINDOW.start).split(':').map(Number);
+  const p = etParts(ts);
+  return p.hour * 60 + p.minute - (sh * 60 + (sm || 0));
+}
+function marketLabel(w) {
+  const name = String((w && w.name) || (w && w.id) || 'market');
+  return name.replace(/ sms$/i, '').trim() || 'market';
+}
+// Stale-index probe (Nov 27 root cause): read a sample of the
+// market's index-queued records and count how many are already in a
+// terminal stage in their record — the index says 'queued' while the
+// record says 'sent' / 'ended-*'. Capped: a 2,500-deep queue must
+// not cost 2,500 reads on one flag. Also captures the most recent
+// send error on a queued record, the other common stall cause.
+async function stallDetail(es, enrollments, market) {
+  const keys = Object.keys(enrollments || {})
+    .filter((k) => {
+      const e = enrollments[k];
+      return e && e.market === market && e.stage === 'queued';
+    })
+    .slice(0, STALL_DETAIL_SAMPLE);
+  let finished = 0;
+  let lastError = '';
+  for (const k of keys) {
+    const r = await readJsonSafe(es, k);
+    if (!r) continue;
+    if (r.stage && r.stage !== 'queued') finished += 1;
+    if (!lastError && r.lastError) lastError = String(r.lastError).slice(0, 120);
+  }
+  return { checked: keys.length, finished, lastError };
 }
 
 // Hold the array at MAX_FLAGS: oldest 'resolved'/'dismissed' first
@@ -513,10 +644,177 @@ async function scan(opts, event) {
     }
   }
 
+  // ---- engine stall (Nov 27, 2026) ----
+  // The tick sends at most one enrollment per market per minute
+  // while a queue exists, so a non-empty queue with no send for
+  // ENGINE_STALL minutes inside the window means the engine is
+  // stuck — the Nov 27 Carolina case (stale 'queued' index entries,
+  // tick idling, nothing flagged it). Per market:
+  //   published + window open + queue non-empty + under the daily
+  //   cap + no send in the threshold -> one 'engine-stall' flag.
+  // Last-send comes from the threads already loaded above: every
+  // engine send appends an outbound message to its thread, so the
+  // newest outbound `at` per market IS the last send. Caveat, read
+  // before debugging a flag: a manual Conversations send also
+  // writes an outbound message, so it resets the clock the same
+  // way — and a Blobs read lagging the newest thread can make the
+  // last send look older than it is. The flag carries lastSendAt
+  // and the stale-index probe, so the two cases are tellable apart
+  // on the flag itself; a lagged read self-heals on the next scan
+  // (send-landed auto-resolve). BEST-EFFORT: any failure here
+  // skips the pass and never touches the passes above.
+  let engineStalls = 0;
+  try {
+    const stallMs =
+      (typeof o.engineStallMinutes === 'number'
+        ? o.engineStallMinutes
+        : DEFAULT_ENGINE_STALL_MINUTES) * 60000;
+    const eff = deps.workflowsProvider
+      ? await deps.workflowsProvider(event)
+      : wfStore
+        ? await wfStore.loadEffective(event)
+        : null;
+    if (eff && Array.isArray(eff.list) && es) {
+      const idxRec = await readJsonSafe(es, ENROLL_INDEX_KEY);
+      const enrollments = (idxRec && idxRec.enrollments) || {};
+      const counter =
+        (await readJsonSafe(es, 'counter-' + etDateString(now))) || {};
+      const sentToday = (counter.markets && typeof counter.markets === 'object')
+        ? counter.markets
+        : {};
+      // Last outbound per market, from the threads already loaded.
+      const lastOut = {};
+      for (const t of threads) {
+        const m = t.market || '';
+        if (!m) continue;
+        const msgs = Array.isArray(t.messages) ? t.messages : [];
+        for (const m2 of msgs) {
+          if (m2 && m2.dir === 'out' && typeof m2.at === 'number') {
+            if (lastOut[m] == null || m2.at > lastOut[m]) lastOut[m] = m2.at;
+          }
+        }
+      }
+      // Queue depth per market, from the index (what the tick reads).
+      const queuedByMarket = {};
+      for (const e of Object.values(enrollments)) {
+        if (e && e.stage === 'queued' && e.market) {
+          queuedByMarket[e.market] = (queuedByMarket[e.market] || 0) + 1;
+        }
+      }
+      // Auto-resolve open stall flags: a send landed after the
+      // flag, or the queue drained (both end the stall episode).
+      for (const f of flags) {
+        if (f.type !== 'engine-stall' || f.status !== 'open') continue;
+        const lastSend = lastOut[f.market];
+        const q = queuedByMarket[f.market] || 0;
+        const sendLanded =
+          lastSend != null &&
+          typeof f.flaggedAt === 'number' &&
+          lastSend > f.flaggedAt;
+        if (sendLanded || q === 0) {
+          f.status = 'resolved';
+          f.resolvedAt = now;
+          f.resolvedReason = q === 0 && !sendLanded ? 'queue-drained' : 'send-landed';
+          resolved += 1;
+        }
+      }
+      for (const w of eff.list) {
+        if (!w || !w.id) continue;
+        // A draft workflow never sends — a queued backlog there is
+        // intentional, not a stall.
+        if (w.status === 'draft') continue;
+        const win =
+          w.window && typeof w.window === 'object' ? w.window : DEFAULT_WINDOW;
+        if (!windowOpen(win, now)) continue;
+        const queued = queuedByMarket[w.id] || 0;
+        if (!queued) continue;
+        const cap =
+          typeof w.dripPerDay === 'number' ? w.dripPerDay : DEFAULT_DRIP_PER_DAY;
+        if ((sentToday[w.id] || 0) >= cap) continue;
+        const lastSend = lastOut[w.id] != null ? lastOut[w.id] : null;
+        if (lastSend != null && now - lastSend < stallMs) continue;
+        if (lastSend == null) {
+          // Never sent: only flag once the window has been open at
+          // least the threshold — 11:01 with a fresh queue is a
+          // healthy market, not a stall.
+          if (windowOpenMinutes(win, now) < stallMs / 60000) continue;
+        }
+        // Same-episode dedupe: a flag already exists for this stall
+        // episode (episode = since the last send). A dismissed flag
+        // counts — Troy dismissed it; a NEW episode (a send, then
+        // another stall) flags afresh because its lastSend is newer
+        // than the old flag.
+        const dup = flags.some(
+          (f) =>
+            f.type === 'engine-stall' &&
+            f.market === w.id &&
+            (f.status === 'open' || f.status === 'dismissed') &&
+            (lastSend == null
+              ? f.lastSendAt == null
+              : typeof f.flaggedAt === 'number' && f.flaggedAt > lastSend)
+        );
+        if (dup) continue;
+        const detail = await stallDetail(es, enrollments, w.id);
+        const label = marketLabel(w);
+        const ageMin =
+          lastSend == null ? null : Math.floor((now - lastSend) / 60000);
+        const staleBit =
+          detail.finished > 0
+            ? ' — ' +
+              detail.finished +
+              ' of ' +
+              detail.checked +
+              ' already finished in records (index stale)'
+            : '';
+        const errorBit = detail.lastError
+          ? ' — last error: ' + detail.lastError
+          : '';
+        const preview = (
+          label +
+          ': no send in ' +
+          (ageMin == null ? 'the window so far' : ageMin + ' min') +
+          ', ' +
+          queued +
+          ' queued' +
+          staleBit +
+          errorBit
+        ).slice(0, 200);
+        // The flag's `key` is a non-phone market key on purpose:
+        // groupNotifFlags falls back to the raw key when it carries
+        // no phone digits, so each stalled market gets its own bell
+        // row instead of collapsing into one 'unknown' group. The
+        // tap guard in conversations.html (engine-stall type) shows
+        // the preview instead of opening a thread — there is no
+        // conversation attached to a market-level flag.
+        flags.push({
+          id: crypto.randomUUID(),
+          type: 'engine-stall',
+          key: 'engine-stall:' + w.id,
+          phone: '',
+          name: label + ' — engine stalled',
+          market: w.id,
+          queued,
+          lastSendAt: lastSend,
+          staleFinished: detail.finished,
+          staleChecked: detail.checked,
+          lastError: detail.lastError || '',
+          preview,
+          flaggedAt: now,
+          status: 'open',
+        });
+        flagged += 1;
+        engineStalls += 1;
+      }
+    }
+  } catch (e) {
+    // Best-effort: a dead workflows/enroll store skips the stall
+    // pass and never breaks the inbound scan.
+  }
+
   flags = capFlags(flags);
   await saveFlags(ns, flags);
   const open = flags.filter((f) => f.status === 'open').length;
-  return { flagged, resolved, open };
+  return { flagged, resolved, open, engineStalls };
 }
 
 async function listFlags(event) {
@@ -590,11 +888,14 @@ exports._test = {
       stores && stores.notifications ? () => stores.notifications : null;
     deps.dialerStoreFactory =
       stores && stores.dialer ? () => stores.dialer : null;
+    deps.workflowsProvider =
+      stores && typeof stores.workflows === 'function' ? stores.workflows : null;
   },
   reset() {
     deps.convStoreFactory = null;
     deps.enrollStoreFactory = null;
     deps.notifStoreFactory = null;
     deps.dialerStoreFactory = null;
+    deps.workflowsProvider = null;
   },
 };

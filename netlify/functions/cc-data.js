@@ -6,6 +6,15 @@
    profit), closeRate + closeRateCapped (closed ÷ fetched opps), and
    per-source errors. Overview responses are cached in-memory for 30s
    (keyed per client). Read-only.
+   GET /.netlify/functions/cc-data?action=getOpportunities
+   Full pipeline board feed (Nov 27): every pipeline + stage from HL
+   (including empty stages), every fetched opportunity with stage name
+   resolved, value, contact id + phone, pipeline, created/updated
+   dates, per-pipeline total/fetched/capped, and phone-enrichment
+   counts. Optional ?pipeline=<id> narrows to one pipeline. Same 30s
+   cache. The location holds 12,917 opps vs a 20-page (2,000-opp)
+   per-call cap — the response labels the boundary, never pretends
+   the slice is the whole pipeline. Read-only.
    PER-CLIENT (Nov 11): location/calendar/token resolve per request
    from the client config (lib-client.js) — Troy's ids are the fallback
    ONLY for Troy's own domains. Unknown subdomains get NO data (honest
@@ -19,7 +28,8 @@
    flight (was: every lead, sequential chunks of 10). */
 'use strict';
 
-const { resolveClientData, LEGACY_TROY_LOCATION_ID, LEGACY_TROY_CALENDAR_ID } = require('./lib-client');
+const { resolveClient, resolveClientData, LEGACY_TROY_LOCATION_ID, LEGACY_TROY_CALENDAR_ID } = require('./lib-client');
+const { getOverride } = require('./lib-client-status');
 
 const HL_API_BASE = 'https://services.leadconnectorhq.com';
 // Per-endpoint API versions, matching the working bot code (src/config.js).
@@ -39,6 +49,19 @@ const TIMEOUT_MS = 20000;
 // Opportunities paging: HL caps /opportunities/search at 100 per call.
 const OPP_PAGE_SIZE = 100;
 const MAX_OPP_PAGES = 10; // hard cap: 1,000 opps per overview, honestly labelled
+// Full-pipeline (getOpportunities action) bounds — see
+// getFullOpportunities. The whole location holds 12,917 opps (live
+// count, Nov 27), so one function call can never hold all of them;
+// the response labels total/fetched/capped per pipeline instead of
+// pretending the slice is the whole pipeline.
+const FULL_OPP_MAX_PAGES = 20; // hard cap: 20 search pages = 2,000 opps per call
+// Contact-phone lookups per getOpportunities call (20 in flight).
+// Phones need one GET /contacts/{id} each — there is no bulk lookup —
+// so the bound keeps the call inside the function timeout. Deal
+// pipelines (smallest totals first) enrich first; the rest render
+// with phone '' and the page labels how many phones were enriched.
+const PHONE_ENRICH_MAX = 200;
+const PHONE_ENRICH_CONCURRENCY = 20;
 // Hot-lead enrichment bounds (see enrichHotLeads).
 const ENRICH_LEADS_MAX = 100;
 const ENRICH_CONCURRENCY = 20;
@@ -360,6 +383,292 @@ async function getOpportunities(ctx) {
   } catch (e) {
     return { underContract: [], newLeads: [], closed: [], total: 0, fetched: 0, capped: false, error: String(e).slice(0, 100) };
   }
+}
+
+// ---- Full pipeline (getOpportunities action, Nov 27) ----
+// The Pipeline board's dedicated feed: every pipeline + stage from HL
+// (including empty stages), every fetched opportunity with its stage
+// name resolved, value, contact id + phone, pipeline, and dates.
+// Read-only; HL reads only, no credits.
+//
+// LIVE SHAPE (Nov 27, via the ghl CLI read-only pull, location
+// krKoHLudPnn7nT0DPtwa): 9 pipelines, 41 stages, 12,917 opps total —
+// 12,914 in the Lead pipeline (all in "New Lead", all $0 value in a
+// 300-row sample), 3 in Acquisitions (all "New"), 0 everywhere else;
+// 12,916 open, 0 won, 1 lost. There are NO won / Under Contract /
+// Closed opps in HL today, so the board's closed columns render empty
+// with an honest 0 — not invented rows. The 12,917 total vs the 2,000
+// per-call cap is the exact boundary: the board shows the newest
+// slice, labelled, never the whole 12,917.
+
+// Normalize one raw pipelines payload into ordered
+// [{ id, name, stages: [{ id, name, position }] }]. Pure — tested
+// without HL. Handles data.pipelines || data.data and stages ||
+// pipelineStages. Positions sort numerically when both sides parse;
+// non-numeric positions (HL sometimes returns opaque strings like
+// 'Zz1cx1z') keep HL's returned order.
+function normalizePipelineList(data) {
+  const pipes = (data && (data.pipelines || data.data)) || [];
+  if (!Array.isArray(pipes)) return [];
+  return pipes
+    .filter((p) => p && (p.id || p.name))
+    .map((p) => {
+      const rawStages = p.stages || p.pipelineStages || [];
+      const stages = (Array.isArray(rawStages) ? rawStages : [])
+        .filter((s) => s && s.id)
+        .map((s, i) => ({ id: String(s.id), name: String(s.name || ''), position: s.position, _i: i }))
+        .sort((a, b) => {
+          const an = Number(a.position), bn = Number(b.position);
+          if (Number.isFinite(an) && Number.isFinite(bn) && an !== bn) return an - bn;
+          return a._i - b._i;
+        })
+        .map((s) => ({ id: s.id, name: s.name, position: s.position }));
+      return { id: String(p.id || ''), name: String(p.name || ''), stages };
+    });
+}
+
+// Stage-detail map: stageId -> { name, pipelineId, pipelineName,
+// position }. Built from normalizePipelineList output.
+function stageDetailMap(pipelines) {
+  const m = new Map();
+  for (const p of pipelines || []) {
+    for (const s of p.stages || []) {
+      if (s && s.id) m.set(String(s.id), { name: s.name || '', pipelineId: p.id || '', pipelineName: p.name || '', position: s.position });
+    }
+  }
+  return m;
+}
+
+// Normalize one raw opportunity into the board row shape. Stage and
+// pipeline names resolve from the stage-detail map (search returns IDs
+// only); an unknown stage ID keeps stage '' so the board files the row
+// under 'No stage' instead of inventing a name. Pure — tested.
+function normalizeFullOpp(o, stageMap) {
+  if (!o || typeof o !== 'object') return null;
+  const stageId = String(o.pipelineStageId || o.pipeline_stage_id || '');
+  const det = (stageMap && stageMap.get(stageId)) || null;
+  return {
+    id: String(o.id || ''),
+    name: String(o.name || o.contactName || 'Unknown'),
+    address: extractAddress(o),
+    stage: det ? det.name : String(o.pipelineStageName || o.stageName || o.stage || ''),
+    stageId,
+    pipeline: det ? det.pipelineName : '',
+    pipelineId: String(o.pipelineId || o.pipeline_id || (det ? det.pipelineId : '') || ''),
+    status: String(o.status || '').toLowerCase(),
+    monetaryValue: Number(o.monetaryValue) || 0,
+    contactId: o.contactId ? String(o.contactId) : '',
+    contactPhone: '',
+    createdAt: o.dateAdded || o.createdAt || null,
+    updatedAt: o.dateUpdated || o.updatedAt || null,
+  };
+}
+
+// Full pipeline list, cached 10 min per location (same TTL as the
+// stage map — pipelines change rarely).
+let pipelineListCache = null; // { locationId, pipelines, at }
+async function getPipelineList(ctx) {
+  const loc = (ctx && ctx.locationId) || HL_LOCATION_ID;
+  if (pipelineListCache && pipelineListCache.locationId === loc && (Date.now() - pipelineListCache.at) < STAGE_MAP_TTL_MS) {
+    return pipelineListCache.pipelines;
+  }
+  const data = await hlFetch(
+    `/opportunities/pipelines?locationId=${loc}`,
+    'GET', null, HL_VERSION_OPPORTUNITIES, ctx && ctx.token
+  );
+  const pipelines = normalizePipelineList(data);
+  pipelineListCache = { locationId: loc, pipelines, at: Date.now() };
+  return pipelines;
+}
+
+// Generic page-through: fetchPage(page) -> raw search page. Page 0
+// first (learns `total`); the rest in parallel. Dedupes by id (page
+// boundaries can shift if the pipeline moves mid-fetch) and enforces
+// maxPages. Returns { rows, total, fetched, capped }.
+async function pageThrough(fetchPage, maxPages) {
+  const first = await fetchPage(0);
+  let rows = (first && (first.opportunities || first.data)) || [];
+  const total = Number(first && first.total) || 0;
+  const pageCount = total > rows.length
+    ? Math.min(Math.ceil(total / OPP_PAGE_SIZE), maxPages)
+    : 1;
+  if (pageCount > 1) {
+    const rest = await Promise.all(
+      Array.from({ length: pageCount - 1 }, (_, i) => fetchPage(i + 1))
+    );
+    for (const pg of rest) {
+      rows = rows.concat((pg && (pg.opportunities || pg.data)) || []);
+    }
+  }
+  const seen = new Set();
+  rows = rows.filter((o) => {
+    if (!o || !o.id || seen.has(o.id)) return false;
+    seen.add(o.id);
+    return true;
+  });
+  const fetched = rows.length;
+  return { rows, total: total || fetched, fetched, capped: total ? total > fetched : fetched >= OPP_PAGE_SIZE };
+}
+
+// One page of /opportunities/search filtered to a single pipeline.
+// LIVE-PROVEN (Nov 27, via the ghl CLI passthrough — the body is
+// forwarded verbatim to HL): filter fields are snake_case —
+// `pipeline_id` with operator `eq`. camelCase `pipelineId` as a body
+// field 422s ("property pipelineId should not exist"), and as a
+// filter field 422s ("Invalid field - pipelineId"). The raw function
+// path uses the same body shape, so it needs the same live check
+// after deploy (see the test file's live-verification note).
+async function searchOppsPageFiltered(ctx, pipelineId, page) {
+  const data = await hlFetch('/opportunities/search', 'POST', {
+    locationId: ctx.locationId,
+    limit: OPP_PAGE_SIZE,
+    page,
+    filters: [{ field: 'pipeline_id', operator: 'eq', value: pipelineId }],
+  }, HL_VERSION_OPPORTUNITIES, ctx && ctx.token).catch(() => null);
+  return data;
+}
+
+// Lean contact-phone read for one opportunity. Never throws — ''
+// on any failure so the row still renders without a phone (labelled
+// on the page). The search response carries contactId only, never a
+// phone, so there is no cheaper source.
+async function getContactPhone(contactId, token) {
+  if (!contactId) return '';
+  try {
+    const data = await hlFetch(`/contacts/${contactId}`, 'GET', null, HL_VERSION_OPPORTUNITIES, token).catch(() => null);
+    const c = (data && (data.contact || data)) || null;
+    return (c && c.phone) ? String(c.phone) : '';
+  } catch (e) {
+    return '';
+  }
+}
+
+// Full-pipeline pull for action=getOpportunities.
+//   onlyPipelineId — when set, fetch just that pipeline (unknown id ->
+//     empty + errors.opps naming it). Otherwise all pipelines.
+// Allocation of the FULL_OPP_MAX_PAGES budget (20 pages): page 0 of
+// every wanted pipeline in parallel (learns exact totals and
+// completes every small pipeline outright), then the remaining pages
+// go to the pipeline with the most unfetched opps first (today the
+// Lead pipeline). When the pipelines endpoint itself fails, the pull
+// falls back to the unfiltered paged search (stage names blank, error
+// surfaced) so the board still renders rows.
+// Returns { pipelines, opportunities, total, fetched, capped,
+// perPipeline: { [pipelineId]: { name, total, fetched, capped } },
+// phonesEnriched, phonesTotal, errors: { pipelines, opps } }.
+async function getFullOpportunities(ctx, onlyPipelineId) {
+  const errors = { pipelines: null, opps: null };
+  let pipelines = [];
+  try {
+    pipelines = await getPipelineList(ctx);
+  } catch (e) {
+    errors.pipelines = String(e).slice(0, 100);
+  }
+  const stageMap = stageDetailMap(pipelines);
+  const perPipeline = {};
+  let rawRows = [];
+  let total = 0;
+  if (pipelines.length) {
+    const wanted = onlyPipelineId
+      ? pipelines.filter((p) => String(p.id) === String(onlyPipelineId))
+      : pipelines.slice();
+    if (onlyPipelineId && !wanted.length) {
+      return {
+        pipelines, opportunities: [], total: 0, fetched: 0, capped: false,
+        perPipeline, phonesEnriched: 0, phonesTotal: 0,
+        errors: { pipelines: errors.pipelines, opps: 'unknown pipeline: ' + String(onlyPipelineId).slice(0, 60) },
+      };
+    }
+    // Phase 1: page 0 of every wanted pipeline, in parallel.
+    const firsts = await Promise.all(wanted.map(async (p) => {
+      try {
+        const data = await searchOppsPageFiltered(ctx, p.id, 0);
+        // A null page means the search call itself failed (HL error or
+        // timeout — searchOppsPageFiltered swallows it to null). That
+        // MUST surface in errors.opps: otherwise a systematic filter
+        // rejection would render every column empty with totals of 0
+        // and no error flag — the silent-zero class.
+        if (!data) return { p, rows: [], total: 0, error: 'search failed for ' + p.name };
+        const rows = (data.opportunities || data.data) || [];
+        return { p, rows, total: Number(data.total) || 0, error: null };
+      } catch (e) {
+        return { p, rows: [], total: 0, error: String(e).slice(0, 100) };
+      }
+    }));
+    const items = firsts.map(({ p, rows, total: t, error }) => {
+      perPipeline[p.id] = { name: p.name, total: t || rows.length, fetched: rows.length, capped: t ? t > rows.length : rows.length >= OPP_PAGE_SIZE };
+      if (error) errors.opps = error;
+      return { p, rows, total: t || rows.length };
+    });
+    // Phase 2: remaining budget to the largest unfetched remainder first.
+    let spent = wanted.length;
+    items.sort((a, b) => ((b.total - b.rows.length) - (a.total - a.rows.length)));
+    for (const item of items) {
+      if (spent >= FULL_OPP_MAX_PAGES) break;
+      const remaining = item.total - item.rows.length;
+      if (remaining <= 0) continue;
+      const nextPage = Math.ceil(item.rows.length / OPP_PAGE_SIZE) || 1;
+      const extra = Math.min(Math.ceil(remaining / OPP_PAGE_SIZE), FULL_OPP_MAX_PAGES - spent);
+      if (extra <= 0) continue;
+      const pages = await Promise.all(
+        Array.from({ length: extra }, (_, i) => searchOppsPageFiltered(ctx, item.p.id, nextPage + i).catch(() => null))
+      );
+      for (const pg of pages) {
+        item.rows = item.rows.concat((pg && (pg.opportunities || pg.data)) || []);
+      }
+      spent += extra;
+      perPipeline[item.p.id].fetched = item.rows.length;
+      perPipeline[item.p.id].capped = item.total > item.rows.length;
+    }
+    for (const item of items) {
+      rawRows = rawRows.concat(item.rows);
+      total += item.total;
+    }
+  } else {
+    // Pipelines endpoint down: unfiltered pull, stage names blank.
+    try {
+      const r = await pageThrough((pg) => searchOppsPage(ctx, pg), FULL_OPP_MAX_PAGES);
+      rawRows = r.rows;
+      total = r.total;
+    } catch (e) {
+      errors.opps = String(e).slice(0, 100);
+    }
+  }
+  // Normalize, dedupe, newest first.
+  const seen = new Set();
+  const opps = [];
+  for (const o of rawRows) {
+    if (!o || !o.id || seen.has(o.id)) continue;
+    seen.add(o.id);
+    const n = normalizeFullOpp(o, stageMap);
+    if (n) opps.push(n);
+  }
+  opps.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+  // Phone enrichment, bounded: smallest pipelines first (deal pipelines
+  // complete first), then newest — so the 3 Acquisitions deals always
+  // carry phones while the Lead firehose is capped.
+  const withContact = opps.filter((o) => o.contactId);
+  withContact.sort((a, b) => {
+    const ta = (perPipeline[a.pipelineId] && perPipeline[a.pipelineId].total) || Infinity;
+    const tb = (perPipeline[b.pipelineId] && perPipeline[b.pipelineId].total) || Infinity;
+    if (ta !== tb) return ta - tb;
+    return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
+  });
+  const toEnrich = withContact.slice(0, PHONE_ENRICH_MAX);
+  await mapWithConcurrency(toEnrich, PHONE_ENRICH_CONCURRENCY, async (o) => {
+    o.contactPhone = await getContactPhone(o.contactId, ctx && ctx.token);
+  });
+  return {
+    pipelines,
+    opportunities: opps,
+    total,
+    fetched: opps.length,
+    capped: total > opps.length,
+    perPipeline,
+    phonesEnriched: toEnrich.length,
+    phonesTotal: withContact.length,
+    errors,
+  };
 }
 
 // ---- Hot Leads CRM motivation score ----
@@ -776,9 +1085,15 @@ exports._test = {
   enrichHotLeads, cheapScoreFor, mapWithConcurrency,
   bookedTodayWindowMs, filterBookedTodayEvents,
   getStageMap, searchOppsPage, getOpportunities,
+  normalizePipelineList, stageDetailMap, normalizeFullOpp,
+  getPipelineList, pageThrough, searchOppsPageFiltered, getContactPhone,
+  getFullOpportunities,
   ENRICH_LEADS_MAX, ENRICH_CONCURRENCY, OPP_PAGE_SIZE, MAX_OPP_PAGES,
+  FULL_OPP_MAX_PAGES, PHONE_ENRICH_MAX, PHONE_ENRICH_CONCURRENCY,
   clearOverviewCache: () => { overviewCacheMem = null; },
   clearStageMapCache: () => { stageMapCache = null; },
+  clearPipelineListCache: () => { pipelineListCache = null; },
+  clearFullOppsCache: () => { fullOppsCacheMem = null; },
 };
 
 // Short in-memory overview cache (30s): the page refreshes every 60s,
@@ -789,10 +1104,28 @@ exports._test = {
 // overview could be served to another client's request.
 let overviewCacheMem = null; // { key, body, at }
 const OVERVIEW_CACHE_TTL_MS = 30000;
+// getOpportunities cache (30s, keyed per client + pipeline filter) —
+// same shape as the overview cache; the full pull is the expensive
+// one (up to 20 search pages + phone lookups), so the second load
+// inside 30s must not re-hit HL.
+let fullOppsCacheMem = null; // { key, body, at }
 
 exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers: corsHeaders, body: '' };
   const action = (event.queryStringParameters && event.queryStringParameters.action) || 'overview';
+
+  // Kill switch v2 (Nov 19): the live status override, read ONCE per
+  // request and passed into resolveClientData below. Troy and the
+  // neutral default never consult the store (Troy can never be
+  // suspended; the neutral client has no data anyway). getOverride
+  // never throws — null means "no override / store unreadable" and
+  // resolution falls back to the client's config flag, so a store
+  // outage changes nothing here.
+  const baseClient = resolveClient(event);
+  let statusOverride = null;
+  if (!baseClient.isTroy && !baseClient.isNeutral) {
+    statusOverride = await getOverride(event, baseClient.subdomain);
+  }
 
   try {
     if (action === 'overview') {
@@ -800,7 +1133,7 @@ exports.handler = async (event) => {
       // (lib-client.js). Unknown subdomain -> null -> honest 400.
       // NEVER Troy's feed: serving his live CRM data to a stranger's
       // subdomain would be a data leak, not a fallback.
-      const ctx = resolveClientData(event);
+      const ctx = resolveClientData(event, statusOverride);
       if (!ctx) {
         return { statusCode: 400, headers: corsHeaders, body: JSON.stringify({ ok: false, error: 'unknown client — no HighLevel location configured for this subdomain' }) };
       }
@@ -860,8 +1193,36 @@ exports.handler = async (event) => {
         body: JSON.stringify(body),
       };
     }
+    if (action === 'getOpportunities') {
+      // Full pipeline board feed: every pipeline + stage from HL,
+      // every fetched opportunity with stage name, value, contact
+      // phone + id, pipeline, and dates. Optional ?pipeline=<id>
+      // narrows to one pipeline. Read-only; HL reads only.
+      const ctx = resolveClientData(event, statusOverride);
+      if (!ctx) {
+        return { statusCode: 400, headers: corsHeaders, body: JSON.stringify({ ok: false, error: 'unknown client — no HighLevel location configured for this subdomain' }) };
+      }
+      const onlyPipeline = String((event.queryStringParameters && event.queryStringParameters.pipeline) || '').trim() || null;
+      const cacheKey = ctx.locationId + '|' + (onlyPipeline || 'all');
+      if (fullOppsCacheMem && fullOppsCacheMem.key === cacheKey && (Date.now() - fullOppsCacheMem.at) < OVERVIEW_CACHE_TTL_MS) {
+        return { statusCode: 200, headers: corsHeaders, body: JSON.stringify({ ...fullOppsCacheMem.body, cached: true }) };
+      }
+      const full = await getFullOpportunities(ctx, onlyPipeline);
+      const body = {
+        ok: true,
+        ...full,
+        fetchedAt: new Date(Date.now()).toISOString(),
+        cached: false,
+      };
+      fullOppsCacheMem = { key: cacheKey, body, at: Date.now() };
+      return {
+        statusCode: 200,
+        headers: corsHeaders,
+        body: JSON.stringify(body),
+      };
+    }
     if (action === 'customfields' || action === 'contactlookup') {
-      const ctx = resolveClientData(event);
+      const ctx = resolveClientData(event, statusOverride);
       if (!ctx) {
         return { statusCode: 400, headers: corsHeaders, body: JSON.stringify({ ok: false, error: 'unknown client — no HighLevel location configured for this subdomain' }) };
       }

@@ -206,9 +206,14 @@ function groupNotifFlags(flags) {
     // callControlId (not a phone), so keying on it splits one
     // conversation's flags across junk groups — and the row's key
     // would be unopenable. Fall back to `key` only when no phone.
+    // (Nov 27, 2026: when the key itself carries no digits either —
+    // an 'engine-stall:<market>' flag has no phone at all — group
+    // on the RAW key, so each stalled market gets its own bell row
+    // instead of every market collapsing into one 'unknown' group.)
     const key =
       String(f.phone || '').replace(/\D/g, '') ||
       String(f.key || '').replace(/\D/g, '') ||
+      String(f.key || '') ||
       'unknown';
     if (!byPhone.has(key)) byPhone.set(key, []);
     byPhone.get(key).push(f);
