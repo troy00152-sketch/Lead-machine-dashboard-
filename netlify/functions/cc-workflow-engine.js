@@ -166,56 +166,75 @@ function counterKey(ts) {
 }
 
 // ---- enrollments ----
-// ---- index-loss fallback (Nov 27, 2026) ----
+// ---- index-loss fallback (Nov 27, 2026; v2 same day) ----
 // The batch enroll's rapid read-modify-write index updates lose entries
 // when Blobs reads lag writes: the 50-lead NC batch left only its last
 // enrollee (Aaron Bower) in the index while all 50 records survived —
 // the Contacts list reads records, so the page showed 50 queued while
 // the tick saw zero and idled for 19 straight minutes. When the index
 // shows no queued enrollment for a market, scan the records directly
-// (index keys ∪ store listing, same pattern as cc-enroll-api
-// allRecordKeys) and repair the index entries found. Throttled to one
-// scan per market per 10 minutes; a fresh enrollment resets the
-// throttle for its market so the next tick scans promptly. The
-// duplicate-send lock (sentAt / prior outbound thread) still guards
-// every record the scan finds — a scan can never resurrect a send.
-const INDEX_SCAN_MS = 10 * 60 * 1000;
+// and repair the index entries found.
+//
+// V2 LESSON (same day, 12:33–12:54 live): v1 repaired the index and
+// then the send's own saveEnrollment RE-READ the index (stale) and
+// clobbered the repair — sends ran exactly one per 10-minute throttle
+// window (12:33, 12:44, 12:54) instead of one per minute. So the tick
+// now threads ONE in-memory index through the whole invocation: the
+// scan repairs into it, every save inside the tick writes from it, and
+// nothing inside a tick ever re-reads the index. The counter is
+// threaded the same way. A scan only reads records the index does not
+// already know about (list pre-check), so in steady state it costs one
+// list call and zero reads. Throttle is a 2-minute backstop; a fresh
+// enrollment resets it for its market. The duplicate-send lock
+// (sentAt / prior outbound thread) still guards every record the scan
+// finds — a scan can never resurrect a send.
+const INDEX_SCAN_MS = 2 * 60 * 1000;
 const SCAN_CAP = 2000;
 const lastIndexScanAt = {};
-async function scanQueuedRecords(s, market) {
-  const keys = new Set(Object.keys((await loadEnrollIndex(s)).enrollments || {}));
+async function scanQueuedRecords(s, market, idx) {
+  const known = new Set(Object.keys((idx && idx.enrollments) || (await loadEnrollIndex(s)).enrollments || {}));
+  let listed = [];
   if (typeof s.list === 'function') {
     try {
       const res = await s.list();
-      const list = (res && (res.blobs || res.keys)) || [];
-      for (const b of list) {
-        const k = typeof b === 'string' ? b : (b && b.key);
-        if (k) keys.add(String(k));
-      }
-    } catch (e) { /* index-only fallback */ }
+      listed = (res && (res.blobs || res.keys)) || [];
+    } catch (e) { /* no listing: nothing new to discover */ }
   }
+  // Only read records the index does not already know about. In
+  // steady state that is nothing (one list call, zero reads); after an
+  // index loss it is exactly the orphaned records.
+  const missing = [];
+  for (const b of listed) {
+    const k = typeof b === 'string' ? b : (b && b.key);
+    if (k && k !== ENROLL_INDEX_KEY && !known.has(String(k))) missing.push(String(k));
+  }
+  if (!missing.length) return [];
   const out = [];
-  for (const k of [...keys].slice(0, SCAN_CAP)) {
-    if (k === ENROLL_INDEX_KEY) continue;
+  for (const k of missing.slice(0, SCAN_CAP)) {
     const r = await loadEnrollment(s, k);
     if (r && r.key === k && r.market === market && r.stage === 'queued') out.push(r);
   }
   out.sort((a, b) => (a.enrolledAt || 0) - (b.enrolledAt || 0) || (a.key < b.key ? -1 : 1));
   return out;
 }
-async function repairIndexEntries(s, recs) {
-  const idx = await loadEnrollIndex(s);
-  for (const r of recs) idx.enrollments[r.key] = { market: r.market, stage: r.stage };
-  idx.updatedAt = Date.now();
-  await writeJson(s, ENROLL_INDEX_KEY, idx);
+async function repairIndexEntries(s, recs, idx) {
+  const target = idx || (await loadEnrollIndex(s));
+  for (const r of recs) target.enrollments[r.key] = { market: r.market, stage: r.stage };
+  target.updatedAt = Date.now();
+  await writeJson(s, ENROLL_INDEX_KEY, target);
 }
 
 async function loadEnrollIndex(s) {
   return (await readJson(s, ENROLL_INDEX_KEY)) || { updatedAt: 0, enrollments: {} };
 }
-async function saveEnrollment(s, rec) {
+async function saveEnrollment(s, rec, idxOpt) {
   await writeJson(s, rec.key, rec);
-  const idx = await loadEnrollIndex(s);
+  // idxOpt (the tick's in-memory index): use it instead of re-reading.
+  // A re-read here can return a snapshot older than a repair written
+  // moments earlier in the same tick and clobber it — that is the v1
+  // stall (one send per throttle window). Callers outside the tick omit
+  // it and keep the old load-each-time behavior.
+  const idx = idxOpt || (await loadEnrollIndex(s));
   idx.enrollments[rec.key] = { market: rec.market, stage: rec.stage };
   idx.updatedAt = Date.now();
   await writeJson(s, ENROLL_INDEX_KEY, idx);
@@ -679,9 +698,9 @@ async function tick(now, event) {
       const lastScan = lastIndexScanAt[market] || 0;
       if (ts - lastScan >= INDEX_SCAN_MS) {
         lastIndexScanAt[market] = ts;
-        const scanned = await scanQueuedRecords(es, market);
+        const scanned = await scanQueuedRecords(es, market, idx);
         if (scanned.length) {
-          await repairIndexEntries(es, scanned);
+          await repairIndexEntries(es, scanned, idx);
           res.repairedIndex = scanned.length;
           queuedKeys = scanned.map((r) => r.key);
         }
@@ -709,7 +728,7 @@ async function tick(now, event) {
     // Opt-out seal: a dnc tag means never send, ever.
     if (lt.includes('dnc')) {
       rec.stage = 'ended-dnc';
-      await saveEnrollment(es, rec);
+      await saveEnrollment(es, rec, idx);
       res.action = 'ended-dnc';
       results.push(res);
       continue;
@@ -717,7 +736,7 @@ async function tick(now, event) {
     // "Is Active lead?" gate — none of the gate tags -> END.
     if (!workflow.activeLeadTags.some((t) => lt.includes(t.toLowerCase()))) {
       rec.stage = 'ended-inactive';
-      await saveEnrollment(es, rec);
+      await saveEnrollment(es, rec, idx);
       res.action = 'ended-inactive';
       results.push(res);
       continue;
@@ -725,7 +744,7 @@ async function tick(now, event) {
     // Per-path bad-number guard — before EVERY path's send.
     if (lt.includes(workflow.badNumberGuard.tag.toLowerCase())) {
       rec.stage = 'ended-bad-number';
-      await saveEnrollment(es, rec);
+      await saveEnrollment(es, rec, idx);
       res.action = 'ended-bad-number';
       results.push(res);
       continue;
@@ -742,7 +761,7 @@ async function tick(now, event) {
     //      person is already being talked to).
     if (rec.sentAt != null) {
       rec.stage = 'ended-already-texted';
-      await saveEnrollment(es, rec);
+      await saveEnrollment(es, rec, idx);
       res.action = 'ended-already-texted';
       results.push(res);
       continue;
@@ -754,7 +773,7 @@ async function tick(now, event) {
       priorThread.messages.some((m) => m && m.dir === 'out')
     ) {
       rec.stage = 'ended-already-texted';
-      await saveEnrollment(es, rec);
+      await saveEnrollment(es, rec, idx);
       res.action = 'ended-already-texted';
       results.push(res);
       continue;
@@ -773,7 +792,7 @@ async function tick(now, event) {
       // FAIL CLOSED: stay queued, record the error, append nothing.
       rec.lastError = String((e && e.message) || e);
       rec.lastAttemptAt = ts;
-      await saveEnrollment(es, rec);
+      await saveEnrollment(es, rec, idx);
       res.action = 'send-error';
       res.error = rec.lastError;
       results.push(res);
@@ -796,8 +815,12 @@ async function tick(now, event) {
     rec.messageId = msg.id;
     rec.lastError = null;
     rec.lastAttemptAt = ts;
-    await saveEnrollment(es, rec);
-    res.sentToday = await bumpCounter(es, ts, market);
+    await saveEnrollment(es, rec, idx);
+    // Thread the counter through the tick's in-memory copy, same as the
+    // index: a reload here could lose another market's bump.
+    counter.markets[market] = (counter.markets[market] || 0) + 1;
+    await writeJson(es, counterKey(ts), counter);
+    res.sentToday = counter.markets[market];
     res.action = 'sent';
     res.messageId = msg.id;
     results.push(res);
