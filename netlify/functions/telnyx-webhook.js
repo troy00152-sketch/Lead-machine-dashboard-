@@ -6,11 +6,15 @@
 // payload}}):
 //   message.received  -> append inbound message to the contact's thread,
 //                        bump unread, refresh the thread index; then
-//                        fire-and-forget cc-bot-hook.processInbound(key)
-//                        (Phase 5 bot adapter — direct module call, the
-//                        same pattern cc-workflow-tick.js uses for the
-//                        engine; the bot hook NEVER blocks or fails the
-//                        webhook ack)
+//                        AWAIT cc-bot-hook.processInbound(key) (bounded,
+//                        BOT_HOOK_TIMEOUT_MS) — Phase 5 bot adapter,
+//                        direct module call, the same pattern
+//                        cc-workflow-tick.js uses for the engine. The
+//                        await is load-bearing: fire-and-forget let the
+//                        Lambda freeze on the 200 and kill the in-flight
+//                        LLM call + send (Nov 26, 2026 — two live Paula
+//                        texts, bot silent). The bot hook NEVER fails
+//                        the webhook ack (timeout/error only logs).
 //   message.sent      -> outbound message status -> 'sent'
 //   message.finalized -> outbound terminal status from payload.to[].status
 //                        ('delivered' -> delivered; 'delivery_failed' /
@@ -51,6 +55,36 @@ const push = require('./cc-push');
 const STORE_NAME = 'cc-conversations';
 const INDEX_KEY = 'index';
 const MAX_MESSAGES_PER_THREAD = 500;
+
+// Bound on the bot-hook await (Nov 26, 2026 silent-bot fix). A real
+// LLM reply aborts at 25s (bot/src/llm.js llmTimeoutMs) + ~1s for the
+// Telnyx send, so 22s covers every realistic reply; the push await
+// below is bounded ~3s inside cc-push, so the worst case (25s) stays
+// inside the 26s function budget (netlify.toml
+// [functions."telnyx-webhook"]). On timeout the webhook still acks
+// 200 — Telnyx retries are deduped by applyEvent, so a slow first
+// attempt can never double-reply.
+const BOT_HOOK_TIMEOUT_MS = 22000;
+
+// Test-only bot-hook override (see _test.setBotHook below).
+let botHookOverride = null;
+
+// Bounded await — same race pattern as cc-push.withTimeout: the
+// timeout resolves {timedOut:true} while the underlying promise keeps
+// running; a rejection is reported as {timedOut:false, error} so the
+// race itself never rejects and a late failure can't surface as an
+// unhandled rejection after the timeout wins.
+function withTimeout(promise, ms) {
+  let timer = null;
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(() => resolve({ timedOut: true }), ms);
+  });
+  const wrapped = Promise.resolve(promise).then(
+    (value) => ({ timedOut: false, value }),
+    (error) => ({ timedOut: false, error })
+  );
+  return Promise.race([wrapped, timeout]).finally(() => { if (timer) clearTimeout(timer); });
+}
 
 // ---- store access (overridable for tests) ----
 let storeFactory = null;
@@ -261,17 +295,25 @@ exports.handler = async (event) => {
     const evt = parsed && parsed.data ? parsed.data : parsed;
     const s = convStore(event);
     const result = await applyEvent(s, evt);
-    // Phase 5: hand inbound messages to the bot adapter, fire-and-forget.
-    // Duplicates (Telnyx retries) are skipped — applyEvent already
-    // deduped them, and the bot must never answer the same text twice.
+    // Phase 5: hand inbound messages to the bot adapter — AWAITED,
+    // bounded (BOT_HOOK_TIMEOUT_MS). Nov 26, 2026 lesson: this used to
+    // be fire-and-forget, so the Lambda froze the moment the handler
+    // returned 200 and killed the in-flight LLM call + send — the bot
+    // stayed silent on two live Paula texts (10:37 + 10:44 PM) even
+    // though both reached the thread. Duplicates (Telnyx retries) are
+    // skipped — applyEvent already deduped them, and the bot must
+    // never answer the same text twice.
     if (
       evt && evt.event_type === 'message.received' &&
       result && result.handled && result.thread && !result.duplicate
     ) {
       try {
-        const p = botHook.processInbound(result.thread, event);
-        if (p && typeof p.catch === 'function') {
-          p.catch((e) => console.error('[telnyx-webhook] bot hook failed:', e));
+        const hook = botHookOverride || botHook.processInbound;
+        const timed = await withTimeout(hook(result.thread, event), BOT_HOOK_TIMEOUT_MS);
+        if (timed.timedOut) {
+          console.error('[telnyx-webhook] bot hook timed out after ' + BOT_HOOK_TIMEOUT_MS + 'ms — reply may not have sent');
+        } else if (timed.error) {
+          console.error('[telnyx-webhook] bot hook failed:', timed.error);
         }
       } catch (e) {
         console.error('[telnyx-webhook] bot hook failed:', e);
@@ -314,5 +356,12 @@ exports._test = {
   verifySignature,
   setStoreFactory(fn) {
     storeFactory = fn;
+  },
+  // Test-only bot-hook override: setBotHook(fn) replaces the
+  // processInbound call the handler awaits (null restores the real
+  // hook). Lets tests prove the handler waits for a slow hook before
+  // responding 200.
+  setBotHook(fn) {
+    botHookOverride = typeof fn === 'function' ? fn : null;
   },
 };

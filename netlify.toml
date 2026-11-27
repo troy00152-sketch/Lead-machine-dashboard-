@@ -14,6 +14,14 @@
 [functions]
   included_files = ["knowledge/**"]
 
+# Webhook bot await (Nov 26, 2026 silent-bot fix): telnyx-webhook now
+# awaits the bot hook (bounded 22s) + push (~3s) before responding.
+# Netlify's default 10s function timeout would kill the invocation
+# mid-LLM-call and reproduce the silent bot, so this function gets the
+# 26s maximum for synchronous functions.
+[functions."telnyx-webhook"]
+  timeout = 26
+
 [functions."gmail-token-watch"]
   schedule = "0 14 * * *"
 
