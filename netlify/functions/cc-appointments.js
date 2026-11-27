@@ -46,6 +46,10 @@ const CALENDAR_ID = 'seller-calls';
 const INDEX_KEY = 'index';
 const HL_API_BASE = 'https://services.leadconnectorhq.com';
 const HL_VERSION_CALENDARS = '2021-04-15';
+// Contacts ride 2021-07-28 (per-endpoint versions — Nov 5 lesson). Nov 27
+// live proof: the lookup below ran on the calendars version, missed an
+// existing contact, and the fallback create 400'd "duplicated contacts".
+const HL_VERSION_CONTACTS = '2021-07-28';
 const HL_TIMEOUT_MS = 20000;
 
 // ---- injectable dependencies (tests) ----
@@ -136,7 +140,7 @@ async function hlFetch(cfg, path, opts) {
       signal: controller.signal,
       headers: {
         'Authorization': 'Bearer ' + cfg.token,
-        'Version': HL_VERSION_CALENDARS,
+        'Version': o.version || HL_VERSION_CALENDARS,
         'Content-Type': 'application/json',
         'Accept': 'application/json',
       },
@@ -180,7 +184,7 @@ async function resolveHlContactId(rec, cfg) {
   if (looksLikeHlId(rec.contactId)) return String(rec.contactId);
   const phone = e164OfPhone(rec.phone);
   if (!phone) throw new Error('no phone or HL contact id to book against');
-  const found = await hlFetch(cfg, `/contacts/lookup?phone=${encodeURIComponent(phone)}&locationId=${encodeURIComponent(cfg.locationId)}`).catch(() => null);
+  const found = await hlFetch(cfg, `/contacts/lookup?phone=${encodeURIComponent(phone)}&locationId=${encodeURIComponent(cfg.locationId)}`, { version: HL_VERSION_CONTACTS }).catch((e) => { console.error('[cc-appointments] HL contact lookup failed (create fallback will run):', String((e && e.message) || e).slice(0, 150)); return null; });
   const hit = found && (found.contact || found);
   const hitId = hit && (hit.id || (Array.isArray(hit.contacts) && hit.contacts[0] && hit.contacts[0].id));
   if (hitId) return String(hitId);
@@ -188,6 +192,7 @@ async function resolveHlContactId(rec, cfg) {
   const parts = name ? name.split(/\s+/) : [];
   const created = await hlFetch(cfg, '/contacts/', {
     method: 'POST',
+    version: HL_VERSION_CONTACTS,
     body: {
       locationId: cfg.locationId,
       firstName: parts[0] || 'Seller',
@@ -304,7 +309,7 @@ async function listHlEventsMapped(fromMs, toMs, cfg) {
     const batch = live.slice(i, i + 25);
     await Promise.all(batch.map(async (e) => {
       try {
-        const c = await hlFetch(cfg, `/contacts/${encodeURIComponent(e.contactId)}`);
+        const c = await hlFetch(cfg, `/contacts/${encodeURIComponent(e.contactId)}`, { version: HL_VERSION_CONTACTS });
         const contact = c && (c.contact || c);
         if (contact) contacts[e.contactId] = contact;
       } catch (err) { /* phone stays blank; the event still maps */ }
