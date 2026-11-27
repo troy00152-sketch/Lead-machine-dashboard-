@@ -174,4 +174,47 @@ module.exports = {
   isGsm7,
   countSegments,
   sendSms,
+  getMessage,
 };
+
+// ---- status lookup (delivery reconciliation, FIX E, Nov 27 2026) ----
+// getMessage({id, fetchImpl?, apiKey?}) -> the Telnyx message object
+// ({id, to: [{phone_number, status, ...}], ...}).
+// GET /v2/messages/{id}. Throws (fail closed) when the API key is
+// missing or Telnyx rejects the lookup. The caller maps
+// to[0].status through the same finalizedStatus() the webhook uses,
+// so a 'delivered'/'delivery_failed' verdict advances a message the
+// event path never updated.
+async function getMessage(opts) {
+  const o = opts || {};
+  const apiKey = o.apiKey || process.env.TELNYX_API_KEY;
+  if (!apiKey) {
+    throw new Error('TELNYX_API_KEY is not configured — refusing to look up message status.');
+  }
+  const fetchImpl = o.fetchImpl || globalThis.fetch;
+  if (typeof fetchImpl !== 'function') {
+    throw new Error('No fetch implementation available.');
+  }
+  const id = String(o.id || '');
+  if (!id) throw new Error('Message id is required.');
+  const res = await fetchImpl(TELNYX_API_URL + '/' + encodeURIComponent(id), {
+    method: 'GET',
+    headers: {
+      Accept: 'application/json',
+      Authorization: 'Bearer ' + apiKey,
+    },
+  });
+  let data = null;
+  try {
+    data = await res.json();
+  } catch (e) {
+    /* non-JSON response — handled below */
+  }
+  if (!res.ok) {
+    const detail =
+      (data && data.errors && data.errors[0] && (data.errors[0].detail || data.errors[0].title)) ||
+      'HTTP ' + res.status;
+    throw new Error('Telnyx message lookup failed: ' + detail);
+  }
+  return (data && data.data) || {};
+}

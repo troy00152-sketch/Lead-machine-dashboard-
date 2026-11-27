@@ -573,20 +573,60 @@ async function cancelAppointment(id, event) {
   if (bare.startsWith('hl-')) {
     // HL-only booking (no Blobs record): cancel on HL directly.
     // HL failure throws — the slot is still held, so the caller
-    // must not report it cancelled.
+    // must not report it cancelled. Any Blobs twins sharing the
+    // same HL event are cancelled too (FIX C idempotency).
     if (!cfg) throw new Error('HL_API_TOKEN not set — cannot cancel the HL booking');
     await cancelHlTolerant(bare.slice(3));
-    return { id: bare, hlEventId: bare.slice(3), status: 'cancelled' };
+    const twins = (await loadAll(s)).filter((r) => r && r.hlEventId && String(r.hlEventId) === bare.slice(3));
+    for (const t of twins) {
+      t.status = 'cancelled';
+      await writeJson(s, recordKey(t.id), t);
+    }
+    return { id: bare, hlEventId: bare.slice(3), status: 'cancelled', cancelledIds: twins.map((t) => t.id) };
   }
-  const rec = await readJson(s, recordKey(bare));
-  if (!rec) return null;
-  if (rec.hlEventId) {
-    if (!cfg) throw new Error('HL_API_TOKEN not set — cannot cancel the HL booking for ' + rec.id);
-    await cancelHlTolerant(rec.hlEventId);
+  const all = await loadAll(s);
+  // Direct-read fallback: loadAll only sees indexed ids, so a record
+  // that lost its index entry (index drift) must still be cancellable.
+  let target = all.find((r) => r && String(r.id) === bare) || null;
+  if (!target) target = await readJson(s, recordKey(bare));
+  if (!target) return null;
+  // IDEMPOTENT ACROSS DUPLICATES (FIX C, Nov 27 2026 — Paula's Sat
+  // Nov 28 11 AM booking): the 10:20 failed attempt left TWO
+  // confirmed Blobs records for the same booking, and cancelling one
+  // left the twin live — the bot still saw a booking and stayed
+  // silent (booked-silent). One cancel now clears EVERY row for the
+  // same booking: the same id, the same HL event, or the same phone
+  // + start (a duplicate create from a retried booking). A re-click
+  // finds the same rows already cancelled and cancels them again
+  // (HL 404-tolerant) — it never creates or appends a record.
+  const phone10 = digitsOnly(target.phone || '');
+  const startKey = target.startMs != null ? target.startMs : toMs(target.startISO || target.startTime);
+  const matches = all.filter((r) => {
+    if (!r) return false;
+    if (String(r.id) === String(target.id)) return true;
+    if (target.hlEventId && r.hlEventId && String(r.hlEventId) === String(target.hlEventId)) return true;
+    if (phone10 && startKey != null) {
+      const rStart = r.startMs != null ? r.startMs : toMs(r.startISO || r.startTime);
+      if (digitsOnly(r.phone || '') === phone10 && rStart === startKey) return true;
+    }
+    return false;
+  });
+  // The direct-read fallback target may not be in `all` — include it.
+  if (!matches.some((m) => String(m.id) === String(target.id))) matches.push(target);
+  // Cancel HL once per distinct event id (never once per twin).
+  const hlIds = [...new Set(matches.map((r) => r.hlEventId).filter(Boolean))];
+  for (const hlId of hlIds) {
+    if (!cfg) throw new Error('HL_API_TOKEN not set — cannot cancel the HL booking for ' + target.id);
+    await cancelHlTolerant(hlId);
   }
-  rec.status = 'cancelled';
-  await writeJson(s, recordKey(rec.id), rec);
-  return rec;
+  for (const m of matches) {
+    m.status = 'cancelled';
+    await writeJson(s, recordKey(m.id), m);
+  }
+  // cancelledIds is return-only metadata (not persisted): the caller
+  // can report how many twin rows one click cleared.
+  target.cancelledIds = matches.map((m) => m.id);
+  return target;
 }
 
 async function forContact(contactId, event) {
