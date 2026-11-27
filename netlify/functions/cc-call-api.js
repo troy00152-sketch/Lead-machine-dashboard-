@@ -531,11 +531,25 @@ exports.handler = async (event) => {
 
     if (action === 'hangup') {
       const callId = body.callId || params.callId;
-      if (!callId) return bad('Missing callId.');
+      const agentLeg = body.agentLeg || params.agentLeg;
+      // The pairing key is often still unresolved on the page (the
+      // banner lookup is async, 6 x 1s) — the page passes the agent
+      // leg's call_control_id as well, and findByLeg matches leg ids
+      // too, so a leg id works as the key. When NO pairing is on file
+      // at all (webhook still saving it), still kill the leg itself
+      // — the other side must hear the call end even if the record
+      // is missing (Troy, Nov 26 — End in the first seconds skipped
+      // the server half entirely).
+      const key = callId || agentLeg;
+      if (!key) return bad('Missing callId.');
       const pairings = await loadPairings(event);
-      const found = findByLeg(pairings, callId);
-      const rec = found ? found.rec : pairings.calls[callId];
-      if (!rec) return json(404, { error: 'unknown call' });
+      const found = findByLeg(pairings, key);
+      const rec = found ? found.rec : pairings.calls[key];
+      if (!rec) {
+        const legId = agentLeg || key;
+        try { await v.hangup(legId); } catch (e) { /* already gone */ }
+        return json(404, { error: 'unknown call', legHungUp: true });
+      }
       const legs = Array.from(new Set([rec.sellerLeg, rec.agentLeg, ...(rec.agentLegs || [])].filter(Boolean)));
       for (const legId of legs) {
         try {
@@ -553,9 +567,15 @@ exports.handler = async (event) => {
       // shape). Fail-soft — thread logging never fails a hangup.
       try {
         if (!rec.loggedToThread) {
-          await logCallToThread(event, rec);
-          rec.loggedToThread = true;
-          await savePairings(pairings, event);
+          // Only mark logged when the log actually landed — a
+          // transient Blobs failure used to set the flag anyway and
+          // permanently lose the thread entry (no retry: a later
+          // hangup/webhook sees loggedToThread and skips).
+          const logged = await logCallToThread(event, rec);
+          if (logged) {
+            rec.loggedToThread = true;
+            await savePairings(pairings, event);
+          }
         }
       } catch (e) { /* already guarded inside logCallToThread */ }
       return ok({ ok: true });
@@ -805,9 +825,10 @@ exports.handler = async (event) => {
 // "Missed call" / "Voicemail" bubble with a Details dialog. The
 // voice webhook calls this when a pairing ends; the page-initiated
 // 'hangup' action calls it too. Returns true when an entry was
-// written. Fail-soft throughout: a missing thread (manual dial to a
-// number with no conversation) simply skips the thread write — the
-// call still shows in Recents.
+// written. Fail-soft throughout: a call from a number with no
+// conversation yet creates the thread first (HighLevel shows the
+// missed call in the conversation) — the call still shows in Recents
+// either way.
 function callHistoryLabel(status) {
   if (status === 'voicemail') return 'Voicemail';
   if (status === 'missed') return 'Missed call';
@@ -819,8 +840,38 @@ async function logCallToThread(event, rec) {
     const lib = telnyxLib();
     const key = lib.phoneKey(rec.phone);
     const s = convStore(event);
-    const thread = await readJson(s, key);
-    if (!thread || !Array.isArray(thread.messages)) return false;
+    let thread = await readJson(s, key);
+    if (!thread || !Array.isArray(thread.messages)) {
+      // A finished call from a number with no conversation yet (a
+      // first-time inbound caller — every real seller calling for the
+      // first time) still gets a thread. The old code returned false
+      // here, so the "Missed call" entry was silently dropped and the
+      // caller never appeared in Conversations at all — while the
+      // phone push notification (fired at call start, no thread
+      // needed) still showed up. Preserve any name/market already on
+      // the record; otherwise the market is the pool the dialed
+      // number belongs to (inbound) or the pairing's market
+      // (outbound).
+      let market = (thread && thread.market) || rec.market || '';
+      if (!market && rec.to) {
+        try {
+          const dialed = lib.toE164(rec.to);
+          const pools = lib.SENDER_POOLS || {};
+          for (const [m, list] of Object.entries(pools)) {
+            if ((list || []).includes(dialed)) { market = m; break; }
+          }
+        } catch (e) { /* unknown dialed number — market stays blank */ }
+      }
+      thread = {
+        phone: (thread && thread.phone) || lib.toE164(rec.phone),
+        key,
+        name: (thread && thread.name) || '',
+        market,
+        unread: (thread && thread.unread) || 0,
+        updatedAt: 0,
+        messages: [],
+      };
+    }
     const wasBridged = !!(rec.wasBridged || rec.status === 'bridged');
     const answered = !!(rec.sellerAnswered && rec.agentAnswered);
     let callStatus = 'missed';
