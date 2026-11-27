@@ -711,9 +711,15 @@ function createHandler(deps) {
     // an appointment on the calendar gets NO reply to anything. Troy
     // handles all communication after the booking. The guards above
     // (opt-out, hostile, etc.) still run — compliance is not "talking".
+    // FIX C (Nov 27, 2026): name the tripping appointment id(s) in
+    // the log AND the response — a bare 'booked-silent' with no ids
+    // is unactionable (Paula's cancelled Sat Nov 28 11 AM row tripped
+    // this and nobody could tell which booking it was). The ids flow
+    // through the runner into the thread botLog.
     if (existing.length) {
-      log(`booked-silent for ${evt.contactId}: ${existing.length} existing booking(s) — Troy handles`);
-      return respond(200, 'booked-silent');
+      const ids = existing.map((a) => a && a.id).filter(Boolean);
+      log(`booked-silent for ${evt.contactId}: ${existing.length} existing booking(s) [${ids.join(',')}] — Troy handles`);
+      return respond(200, 'booked-silent', { appointmentIds: ids });
     }
 
     // 7.7 — NO-PROPERTY GATE (Nov 20, 2026, Troy — the 30007 fix): the
