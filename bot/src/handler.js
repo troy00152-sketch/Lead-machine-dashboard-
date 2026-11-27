@@ -29,7 +29,15 @@
  *      Jada Aderiye cross-burst shape) — seals any further message the
  *      same way: no reply, DND + dnc. First detection stays with the
  *      burst guards (6.5 absurd silence, 6.6 one firm walkaway).
+ *      Step 6.15 (Nov 20, 30007 fix): BUYER SILENCE — a contact carrying
+ *      buyer tags (`cash buyer` / any `buyer…` tag) gets NO reply at
+ *      all. Runs after the guard seals, so a buyer's own opt-out still
+ *      DNDs first (compliance beats lane discipline).
  *   7. Hours gate (8 AM–9 PM ET).  → outside = no generation, no send.
+ *   7.7 NO-PROPERTY GATE (Nov 20, 30007 fix): no property address on
+ *       file (address1 empty, or a PO Box — a mailing address is not a
+ *       property) → silence + flag for Troy. The bot sells ONE place;
+ *       with none on file it must never improvise a generic pitch.
  *   7.5 Existing bookings (Paula Thomas calendar). → feeds the silence rule.
  *       A failed fetch = "no known booking": never a reason to silence
  *       or mis-book.
@@ -54,10 +62,13 @@
  *      the entire reason this bot exists).
  *  10. Post-process: one question max; spam-safe word filter (regenerate
  *      once, then soften by substitution, then strip); number guard
- *      (figures only from the MAO/LAO range); future-outreach promises
- *      stripped on EVERY text (the bot cannot follow up, so it must never
- *      promise to); claim–reality guard (prose cancellation/booking claims
- *      are reconciled with real actions — a claim never goes out unmatched).
+ *      (figures only from the MAO/LAO range); vague-pitch screen (Nov 20,
+ *      30007 fix: a generic "any house or land you own" pitch that does
+ *      not name the property on file is regenerated once, then stripped;
+ *      still vague = silence + flag for Troy, never sent); future-outreach
+ *      promises stripped on EVERY text (the bot cannot follow up, so it
+ *      must never promise to); claim–reality guard (prose cancellation/booking
+ *      claims are reconciled with real actions — a claim never goes out unmatched).
  *  11. Book via Calendar API when the model returns a book action with a
  *      real offered slot — but NEVER for a seller who already has a
  *      booking (Oct 24, 6:12 PM no-reschedule rule: a book action there
@@ -70,7 +81,7 @@
  */
 'use strict';
 
-const { classifyInbound, isOptOut, contactIsDnd, contactIsLandline, withinHours, detectDecline, isAcknowledgment, lastOutboundWasBookingConfirmation, lastOutboundInfo, historyTailDebug, weekdayOf, isAbsurdPrice, ABSURD_PRICE_MULTIPLE, isFirmPrice, isFirmPriceBurst, establishedPriceSeal, isVisitInvitation, hasExplicitTimeMention, lastOutboundAskedForPhotos, isPhotoSendReply, countPriceAsks, isPriceAsk, inboundBurst, normalize, isClearWrongPerson, isBareWrongNumber, threadShowsNegotiation, detectOwnerReferral, stripForeignMonth } = require('./guards');
+const { classifyInbound, isOptOut, contactIsDnd, contactIsLandline, contactIsBuyer, contactPropertyAddress, withinHours, detectDecline, isAcknowledgment, lastOutboundWasBookingConfirmation, lastOutboundInfo, historyTailDebug, weekdayOf, isAbsurdPrice, ABSURD_PRICE_MULTIPLE, isFirmPrice, isFirmPriceBurst, establishedPriceSeal, isVisitInvitation, hasExplicitTimeMention, lastOutboundAskedForPhotos, isPhotoSendReply, countPriceAsks, isPriceAsk, inboundBurst, normalize, isClearWrongPerson, isBareWrongNumber, threadShowsNegotiation, detectOwnerReferral, stripForeignMonth } = require('./guards');
 const { getBallpark, getVerifiedPrice, normalizePhoneDigits } = require('./hl');
 const { buildSystemPrompt, parseModelOutput, loadKnowledge } = require('./prompt');
 const { matchObjection } = require('./objections');
@@ -489,6 +500,24 @@ function createHandler(deps) {
       }
     }
 
+    // 6.15 — BUYER SILENCE (Nov 20, 2026, Troy — the 30007 fix):
+    // Brightcasa LLC is a BUYER (tags: cash buyer, buyer - nc, 100-200k,
+    // flipper, landlord) that was sitting in the Carolina seller flow.
+    // The bot chatted with it as if it were a seller, improvised vague
+    // pitches, and one reply was carrier-blocked (error 30007). A
+    // contact carrying buyer tags is on the other side of the business:
+    // the seller bot sends NOTHING — no reply, no pitch, no times.
+    // No DND, no dnc: buying-side communication is a different lane and
+    // is not this bot's call. Placement is deliberate: AFTER the guard
+    // seals (steps 6/6.1), so a buyer texting STOP still gets DND'd
+    // immediately — compliance beats lane discipline — and BEFORE every
+    // sending path below (6.6 walkaway, 6.7 referral ack, booking,
+    // priced offer, model), so no path can leak a seller text to a buyer.
+    if (contactIsBuyer(contact)) {
+      log(`buyer-silence for ${evt.contactId}: buyer-tagged contact in the seller flow — no reply`);
+      return respond(200, 'buyer-silence', { category: 'buyer-contact' });
+    }
+
     // 6.2 — established firm/absurd seal (Nov 11 late, 2026, Troy): once a
     // seller's firm or absurd position is ESTABLISHED — the firm-price or
     // absurd-price tag is on the contact, or the evidence sits in earlier
@@ -685,6 +714,27 @@ function createHandler(deps) {
     if (existing.length) {
       log(`booked-silent for ${evt.contactId}: ${existing.length} existing booking(s) — Troy handles`);
       return respond(200, 'booked-silent');
+    }
+
+    // 7.7 — NO-PROPERTY GATE (Nov 20, 2026, Troy — the 30007 fix): the
+    // bot sells ONE place — the property on the contact's file. When no
+    // property is known (address1 empty, or only a PO Box, which is a
+    // mailing address and not a property), there is nothing grounded
+    // for the bot to talk about, and the Brightcasa lesson is what it
+    // does instead: it improvises a generic "any house or land you
+    // might own in <city>" pitch — the exact shape carrier content
+    // filters block (error 30007). So: silence + flag for Troy (the
+    // appointment-reply tag — he owns the thread, the notifier surfaces
+    // it, the watchdog stays silent behind it). NO DND, NO dnc: the
+    // contact may be a perfectly good lead whose property simply is
+    // not on the record yet. Runs after the deterministic non-pitch
+    // paths above (guard seals, firm walkaway, referral ack) and the
+    // booked-silence rule, and before every pitch/booking/model path
+    // below — including the priced offer, which is a pitch.
+    const propertyAddress = contactPropertyAddress(contact);
+    if (!propertyAddress) {
+      log(`no-property-on-file for ${evt.contactId} — flagging Troy, no pitch`);
+      return flagForTroy(evt.contactId, 'no-property-on-file');
     }
 
     // 8 — context: ballpark + live slots
@@ -1284,15 +1334,21 @@ function createHandler(deps) {
     }
     log(`model action=${result.action} slot=${result.slotStart || '-'}`);
 
-    // 10 — post-process: one question, spam-safe words, number guard.
-    // One regeneration attempt, then soften/strip.
+    // 10 — post-process: one question, spam-safe words, number guard,
+    // vague-pitch screen (Nov 20, 30007 fix). One regeneration attempt,
+    // then soften/strip.
     let text = wf.enforceOneQuestion(result.text);
     const violationsOf = (t) => ({
       words: wf.scanOutbound(t),
       numbers: wf.checkNumbers(t, ballpark),
+      // A generic pitch is only a violation when it fails to name the
+      // property on file — a grounded mention of the seller's own place
+      // is the bot doing its job (see wordfilter.js vague-pitch screen).
+      vague: wf.isVaguePitch(t) && !wf.referencesProperty(t, propertyAddress),
     });
+    const dirty = (v) => v.words.length || !v.numbers.ok || v.vague;
     let v = violationsOf(text);
-    if (v.words.length || !v.numbers.ok) {
+    if (dirty(v)) {
       const badWords = v.words.map((x) => x.term);
       try {
         const retry = await generate(system, [
@@ -1304,13 +1360,16 @@ function createHandler(deps) {
               `[System note: rewrite your last reply. It used carrier-flagged words (${badWords.join(', ') || 'none'}) ` +
               `or figures outside the allowed ballpark. Use plain wording: "we work directly with owners", "the place", ` +
               `"a straight number". State NO dollar figure unless it is exactly one of the ballpark range values. ` +
+              (v.vague
+                ? `It also pitched property in general instead of the seller's place — talk about the specific place on file (${propertyAddress}) by its street, or drop the pitch entirely. `
+                : '') +
               `One question max. Same JSON output format.]`,
           },
         ]);
         if (retry.action !== 'silent' && retry.text) {
           const retryText = wf.enforceOneQuestion(retry.text);
           const rv = violationsOf(retryText);
-          if (!rv.words.length && rv.numbers.ok) {
+          if (!dirty(rv)) {
             text = retryText;
             v = rv;
             if (retry.action === 'book') result = retry;
@@ -1320,7 +1379,7 @@ function createHandler(deps) {
         log(`regeneration failed: ${e.message} — falling back to softening`);
       }
     }
-    if (v.words.length || !v.numbers.ok) {
+    if (dirty(v)) {
       text = wf.softenOutbound(text);
       v = violationsOf(text);
       if (!v.numbers.ok) {
@@ -1333,6 +1392,23 @@ function createHandler(deps) {
           wf.scanOutbound(s).some((x) => bad.has(x.term))
         );
         v = violationsOf(text);
+      }
+      // Vague-pitch strip: softening cannot ground a generic pitch, so
+      // its sentences come out. If the pitch WAS the whole message,
+      // nothing is left — that is the flag case below, not a send.
+      let vagueSeen = v.vague;
+      if (v.vague) {
+        text = wf.stripSentencesWith(text, (s) =>
+          wf.isVaguePitch(s) && !wf.referencesProperty(s, propertyAddress)
+        );
+        v = violationsOf(text);
+        vagueSeen = true;
+      }
+      if (v.vague || (vagueSeen && !text)) {
+        // Still a generic pitch (or the pitch was all there was):
+        // silence + flag for Troy. Sending it is how 30007 happens.
+        log(`vague-pitch blocked for ${evt.contactId} — silence + flag`);
+        return flagForTroy(evt.contactId, 'vague-pitch-blocked');
       }
       if (!text || v.words.length || !v.numbers.ok) {
         // Nothing safe left to say → silence beats a filtered message.

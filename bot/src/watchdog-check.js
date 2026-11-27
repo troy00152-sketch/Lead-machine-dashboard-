@@ -65,7 +65,7 @@
  */
 'use strict';
 
-const { classifyInbound, contactIsDnd, withinHours, isAbsurdPrice, isFirmPriceBurst, isReaction, inboundBurst, detectOwnerReferral } = require('./guards');
+const { classifyInbound, contactIsDnd, contactIsBuyer, withinHours, isAbsurdPrice, isFirmPriceBurst, isReaction, inboundBurst, detectOwnerReferral } = require('./guards');
 const { getBallpark, normalizePhoneDigits } = require('./hl');
 const { getOfferSlots, getWindowSlots, resolveAvailabilityWindow, formatOfferQuestion, displayTimeZoneFor, relabelSlots } = require('./booking');
 
@@ -196,6 +196,15 @@ function createWatchdogCheck({ config, hl, nowMs = () => Date.now() }) {
       // and the watchdog sent a holding offer behind the bot's back.
       if (tags.includes('appointment-reply')) {
         return fail('skipped-appointment-reply');
+      }
+      // BUYER SILENCE (Nov 20, 2026, Troy — the 30007 fix): a contact
+      // carrying buyer tags (`cash buyer` / any `buyer…` tag) is on the
+      // buying side — the seller bot sends it NOTHING, and the watchdog
+      // must never break that silence with a holding reply. (Nov 20:
+      // Brightcasa LLC, a buyer contact in the Carolina seller flow,
+      // drew improvised seller pitches until one was carrier-blocked.)
+      if (contactIsBuyer(contact)) {
+        return fail('skipped-buyer');
       }
     }
 

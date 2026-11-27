@@ -643,6 +643,43 @@ function contactIsLandline(contact, phoneTypeFieldId) {
   return false;
 }
 
+/**
+ * True when the contact carries BUYER tags: the exact `cash buyer` tag
+ * or any tag starting with `buyer` ("buyer - nc", "buyer - in", ...).
+ * Nov 20, 2026 (Troy — the 30007 fix): Brightcasa LLC, a buyer contact
+ * (cash buyer / buyer - nc / flipper / landlord, PO Box address, no
+ * property), was sitting in the Carolina seller flow and the bot
+ * improvised vague seller pitches at it until one was carrier-blocked
+ * (error 30007). A buyer in the seller flow gets TOTAL bot silence —
+ * the seller bot exists to talk to sellers, and a buyer tag is the
+ * system's own label saying this contact is on the other side.
+ */
+function contactIsBuyer(contact) {
+  if (!contact || !Array.isArray(contact.tags)) return false;
+  return contact.tags.some((t) => {
+    const s = String(t || '').trim().toLowerCase();
+    return s === 'cash buyer' || s.startsWith('buyer');
+  });
+}
+
+/**
+ * The contact's property address on file, or null when no property is
+ * known. HL's address1 IS the property for seller contacts (the same
+ * field getPastAppointments matches appointments on). A PO Box is a
+ * mailing address, NOT a property — Brightcasa's only address was a
+ * PO Box, and "no property" is exactly what let the bot improvise.
+ * An address counts only when it carries a street number + name: the
+ * bot must be able to NAME the place it is talking about.
+ */
+function contactPropertyAddress(contact) {
+  if (!contact) return null;
+  const a = String(contact.address1 || '').trim();
+  if (!a) return null;
+  if (/\b(p\.?\s?o\.?\s?box|post\s+office\s+box)\b/i.test(a)) return null;
+  if (!/^\d+\s+\S+/.test(a)) return null;
+  return a;
+}
+
 /** Current hour (0-23) in the configured timezone, via Intl — no date libs. */
 function hourInTimezone(date, timeZone) {
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -1137,6 +1174,8 @@ module.exports = {
   isFirmPriceBurst,
   contactIsDnd,
   contactIsLandline,
+  contactIsBuyer,
+  contactPropertyAddress,
   withinHours,
   hourInTimezone,
   normalize,
