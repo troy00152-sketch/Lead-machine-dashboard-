@@ -18,7 +18,14 @@ function createLlm(config, fetchImpl = globalThis.fetch) {
 
   async function generate({ system, messages }) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), config.llmTimeoutMs || 25000);
+    // Default 15s (Nov 27, 2026): the bot hook awaits at most 22s
+    // (telnyx-webhook BOT_HOOK_TIMEOUT_MS), and cold build (~3–5s) +
+    // LLM + ~1s Telnyx send must fit inside it with margin. The old
+    // 25s default meant a slow reply was abandoned at 22s — Lambda
+    // freeze killed the in-flight runBot, so no reply AND no botLog
+    // entry. LLM_TIMEOUT_MS (via bot/src/config.js, also 15000)
+    // overrides this default.
+    const timer = setTimeout(() => controller.abort(), config.llmTimeoutMs || 15000);
     try {
       const res = await fetchImpl(`${base}/chat/completions`, {
         method: 'POST',
