@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Contracts — Lead Machine</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#0d1117">
+<link rel="apple-touch-icon" href="/assets/icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<script src="/assets/pwa.js" defer></script>
+<style>
+  :root{ --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --line:#2b3444; --text:#e8eef4; --muted:#9aa7b5; --accent:#ff6b1a; --green:#2ea043; --red:#e5534b; --amber:#e0a53a; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--text); }
+  .wrap{ max-width:1280px; margin:0 auto; padding:18px 14px 60px; }
+  .topbar{ display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
+  .title{ font-size:22px; font-weight:700; }
+  .back{ margin-left:auto; background:var(--panel2); border:1px solid var(--line); color:var(--text); border-radius:24px; padding:9px 16px; font-size:13px; font-weight:600; text-decoration:none; white-space:nowrap; }
+  .back + .back{ margin-left:0; }
+  .back.active{ border-color:var(--accent); color:var(--accent); }
+  .muted{ color:var(--muted); font-size:13px; }
+  .empty{ color:var(--muted); padding:18px 6px; text-align:center; font-size:14px; }
+  .filters{ display:flex; gap:8px; flex-wrap:wrap; margin:0 0 12px; }
+  .filters button{ background:var(--panel2); border:1px solid var(--line); color:var(--text); border-radius:20px; padding:7px 14px; font-size:13px; font-weight:600; cursor:pointer; }
+  .filters button.active{ border-color:var(--accent); color:var(--accent); }
+  .tablewrap{ overflow-x:auto; background:var(--panel); border:1px solid var(--line); border-radius:14px; }
+  table{ width:100%; border-collapse:collapse; font-size:13px; min-width:900px; }
+  th, td{ text-align:left; padding:10px 12px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th{ color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
+  tr:last-child td{ border-bottom:0; }
+  .name{ font-weight:700; }
+  .sub{ color:var(--muted); font-size:12px; margin-top:3px; }
+  td a{ color:var(--accent); font-size:12px; font-weight:600; text-decoration:none; }
+  .pill{ display:inline-block; border:1px solid var(--line); background:var(--panel2); color:var(--muted); border-radius:20px; padding:2px 9px; font-size:11px; font-weight:600; white-space:nowrap; }
+  .pill.green{ border-color:var(--green); color:#7ee2a0; }
+  .pill.amber{ border-color:var(--amber); color:#f2cd8a; }
+  .pill.red{ border-color:var(--red); color:#f2a49e; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <div class="title">📄 Contracts</div>
+    <a class="back active" href="/contracts.html">📄 Contracts</a>
+    <a class="back" href="/contacts.html">👥 Contacts</a>
+    <a class="back" href="/conversations.html">💬 Conversations</a>
+    <a class="back" href="/index.html">← Dashboard</a>
+  </div>
+  <p class="muted" id="contractMeta">Loading contracts…</p>
+  <div class="filters" id="filters" style="display:none">
+    <button data-filter="all" class="active">All</button>
+    <button data-filter="draft">Draft</button>
+    <button data-filter="sent">Sent</button>
+    <button data-filter="viewed">Viewed</button>
+    <button data-filter="signed">Signed</button>
+  </div>
+  <div class="tablewrap" id="tablewrap" style="display:none">
+    <table>
+      <thead><tr>
+        <th>Seller / Contact</th><th>Property</th><th>Document</th><th>Status</th>
+        <th>Sent</th><th>Viewed</th><th>Signed</th><th>Signing link</th><th>Contact / Thread</th>
+      </tr></thead>
+      <tbody id="contractRows"></tbody>
+    </table>
+  </div>
+  <div class="empty" id="emptyState" style="display:none">No contracts in HighLevel yet — documents appear here once a contract is prepared or sent from the e-sign sheet.</div>
+  <div class="empty" id="errorState" style="display:none"></div>
+  <p class="muted">Read-only list — nothing here sends, signs or changes a contract. Contracts come live from HighLevel via <b>/.netlify/functions/esign?action=documents</b> (HL GET /proposals/document), the same list the e-sign sheet reads. No rows are ever invented: if the call fails, this page says so instead of showing old or made-up contracts.</p>
+  <p class="muted">What this list cannot show (the documents feed does not carry it): <b>property address</b> — the document record has no address, APN or legal description, so the Property column is always “—” until a server enrichment joins the seller contact's address; <b>sent and viewed dates</b> — the feed returns only one timestamp per document (last updated), so Sent / Viewed show “—” unless a document's own status proves it; <b>signing links</b> — the feed strips the links array (drafts carry no links at all; links are minted at send), so the link lives in HighLevel / the seller's email, not here; <b>signed date</b> shows only when a recipient record carries signedDate / signedAt. The seller is the first signer recipient who is not the buyer signer (Paula Thomas) or Troy — co-sellers after the first are listed under the seller name.</p>
+  <p class="muted">Follow-ups (need a server change, not this page): (1) have the documents action also return each document's links[] + createdAt so Sent date and the signing link can render; (2) join the seller contact's phone + address so the Property column and a Conversations thread deep-link (?thread=&lt;phoneKey&gt;) work — contacts.html also has no per-contact URL deep-link today, so the Contact link below opens Contacts and the CRM contact id is printed for search.</p>
+</div>
+
+<script>
+/* ==PURE== */
+/* Pure contracts logic — no DOM access in this block.
+   cc-contracts-test.js extracts and unit-tests these functions. */
+/* Status labels — same words as assets/esign.js stateLabel, so the
+   Contracts page and the e-sign sheet never disagree. */
+function docStatusLabel(status) {
+  var map = { prepared: 'Prepared', draft: 'Draft ready — not sent', 'fields-blocked': 'BLOCKED — fields missing', sent: 'Sent — awaiting signature', viewed: 'Viewed by seller', completed: 'Signed — complete', accepted: 'Signed — accepted' };
+  var s = String(status || '').trim();
+  return map[s] || s || '—';
+}
+function docStatusPill(status) {
+  var s = String(status || '').toLowerCase();
+  if (s === 'completed' || s === 'accepted') return 'green';
+  if (s === 'viewed' || s === 'sent') return 'amber';
+  return '';
+}
+/* The seller is the first signer recipient who is NOT the buyer signer
+   (Paula Thomas — her seat lives in the HL template) and NOT Troy
+   (the CC'd copy recipient). Falls back to the first recipient, then
+   to empty — never invents a name. Returns { name, contactId }. */
+function sellerOf(doc) {
+  var recips = (doc && Array.isArray(doc.recipients)) ? doc.recipients : [];
+  var skip = ['paula thomas', 'troy thomas'];
+  for (var i = 0; i < recips.length; i++) {
+    var r = recips[i] || {};
+    var name = String(r.contactName || '').trim();
+    if (!name) continue;
+    if (skip.indexOf(name.toLowerCase()) !== -1) continue;
+    if (r.role && String(r.role).toLowerCase() !== 'signer') continue;
+    return { name: name, contactId: String(r.id || '') };
+  }
+  if (recips.length) {
+    var first = recips[0] || {};
+    return { name: String(first.contactName || '').trim(), contactId: String(first.id || '') };
+  }
+  return { name: '', contactId: '' };
+}
+/* Signed date: the first recipient whose own record shows a signature
+   (hasCompleted / signedDate / signedAt — the recipient record is where
+   signing actually shows, per the Nov 11 live reads in esign.js).
+   Returns the raw ISO string, or '' when nobody has signed. */
+function signedDateOf(doc) {
+  var recips = (doc && Array.isArray(doc.recipients)) ? doc.recipients : [];
+  for (var i = 0; i < recips.length; i++) {
+    var r = recips[i] || {};
+    if (r.hasCompleted === true || r.signedDate || r.signedAt) {
+      return String(r.signedDate || r.signedAt || '');
+    }
+  }
+  return '';
+}
+/* True when the document counts as signed: status completed/accepted,
+   or any recipient's own record shows a signature. */
+function isSigned(doc) {
+  var s = String((doc && doc.status) || '').toLowerCase();
+  if (s === 'completed' || s === 'accepted') return true;
+  return signedDateOf(doc) !== '';
+}
+function fmtDate(iso) {
+  if (!iso) return '—';
+  var d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+/* Newest first by updatedAt; undated rows last. Never mutates input. */
+function sortDocsDesc(docs) {
+  var list = (Array.isArray(docs) ? docs : []).slice();
+  list.sort(function (a, b) {
+    var ta = new Date((a && a.updatedAt) || 0).getTime();
+    var tb = new Date((b && b.updatedAt) || 0).getTime();
+    if (!Number.isFinite(ta)) ta = 0;
+    if (!Number.isFinite(tb)) tb = 0;
+    return tb - ta;
+  });
+  return list;
+}
+/* Status filter: all | draft | sent | viewed | signed (signed =
+   completed/accepted status OR a signed recipient record). */
+function filterDocs(docs, filter) {
+  var list = Array.isArray(docs) ? docs : [];
+  var f = String(filter || 'all').toLowerCase();
+  if (f === 'all') return list.slice();
+  if (f === 'signed') return list.filter(function (d) { return isSigned(d); });
+  return list.filter(function (d) { return String((d && d.status) || '').toLowerCase() === f; });
+}
+/* ==/PURE== */
+</script>
+
+<script>
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+var allDocs = [];
+var activeFilter = 'all';
+
+function rowHtml(d) {
+  var seller = sellerOf(d);
+  var recips = Array.isArray(d.recipients) ? d.recipients : [];
+  var others = recips
+    .map(function (r) { return String((r && r.contactName) || '').trim(); })
+    .filter(function (n) { return n && n !== seller.name; });
+  var status = String(d.status || '');
+  // Sent / Viewed dates: the documents feed carries NO per-status
+  // timestamps (only updatedAt), so these are honestly "—". Signed
+  // comes from the recipient record when it carries one.
+  var signed = signedDateOf(d);
+  var contactCell = '';
+  if (seller.contactId) {
+    contactCell += '<a href="/contacts.html">View in Contacts ↗</a><div class="sub">CRM contact ' + esc(seller.contactId) + '</div>';
+  } else {
+    contactCell += '<a href="/contacts.html">View in Contacts ↗</a>';
+  }
+  contactCell += '<div class="sub">Thread: — (no phone in the document feed — a thread deep-link needs a phone key)</div>';
+  return '<tr>' +
+    '<td><div class="name">' + esc(seller.name || '—') + '</div>' +
+      (others.length ? '<div class="sub">Also on doc: ' + esc(others.join(', ')) + '</div>' : '') +
+      (seller.contactId ? '<div class="sub">CRM contact ' + esc(seller.contactId) + '</div>' : '') + '</td>' +
+    '<td>—</td>' +
+    '<td><div class="name">' + esc(d.name || 'Untitled document') + '</div><div class="sub">Doc ' + esc(d.id || '—') + '</div></td>' +
+    '<td><span class="pill ' + esc(docStatusPill(status)) + '">' + esc(docStatusLabel(status)) + '</span>' +
+      '<div class="sub">Updated ' + esc(fmtDate(d.updatedAt)) + '</div></td>' +
+    '<td>—</td>' +
+    '<td>—</td>' +
+    '<td>' + esc(fmtDate(signed)) + '</td>' +
+    '<td>—</td>' +
+    '<td>' + contactCell + '</td>' +
+    '</tr>';
+}
+function render() {
+  var rows = document.getElementById('contractRows');
+  var shown = filterDocs(allDocs, activeFilter);
+  rows.innerHTML = shown.map(rowHtml).join('') ||
+    '<tr><td colspan="9" class="empty">No contracts match this filter.</td></tr>';
+  document.getElementById('contractMeta').textContent =
+    'Showing ' + shown.length + ' of ' + allDocs.length + ' contracts from HighLevel' +
+    (allDocs.length ? ' (newest first by last updated).' : '.');
+}
+async function loadContracts() {
+  var meta = document.getElementById('contractMeta');
+  var errBox = document.getElementById('errorState');
+  try {
+    var res = await fetch('/.netlify/functions/esign?action=documents', { credentials: 'include' });
+    var data = null;
+    try { data = await res.json(); } catch (e) { data = null; }
+    if (!res.ok) throw new Error((data && data.error) || ('HighLevel document list failed (HTTP ' + res.status + ').'));
+    if (!data || !Array.isArray(data.documents)) throw new Error('Unexpected response from the document list — no documents array.');
+    allDocs = sortDocsDesc(data.documents);
+    document.getElementById('filters').style.display = 'flex';
+    document.getElementById('tablewrap').style.display = 'block';
+    if (!allDocs.length) {
+      document.getElementById('tablewrap').style.display = 'none';
+      document.getElementById('emptyState').style.display = 'block';
+      meta.textContent = 'No contracts in HighLevel yet.';
+      return;
+    }
+    render();
+  } catch (e) {
+    meta.textContent = 'Contracts could not be loaded.';
+    errBox.style.display = 'block';
+    errBox.textContent = 'Could not load contracts: ' + (e.message || e) + ' Nothing is shown instead of stale or made-up rows — retry from the dashboard, or check the signing list in HighLevel.';
+  }
+}
+document.getElementById('filters').addEventListener('click', function (ev) {
+  var btn = ev.target && ev.target.closest ? ev.target.closest('button[data-filter]') : null;
+  if (!btn) return;
+  activeFilter = btn.getAttribute('data-filter');
+  var btns = document.getElementById('filters').querySelectorAll('button');
+  for (var i = 0; i < btns.length; i++) btns[i].classList.toggle('active', btns[i] === btn);
+  render();
+});
+loadContracts();
+</script>
+</body>
+</html>

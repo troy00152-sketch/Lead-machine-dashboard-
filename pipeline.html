@@ -21,6 +21,8 @@
   .back.active{ border-color:var(--accent); color:var(--accent); }
   .muted{ color:var(--muted); font-size:13px; }
   .empty{ color:var(--muted); padding:18px 6px; text-align:center; font-size:14px; }
+  .pipe-head{ margin:22px 0 8px; font-size:17px; font-weight:700; }
+  .pipe-head .muted{ font-weight:400; }
   .board{ display:flex; gap:12px; align-items:flex-start; overflow-x:auto; padding-bottom:8px; }
   .col{ flex:1 1 240px; min-width:240px; background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:12px; }
   .col h2{ margin:0 0 4px; font-size:15px; }
@@ -45,9 +47,9 @@
     <a class="back" href="/index.html">← Dashboard</a>
   </div>
   <p class="muted" id="pipeMeta">Loading pipeline…</p>
-  <div class="board" id="board"></div>
-  <p class="muted">Read-only board — no drag, no status changes in this pass. Deals come from the Command Center overview feed (cc-data ?action=overview), which resolves stage names server-side via the HighLevel pipelines endpoint. The feed returns the top 9 new leads and the top 10 under-contract deals, so columns below show those deals only — not the whole pipeline. Closed deals show as count + gross volume only: the overview feed returns no closed rows.</p>
-  <p class="muted">Follow-up (needs a cc-data change, not this page): a dedicated cc-data getOpportunities action returning every opportunity with its stage, value, contact phone and contact id would give this board the full pipeline, per-stage columns for empty stages, closed rows, and a direct thread deep-link per deal.</p>
+  <div id="board"></div>
+  <p class="muted">Read-only board — no drag, no status changes. Deals come from the dedicated cc-data getOpportunities feed, which returns every pipeline and stage from HighLevel (including empty stages), every fetched opportunity with its stage name resolved server-side, value, contact phone + contact id, pipeline, and dates. Closed deals render as rows in their Closed / Sold / Won stage columns like any other deal — no longer count + volume only.</p>
+  <p class="muted">Honest limit: HighLevel holds far more opportunities than one function call can fetch (12,917 total on Nov 27 vs a 20-page / 2,000-opp per-call cap), so the board shows the newest fetched slice, labelled above with the exact total and the per-pipeline counts. Empty stages render as empty columns, not missing ones. Contact phones are enriched for up to 200 fetched deals per load (deal pipelines first); the rest show no phone until enriched.</p>
 </div>
 
 <script>
@@ -62,7 +64,8 @@ function pipeMoney(v) {
 /* Group overview deals (newLeads + underContractDeals) by stage
    name. Returns [{ stage, deals }] sorted by deal count desc,
    then stage name asc. Deals with no stage name land in
-   'No stage'. The input list is never mutated. */
+   'No stage'. The input list is never mutated. Kept for the
+   overview feed; the full board uses buildPipelineColumns. */
 function groupOppsByStage(deals) {
   var byStage = {};
   (deals || []).forEach(function (o) {
@@ -78,10 +81,120 @@ function groupOppsByStage(deals) {
     return { stage: stage, deals: byStage[stage] };
   });
 }
+/* Thread key for the Conversations deep link: conversations.html
+   reads ?thread=<phoneKey> where the key is the 10-digit phone
+   prefixed with '1' (same rule as contacts.html ctPhoneKey).
+   Returns '' when the phone has no usable digits. */
+function pipeThreadKey(phone) {
+  var d = String(phone || '').replace(/\D/g, '');
+  if (d.length === 11 && d.charAt(0) === '1') d = d.slice(1);
+  if (d.length !== 10) return '';
+  return '1' + d;
+}
+/* Direct thread deep-link per deal, or '' when the deal has no
+   phone (no thread exists to link to — never invent a key). */
+function pipeThreadLink(phone) {
+  var k = pipeThreadKey(phone);
+  return k ? '/conversations.html?thread=' + encodeURIComponent(k) : '';
+}
+/* tel: link for a phone, or '' when unusable. */
+function pipePhoneHref(phone) {
+  var k = pipeThreadKey(phone);
+  return k ? 'tel:+' + k : '';
+}
+/* Closed-deal summary over fetched opportunities: a deal counts as
+   closed when its status is 'won' or its stage name says Closed,
+   Sold or Won (HL holds no status-won opps today — stage names are
+   the live signal). Returns { count, volume }. Pure. */
+function pipeClosedSummary(opps) {
+  var count = 0, volume = 0;
+  (opps || []).forEach(function (o) {
+    if (!o || typeof o !== 'object') return;
+    var stage = String(o.stage || '').toLowerCase();
+    if (String(o.status || '').toLowerCase() === 'won' ||
+        stage.indexOf('closed') !== -1 || stage.indexOf('sold') !== -1 ||
+        stage.indexOf('won') !== -1) {
+      count += 1;
+      volume += Number(o.monetaryValue) || 0;
+    }
+  });
+  return { count: count, volume: volume };
+}
+/* Render cap: a stage column shows at most `max` cards; the rest
+   are counted, never silently dropped. Returns
+   { shown: [...], hidden: n }. Pure. */
+function columnDealsForRender(deals, max) {
+  var list = (deals || []).slice();
+  var m = Number(max);
+  if (!Number.isFinite(m) || m < 0) m = list.length;
+  return { shown: list.slice(0, m), hidden: Math.max(0, list.length - m) };
+}
+/* Build the board columns from the getOpportunities payload: one
+   entry per pipeline, stages in position order, EVERY stage present
+   even with zero deals. Deals match by stageId; a deal whose
+   stageId is unknown (or blank) falls back to a stage-name match
+   inside its own pipeline, then to a 'No stage' column in that
+   pipeline. A deal whose pipeline is not in the list at all lands
+   in a trailing 'Unmatched' bucket (only created when non-empty).
+   Deals inside a column sort newest-first (createdAt desc).
+   The input lists are never mutated. */
+function buildPipelineColumns(pipelines, opps) {
+  var pipes = (pipelines || []).map(function (p) {
+    return {
+      pipelineId: String(p.id || ''),
+      pipeline: String(p.name || 'Pipeline'),
+      stages: (p.stages || []).map(function (s) {
+        return { stageId: String(s.id || ''), stage: String(s.name || ''), position: s.position, deals: [] };
+      })
+    };
+  });
+  var unmatched = { pipelineId: '', pipeline: 'Unmatched', stages: [] };
+  function noStageCol(pipe) {
+    for (var i = 0; i < pipe.stages.length; i++) {
+      if (pipe.stages[i].stageId === '') return pipe.stages[i];
+    }
+    var c = { stageId: '', stage: 'No stage', position: null, deals: [] };
+    pipe.stages.push(c);
+    return c;
+  }
+  function byNewest(a, b) {
+    return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
+  }
+  (opps || []).forEach(function (o) {
+    if (!o || typeof o !== 'object') return;
+    var pipe = null;
+    if (o.pipelineId) {
+      for (var i = 0; i < pipes.length; i++) {
+        if (pipes[i].pipelineId && pipes[i].pipelineId === String(o.pipelineId)) { pipe = pipes[i]; break; }
+      }
+    }
+    var target = pipe || unmatched;
+    var col = null;
+    if (o.stageId) {
+      for (var j = 0; j < target.stages.length; j++) {
+        if (target.stages[j].stageId === String(o.stageId)) { col = target.stages[j]; break; }
+      }
+    }
+    if (!col && o.stage) {
+      for (var k = 0; k < target.stages.length; k++) {
+        if (target.stages[k].stage === String(o.stage)) { col = target.stages[k]; break; }
+      }
+    }
+    if (!col) col = noStageCol(target);
+    col.deals.push(o);
+  });
+  pipes.forEach(function (pipe) {
+    pipe.stages.forEach(function (c) { c.deals.sort(byNewest); });
+  });
+  unmatched.stages.forEach(function (c) { c.deals.sort(byNewest); });
+  if (unmatched.stages.length) pipes.push(unmatched);
+  return pipes;
+}
 /* ==/PURE== */
 </script>
 
 <script>
+var PIPE_COLUMN_RENDER_MAX = 100;
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
     return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
@@ -89,40 +202,69 @@ function esc(s) {
 }
 function dealCardHtml(o) {
   var addr = esc(o.address || '');
+  var thread = pipeThreadLink(o.contactPhone);
+  var phoneHref = pipePhoneHref(o.contactPhone);
+  var created = o.createdAt ? new Date(o.createdAt).toLocaleDateString() : '';
   return '<div class="card"><div class="name">' + esc(o.name || 'Opportunity') + '</div>' +
     (addr ? '<div class="sub">' + addr + '</div>' : '') +
     '<div class="val">' + esc(pipeMoney(o.monetaryValue)) + '</div>' +
+    (o.contactPhone
+      ? '<div class="sub">📞 <a href="' + esc(phoneHref) + '">' + esc(o.contactPhone) + '</a></div>'
+      : '<div class="sub">No phone on file</div>') +
     (o.contactId ? '<div class="sub">CRM contact ' + esc(o.contactId) + '</div>' : '') +
-    '<div style="margin-top:6px"><a href="/contacts.html">View in Contacts →</a></div></div>';
+    (created ? '<div class="sub">Created ' + esc(created) + '</div>' : '') +
+    '<div style="margin-top:6px">' +
+    (thread ? '<a href="' + esc(thread) + '">Open thread →</a> · ' : '') +
+    '<a href="/contacts.html">View in Contacts →</a></div></div>';
+}
+function stageColumnHtml(c) {
+  var part = columnDealsForRender(c.deals, PIPE_COLUMN_RENDER_MAX);
+  var html = '<div class="col"><h2>' + esc(c.stage) + '</h2>' +
+    '<div class="count">' + c.deals.length + ' deal' + (c.deals.length === 1 ? '' : 's') + '</div>';
+  if (!c.deals.length) {
+    html += '<div class="empty">No deals in this stage yet.</div>';
+  } else {
+    html += part.shown.map(dealCardHtml).join('');
+    if (part.hidden > 0) {
+      html += '<div class="empty">+' + part.hidden + ' more in this stage — newest ' +
+        PIPE_COLUMN_RENDER_MAX + ' shown.</div>';
+    }
+  }
+  return html + '</div>';
 }
 async function loadPipeline() {
   var meta = document.getElementById('pipeMeta');
   var board = document.getElementById('board');
   try {
-    var res = await fetch('/.netlify/functions/cc-data?action=overview', { credentials: 'include' });
+    var res = await fetch('/.netlify/functions/cc-data?action=getOpportunities', { credentials: 'include' });
     var d = await res.json();
     if (!d || d.ok === false) throw new Error((d && d.error) || ('HTTP ' + res.status));
-    var deals = ((d.newLeads || []).concat(d.underContractDeals || []));
-    var cols = groupOppsByStage(deals);
-    var fetchedNote = (d.oppsFetched != null)
-      ? 'Showing ' + deals.length + ' deals from ' + d.oppsFetched + ' fetched opportunities' +
-        (d.oppsTotal ? ' of ' + d.oppsTotal + ' total' : '') +
-        (d.closeRateCapped ? ' — list capped at the fetched set' : '') + '.'
-      : 'Showing ' + deals.length + ' deals.';
-    meta.textContent = fetchedNote +
-      (d.fetchedAt ? ' As of ' + new Date(d.fetchedAt).toLocaleString() + '.' : '') +
-      ((d.errors && d.errors.opps) ? ' Pipeline feed issue: ' + d.errors.opps : '');
-    var html = cols.map(function (c) {
-      return '<div class="col"><h2>' + esc(c.stage) + '</h2>' +
-        '<div class="count">' + c.deals.length + ' deal' + (c.deals.length === 1 ? '' : 's') + '</div>' +
-        c.deals.map(dealCardHtml).join('') + '</div>';
+    var opps = d.opportunities || [];
+    var cols = buildPipelineColumns(d.pipelines || [], opps);
+    var closed = pipeClosedSummary(opps);
+    var perPipe = Object.keys(d.perPipeline || {}).map(function (id) {
+      var p = d.perPipeline[id];
+      return p.name + ' ' + p.fetched + '/' + p.total;
+    }).join(' · ');
+    var metaLine = 'Showing ' + opps.length + ' deals of ' + (d.total || opps.length) + ' total opportunities' +
+      (d.capped ? ' — fetch capped at the newest ' + opps.length + ' (20-page / 2,000-opp per-call cap)' : '') +
+      (d.phonesTotal ? ' · phones on ' + (d.phonesEnriched || 0) + ' of ' + d.phonesTotal + ' fetched deals with contacts' : '') +
+      '. Closed (fetched): ' + closed.count + ' deals · ' + pipeMoney(closed.volume) + ' gross volume.';
+    if (perPipe) metaLine += ' Per pipeline (fetched/total): ' + perPipe + '.';
+    metaLine += (d.fetchedAt ? ' As of ' + new Date(d.fetchedAt).toLocaleString() + '.' : '') +
+      ((d.errors && (d.errors.pipelines || d.errors.opps)) ? ' Feed issue: ' + (d.errors.pipelines || d.errors.opps) : '');
+    meta.textContent = metaLine;
+    var html = cols.map(function (pipe) {
+      var pipeTotal = (d.perPipeline && d.perPipeline[pipe.pipelineId])
+        ? d.perPipeline[pipe.pipelineId]
+        : null;
+      var sub = pipeTotal
+        ? pipeTotal.fetched + ' of ' + pipeTotal.total + ' fetched' + (pipeTotal.capped ? ' (capped)' : '')
+        : pipe.stages.reduce(function (n, c) { return n + c.deals.length; }, 0) + ' deals';
+      return '<h2 class="pipe-head">' + esc(pipe.pipeline) + ' <span class="muted">— ' + esc(sub) + '</span></h2>' +
+        '<div class="board">' + pipe.stages.map(stageColumnHtml).join('') + '</div>';
     }).join('');
-    // Closed / Won: count + gross volume only — the overview feed
-    // returns no closed rows to list.
-    html += '<div class="col"><h2>Closed / Won</h2>' +
-      '<div class="count">' + (d.closedCount || 0) + ' closed · ' + esc(pipeMoney(d.closedVolume)) + ' gross volume</div>' +
-      '<div class="empty">Closed rows are not returned by the overview feed — count + volume only. See the follow-up note below.</div></div>';
-    board.innerHTML = html || '<div class="empty">No open deals in the overview feed.</div>';
+    board.innerHTML = html || '<div class="empty">No pipelines returned by the feed.</div>';
   } catch (e) {
     meta.textContent = 'Pipeline could not be loaded.';
     board.innerHTML = '<div class="empty">Could not load the pipeline: ' + esc(e.message || e) + '</div>';

@@ -2364,7 +2364,7 @@ function renderNotifPanel() {
     // Tap anywhere on the row opens its conversation (Nov 27, 2026 —
     // Troy: rows were dead on tap; GoHighLevel opens the thread on
     // tap). data-notif-key/phone carry the thread; the ✕ still dismisses.
-    return '<div class="notif-item" role="button" tabindex="0" data-notif-key="' + esc(f.key || '') + '" data-notif-phone="' + esc(f.phone || '') + '" title="Tap to open conversation"><div class="n-body"><div class="n-name">' + esc(who) + '</div>' +
+    return '<div class="notif-item" role="button" tabindex="0" data-notif-key="' + esc(f.key || '') + '" data-notif-phone="' + esc(f.phone || '') + '" data-notif-type="' + esc(f.type || '') + '" data-notif-preview="' + esc(prev) + '" title="Tap to open conversation"><div class="n-body"><div class="n-name">' + esc(who) + '</div>' +
       (prev ? '<div class="n-prev">' + esc(prev) + '</div>' : '') +
       (when ? '<div class="n-time">' + esc(fmtTime(when)) + '</div>' : '') +
       '</div><span class="n-go" aria-hidden="true">›</span><button type="button" class="n-x" data-dismiss="' + esc(f.id) + '" title="Dismiss">✕</button></div>';
@@ -2378,6 +2378,13 @@ function renderNotifPanel() {
    that never texted), fall through to Dialer recents, where the call
    itself is listed. */
 async function openNotifThread(item) {
+  // Engine-stall flags are market-level, not a conversation: there
+  // is no thread to open. Tapping one shows what stalled instead
+  // of opening a junk thread (Nov 27, 2026).
+  if ((item.getAttribute('data-notif-type') || '') === 'engine-stall') {
+    toast(item.getAttribute('data-notif-preview') || 'Engine stalled for this market.');
+    return;
+  }
   var key = item.getAttribute('data-notif-key') || '';
   var phone = item.getAttribute('data-notif-phone') || '';
   // Prefer the PHONE: it is always a real phone, while `key` may be a
