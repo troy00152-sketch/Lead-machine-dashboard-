@@ -2117,7 +2117,11 @@ async function startSession() {
     return;
   }
   try {
-    var data = await api('', { action: 'start', agentSipUri: state.agentSipUri });
+    // The page sends the id of the session it built so the server can
+    // refuse to dial if a stale save replaced it (Nov 28: Start
+    // resumed the wrong list twice). No id (e.g. a resumed session
+    // loaded from the server) skips the check.
+    var data = await api('', { action: 'start', agentSipUri: state.agentSipUri, sessionId: state.session && state.session.id });
     state.session = data.session;
     renderSession();
     if (data.error) toast('Dialing stopped: ' + data.error);
