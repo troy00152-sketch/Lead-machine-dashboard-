@@ -81,7 +81,7 @@
  */
 'use strict';
 
-const { classifyInbound, isOptOut, contactIsDnd, contactIsLandline, contactIsBuyer, contactPropertyAddress, withinHours, detectDecline, isAcknowledgment, lastOutboundWasBookingConfirmation, lastOutboundInfo, historyTailDebug, weekdayOf, isAbsurdPrice, ABSURD_PRICE_MULTIPLE, isFirmPrice, isFirmPriceBurst, establishedPriceSeal, isVisitInvitation, hasExplicitTimeMention, lastOutboundAskedForPhotos, isPhotoSendReply, countPriceAsks, isPriceAsk, inboundBurst, normalize, isClearWrongPerson, isBareWrongNumber, threadShowsNegotiation, detectOwnerReferral, stripForeignMonth } = require('./guards');
+const { classifyInbound, isOptOut, isListed, contactIsDnd, contactIsLandline, contactIsBuyer, contactPropertyAddress, withinHours, detectDecline, isAcknowledgment, lastOutboundWasBookingConfirmation, lastOutboundInfo, historyTailDebug, weekdayOf, isAbsurdPrice, absurdPriceBranches, ABSURD_PRICE_MULTIPLE, isFirmPrice, isFirmPriceBurst, establishedPriceSeal, isVisitInvitation, hasExplicitTimeMention, lastOutboundAskedForPhotos, isPhotoSendReply, countPriceAsks, isPriceAsk, inboundBurst, normalize, isClearWrongPerson, isBareWrongNumber, threadShowsNegotiation, detectOwnerReferral, stripForeignMonth } = require('./guards');
 const { getBallpark, getVerifiedPrice, normalizePhoneDigits } = require('./hl');
 const { buildSystemPrompt, parseModelOutput, loadKnowledge } = require('./prompt');
 const { matchObjection } = require('./objections');
@@ -261,11 +261,43 @@ function createHandler(deps) {
   const dedupe = deps.dedupe || createDedupe();
   const log = (...a) => logger.log('[custom-bot]', ...a);
 
+  // ── Conversation AI guardrail toggles (Nov 27, 2026) ────────────────
+  // The stored config's guardrails gate the seal/silence rules below.
+  // The runner (cc-bot-runner.js) copies botConfig.guardrails onto
+  // config.guardrails on EVERY invocation and clears it when the store
+  // can't be read, so a warm container can never carry a stale OFF
+  // across a failed config load. Fail-closed: a rule is skipped ONLY
+  // when its toggle is explicitly `false` — true, absent, or an
+  // unreadable config all mean ON, the long-standing doctrine.
+  // A bypass is recorded twice: a log line here, and the ids in the
+  // response body (guardrailsBypassed), which cc-bot-hook writes onto
+  // the thread's botLog entry — a disabled rule stays visible.
+  // `bypassed` is per-invocation: reset at the top of handle().
+  let bypassed = [];
+  function guardOn(id) {
+    const g = config && config.guardrails;
+    return !(g && typeof g === 'object' && g[id] === false);
+  }
+  function guardOpts() {
+    return {
+      optout: guardOn('optout'),
+      listed: guardOn('listed'),
+      bigAsk: guardOn('big-ask'),
+      overMao: guardOn('over-mao'),
+    };
+  }
+  function logGuardrailBypassed(id, contactId, note) {
+    if (!bypassed.includes(id)) bypassed.push(id);
+    log(`guardrail-bypassed ${id} for ${contactId} — toggle OFF, rule skipped${note ? ' (' + note + ')' : ''}`);
+  }
+
   function respond(statusCode, outcome, extra = {}) {
+    const body = { outcome, ...extra };
+    if (bypassed.length) body.guardrailsBypassed = [...bypassed];
     return {
       statusCode,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ outcome, ...extra }),
+      body: JSON.stringify(body),
     };
   }
 
@@ -328,6 +360,7 @@ function createHandler(deps) {
   }
 
   async function handle(event) {
+    bypassed = [];
     if (!config.botEnabled) return respond(200, 'disabled');
 
     // 0 — shared-secret verification (header preferred, query fallback)
@@ -424,11 +457,14 @@ function createHandler(deps) {
     // One carve-out: a genuine opt-out ("STOP"/"Out"/"remove me") still
     // takes the normal guard path and is DND'd immediately — an opt-out
     // is a legal compliance signal, not a conversation to own. The
-    // appointment verdict itself never DNDs anyone.
+    // appointment verdict itself never DNDs anyone. When the optout
+    // guardrail is OFF, an opt-out is NOT a carve-out any more: the
+    // past-appointment silence applies instead (the guard step below
+    // skips the seal the same way).
     // Fail-open like step 7.5: a calendar outage must not silence every
     // seller — a failed check is logged and treated as "no known past
     // appointment".
-    if (!isOptOut(inboundText)) {
+    if (!(guardOn('optout') && isOptOut(inboundText))) {
       let pastAppt = null;
       const apptCalendars = [config.calendarId, config.legacyCalendarId].filter(Boolean);
       for (const calId of apptCalendars) {
@@ -459,7 +495,14 @@ function createHandler(deps) {
     // 6 — guard classification (24/7, before hours gate). The thread
     // history rides along so the bare-"No" question-context exemption
     // (Nov 11, Gatlin gap) can see the last outbound question.
-    const verdict = classifyInbound(inboundText, history);
+    // Guardrail toggles (Nov 27): classifyInbound skips the opt-out /
+    // listed buckets whose toggle is OFF (see guards.js); a skipped
+    // rule that WOULD have fired is logged + recorded as bypassed, so
+    // a disabled rule is visible instead of silently absent.
+    const opts = guardOpts();
+    if (!opts.optout && isOptOut(inboundText)) logGuardrailBypassed('optout', evt.contactId, 'opt-out wording ignored');
+    if (!opts.listed && isListed(inboundText)) logGuardrailBypassed('listed', evt.contactId, 'listing signal ignored');
+    const verdict = classifyInbound(inboundText, history, opts);
     if (verdict.verdict === 'silence-dnd') {
       // Nov 9, Charday Cooke round 2: a bare "wrong number" in a LIVE
       // negotiation is frustration at the bot's own bad offers, not a
@@ -485,7 +528,9 @@ function createHandler(deps) {
     // already handled and never re-trigger (see inboundBurst).
     for (const body of inboundBurst(history)) {
       if (normalize(body) === normalize(inboundText)) continue;
-      const burstVerdict = classifyInbound(body, history);
+      if (!opts.optout && isOptOut(body)) logGuardrailBypassed('optout', evt.contactId, 'opt-out wording ignored (burst)');
+      if (!opts.listed && isListed(body)) logGuardrailBypassed('listed', evt.contactId, 'listing signal ignored (burst)');
+      const burstVerdict = classifyInbound(body, history, opts);
       if (burstVerdict.verdict === 'silence-dnd') {
         // Same narrowing as step 6: a bare "wrong number" inside a live
         // negotiation is frustration, not a wrong-person declaration.
@@ -539,7 +584,17 @@ function createHandler(deps) {
       const contactTags = Array.isArray(contact.tags) ? contact.tags : [];
       let sealCategory = null;
       let sealSource = null;
-      if (contactTags.includes('absurd-price')) {
+      // Guardrail toggles (Nov 27): the absurd-price tag was written
+      // when the absurd rule fired — it only still seals while at
+      // least one absurd branch is ON. With big-ask AND over-mao both
+      // OFF the tag is a record of a disabled rule, not a live seal
+      // (logged as bypassed; a firm-price tag or history evidence can
+      // still seal below — firm has no toggle).
+      if (contactTags.includes('absurd-price') && !guardOn('big-ask') && !guardOn('over-mao')) {
+        logGuardrailBypassed('big-ask', evt.contactId, 'absurd-price tag ignored');
+        logGuardrailBypassed('over-mao', evt.contactId, 'absurd-price tag ignored');
+      }
+      if (contactTags.includes('absurd-price') && (guardOn('big-ask') || guardOn('over-mao'))) {
         sealCategory = 'absurd-price';
         sealSource = 'tag';
       } else if (contactTags.includes('firm-price')) {
@@ -547,7 +602,7 @@ function createHandler(deps) {
         sealSource = 'tag';
       } else {
         const bpSeal = getBallpark(contact, config);
-        sealCategory = establishedPriceSeal(history, bpSeal ? bpSeal.mao : null);
+        sealCategory = establishedPriceSeal(history, bpSeal ? bpSeal.mao : null, guardOpts());
         if (sealCategory) sealSource = 'history';
       }
       if (sealCategory) {
@@ -579,7 +634,21 @@ function createHandler(deps) {
       const bp65 = getBallpark(contact, config);
       const mao = bp65 ? bp65.mao : null;
       const burstBodies = [inboundText, ...inboundBurst(history)];
-      if (burstBodies.some((t) => isAbsurdPrice(t, mao))) {
+      // Guardrail toggles (Nov 27): each absurd branch is gated
+      // separately (big-ask = $500K+ gate, over-mao = >2x-MAO gate).
+      // A burst that would have sealed under a disabled toggle is
+      // logged + recorded as bypassed instead of silencing.
+      const wouldFire = burstBodies.some((t) => isAbsurdPrice(t, mao));
+      const gatedFire = burstBodies.some((t) => isAbsurdPrice(t, mao, guardOpts()));
+      if (wouldFire && !gatedFire) {
+        if (burstBodies.some((t) => absurdPriceBranches(t, mao).absolute) && !guardOn('big-ask')) {
+          logGuardrailBypassed('big-ask', evt.contactId, '$500K+ ask ignored');
+        }
+        if (burstBodies.some((t) => absurdPriceBranches(t, mao).relative) && !guardOn('over-mao')) {
+          logGuardrailBypassed('over-mao', evt.contactId, 'over-2x-MAO ask ignored');
+        }
+      }
+      if (gatedFire) {
         log(`absurd-price silence for ${evt.contactId}: ask absurd (mao=${mao})`);
         try {
           await hl.addTags(evt.contactId, ['absurd-price']);
@@ -655,6 +724,14 @@ function createHandler(deps) {
       const contactDigits = normalizePhoneDigits(
         contact && (contact.phone || contact.phoneNumber || contact.mobile || contact.phone_number)
       );
+      // Guardrail toggle (Nov 27): referral OFF means the referral
+      // rule is skipped entirely — no ack, no flag, no tag. The
+      // message falls through to the normal reply path, and the skip
+      // is logged + recorded as bypassed.
+      if (referral && referral.phone && referral.phone !== contactDigits && !guardOn('referral')) {
+        logGuardrailBypassed('referral', evt.contactId, 'owner referral ignored');
+        referral = null;
+      }
       if (referral && referral.phone && referral.phone !== contactDigits) {
         if (referralAlreadyAnswered(history) || !withinHours(now(), config)) {
           log(`owner-referral for ${evt.contactId}: flagging Troy, no send (${referralAlreadyAnswered(history) ? 'already answered' : 'after-hours'})`);
@@ -711,6 +788,11 @@ function createHandler(deps) {
     // an appointment on the calendar gets NO reply to anything. Troy
     // handles all communication after the booking. The guards above
     // (opt-out, hostile, etc.) still run — compliance is not "talking".
+    // Guardrail toggle (Nov 27): booked OFF skips ONLY this silence —
+    // the seller falls through to the normal reply path (the booking
+    // itself is untouched: nothing here reschedules or cancels, and
+    // the no-reschedule ack below still applies). The skip is logged +
+    // recorded as bypassed.
     // FIX C (Nov 27, 2026): name the tripping appointment id(s) in
     // the log AND the response — a bare 'booked-silent' with no ids
     // is unactionable (Paula's cancelled Sat Nov 28 11 AM row tripped
@@ -718,8 +800,12 @@ function createHandler(deps) {
     // through the runner into the thread botLog.
     if (existing.length) {
       const ids = existing.map((a) => a && a.id).filter(Boolean);
-      log(`booked-silent for ${evt.contactId}: ${existing.length} existing booking(s) [${ids.join(',')}] — Troy handles`);
-      return respond(200, 'booked-silent', { appointmentIds: ids });
+      if (!guardOn('booked')) {
+        logGuardrailBypassed('booked', evt.contactId, `${existing.length} existing booking(s) [${ids.join(',')}] ignored`);
+      } else {
+        log(`booked-silent for ${evt.contactId}: ${existing.length} existing booking(s) [${ids.join(',')}] — Troy handles`);
+        return respond(200, 'booked-silent', { appointmentIds: ids });
+      }
     }
 
     // 7.7 — NO-PROPERTY GATE (Nov 20, 2026, Troy — the 30007 fix): the
