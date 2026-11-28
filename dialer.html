@@ -190,6 +190,16 @@
 
   <section class="statcards" id="statCards" aria-label="Session stats"></section>
 
+  <!-- Number rotation (Nov 28, 2026 — XLeads 3X Dialer parity): which
+       caller ID each number dialed out on today, which numbers are
+       resting at the daily cap, excluded numbers, and how many
+       contacts answer on a remembered (sticky) number. Filled by
+       renderRotation() from ?action=state. -->
+  <section class="pane" aria-label="Number rotation" style="margin-top:12px">
+    <div class="pane-head"><h2>📞 Number rotation</h2></div>
+    <div class="pane-body" id="rotationPanel"><div class="note">Loading rotation…</div></div>
+  </section>
+
   <main class="grid">
     <!-- LEFT: list + session controls -->
     <div>
@@ -433,6 +443,7 @@ var state = {
   config: null,
   session: null,
   recordings: [],
+  rotation: null,
   agentSipUri: '',
   audioConnected: false,
   audioConnecting: false, /* a connect is in flight — never stack a second client on one credential */
@@ -573,11 +584,67 @@ function renderSlots() {
     var cls = !leg ? '' : (leg.state === 'bridged' || leg.state === 'answered-human' ? ' live' : ' ringing');
     html += '<div class="slot' + cls + '"><div class="s-k">Line ' + (i + 1) + '</div>' +
       (leg
-        ? '<div class="s-phone">' + esc(fmtPhone(leg.phone)) + '</div><div class="s-state">' + slotStateLabel(leg) + '</div>'
+        ? '<div class="s-phone">' + esc(fmtPhone(leg.phone)) + '</div><div class="s-state">' + slotStateLabel(leg) + '</div>' +
+          (leg.from ? '<div style="font-size:11px;color:var(--muted)">from ' + esc(fmtPhone(leg.from)) + '</div>' : '')
         : '<div class="s-phone" style="color:var(--muted2)">—</div><div class="s-state"><span class="pill">Idle</span></div>') +
       '</div>';
   }
   el.innerHTML = html;
+}
+
+/* ---------- number rotation ---------- */
+/* Renders the rotation panel from state.rotation (?action=state carries
+   it). Per market: each pool number, calls today, resting/capped /
+   excluded state, and how many contacts are sticky to it. The cap +
+   excluded list are editable here (rotation-config). Bound after each
+   render — the panel is re-rendered on every state refresh. */
+function renderRotation() {
+  var el = document.getElementById('rotationPanel');
+  if (!el) return;
+  var r = state.rotation;
+  if (!r) { el.innerHTML = '<div class="note">Rotation data unavailable.</div>'; return; }
+  var html = '<div class="note" style="margin-bottom:8px">Daily cap <strong>' + esc(String(r.dailyCap)) + ' calls per number</strong> · ' +
+    esc(String(r.stickyCount)) + ' contact(s) answer on a remembered number · a number at its cap rests until tomorrow (ET). ' +
+    'A seller who answers keeps their number — future calls to them use it first.</div>';
+  var anyNumbers = false;
+  (r.markets || []).forEach(function (m) {
+    if (!m.numbers || !m.numbers.length) return;
+    anyNumbers = true;
+    html += '<div style="margin-top:8px"><strong>' + esc(MARKET_LABELS[m.market] || m.market) + '</strong></div>';
+    html += m.numbers.map(function (n) {
+      var status = n.excluded ? '<span class="pill red">Excluded</span>'
+        : n.capped ? '<span class="pill red">Resting — cap reached</span>'
+        : '<span class="pill green">Active</span>';
+      return '<div class="q-item"><div style="flex:1;min-width:0"><div class="q-name">' + esc(fmtPhone(n.number)) + '</div>' +
+        '<div class="q-sub">' + esc(String(n.today)) + ' call(s) today' +
+        (n.stickyFor ? ' · ' + esc(String(n.stickyFor)) + ' sticky contact(s)' : '') + '</div></div>' + status + '</div>';
+    }).join('');
+  });
+  if (!anyNumbers) html += '<div class="note" style="margin-top:8px">No sender numbers in any market yet — numbers are Troy\u2019s purchase; until then dialing fails closed.</div>';
+  html += '<div class="row" style="margin-top:10px;align-items:flex-end;flex-wrap:wrap">' +
+    '<div><label class="lbl" for="rotCap">Daily cap per number</label>' +
+    '<input class="field" id="rotCap" type="number" min="1" max="500" value="' + esc(String(r.dailyCap)) + '" style="width:90px"></div>' +
+    '<div style="flex:1;min-width:220px"><label class="lbl" for="rotExcluded">Excluded numbers (comma-separated)</label>' +
+    '<input class="field" id="rotExcluded" type="text" placeholder="(252) 538-7760, …" value="' + esc((r.excluded || []).map(fmtPhone).join(', ')) + '"></div>' +
+    '<button class="btn small" id="rotSaveBtn" type="button">Save rotation settings</button></div>';
+  el.innerHTML = html;
+  var btn = document.getElementById('rotSaveBtn');
+  if (btn) btn.addEventListener('click', saveRotationConfig);
+}
+async function saveRotationConfig() {
+  var capEl = document.getElementById('rotCap');
+  var excEl = document.getElementById('rotExcluded');
+  var body = { action: 'rotation-config' };
+  if (capEl && capEl.value !== '') body.dailyCap = Number(capEl.value);
+  if (excEl) body.excluded = excEl.value.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+  try {
+    var data = await api('', body);
+    state.rotation = data.rotation;
+    renderRotation();
+    toast('Rotation settings saved.');
+  } catch (e) {
+    toast('Could not save rotation settings: ' + (e && e.message ? e.message : e));
+  }
 }
 
 /* ---------- queue ---------- */
@@ -660,6 +727,7 @@ function renderSession() {
   document.getElementById('startBtn').textContent = s && s.status === 'paused' ? '▶ Resume dialing' : '▶ Start dialing';
   renderStats();
   renderSlots();
+  renderRotation();
   renderQueue();
   renderCallCard();
   // A token refresh deferred past a live call drains once the session
@@ -680,6 +748,7 @@ async function refreshState() {
   var prevConnected = state.session && state.session.connectedLead ? state.session.connectedLead.key : null;
   state.session = data.session;
   state.recordings = Array.isArray(data.recordings) ? data.recordings : [];
+  state.rotation = data.rotation || null;
   renderSession();
   renderRecordings();
   var nowConnected = state.session && state.session.connectedLead ? state.session.connectedLead.key : null;

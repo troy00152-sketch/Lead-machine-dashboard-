@@ -885,6 +885,14 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
               <option value="C">🟡 C — Possible</option>
               <option value="D">⚪ D — Thin data</option>
             </select>
+            <select class="field" id="mbType" style="width:170px" onchange="searchMasterBuyers()" title="Filter by buyer type, from deal history">
+              <option value="">All types</option>
+              <option value="Flipper">Flipper</option>
+              <option value="Landlord">Landlord</option>
+              <option value="Flipper+Landlord">Flipper + Landlord</option>
+              <option value="Buyer">Buyer</option>
+              <option value="__none">No type on file</option>
+            </select>
             <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);white-space:nowrap;cursor:pointer" title="Show only land investors (name contains 'land', phone on file)">
               <input type="checkbox" id="mbLandOnly" onchange="searchMasterBuyers()" style="width:16px;height:16px;accent-color:#22c55e" /> 🌱 Land only
             </label>
@@ -915,6 +923,7 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
           </div>
           <div id="mbMap" style="display:none;height:480px;border-radius:12px;margin-bottom:12px;border:1px solid var(--line);z-index:0"></div>
           <div id="mbMapNote" style="display:none;font-size:12px;color:var(--muted);margin-bottom:12px"></div>
+          <div id="mbTopMarkets" style="margin-bottom:14px"></div>
           <div id="mbResults" style="max-height:600px;overflow-y:auto"></div>
           <div id="mbPagination" style="margin-top:12px;text-align:center"></div>
         </div>
@@ -1275,6 +1284,8 @@ body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
             <div><label class="lbl">Repairs ($)</label><input class="field" id="compRepairs" type="number" placeholder="Enter repairs" oninput="calcComp()" /></div>
           </div>
           <div id="compResult" style="margin-top:14px"></div>
+          <div id="compOfferLine" style="margin-top:14px"></div>
+          <div id="compPayoff" style="margin-top:14px"></div>
           <div id="compTierTable" style="margin-top:14px"></div>
           <p style="color:var(--muted2);font-size:11px;margin-top:12px">MAO tiers: 70% under $120K · 80% $120–220K · 81.5% $220–300K · 82.9% $300–400K · 84.9% $400K+. LAO = MAO × 70%. Manual ARV always wins — typing your own ARV overrides the picks average until picks change.</p>
           <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:14px"><button class="btn primary" onclick="downloadCompReport()">📄 Download comp report</button><span style="font-size:12px;color:var(--muted)">Prints the current page state — picks, ARV, offer math, listing, and mortgage.</span></div>
@@ -1605,7 +1616,15 @@ function showPage(name){
   document.querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active', b.dataset.nav===name));
   if(name === 'dealrooms' && typeof drLoadDeals === 'function') drLoadDeals();
   if(name === 'comps'){ renderCompMap(); setTimeout(()=>{ if(compMap){ compMap.invalidateSize(); renderCompMap(); } }, 150); }
-  if(name === 'masterbuyers' && typeof syncMbView === 'function'){ setTimeout(()=>{ if(mbMap){ mbMap.invalidateSize(); if(mbView === 'map') renderBuyerMap(); } }, 150); }
+  if(name === 'masterbuyers'){
+    if(typeof syncMbView === 'function'){ setTimeout(()=>{ if(mbMap){ mbMap.invalidateSize(); if(mbView === 'map') renderBuyerMap(); } }, 150); }
+    /* First open auto-loads the list: #mbResults starts empty and
+       nothing else calls searchMasterBuyers() on open, so the tab
+       rendered zero buyers until Search was pressed (Nov 27 Phase-2
+       proof: "failed to open Master Buyers"). Once-only, so leaving
+       and returning never resets the user's search, filters, or page. */
+    if(!window._mbAutoLoaded && typeof searchMasterBuyers === 'function'){ window._mbAutoLoaded = true; searchMasterBuyers(); }
+  }
   if(name === 'buyervault' && typeof BuyerVaultUI !== 'undefined'){ BuyerVaultUI.init(); }
   /* Leaving Comps wipes it (never on entering, never on a same-page
      re-click): a return shows a blank page, never the previous property. */
@@ -3997,6 +4016,7 @@ async function unverifyBuyer(){
 async function searchMasterBuyers(){
   const q = (document.getElementById('mbSearch').value || '').toLowerCase().trim();
   const tier = (document.getElementById('mbTier') || {}).value || '';
+  const type = (document.getElementById('mbType') || {}).value || '';
   const landOnly = (document.getElementById('mbLandOnly') || {}).checked || false;
   const verifiedOnly = (document.getElementById('mbVerifiedOnly') || {}).checked || false;
   const data = await loadMasterBuyers();
@@ -4013,6 +4033,16 @@ async function searchMasterBuyers(){
   if(tier){
     results = results.filter(b => (b.ti||'').charAt(0) === tier);
   }
+  /* Buyer-type filter (Nov 28, 2026 — BuyBox parity): the st field
+     already carries the type from deal history; "__none" is buyers
+     with no type on file (3,333 of them). */
+  if(type){
+    results = results.filter(b => type === '__none' ? !(b.st||'') : (b.st||'') === type);
+  }
+  /* Top-markets click filter: exact city + state match. */
+  if(_mbMarketFilter){
+    results = results.filter(b => (b.c||'').toLowerCase() === _mbMarketFilter.city.toLowerCase() && (b.s||'').toLowerCase() === _mbMarketFilter.state.toLowerCase());
+  }
   if(verifiedOnly){
     results = results.filter(b => vmap[mbDigits(b.p)]);
   }
@@ -4028,6 +4058,51 @@ async function searchMasterBuyers(){
   window._mbSortDir = 1; /* reset to score-desc on new search */
   if(typeof mbResetDraw === 'function') mbResetDraw(); /* a new search clears any drawn-area filter */
   renderMasterBuyers(results);
+  renderMbTopMarkets();
+}
+/* ---- Top buyer markets (Nov 28, 2026 — BuyBox parity): rank
+   city+state by buyer count, tie-break portfolio volume, from the
+   data already on file. Click a market to filter the table to it.
+   No per-deal dates exist in the data, so last-buy / active-status /
+   preferred-ZIP ranking is NOT invented here. ---- */
+let _mbMarketFilter = null; // {city, state} set by a top-markets click
+function mbTopMarkets(){
+  const data = mbData || [];
+  const byKey = {};
+  for(const b of data){
+    const city = (b.c||'').trim(), state = (b.s||'').trim();
+    if(!city && !state) continue;
+    const key = city + ', ' + state;
+    const m = byKey[key] || (byKey[key] = {key, city, state, count:0, volume:0, purchases:0});
+    m.count += 1;
+    m.volume += Number(b.pv)||0;
+    m.purchases += Number(b.pc)||0;
+  }
+  return Object.values(byKey).sort((a,b) => (b.count - a.count) || (b.volume - a.volume)).slice(0, 10);
+}
+function renderMbTopMarkets(){
+  const box = document.getElementById('mbTopMarkets'); if(!box) return;
+  const rows = mbTopMarkets();
+  window._mbTopMarkets = rows;
+  if(!rows.length){ box.innerHTML = ''; return; }
+  let html = '<div style="font-size:13px;font-weight:700;margin-bottom:8px">🏆 Top buyer markets <span style="color:var(--muted);font-weight:400">— ranked by buyer count, then portfolio volume. Click a market to filter the table.</span></div>';
+  if(_mbMarketFilter){
+    html += '<div style="margin-bottom:8px"><span class="badge blue" style="font-size:12px">Showing: ' + esc(_mbMarketFilter.city + ', ' + _mbMarketFilter.state) + '</span> <button class="btn small ghost" onclick="mbClearMarketFilter()">✕ Clear market filter</button></div>';
+  }
+  html += '<div style="display:flex;gap:8px;flex-wrap:wrap">' + rows.map((m,i) =>
+    '<button class="btn small" onclick="mbFilterMarketByRank(' + i + ')" title="' + m.count + ' buyers · ' + m.purchases + ' purchases · $' + (m.volume/1e6).toFixed(1) + 'M portfolio value">#' + (i+1) + ' ' + esc(m.key) + ' · ' + m.count + ' buyers</button>'
+  ).join('') + '</div>';
+  box.innerHTML = html;
+}
+function mbFilterMarketByRank(i){
+  const rows = window._mbTopMarkets || [];
+  const m = rows[i]; if(!m) return;
+  _mbMarketFilter = {city: m.city, state: m.state};
+  searchMasterBuyers();
+}
+function mbClearMarketFilter(){
+  _mbMarketFilter = null;
+  searchMasterBuyers();
 }
 function mbScoreBadge(b){
   const sc = (b.sc == null ? 0 : b.sc);
@@ -4807,6 +4882,7 @@ function compTierLabel(arv){
    live comp lookups (Realie / data provider); nothing here is sample data. */
 let compRows = [];
 let compPicks = [];
+let compExcludedRows = []; // feed-rejected sales + why (OfferX parity) — display-only, never in the math
 let compLoadedAddr = '';
 let compListingAddr = ''; /* last address the listing auto-fill fired for (once per search; retry re-runs loadCompsForAddress) */
 let compLeadFacts = null; /* { address, facts } stashed by openCompsForLead — the lead's own subject facts, merged UNDER the data-provider subject in loadCompsForAddress (address-keyed so a different search never inherits them) */
@@ -5724,6 +5800,70 @@ function copyQuickOffer(){
     if(btn){ const orig = btn.textContent; btn.textContent = '✓ Copied!'; setTimeout(()=>{ btn.textContent = orig; }, 1500); }
   }).catch(()=>{ alert('Copy failed — select the text manually.'); });
 }
+/* ---- OfferX parity (Nov 28, 2026): presentation over the EXISTING
+   ARV/MAO/LAO — no math changes, no forward haircut. The number line
+   shows open (LAO) -> target (midpoint, already computed in
+   renderCompTierTable) -> ceiling (MAO) -> ARV; the payoff box shows
+   what the seller nets after the mortgage, with a warning when the
+   walk-away is below the payoff. ---- */
+function renderCompOfferLine(arv, mao, lao){
+  const box = document.getElementById('compOfferLine'); if(!box) return;
+  if(!arv || !mao || !lao || arv <= lao){ box.innerHTML = ''; return; }
+  const mid = Math.round((lao + mao) / 2);
+  const pct = (v) => Math.max(0, Math.min(100, ((v - lao) / (arv - lao)) * 100));
+  const money = (v) => '$' + Number(v).toLocaleString();
+  const marker = (v, label, color) => {
+    const p = pct(v);
+    const shift = p <= 0 ? 'translateX(0)' : (p >= 100 ? 'translateX(-100%)' : 'translateX(-50%)');
+    return '<div style="position:absolute;left:' + p.toFixed(1) + '%;top:-5px;transform:' + shift + ';text-align:center">'
+      + '<div style="width:14px;height:14px;border-radius:50%;background:' + color + ';border:2px solid var(--card);margin:0 auto"></div>'
+      + '<div style="font-size:11px;font-weight:700;color:' + color + ';white-space:nowrap;margin-top:4px">' + label + '</div>'
+      + '<div style="font-size:11px;color:var(--text);white-space:nowrap">' + money(v) + '</div></div>';
+  };
+  box.innerHTML = '<div style="background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 14px 8px">'
+    + '<div style="font-size:12px;color:var(--muted);margin-bottom:16px">📏 <strong style="color:var(--text)">Offer number line</strong> — open at LAO, target the midpoint, never above MAO. ARV is the ceiling of value, not an offer.</div>'
+    + '<div style="position:relative;height:6px;background:var(--line);border-radius:3px;margin:0 6px 46px">'
+    + '<div style="position:absolute;left:0;width:' + pct(mao).toFixed(1) + '%;top:0;bottom:0;background:var(--green);opacity:.45;border-radius:3px"></div>'
+    + marker(lao, 'LAO · open', 'var(--green)')
+    + marker(mid, 'TARGET', 'var(--blue)')
+    + marker(mao, 'MAO · ceiling', 'var(--text)')
+    + marker(arv, 'ARV', 'var(--muted)')
+    + '</div></div>';
+}
+function renderCompPayoff(mao, lao){
+  const box = document.getElementById('compPayoff'); if(!box) return;
+  const amtEl = document.getElementById('compMortAmt');
+  const amtRaw = amtEl ? amtEl.value : '';
+  const amt = amtRaw === '' ? null : parseFloat(amtRaw);
+  const money = (v) => '$' + Math.round(v).toLocaleString();
+  const warnStyle = 'background:#3d0d0d;border:1px solid #ff4d4d;border-radius:10px;padding:12px;font-size:13px;color:#ff8080';
+  const okStyle = 'background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;font-size:13px';
+  if(compMortFreeClear || amt === 0){
+    box.innerHTML = '<div style="' + okStyle + '">💰 <strong>Seller payoff — free &amp; clear.</strong> No mortgage to pay off: the seller nets the full offer — <strong>' + money(lao) + ' at LAO</strong> · <strong>' + money(mao) + ' at MAO</strong>.</div>';
+    return;
+  }
+  if(amt != null && amt > 0){
+    const netLao = lao - amt;
+    const netMao = mao - amt;
+    let warn = '';
+    if(netMao < 0) warn += '<div style="margin-top:8px;font-weight:700">⚠️ Even at the ceiling the seller would owe ' + money(-netMao) + ' at closing — MAO does not clear the mortgage.</div>';
+    else if(netLao < 0) warn += '<div style="margin-top:8px;font-weight:700">⚠️ At the opening offer the seller would owe ' + money(-netLao) + ' at closing — the walk-away is below the payoff. Do not open at LAO on this one.</div>';
+    box.innerHTML = '<div style="' + (warn ? warnStyle : okStyle) + '">💰 <strong>Seller payoff</strong> — owes ' + money(amt) + ' (estimate — confirm with the lender before closing).'
+      + '<br>At LAO the seller nets <strong>' + money(netLao) + '</strong> · at MAO the seller nets <strong>' + money(netMao) + '</strong>.'
+      + warn + '</div>';
+    return;
+  }
+  box.innerHTML = '<div style="' + okStyle + '">💰 <strong>Seller payoff — balance unknown.</strong> No mortgage balance on record — confirm the payoff with the seller before offering. Gross offers (before any payoff): <strong>' + money(lao) + ' at LAO</strong> · <strong>' + money(mao) + ' at MAO</strong>.</div>';
+}
+/* Rejected comps + why (Nov 28, 2026 — OfferX parity): the feed's
+   excluded sales (distressed / non-arm's-length / nominal / outliers)
+   with the engine's reason each. Display-only — they never enter the
+   average, the count, or the offer math. Same pattern as the lead
+   modal's property-records panel. */
+function compExcludedHtml(){
+  if(!compExcludedRows || !compExcludedRows.length) return '';
+  return '<details style="margin-top:8px"><summary style="cursor:pointer;color:var(--muted);font-size:12px">' + compExcludedRows.length + ' nearby sale(s) rejected — see why</summary><ul style="margin:6px 0 0 18px;padding:0;color:var(--muted);font-size:12px">' + compExcludedRows.map(x => '<li><strong style="color:var(--text)">' + esc(x.address) + ' · ' + fmtMoney(x.amount) + '</strong> — ' + esc(x.reason) + '</li>').join('') + '</ul></details>';
+}
 function calcComp(){
   /* The listing group belongs to the address in the box right now. Stamp it
      here — every listing-field edit runs calcComp — so an address change can
@@ -5731,6 +5871,11 @@ function calcComp(){
   const addrNow = (document.getElementById('compListAddr')||{}).value.trim();
   if(addrNow && compListingGroupSet()) compGateAddr = addrNow;
   renderCompMortgage();
+  /* OfferX boxes clear on every calc — they render only on the valid
+     offer path below, so listed / land / thin / no-ARV never show a
+     stale line or payoff. */
+  const offerLineEl = document.getElementById('compOfferLine'); if(offerLineEl) offerLineEl.innerHTML = '';
+  const payoffEl = document.getElementById('compPayoff'); if(payoffEl) payoffEl.innerHTML = '';
   const st = document.getElementById('compListStatus');
   const gate = document.getElementById('compGateMsg');
   const el = document.getElementById('compResult');
@@ -5820,6 +5965,8 @@ function calcComp(){
     <div class="card"><div class="num" style="color:var(--green)">$${lao.toLocaleString()}</div><div class="lbl">LAO (opening)</div><div class="sub">70% of MAO</div></div>
     <div class="card"><div class="num" style="color:var(--blue)">$${(mao-lao).toLocaleString()}</div><div class="lbl">Negotiation Room</div></div>
   </div>`;
+  renderCompOfferLine(arv, mao, lao);
+  renderCompPayoff(mao, lao);
   renderCompTierTable();
   renderCompWarnBar();
   // ⚡ Quick Offer: refresh the summary card live
@@ -5903,7 +6050,7 @@ function renderCompList(){
   renderCompMap();
   renderCompBest3();
   if(!compRows.length){
-    box.innerHTML = '<p style="color:var(--muted);font-size:13px">No verified comps loaded yet. Enter the property address above, then load verified comps — or type an ARV below to run the math manually.</p>';
+    box.innerHTML = '<p style="color:var(--muted);font-size:13px">No verified comps loaded yet. Enter the property address above, then load verified comps — or type an ARV below to run the math manually.</p>' + compExcludedHtml();
     if(bar) bar.innerHTML = '';
     return;
   }
@@ -5949,6 +6096,7 @@ function renderCompList(){
       + '</tr>';
   }).join('');
   html += '<div class="tbl-wrap"><table><thead><tr><th>Pick</th><th>Address</th><th>Sale price</th><th>Sale date</th><th>Distance</th><th>Beds</th><th>Baths</th><th>Sqft</th><th>$/Sqft</th><th>Status</th><th>Source</th><th>DOM</th><th>Flags</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+  html += compExcludedHtml();
   box.innerHTML = html;
   if(bar){
     const picked = compPickedRows();
@@ -6545,7 +6693,7 @@ async function loadCompsForAddress(retryAttempt){
       if(assumedBaths) assumedNoteEl.textContent = 'Baths not on record — valued as 1 bath (assumed).';
       else if(realieBaths) assumedNoteEl.textContent = 'Baths not on the property record — showing the count from the existing property record.';
     }
-    if(!d.matched){ compRows = []; compPicks = []; compLoadedAddr = ''; compSubjectLat = null; compSubjectLng = null; compConfidence = ''; compConfidenceText = ''; compSubjectSqft = null; compSubjectAvm = null; compSubjectBeds = null; compDetailData = null; compStabilityWarns = []; resetCompFilters(); resetCompMortgage(); renderCompSubjectCard(null, addr, ''); if(msg) msg.textContent = 'No ownership records found for this address — type an ARV below to run the math manually.'; renderCompList(); renderCompMortgage(); calcComp(); return; }
+    if(!d.matched){ compRows = []; compPicks = []; compExcludedRows = []; compLoadedAddr = ''; compSubjectLat = null; compSubjectLng = null; compConfidence = ''; compConfidenceText = ''; compSubjectSqft = null; compSubjectAvm = null; compSubjectBeds = null; compDetailData = null; compStabilityWarns = []; resetCompFilters(); resetCompMortgage(); renderCompSubjectCard(null, addr, ''); if(msg) msg.textContent = 'No ownership records found for this address — type an ARV below to run the math manually.'; renderCompList(); renderCompMortgage(); calcComp(); return; }
     renderCompSubjectCard(d.property || null, addr, d.address || '', null, d.linkedProperties || []);
     applyCompMortgageFromRecords(d.property || null, addr);
     compConfidence = (d.comps && d.comps.confidence) || '';
@@ -6575,6 +6723,7 @@ async function loadCompsForAddress(retryAttempt){
     if(c.asIsAnchor) pushRow(c.asIsAnchor, 'anchor');
     (c.unverified || []).forEach(x => pushRow(x, 'unverified'));
     compRows = rows;
+    compExcludedRows = (c.excluded || []).slice(); // rejected sales + why — tab display only, never in the math
     compPicks = (c.best || []).map(x => x.address).filter(a => seen[a]);
     compLoadedAddr = addr;
     compLastAddr = addr;
