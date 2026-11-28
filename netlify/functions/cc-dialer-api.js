@@ -674,6 +674,15 @@ exports.handler = async (event) => {
       }
       const session = await loadSession(event);
       if (!session) return bad('No session — create one first.');
+      // Nov 28: never dial the wrong list. The page sends the id of
+      // the session it built; if the stored session is a different
+      // one (a stale save overwrote the new list — seen live twice
+      // Nov 28, Start resumed the 48-seller enrolled session instead
+      // of the 1-seller paste list), refuse loudly instead of
+      // silently dialing the wrong sellers.
+      if (body && body.sessionId && session.id !== body.sessionId) {
+        return bad('The session changed since this list was built — rebuild the list before dialing.');
+      }
       if (session.status === 'running' || session.status === 'connected') {
         return ok({ session: publicSession(session), already: true });
       }
@@ -711,9 +720,13 @@ exports.handler = async (event) => {
       // lead stays 'dialing', so it can't be re-dialed while the
       // first leg still rings) — a second Stop retries it. A
       // 404/not-found from Telnyx means the leg is already gone, so
-      // that one is marked ended.
+      // that one is marked ended. Telnyx's terminal-state error —
+      // "This call is no longer active and can't receive commands" —
+      // means the same thing (the call is already dead at Telnyx, so
+      // there is nothing left to hang up); Nov 28 live test showed a
+      // leg stuck 'Dialing' forever because only 404 counted as gone.
       const v = voiceLib();
-      const alreadyGone = (e) => /404|not[\s-]?found/i.test(String((e && e.message) || e));
+      const alreadyGone = (e) => /404|not[\s-]?found|no longer active|receive commands/i.test(String((e && e.message) || e));
       const hangupFailures = [];
       const failedLeadKeys = new Set();
       const hangupLeg = async (callControlId, label, leadKey) => {
