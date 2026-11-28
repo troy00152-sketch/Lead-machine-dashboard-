@@ -1033,6 +1033,32 @@ async function handleInboundCallSam(evt, event, fromStr, toStr, callControlId, p
   }
   rec.updatedAt = Date.now();
   await callApi._thread.savePairings(pairings, event);
+  // Sam answers in <1s — its call.answered can land after the merge
+  // above ran but before this save propagated, leaving the answer
+  // stashed and orphaned: nothing re-reads it (the merge already
+  // ran), the sweep's bridge retry needs agentAnswered, and the
+  // caller hears ringback until they hang up. Re-merge AFTER the
+  // save, with one short retry, so a stashed answer is picked up
+  // and the seller leg is answered + bridged. (Nov 28, 2026: three
+  // Halima calls — Sam greeted into the void, ASR 0.0s, no bridge.)
+  if (samLeg && !rec.agentAnswered) {
+    await callApi._thread.mergePending(event, callControlId, rec);
+    if (!rec.agentAnswered) {
+      await sleep(750);
+      await callApi._thread.mergePending(event, callControlId, rec);
+    }
+    if (rec.agentAnswered) {
+      if (rec.route === 'sam') rec.samAnswered = true;
+      if (!rec.sellerAnswered) {
+        const answered = await safeVoice(() => v.answer(rec.sellerLeg), 'answer inbound leg (post-save merge)');
+        if (answered === null) rec.lastError = 'inbound-answer-failed';
+        else {
+          rec.updatedAt = Date.now();
+          await callApi._thread.savePairings(pairings, event);
+        }
+      }
+    }
+  }
   if (!samLeg) {
     // Nobody is coming: end the call now instead of leaving the
     // seller ringing into nothing. The seller-leg hangup event closes
