@@ -8,9 +8,12 @@
  *
  * Covers:
  *   A. Knowledge base defaults: the REAL 31 starter FAQs, compared
- *      verbatim against knowledge/kb.json (which is generated from
- *      your_files/ashley-kb-faqs.md) — n 1..31, exact question and
- *      answer text, no extras, no drops.
+ *      against knowledge/kb.json (which is generated from
+ *      your_files/ashley-kb-faqs.md) — n 1..31, exact question text
+ *      and answer text with the shipped text-bot name rendered as
+ *      Amber (Troy, Nov 26, 2026 — the bot stays Amber; kb.json
+ *      stays Ashley-canonical, the page renders the Amber name),
+ *      no extras, no drops.
  *   B. Pure logic (extracted from the page): tenant derivation from
  *      host (mirrors the server-side host rules), per-tenant storage
  *      namespacing + isolation, bot sanitize/state, FAQ CRUD +
@@ -104,22 +107,26 @@ function fakeStorage() {
   const html = readPage('conversation-ai.html');
   const m = html.match(/\/\* ==PURE== \*\/([\s\S]*?)\/\* ==\/PURE== \*\//);
   assert.ok(m, 'pure block markers present');
-  const P = new Function(m[1] + '; return { CAI_PREFIX, BOT_MODES, caiTenantFromHost, caiKey, caiBrandFromConfig, caiDefaultBots, caiSanitizeBots, caiLoadBots, caiSaveBots, caiBotState, CAI_DEFAULT_FAQS, caiDefaultFaqs, CAI_SOURCE_COMPANY, caiSwapCompanyName, caiStarterFaqs, caiLoadFaqs, caiSaveFaqs, caiAddFaq, caiUpdateFaq, caiDeleteFaq, caiSearchFaqs, caiRestoreFaqs, caiDefaultInstructions, caiLoadInstructions, caiSaveInstructions, caiDefaultBooking, caiSanitizeBooking, caiLoadBooking, caiSaveBooking, caiDefaultGuardrails, caiLoadGuardrails, caiSaveGuardrails, CAI_BOT_NAME_MAX, caiDefaultBotNames, caiSanitizeBotName, caiSanitizeBotNames, caiLoadBotNames, caiSaveBotNames, caiRestoreBotNames, CAI_RESERVED_BOT_IDS, CAI_CHANNELS, caiSanitizeProfiles, caiLoadProfiles, caiSaveProfiles, caiAddProfile, caiUpdateProfile, caiRemoveProfile, caiAllBots, caiValidSelected, caiLoadSelected, caiSaveSelected, CAI_AVATAR_OPTIONS, CAI_AVATAR_INITIALS, caiAvatarOption, caiHeadsetAvatarId, caiDefaultAvatar, caiSanitizeAvatarSel, caiDefaultAvatars, caiSanitizeAvatars, caiLoadAvatars, caiSaveAvatars, caiAvatarInitial, caiAvatarSvg, CAI_VOICE_OPTIONS, caiDefaultVoiceSel, caiVoiceOption, caiSanitizeVoiceSel, caiLoadVoice, caiSaveVoice, caiVoiceLabel, caiGreeting, caiPickSpeechVoice, caiNormText, caiTokens, caiMatchFaq, caiIsOptOut, caiIsBookingIntent, caiParseMoneyAsk, caiOfferTimes, caiBookingReply, caiSwapPersona, caiDefaultReply, caiTestReply };')();
+  const P = new Function(m[1] + '; return { CAI_PREFIX, BOT_MODES, caiTenantFromHost, caiKey, caiBrandFromConfig, caiDefaultBots, caiSanitizeBots, caiLoadBots, caiSaveBots, caiBotState, CAI_DEFAULT_FAQS, caiDefaultFaqs, CAI_SOURCE_COMPANY, caiSwapCompanyName, caiStarterFaqs, caiLoadFaqs, caiSaveFaqs, caiAddFaq, caiUpdateFaq, caiDeleteFaq, caiSearchFaqs, caiRestoreFaqs, caiDefaultInstructions, caiLoadInstructions, caiSaveInstructions, caiDefaultBooking, caiSanitizeBooking, caiLoadBooking, caiSaveBooking, caiDefaultGuardrails, caiLoadGuardrails, caiSaveGuardrails, CAI_BOT_NAME_MAX, caiDefaultBotNames, caiSanitizeBotName, caiSanitizeBotNames, caiLoadBotNames, caiSaveBotNames, caiRestoreBotNames, CAI_RESERVED_BOT_IDS, CAI_CHANNELS, caiSanitizeProfiles, caiLoadProfiles, caiSaveProfiles, caiAddProfile, caiUpdateProfile, caiRemoveProfile, caiAllBots, caiValidSelected, caiLoadSelected, caiSaveSelected, CAI_AVATAR_OPTIONS, CAI_PHOTO_AVATARS, caiPhotoAvatar, CAI_AVATAR_INITIALS, caiAvatarOption, caiHeadsetAvatarId, caiDefaultAvatar, caiSanitizeAvatarSel, caiDefaultAvatars, caiSanitizeAvatars, caiLoadAvatars, caiSaveAvatars, caiAvatarInitial, caiAvatarSvg, CAI_VOICE_OPTIONS, caiDefaultVoiceSel, caiVoiceOption, caiSanitizeVoiceSel, caiLoadVoice, caiSaveVoice, caiVoiceLabel, caiGreeting, caiPickSpeechVoice, caiNormText, caiTokens, caiMatchFaq, caiIsOptOut, caiIsBookingIntent, caiParseMoneyAsk, caiOfferTimes, caiBookingReply, caiSwapPersona, caiDefaultReply, caiTestReply };')();
 
   console.log('— A. Knowledge base defaults = the real 31 FAQs —');
   const kb = readJson('knowledge/kb.json');
   const kb31 = kb.faqs.filter((f) => f.n >= 1 && f.n <= 31);
+  // The page's starter set renders the shipped text-bot name Amber
+  // (Troy, Nov 26, 2026); kb.json stays Ashley-canonical and the
+  // live bot swaps at load. Questions stay verbatim either way.
+  const kb31Amber = kb31.map((f) => ({ ...f, answer: f.answer.replace(/\bAshley\b/g, 'Amber') }));
   await check('kb.json source itself carries exactly 31 starter FAQs (n 1..31)', async () => {
     assert.strictEqual(kb31.length, 31);
     assert.deepStrictEqual(kb31.map((f) => f.n), Array.from({ length: 31 }, (_, i) => i + 1));
   });
-  await check('page defaults match kb.json verbatim (question + answer, in order)', async () => {
+  await check('page defaults match kb.json with the shipped text-bot name rendered as Amber (question + answer, in order)', async () => {
     assert.strictEqual(P.CAI_DEFAULT_FAQS.length, 31);
     kb31.forEach((src, i) => {
       const d = P.CAI_DEFAULT_FAQS[i];
       assert.strictEqual(d.n, src.n, 'n at index ' + i);
       assert.strictEqual(d.question, src.question, 'question ' + src.n);
-      assert.strictEqual(d.answer, src.answer, 'answer ' + src.n);
+      assert.strictEqual(d.answer, kb31Amber[i].answer, 'answer ' + src.n);
     });
   });
   await check('no kb.json extras leak into the starter set (objections stay out)', async () => {
@@ -152,7 +159,7 @@ function fakeStorage() {
     assert.strictEqual(P.caiKey('troy', 'faqs'), 'acc_conv_ai_troy_faqs');
     assert.notStrictEqual(P.caiKey('demo', 'bots'), P.caiKey('troy', 'bots'));
   });
-  await check('bots: defaults are Ashley + Sam, on, Auto-Pilot', async () => {
+  await check('bots: defaults are Amber + Sam, on, Auto-Pilot', async () => {
     assert.deepStrictEqual(P.caiDefaultBots(), { ashley: { on: true, mode: 'auto' }, sam: { on: true, mode: 'auto' } });
     assert.deepStrictEqual(P.BOT_MODES, ['auto', 'suggest', 'off']);
     assert.deepStrictEqual(P.caiLoadBots(fakeStorage(), 'demo'), P.caiDefaultBots());
@@ -238,7 +245,7 @@ function fakeStorage() {
     assert.strictEqual(partial.find((s) => s.id === 'role').body, P.caiDefaultInstructions()[0].body, 'untouched sections fall back to defaults');
   });
   await check('booking: defaults are Seller Calls, 3 days, 3 slots, 3 hours apart', async () => {
-    assert.deepStrictEqual(P.caiDefaultBooking(), { calendar: 'Seller Calls', windowDays: 3, slots: 3, minGapHours: 3, hoursStart: '08:00', hoursEnd: '21:00', callMinutes: 30 });
+    assert.deepStrictEqual(P.caiDefaultBooking(), { calendar: 'Seller Calls', windowDays: 3, slots: 3, minGapHours: 3, hoursStart: '08:00', hoursEnd: '16:30', callMinutes: 30 });
     assert.deepStrictEqual(P.caiLoadBooking(fakeStorage(), 'demo'), P.caiDefaultBooking());
   });
   await check('booking: save/load round-trips and sanitize clamps junk', async () => {
@@ -387,15 +394,15 @@ function fakeStorage() {
     assert.strictEqual(P.caiSwapCompanyName(src, ''), src, 'no name = no swap, never guessed');
     assert.strictEqual(P.caiSwapCompanyName(src, null), src, 'missing name = no swap');
   });
-  await check('owner account: starter set renders kb.json verbatim (load + direct)', async () => {
+  await check('owner account: starter set renders kb.json with the shipped name Amber (load + direct)', async () => {
     const viaLoad = P.caiLoadFaqs(fakeStorage(), 'troy', 'Direct Property Buyers');
     assert.strictEqual(viaLoad.length, 31);
     kb31.forEach((src, i) => {
       assert.strictEqual(viaLoad[i].question, src.question, 'owner question ' + src.n);
-      assert.strictEqual(viaLoad[i].answer, src.answer, 'owner answer ' + src.n + ' must stay verbatim');
+      assert.strictEqual(viaLoad[i].answer, kb31Amber[i].answer, 'owner answer ' + src.n + ' renders the Amber name');
     });
-    assert.deepStrictEqual(P.caiStarterFaqs('Direct Property Buyers').map((f) => f.answer), kb31.map((f) => f.answer));
-    assert.deepStrictEqual(P.caiStarterFaqs('').map((f) => f.answer), kb31.map((f) => f.answer), 'no configured name renders the verbatim source');
+    assert.deepStrictEqual(P.caiStarterFaqs('Direct Property Buyers').map((f) => f.answer), kb31Amber.map((f) => f.answer));
+    assert.deepStrictEqual(P.caiStarterFaqs('').map((f) => f.answer), kb31Amber.map((f) => f.answer), 'no configured name renders the Amber starter set');
   });
   await check('demo account (real clients/demo.json): starter answers carry Summit Home Buyers, zero owner name', async () => {
     const demo = readJson('clients/demo.json');
@@ -409,8 +416,8 @@ function fakeStorage() {
         assert.strictEqual(f.answer, kb31[i].answer, 'answer ' + f.n + ' had no company name and must stay verbatim');
       }
     });
-    assert.ok(faqs[0].answer.startsWith('Ashley works with Summit Home Buyers,'), 'FAQ 1 names the demo company');
-    assert.ok(faqs[30].answer.includes('This is Ashley with Summit Home Buyers'), 'FAQ 31 names the demo company');
+    assert.ok(faqs[0].answer.startsWith('Amber works with Summit Home Buyers,'), 'FAQ 1 names the demo company');
+    assert.ok(faqs[30].answer.includes('This is Amber with Summit Home Buyers'), 'FAQ 31 names the demo company');
   });
   await check('restore starter set respects the account\u2019s own name', async () => {
     const st = fakeStorage();
@@ -421,7 +428,7 @@ function fakeStorage() {
     assert.ok(restored[0].answer.includes('Summit Home Buyers'));
     assert.deepStrictEqual(P.caiLoadFaqs(st, 'demo', 'Summit Home Buyers').map((f) => f.answer), restored.map((f) => f.answer), 'restored set persisted');
     const ownerRestored = P.caiRestoreFaqs(fakeStorage(), 'troy', 'Direct Property Buyers');
-    assert.deepStrictEqual(ownerRestored.map((f) => f.answer), kb31.map((f) => f.answer), 'owner restore stays verbatim');
+    assert.deepStrictEqual(ownerRestored.map((f) => f.answer), kb31Amber.map((f) => f.answer), 'owner restore stays on the Amber starter set');
   });
   await check('saved edits win untouched: the swap never rewrites a saved knowledge base', async () => {
     const st = fakeStorage();
@@ -440,8 +447,8 @@ function fakeStorage() {
   });
 
   console.log('— H. Editable bot names, voice library logic, test engine —');
-  await check('bot names: defaults are Ashley / Sam, sanitize trims, caps, strips markup', async () => {
-    assert.deepStrictEqual(P.caiDefaultBotNames(), { ashley: 'Ashley', sam: 'Sam' });
+  await check('bot names: defaults are Amber / Sam, sanitize trims, caps, strips markup', async () => {
+    assert.deepStrictEqual(P.caiDefaultBotNames(), { ashley: 'Amber', sam: 'Sam' });
     assert.strictEqual(P.CAI_BOT_NAME_MAX, 40);
     assert.strictEqual(P.caiSanitizeBotName('  Maria  ', 'Ashley'), 'Maria');
     assert.strictEqual(P.caiSanitizeBotName('<b>Maria</b>', 'Ashley'), 'Maria');
@@ -456,9 +463,9 @@ function fakeStorage() {
     P.caiSaveBotNames(st, 'demo', { ashley: 'Maria', sam: 'Rob' });
     assert.deepStrictEqual(P.caiLoadBotNames(st, 'demo'), { ashley: 'Maria', sam: 'Rob' });
     assert.ok(st.data['acc_conv_ai_demo_names'], 'persisted under the demo names key');
-    assert.deepStrictEqual(P.caiLoadBotNames(st, 'troy'), { ashley: 'Ashley', sam: 'Sam' }, 'owner account untouched');
+    assert.deepStrictEqual(P.caiLoadBotNames(st, 'troy'), { ashley: 'Amber', sam: 'Sam' }, 'owner account untouched');
     const restored = P.caiRestoreBotNames(st, 'demo');
-    assert.deepStrictEqual(restored, { ashley: 'Ashley', sam: 'Sam' });
+    assert.deepStrictEqual(restored, { ashley: 'Amber', sam: 'Sam' });
     assert.deepStrictEqual(P.caiLoadBotNames(st, 'demo'), restored, 'restore persisted');
     P.caiSaveBotNames(st, 'demo', { ashley: '<img src=x onerror=alert(1)>Eve', sam: '' });
     const cleaned = P.caiLoadBotNames(st, 'demo');
@@ -484,7 +491,7 @@ function fakeStorage() {
     assert.strictEqual(nat.pitch, 1.0, 'Natural pitch is the neutral-natural value');
     assert.strictEqual(nat.rate, 0.98, 'Natural rate is the neutral-natural value');
     assert.strictEqual(P.caiDefaultVoiceSel(), 'natural', 'Natural is the default selection for a fresh tenant');
-    assert.strictEqual(P.caiLoadVoice(fakeStorage(), 'brand-new-tenant'), 'natural', 'a tenant with nothing saved gets Natural');
+    assert.strictEqual(P.caiLoadVoice(fakeStorage(), 'brand-new-tenant'), 'el:CwhRBWXzGAHq8TQ4Fs17', 'a tenant with nothing saved gets Sam\'s default voice (Roger) — Nov 19/20, not the Natural device style');
     assert.strictEqual(P.caiSanitizeVoiceSel('male-deep'), 'male-deep');
     assert.strictEqual(P.caiSanitizeVoiceSel('browser:Device Voice One'), 'browser:Device Voice One');
     assert.strictEqual(P.caiSanitizeVoiceSel('browser:'), P.caiDefaultVoiceSel(), 'empty device name refused');
@@ -492,7 +499,7 @@ function fakeStorage() {
     const st = fakeStorage();
     P.caiSaveVoice(st, 'demo', 'male-calm');
     assert.strictEqual(P.caiLoadVoice(st, 'demo'), 'male-calm');
-    assert.strictEqual(P.caiLoadVoice(st, 'troy'), P.caiDefaultVoiceSel(), 'other tenant keeps the default');
+    assert.strictEqual(P.caiLoadVoice(st, 'troy'), 'el:CwhRBWXzGAHq8TQ4Fs17', 'other tenant keeps the default (Sam\'s Roger voice)');
   });
   await check('voice: greeting speaks the bot\u2019s current name + the account\u2019s business name', async () => {
     assert.strictEqual(P.caiGreeting('Sam', 'Summit Home Buyers'), 'Hi, thanks for calling Summit Home Buyers! This is Sam — how can I help you today?');
@@ -591,7 +598,7 @@ function fakeStorage() {
   });
   await check('test engine: full replies — KB, booking, silence rules, precedence, default', async () => {
     const faqs = P.caiLoadFaqs(fakeStorage(), 'troy', 'Direct Property Buyers');
-    const ctx = { faqs, booking: P.caiDefaultBooking(), botName: 'Ashley', bizName: 'Direct Property Buyers', now: new Date(2026, 10, 19, 15, 0, 0) };
+    const ctx = { faqs, booking: P.caiDefaultBooking(), botName: 'Amber', bizName: 'Direct Property Buyers', now: new Date(2026, 10, 19, 15, 0, 0) };
     const kb = P.caiTestReply('Are you a realtor?', ctx);
     assert.strictEqual(kb.type, 'reply');
     assert.strictEqual(kb.faqId, 'faq-5');
@@ -616,7 +623,7 @@ function fakeStorage() {
     assert.notStrictEqual(under.type, 'silence', 'under $500K is not silenced');
     const dflt = P.caiTestReply('Hello there', ctx);
     assert.strictEqual(dflt.type, 'reply');
-    assert.ok(dflt.text.includes('Ashley') && dflt.text.includes('Direct Property Buyers'), 'default reply is in character with bot + business name');
+    assert.ok(dflt.text.includes('Amber') && dflt.text.includes('Direct Property Buyers'), 'default reply is in character with bot + business name');
     assert.strictEqual(P.caiTestReply('   ', ctx).type, 'empty');
   });
   await check('test engine: tenant edits, business name, and renamed bots flow into replies', async () => {
@@ -627,7 +634,8 @@ function fakeStorage() {
     const who = P.caiTestReply('Who is this?', ctx);
     assert.strictEqual(who.type, 'reply');
     assert.ok(who.text.includes('Maria'), 'renamed bot speaks under its new name');
-    assert.ok(!/\bAshley\b/.test(who.text), 'the shipped name is gone from the reply');
+    assert.ok(!/\bAshley\b/.test(who.text), 'the legacy shipped name is gone from the reply');
+    assert.ok(!/\bAmber\b/.test(who.text), 'the current shipped name is gone from the reply too');
     assert.ok(who.text.includes('Summit Home Buyers'), 'the tenant\u2019s business name is in the reply');
     assert.ok(!who.text.includes('Direct Property Buyers'), 'no trace of the owner business');
     const dflt = P.caiTestReply('hey there', ctx);
@@ -722,12 +730,13 @@ function fakeStorage() {
     }
     assert.ok(html.includes("'speechSynthesis' in window"), 'preview is feature-detected, never assumed');
   });
-  await check('page wiring: test panel — preview label, log, input, engine call with the selected bot', async () => {
+  await check('page wiring: test panel — live dry-run label, log, input, engine call with the selected bot', async () => {
     for (const needle of ['Test your bot', 'id="testLog"', 'id="testInput"', 'id="btnTestSend"', 'id="btnTestClear"', 'id="testBotLabel"',
-      'Preview only — replies come from the knowledge base and settings on this screen',
-      'caiTestReply(msg, {', 'botName: bot.name', 'bizName: BRAND_NAME', 'selectedBot()', 'No reply — ']) {
+      'Live dry-run', 'Offline simulation — server dry-run unavailable',
+      'caiDryRunPayload', 'caiPostDryRun', 'selectedBot()', 'No reply — ']) {
       assert.ok(html.includes(needle), 'missing ' + needle);
     }
+    assert.ok(!html.includes('Preview only — replies come from the knowledge base and settings on this screen'), 'the old preview-only copy is gone — the panel runs the real bot now');
   });
   await check('page wiring: test panel sits right after the bot cards and before the Knowledge Base, titled "Test your bot"', async () => {
     const botsAt = html.indexOf('Bot status &amp; mode');
@@ -740,71 +749,63 @@ function fakeStorage() {
   });
 
   console.log('— J. Bot avatars —');
-  await check('avatar options: at least 28 illustrated portraits, unique, fully described, headset + glasses present', async () => {
-    assert.ok(P.CAI_AVATAR_OPTIONS.length >= 28, 'a big avatar library (at least 28 built-in illustrated avatars)');
-    const ids = P.CAI_AVATAR_OPTIONS.map((o) => o.id);
+  await check('avatar options: 22 photo faces, unique, fully described — photos only (Troy, Nov 19)', async () => {
+    assert.strictEqual(P.CAI_PHOTO_AVATARS.length, 22, 'a big photo avatar library (22 generated headshots)');
+    const ids = P.CAI_PHOTO_AVATARS.map((o) => o.id);
     assert.strictEqual(new Set(ids).size, ids.length, 'option ids unique');
-    P.CAI_AVATAR_OPTIONS.forEach((o) => {
+    P.CAI_PHOTO_AVATARS.forEach((o) => {
       assert.ok(o.label, o.id + ' has a label');
-      for (const field of ['bg', 'skin', 'hair', 'shirt']) {
-        assert.ok(/^#[0-9a-fA-F]{6}$/.test(o[field]), o.id + ' ' + field + ' is a color');
-      }
-      assert.ok(['short', 'long', 'bun', 'buzz', 'ponytail', 'curly', 'wavy', 'bald'].includes(o.hairStyle), o.id + ' hair style is a drawn style');
-      assert.ok(['none', 'glasses', 'headset'].includes(o.accessory), o.id + ' accessory is a drawn accessory');
+      assert.ok(/^\/avatars\/[a-z]+\.webp$/.test(o.photo), o.id + ' photo is a /avatars/*.webp file');
+      assert.ok(['female', 'male', 'neutral'].includes(o.gender), o.id + ' gender is described');
     });
-    assert.strictEqual(P.CAI_AVATAR_OPTIONS[0].id, 'ava-aria', 'the original first portrait keeps its place (saved picks stay stable)');
-    assert.strictEqual(P.caiHeadsetAvatarId(), 'ava-agent', 'the original headset portrait keeps its id and stays the voice-bot default');
-    assert.ok(P.CAI_AVATAR_OPTIONS.filter((o) => o.accessory === 'headset').length >= 2, 'more than one headset portrait for voice bots');
-    assert.ok(P.CAI_AVATAR_OPTIONS.filter((o) => o.accessory === 'glasses').length >= 3, 'several glasses portraits');
-    assert.ok(new Set(P.CAI_AVATAR_OPTIONS.map((o) => o.skin)).size >= 6, 'portraits span many skin tones');
-    assert.ok(new Set(P.CAI_AVATAR_OPTIONS.map((o) => o.hair)).size >= 10, 'portraits span many hair colors (black, brown, blond, red, gray/silver, copper)');
+    assert.strictEqual(P.CAI_PHOTO_AVATARS[0].id, 'ph-ashley', 'the text bot\'s face leads the photo library');
+    assert.ok(P.caiPhotoAvatar('ph-roger'), 'Roger\'s photo exists — the face that matches Sam\'s voice');
+    assert.strictEqual(P.caiAvatarOption('ava-aria'), null, 'illustrated ids no longer validate (photos only, Nov 19)');
     assert.strictEqual(P.CAI_AVATAR_INITIALS, 'initials');
     const st = fakeStorage();
     P.caiSaveAvatars(st, 'demo', { ashley: 'ava-kai', sam: 'ava-sofia' });
-    assert.deepStrictEqual(P.caiLoadAvatars(st, 'demo'), { ashley: 'ava-kai', sam: 'ava-sofia' }, 'avatar picks saved before the expansion still resolve to the same faces');
+    assert.deepStrictEqual(P.caiLoadAvatars(st, 'demo'), { ashley: 'ph-ashley', sam: 'ph-roger' }, 'old illustrated picks saved before the photos-only switch fall back to the shipped photo faces');
   });
-  await check('avatar defaults: text bot = first portrait, voice bot = headset portrait', async () => {
-    assert.strictEqual(P.caiDefaultAvatar('ashley'), P.CAI_AVATAR_OPTIONS[0].id);
-    assert.strictEqual(P.caiDefaultAvatar('sam'), P.caiHeadsetAvatarId());
-    assert.strictEqual(P.caiAvatarOption(P.caiHeadsetAvatarId()).accessory, 'headset');
-    assert.strictEqual(P.caiDefaultAvatar('some-added-bot'), P.CAI_AVATAR_OPTIONS[0].id);
-    assert.deepStrictEqual(P.caiDefaultAvatars(), { ashley: P.CAI_AVATAR_OPTIONS[0].id, sam: P.caiHeadsetAvatarId() });
+  await check('avatar defaults: text bot = Amber photo, voice bot = Roger photo', async () => {
+    assert.strictEqual(P.caiDefaultAvatar('ashley'), 'ph-ashley');
+    assert.strictEqual(P.caiDefaultAvatar('sam'), 'ph-roger');
+    assert.strictEqual(P.caiDefaultAvatar('some-added-bot'), 'ph-ashley');
+    assert.deepStrictEqual(P.caiDefaultAvatars(), { ashley: 'ph-ashley', sam: 'ph-roger' });
     assert.deepStrictEqual(P.caiLoadAvatars(fakeStorage(), 'demo'), P.caiDefaultAvatars(), 'empty storage loads the shipped faces');
   });
   await check('avatar selection: sanitize accepts real picks + initials, refuses junk', async () => {
-    const someId = P.CAI_AVATAR_OPTIONS[3].id;
+    const someId = P.CAI_PHOTO_AVATARS[3].id;
     assert.strictEqual(P.caiSanitizeAvatarSel(someId, 'initials'), someId);
     assert.strictEqual(P.caiSanitizeAvatarSel('initials', someId), 'initials');
+    assert.strictEqual(P.caiSanitizeAvatarSel('ava-kai', someId), someId, 'an illustrated id no longer validates — falls back to the given default');
     assert.strictEqual(P.caiSanitizeAvatarSel('not-a-face', someId), someId, 'junk falls back to the given default');
-    assert.strictEqual(P.caiSanitizeAvatarSel('not-a-face', 'also-junk'), P.CAI_AVATAR_OPTIONS[0].id, 'junk default falls back to the first portrait');
-    assert.strictEqual(P.caiSanitizeAvatarSel(null, null), P.CAI_AVATAR_OPTIONS[0].id);
-    assert.deepStrictEqual(P.caiSanitizeAvatars({ ashley: 'bogus', sam: 'initials' }), { ashley: P.CAI_AVATAR_OPTIONS[0].id, sam: 'initials' });
+    assert.strictEqual(P.caiSanitizeAvatarSel('not-a-face', 'also-junk'), 'ph-ashley', 'junk default falls back to the first photo face');
+    assert.strictEqual(P.caiSanitizeAvatarSel(null, null), 'ph-ashley');
+    assert.deepStrictEqual(P.caiSanitizeAvatars({ ashley: 'bogus', sam: 'initials' }), { ashley: 'ph-ashley', sam: 'initials' });
     assert.deepStrictEqual(P.caiSanitizeAvatars('junk'), P.caiDefaultAvatars());
   });
   await check('avatar selection: persists per tenant per bot, isolated', async () => {
     const st = fakeStorage();
-    const pick = P.CAI_AVATAR_OPTIONS[5].id;
+    const pick = P.CAI_PHOTO_AVATARS[5].id;
     P.caiSaveAvatars(st, 'demo', { ashley: 'initials', sam: pick });
     assert.deepStrictEqual(P.caiLoadAvatars(st, 'demo'), { ashley: 'initials', sam: pick });
     assert.ok(st.data['acc_conv_ai_demo_avatars'], 'persisted under the demo avatars key');
     assert.deepStrictEqual(P.caiLoadAvatars(st, 'troy'), P.caiDefaultAvatars(), 'owner account untouched by demo picks');
   });
-  await check('avatar svg: illustrated portraits are self-contained inline SVG with their colors + accessories', async () => {
-    const first = P.CAI_AVATAR_OPTIONS[0];
-    const svg = P.caiAvatarSvg(first.id, 'Ashley', '#ff6b1a');
-    assert.ok(svg.startsWith('<svg'), 'renders an inline SVG, not an image file');
-    assert.ok(svg.includes('data-avatar="' + first.id + '"'), 'svg carries its option id');
-    assert.ok(svg.includes(first.bg) && svg.includes(first.skin) && svg.includes(first.shirt), 'portrait uses the descriptor colors');
-    assert.ok(!/src=|href=|url\(/.test(svg), 'no external references inside the svg');
-    const headset = P.caiAvatarSvg(P.caiHeadsetAvatarId(), 'Sam', '#ff6b1a');
-    assert.ok(headset.includes('class="av-headset"'), 'headset portrait draws the headset');
-    assert.ok(!svg.includes('av-headset'), 'non-headset portraits have no headset');
-    const glassesOpt = P.CAI_AVATAR_OPTIONS.find((o) => o.accessory === 'glasses');
-    assert.ok(P.caiAvatarSvg(glassesOpt.id, 'Lena', '#ff6b1a').includes('class="av-glasses"'), 'glasses portrait draws the glasses');
-    P.CAI_AVATAR_OPTIONS.forEach((o) => {
-      assert.ok(P.caiAvatarSvg(o.id, 'Bot', '#ff6b1a').includes('<svg'), o.id + ' renders');
+  await check('avatar render: photo faces render as a clipped image in an SVG circle, initials stay a disc', async () => {
+    const svg = P.caiAvatarSvg('ph-roger', 'Sam', '#ff6b1a');
+    assert.ok(svg.startsWith('<svg'), 'renders an inline SVG wrapper, not a bare image tag');
+    assert.ok(svg.includes('data-avatar="ph-roger"'), 'svg carries its option id');
+    assert.ok(svg.includes('<image href="/avatars/roger.webp"'), 'photo face embeds its /avatars/*.webp file');
+    assert.ok(svg.includes('clip-path'), 'photo is clipped to the avatar circle');
+    assert.ok(!/src=|href="http/.test(svg), 'no external references inside the svg');
+    const ash = P.caiAvatarSvg('ph-ashley', 'Amber', '#ff6b1a');
+    assert.ok(ash.includes('<image href="/avatars/ashley.webp"'), 'Amber\'s photo renders');
+    assert.ok(P.caiAvatarSvg('bogus-id', 'Bot', '#ff6b1a').includes('data-avatar="ph-ashley"'), 'unknown selection renders the default photo face');
+    assert.ok(P.caiAvatarSvg('ava-kai', 'Bot', '#ff6b1a').includes('data-avatar="ph-ashley"'), 'an illustrated id falls back to the default photo face');
+    P.CAI_PHOTO_AVATARS.forEach((o) => {
+      assert.ok(P.caiAvatarSvg(o.id, 'Bot', '#ff6b1a').includes('<image href="' + o.photo + '"'), o.id + ' renders its photo');
     });
-    assert.ok(P.caiAvatarSvg('bogus-id', 'Bot', '#ff6b1a').includes('data-avatar="' + first.id + '"'), 'unknown selection renders the default portrait');
   });
   await check('avatar svg: Initials disc uses the account accent + the bot\u2019s current initial, and follows renames', async () => {
     const a = P.caiAvatarSvg('initials', 'Ashley', '#123abc');
@@ -823,21 +824,21 @@ function fakeStorage() {
   });
   await check('avatars on profiles + unified list: added bots get sensible defaults, picks survive sanitize/update', async () => {
     const voiceAdd = P.caiAddProfile([], { name: 'Rob', channel: 'voice', mode: 'auto' });
-    assert.strictEqual(voiceAdd.profile.avatar, P.caiHeadsetAvatarId(), 'an added voice bot defaults to the headset face');
+    assert.strictEqual(voiceAdd.profile.avatar, 'ph-roger', 'an added voice bot defaults to Roger\'s photo face');
     const textAdd = P.caiAddProfile([], { name: 'Maria', channel: 'text', mode: 'auto' });
-    assert.strictEqual(textAdd.profile.avatar, P.CAI_AVATAR_OPTIONS[0].id, 'an added text bot defaults to the first portrait');
+    assert.strictEqual(textAdd.profile.avatar, 'ph-ashley', 'an added text bot defaults to Amber\'s photo face');
     const cleaned = P.caiSanitizeProfiles([{ id: 'ok1', name: 'A', channel: 'text', mode: 'auto', on: true, avatar: 'initials' }, { id: 'ok2', name: 'B', channel: 'voice', mode: 'auto', on: true, avatar: 'junk-face' }]);
     assert.strictEqual(cleaned[0].avatar, 'initials', 'a saved pick survives sanitize');
-    assert.strictEqual(cleaned[1].avatar, P.caiHeadsetAvatarId(), 'a junk pick on a voice profile falls back to the headset face');
-    const upd = P.caiUpdateProfile(cleaned, 'ok1', { avatar: P.CAI_AVATAR_OPTIONS[2].id });
-    assert.strictEqual(upd[0].avatar, P.CAI_AVATAR_OPTIONS[2].id, 'avatar is patchable like voice');
-    const all = P.caiAllBots({ ashley: 'Ash', sam: 'Sammy' }, P.caiDefaultBots(), upd, { ashley: 'initials', sam: P.CAI_AVATAR_OPTIONS[4].id });
+    assert.strictEqual(cleaned[1].avatar, 'ph-roger', 'a junk pick on a voice profile falls back to Roger\'s photo face');
+    const upd = P.caiUpdateProfile(cleaned, 'ok1', { avatar: P.CAI_PHOTO_AVATARS[2].id });
+    assert.strictEqual(upd[0].avatar, P.CAI_PHOTO_AVATARS[2].id, 'avatar is patchable like voice');
+    const all = P.caiAllBots({ ashley: 'Ash', sam: 'Sammy' }, P.caiDefaultBots(), upd, { ashley: 'initials', sam: P.CAI_PHOTO_AVATARS[4].id });
     assert.strictEqual(all[0].avatar, 'initials', 'unified list carries the text original\u2019s pick');
-    assert.strictEqual(all[1].avatar, P.CAI_AVATAR_OPTIONS[4].id, 'unified list carries the voice original\u2019s pick');
-    assert.strictEqual(all[2].avatar, P.CAI_AVATAR_OPTIONS[2].id, 'unified list carries the added bot\u2019s pick');
+    assert.strictEqual(all[1].avatar, P.CAI_PHOTO_AVATARS[4].id, 'unified list carries the voice original\u2019s pick');
+    assert.strictEqual(all[2].avatar, P.CAI_PHOTO_AVATARS[2].id, 'unified list carries the added bot\u2019s pick');
     const noMap = P.caiAllBots(null, null, []);
-    assert.strictEqual(noMap[0].avatar, P.CAI_AVATAR_OPTIONS[0].id, 'no stored picks = shipped defaults');
-    assert.strictEqual(noMap[1].avatar, P.caiHeadsetAvatarId());
+    assert.strictEqual(noMap[0].avatar, 'ph-ashley', 'no stored picks = shipped defaults');
+    assert.strictEqual(noMap[1].avatar, 'ph-roger');
   });
   await check('page wiring: avatar slots, choosers, and persistence on every bot surface', async () => {
     for (const needle of ['id="ashleyAvatars"', 'id="samAvatars"', 'data-avatar-slot="ashley"', 'data-avatar-slot="sam"',
@@ -874,14 +875,16 @@ function fakeStorage() {
     const start = html.slice(html.indexOf('function startTestCall()'), html.indexOf('function endTestCall()'));
     assert.ok(start.includes("bot.channel !== 'voice'"), 'starting a call refuses a text bot outright');
   });
-  await check('voice-call test: spoken utterances and typed lines share ONE exchange — a single caiTestReply call', async () => {
-    assert.strictEqual((html.match(/caiTestReply\(/g) || []).length, 2, 'the engine is defined once and called once — no second reply path for voice');
-    const exchange = html.slice(html.indexOf('function testExchange(msg)'), html.indexOf('function runTest()'));
-    assert.ok(exchange.includes('caiTestReply(msg, {'), 'the shared exchange is the one place the engine runs');
-    const typed = html.slice(html.indexOf('function runTest()'), html.indexOf("document.getElementById('btnTestSend')"));
-    assert.ok(typed.includes('testExchange(msg)'), 'typed tests route through the shared exchange');
-    const spoken = html.slice(html.indexOf('function handleCallUtterance(text)'), html.indexOf('function startTestCall()'));
-    assert.ok(spoken.includes('testExchange(text)'), 'recognized utterances route through the same shared exchange');
+  await check('voice-call test: spoken utterances and typed lines share ONE exchange — live dry-run, local reply only as labelled fallback', async () => {
+    assert.strictEqual((html.match(/caiTestReply\(/g) || []).length, 2, 'the local engine is defined once and called once — only as the offline fallback, never as a second reply path');
+    const exchange = html.slice(html.indexOf('async function testExchange(msg)'), html.indexOf('async function runTest()'));
+    assert.ok(exchange.includes('caiPostDryRun('), 'the shared exchange posts the server dry-run first');
+    assert.ok(exchange.includes('caiTestReply(msg, {'), 'the shared exchange falls back to the local engine only when the dry-run fails');
+    assert.ok(exchange.includes('sim: true'), 'fallback replies are flagged so the log labels them a simulation');
+    const typed = html.slice(html.indexOf('async function runTest()'), html.indexOf("document.getElementById('btnTestSend').addEventListener"));
+    assert.ok(typed.includes('await testExchange(msg)'), 'typed tests route through the shared exchange');
+    const spoken = html.slice(html.indexOf('async function handleCallUtterance(text)'), html.indexOf('function startTestCall()'));
+    assert.ok(spoken.includes('await testExchange(text)'), 'recognized utterances route through the same shared exchange');
     assert.ok(spoken.includes("if (res.type === 'reply') speakTestReply(res.text);"), 'only real replies are spoken — guardrail silence is never spoken aloud');
   });
   await check('voice-call test: the bot speaks through the library\u2019s own style→voice path (same as Listen)', async () => {
@@ -889,7 +892,7 @@ function fakeStorage() {
     assert.ok(speak.includes('caiPickSpeechVoice(voices, selId)'), 'one voice-matching helper for previews and calls');
     assert.ok(speak.includes('SpeechSynthesisUtterance'), 'speech is the browser\u2019s own synthesis');
     const preview = html.slice(html.indexOf('function previewVoice(ownerId, selId)'), html.indexOf("document.addEventListener('click'"));
-    assert.ok(preview.includes('speakWithSelection(caiGreeting(botName, BRAND_NAME), selId)'), 'Listen buttons preview through the shared speech path');
+    assert.ok(preview.includes('speakWithSelection(line, selId'), 'Listen buttons preview through the shared speech path');
     const reply = html.slice(html.indexOf('function speakTestReply(text)'), html.indexOf('function handleCallUtterance(text)'));
     assert.ok(reply.includes('voiceSelectionFor(bot.id)'), 'call replies use the bot\u2019s saved library voice selection');
     assert.ok(reply.includes('speakWithSelection(text,'), 'call replies speak through the shared path');
@@ -903,7 +906,7 @@ function fakeStorage() {
     assert.ok(html.includes("err === 'not-allowed'"), 'microphone permission denial is handled by name');
     assert.ok(html.includes('Microphone access was blocked'), 'mic denial shows a clear note, never a crash');
     assert.ok(html.includes('callRecogBlocked = true'), 'a blocked mic stops recognition retries instead of looping');
-    const typed = html.slice(html.indexOf('function runTest()'), html.indexOf("document.getElementById('btnTestSend')"));
+    const typed = html.slice(html.indexOf('async function runTest()'), html.indexOf("document.getElementById('btnTestSend').addEventListener"));
     assert.ok(typed.includes("if (callActive && res.type === 'reply') speakTestReply(res.text);"), 'a line typed during a call gets a spoken reply (the hear-the-bot fallback)');
   });
   await check('voice-call test: lifecycle — status line, transcript notes, switching bot or mode ends the call cleanly', async () => {

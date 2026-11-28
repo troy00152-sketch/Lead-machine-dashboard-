@@ -129,7 +129,7 @@ window.OFFER_FLOW_LEADS = [
    "verified": false,
    "detail": "No live listing credential in the local build \u2014 the listed-first check has not verified this lead. Offers stay locked until it does."
   },
-  "loi_file": "../playbook-system/dealbreeze-takeaways/loi/samples/955-olin-ave-indianapolis-in-46222.html",
+  "loi_file": "assets/loi-samples/955-olin-ave-indianapolis-in-46222.html",
   "loi_offer": 32657
  },
  {
@@ -282,7 +282,7 @@ window.OFFER_FLOW_LEADS = [
    "verified": false,
    "detail": "No live listing credential in the local build \u2014 the listed-first check has not verified this lead. Offers stay locked until it does."
   },
-  "loi_file": "../playbook-system/dealbreeze-takeaways/loi/samples/938-n-livingston-ave-indianapolis-in-46222.html",
+  "loi_file": "assets/loi-samples/938-n-livingston-ave-indianapolis-in-46222.html",
   "loi_offer": 45427
  },
  {
@@ -405,7 +405,7 @@ window.OFFER_FLOW_LEADS = [
    "verified": false,
    "detail": "No live listing credential in the local build \u2014 the listed-first check has not verified this lead. Offers stay locked until it does."
   },
-  "loi_file": "../playbook-system/dealbreeze-takeaways/loi/samples/222-n-state-ave-indianapolis-in-46201.html",
+  "loi_file": "assets/loi-samples/222-n-state-ave-indianapolis-in-46201.html",
   "loi_offer": 131111
  },
  {
@@ -535,7 +535,7 @@ window.OFFER_FLOW_LEADS = [
    "verified": false,
    "detail": "No live listing credential in the local build \u2014 the listed-first check has not verified this lead. Offers stay locked until it does."
   },
-  "loi_file": "../playbook-system/dealbreeze-takeaways/loi/samples/9149-faulkner-dr-indianapolis-in-46239.html",
+  "loi_file": "assets/loi-samples/9149-faulkner-dr-indianapolis-in-46239.html",
   "loi_offer": 161202
  },
  {
@@ -687,7 +687,7 @@ window.OFFER_FLOW_LEADS = [
    "verified": false,
    "detail": "No live listing credential in the local build \u2014 the listed-first check has not verified this lead. Offers stay locked until it does."
   },
-  "loi_file": "../playbook-system/dealbreeze-takeaways/loi/samples/4844-winston-dr-indianapolis-in-46226.html",
+  "loi_file": "assets/loi-samples/4844-winston-dr-indianapolis-in-46226.html",
   "loi_offer": 190254
  }
 ];

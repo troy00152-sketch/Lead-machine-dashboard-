@@ -101,6 +101,14 @@
   .voice-depth .lbl{ font-size:12px; color:var(--muted); font-weight:600; margin-right:2px; }
   .voice-depth .vdepth.on{ background:#2e7d32; color:#fff; border-color:#2e7d32; }
   /* test panel */
+  .draft{ border:1px solid var(--line); border-radius:12px; padding:12px 14px; margin-bottom:10px; background:var(--panel2); }
+  .draft .who{ font-weight:700; font-size:13.5px; }
+  .draft .when{ color:var(--muted); font-size:12px; font-weight:400; }
+  .draft .lbl{ font-size:11px; color:var(--muted); font-weight:700; text-transform:uppercase; letter-spacing:.04em; margin:10px 0 3px; }
+  .draft .msg{ font-size:13.5px; line-height:1.55; white-space:pre-wrap; }
+  .draft .reply{ font-size:13.5px; line-height:1.55; white-space:pre-wrap; }
+  .draft .book{ font-size:12.5px; color:var(--amber); margin-top:8px; }
+  .draft .row{ display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
   .test-log{ border:1px solid var(--line); border-radius:12px; background:var(--bg); padding:12px; min-height:150px; max-height:340px; overflow-y:auto; margin-bottom:10px; }
   .bubble-row{ display:flex; margin-bottom:9px; }
   .bubble-row.user{ justify-content:flex-end; }
@@ -109,6 +117,7 @@
   .bubble.bot{ background:var(--panel2); border:1px solid var(--line); border-bottom-left-radius:4px; }
   .bubble-who{ font-size:11px; color:var(--muted); margin-bottom:3px; font-weight:600; }
   .silence-note{ text-align:center; color:var(--muted); font-size:12.5px; font-style:italic; margin:10px 0; }
+  .sim-label{ font-size:11px; color:var(--muted); font-style:italic; margin-top:3px; }
   .test-row{ display:flex; gap:8px; }
   .test-row input{ flex:1; }
   .test-modes{ display:flex; gap:8px; margin-bottom:12px; }
@@ -233,6 +242,7 @@
             <option value="off">Off</option>
           </select>
         </div>
+        <div class="muted" id="samRouteNote" style="font-size:12px;margin-top:6px">Sam answers inbound calls on the Carolina numbers.</div>
         <div class="name-row">
           <span class="lbl">Bot name</span>
           <input type="text" id="samName" maxlength="40" autocomplete="off">
@@ -253,13 +263,33 @@
     <div class="bot-grid" id="addedBotGrid" style="margin-top:14px" hidden></div>
   </div>
 
+  <!-- ============ SUGGESTED REPLIES ============ -->
+  <div class="card">
+    <h2>Suggested replies</h2>
+    <p class="muted" style="margin:0 0 12px">
+      When Amber is in Suggest mode, her replies wait here for your approval instead of going out.
+      Nothing sends until you tap Approve — approving sends the reply on the number the seller
+      texted, and books the call time shown, if there is one. Dismissing throws the draft away.
+      Sam is voice-only and never drafts here.
+    </p>
+    <div style="margin-bottom:10px">
+      <button class="btn small" id="btnSuggestRefresh" type="button">Refresh</button>
+      <span class="muted" id="suggestStatus" style="font-size:12px;margin-left:8px"></span>
+    </div>
+    <div id="suggestList"></div>
+    <div class="empty" id="suggestEmpty">No suggested replies waiting — when Amber is in Suggest mode, her drafts will show up here for approval.</div>
+  </div>
+
   <!-- ============ TEST YOUR BOT ============ -->
   <div class="card">
     <h2>Test your bot</h2>
     <p class="muted" style="margin:0 0 12px">
-      Preview only — replies come from the knowledge base and settings on this screen, and nothing
-      here is sent anywhere. Type like a seller would and see what the bot says back. You are
-      testing: <b id="testBotLabel"></b> <span class="muted">(switch bots in the picker at the top of this page)</span>
+      Live dry-run — your message goes to the real bot engine on the server (same reply logic, same
+      stored settings, same mode gate) and nothing here is ever sent to a seller. If the server
+      can't be reached, the panel falls back to a local simulation and labels it as one. The
+      dry-run runs the live text-bot engine; for a voice bot the reply is spoken back in that
+      bot's voice on a test call. You are testing: <b id="testBotLabel"></b>
+      <span class="muted">(switch bots in the picker at the top of this page)</span>
     </p>
     <div class="test-modes">
       <button class="btn small test-mode-btn active" id="btnTestModeText" type="button">💬 Text</button>
@@ -1337,32 +1367,103 @@ function caiSaveVoice(storage, tenant, sel) {
    per-bot string value still reads as that bot's fallback depth. */
 var CAI_DEPTHS = ['light', 'medium', 'deep'];
 function caiDepthRate(d) { return d === 'light' ? 1.12 : d === 'deep' ? 0.88 : 1; }
-function caiDepthMap() {
-  var m = caiLoadJson(localStorage, caiKey(TENANT, 'voiceDepth'), null);
-  return m && typeof m === 'object' ? m : {};
+/* Voice depth as a pure map: { ownerId: { selId: depth } }. A legacy
+   per-bot STRING value still reads as that bot's fallback depth
+   (caiVoiceDepthFor falls back to it); caiVoiceDepthSet converts it
+   to the keyed shape on the next write, so the server only ever
+   sees the keyed shape. Owner ids are the two originals or an added
+   bot's 'bot_*' id; voice selections use the same shapes as
+   caiSanitizeVoiceSel ('el:<id>', a built-in style id, 'browser:<name>'). */
+function caiSanitizeVoiceDepth(v) {
+  var out = {};
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return out;
+  Object.keys(v).slice(0, 20).forEach(function (owner) {
+    if (owner !== 'ashley' && owner !== 'sam' && !/^bot_[A-Za-z0-9_]{1,64}$/.test(owner)) return;
+    var entry = v[owner];
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return;
+    var inner = {};
+    Object.keys(entry).slice(0, 30).forEach(function (selId) {
+      if (caiSanitizeVoiceSel(selId) !== selId && selId.indexOf('browser:') !== 0) return;
+      var d = String(entry[selId] || '').trim();
+      if (CAI_DEPTHS.indexOf(d) >= 0) inner[selId] = d;
+    });
+    if (Object.keys(inner).length) out[owner] = inner;
+  });
+  return out;
 }
-function depthForVoice(ownerId, selId) {
-  var entry = caiDepthMap()[ownerId];
+function caiVoiceDepthFor(map, ownerId, selId) {
+  var entry = (map && typeof map === 'object') ? map[ownerId] : null;
   var d = null;
   if (entry && typeof entry === 'object') d = entry[selId];
   else if (typeof entry === 'string') d = entry;
   return CAI_DEPTHS.indexOf(d) >= 0 ? d : 'medium';
+}
+function caiVoiceDepthSet(map, ownerId, selId, d, fallbackSelId) {
+  var m = caiSanitizeVoiceDepth(map || {});
+  /* Keep a legacy string entry readable until it is converted: a
+     plain {sam:'deep'} round-trips through the sanitizer as {} (no
+     voice key), so re-attach it under the fallback voice first. */
+  if (map && typeof map[ownerId] === 'string' && CAI_DEPTHS.indexOf(map[ownerId]) >= 0 && fallbackSelId) {
+    m[ownerId] = m[ownerId] || {};
+    m[ownerId][fallbackSelId] = map[ownerId];
+  }
+  if (CAI_DEPTHS.indexOf(d) < 0) return m;
+  var obj = m[ownerId] && typeof m[ownerId] === 'object' ? m[ownerId] : {};
+  obj[selId] = d;
+  m[ownerId] = obj;
+  return m;
+}
+function caiLoadVoiceDepth(storage, tenant) {
+  var saved = caiLoadJson(storage, caiKey(tenant, 'voiceDepth'), null);
+  if (saved == null) return {};
+  /* Legacy per-bot string values survive a load (caiVoiceDepthFor
+     reads them); they convert to the keyed shape on the next write. */
+  if (saved && typeof saved === 'object') return saved;
+  return {};
+}
+function caiSaveVoiceDepth(storage, tenant, map) {
+  var clean = caiSanitizeVoiceDepth(map);
+  /* A legacy string entry must not be silently dropped by the save:
+     keep it in the local cache under its owner's current voice (the
+     server copy holds the keyed shape only). */
+  if (map && typeof map === 'object') {
+    Object.keys(map).forEach(function (owner) {
+      if (typeof map[owner] === 'string' && CAI_DEPTHS.indexOf(map[owner]) >= 0) {
+        clean[owner] = map[owner];
+      }
+    });
+  }
+  caiSaveJson(storage, caiKey(tenant, 'voiceDepth'), clean);
+  return clean;
+}
+function caiDepthMap() {
+  /* In-memory state wins when the page has it (server load may have
+     replaced it); otherwise the localStorage fallback cache. The
+     typeof guard keeps the pure-block extraction working in tests,
+     where `state` does not exist. */
+  try {
+    if (typeof state !== 'undefined' && state && state.voiceDepth && typeof state.voiceDepth === 'object') return state.voiceDepth;
+  } catch (e) { /* fall through to the cache */ }
+  var m = caiLoadJson(localStorage, caiKey(TENANT, 'voiceDepth'), null);
+  return m && typeof m === 'object' ? m : {};
+}
+function depthForVoice(ownerId, selId) {
+  return caiVoiceDepthFor(caiDepthMap(), ownerId, selId);
 }
 function depthFor(ownerId) {
   return depthForVoice(ownerId, voiceSelectionFor(ownerId));
 }
 function setDepthForVoice(ownerId, selId, d) {
   if (CAI_DEPTHS.indexOf(d) < 0) return;
-  var m = caiDepthMap();
-  var entry = m[ownerId];
-  var obj = {};
-  if (entry && typeof entry === 'object') obj = entry;
-  else if (typeof entry === 'string') {
-    try { obj[voiceSelectionFor(ownerId)] = entry; } catch (e) {}
-  }
-  obj[selId] = d;
-  m[ownerId] = obj;
-  caiSaveJson(localStorage, caiKey(TENANT, 'voiceDepth'), m);
+  var fallback = null;
+  try { fallback = voiceSelectionFor(ownerId); } catch (e) { fallback = null; }
+  var m = caiVoiceDepthSet(caiDepthMap(), ownerId, selId, d, fallback);
+  caiSaveVoiceDepth(localStorage, caiKey(TENANT, 'voiceDepth'), m);
+  /* Keep the in-memory state in step with the cache so the picker
+     and the next server save both see the new depth at once. */
+  try {
+    if (typeof state !== 'undefined' && state) state.voiceDepth = caiSanitizeVoiceDepth(m);
+  } catch (e) { /* state is page-only */ }
 }
 function caiVoiceLabel(v) {
   if (!v || typeof v !== 'object') return 'Voice';
@@ -1676,15 +1777,88 @@ function caiTestReply(text, ctx) {
   }
   return { type: 'reply', text: caiDefaultReply(botName, ctx.bizName), note: '', faqId: '' };
 }
+/* ---- Live dry-run test panel (Nov 27 audit batch B) ---- */
+/* The test panel no longer simulates the bot: it POSTs the test
+   thread to cc-bot-config {action:'test'} and renders the REAL
+   bot's answer. caiTestReply above stays ONLY as the offline
+   fallback — when the server cannot be reached the panel labels
+   its reply "Offline simulation" so it never passes as the live
+   bot. The dry-run runs the live text-bot engine against a
+   fictional 555 test contact (never a real seller, never a real
+   number) with the panel's own thread as context; the server sends
+   nothing and writes nothing. The server gates on the ASHLEY
+   on/mode and runs Amber's text logic for every bot picked here —
+   botId is carried for display/routing, but Sam / added voice bots
+   are NOT dry-run through their own voice agents (no such server
+   path exists); their replies are spoken back in their own voice
+   on a test call. */
+var CAI_DRY_RUN_CONTACT = { phone: '5550101234', name: 'Test Seller', address1: '123 Test Street', city: 'Greenville', state: 'NC', market: 'carolina' };
+var CAI_DRY_RUN_TO_NUMBER = '+12525387760';
+var CAI_OFFLINE_SIM_LABEL = 'Offline simulation — server dry-run unavailable';
+/* Build the {action:'test'} POST body: the panel's thread so far
+   (user lines in, bot lines out, notes/silence skipped) plus the
+   new inbound message. logEntries is the panel's testLog BEFORE
+   the new message is appended. */
+function caiDryRunPayload(msg, logEntries, botId) {
+  var messages = [];
+  (logEntries || []).forEach(function (m) {
+    if (!m) return;
+    if (m.who === 'user') messages.push({ dir: 'in', body: String(m.text || '') });
+    else if (m.who === 'bot') messages.push({ dir: 'out', body: String(m.text || '') });
+  });
+  messages.push({ dir: 'in', body: String(msg == null ? '' : msg) });
+  return {
+    action: 'test',
+    botId: String(botId || 'ashley'),
+    toNumber: CAI_DRY_RUN_TO_NUMBER,
+    contact: {
+      phone: CAI_DRY_RUN_CONTACT.phone,
+      name: CAI_DRY_RUN_CONTACT.name,
+      address1: CAI_DRY_RUN_CONTACT.address1,
+      city: CAI_DRY_RUN_CONTACT.city,
+      state: CAI_DRY_RUN_CONTACT.state,
+      market: CAI_DRY_RUN_CONTACT.market,
+    },
+    messages: messages,
+  };
+}
+/* Map a dry-run response onto a log entry: a reply renders as the
+   bot's bubble; silence (Off / Suggest / guardrail) renders as the
+   🤫 note with the server's reason. A booking the dry-run
+   attempted is reported as a note — it was captured in memory,
+   never created. */
+function caiDryRunResultToLog(result) {
+  result = result || {};
+  var outcome = String(result.outcome || '');
+  var replyText = String(result.replyText || '').trim();
+  var note = String(result.note || '').trim();
+  if (result.silenced || !replyText) {
+    return {
+      type: 'silence',
+      text: '',
+      note: note || ('The live bot stays silent (' + (outcome || 'no reply') + ').'),
+      outcome: outcome,
+      actionsNote: '',
+    };
+  }
+  var actionsNote = '';
+  if (Array.isArray(result.bookedAttempted) && result.bookedAttempted.length) {
+    actionsNote = 'Booking attempted: ' + result.bookedAttempted.length + ' appointment(s) (dry-run — nothing was created).';
+  }
+  return { type: 'reply', text: replyText, note: '', outcome: outcome, actionsNote: actionsNote };
+}
 /* ---- Server config sync (Nov 27, 2026) ---- */
 /* The screen's edits live on the SERVER (cc-bot-config endpoint), not
    just in this browser. These pure mappers translate between the
    page's local state and the server config shape; the DOM script
    below does the fetching. localStorage stays ONLY as an offline
-   fallback cache. Avatars, added-bot profiles and the picker
-   selection are presentation state with no server field — they stay
-   localStorage-only, clearly separated from the server-backed fields
-   below. */
+   fallback cache. Avatars, voice depth, added-bot profiles and the
+   picker selection are server-backed too (Nov 27 audit batch B):
+   they ride in the same config POST as the rest of the state, so a
+   face, a depth, an added bot or a picker pick survives across
+   devices. (Added profiles sync the picker only — the live runner
+   only ever runs the two originals, so an added bot gets no live
+   number or inbound route from being stored.) */
 /* The instruction sections as one joined text per bot (the shape the
    server stores as instructions.{ashley,sam}); Sam's copy reads as
    Sam, Amber's as Amber. */
@@ -1760,6 +1934,10 @@ function caiServerConfigFromState(state, brandName) {
     booking: caiSanitizeBooking(state.booking),
     guardrails: guards,
     voice: { sam: caiSanitizeVoiceSel(state.voice) },
+    avatars: caiSanitizeAvatars(state.avatars),
+    voiceDepth: caiSanitizeVoiceDepth(state.voiceDepth),
+    profiles: caiSanitizeProfiles(state.profiles),
+    selected: caiValidSelected(state.selected, caiAllBots(state.names, state.bots, state.profiles, state.avatars)),
     names: caiSanitizeBotNames(state.names),
   };
 }
@@ -1786,6 +1964,13 @@ function caiApplyServerToState(cfg, brandName) {
     });
   }
   if (cfg.voice && typeof cfg.voice.sam === 'string') patch.voice = caiSanitizeVoiceSel(cfg.voice.sam);
+  if (cfg.avatars && typeof cfg.avatars === 'object') patch.avatars = caiSanitizeAvatars(cfg.avatars);
+  if (cfg.voiceDepth && typeof cfg.voiceDepth === 'object') patch.voiceDepth = caiSanitizeVoiceDepth(cfg.voiceDepth);
+  if (Array.isArray(cfg.profiles)) patch.profiles = caiSanitizeProfiles(cfg.profiles);
+  if (typeof cfg.selected === 'string') {
+    var selBots = caiAllBots(cfg.names, { ashley: cfg.ashley, sam: cfg.sam }, patch.profiles || [], patch.avatars || null);
+    patch.selected = caiValidSelected(cfg.selected, selBots);
+  }
   return patch;
 }
 /* ==/PURE== */
@@ -1821,6 +2006,7 @@ var state = {
   profiles: caiLoadProfiles(localStorage, TENANT),
   selected: 'ashley',
   voice: caiLoadVoice(localStorage, TENANT),
+  voiceDepth: caiLoadVoiceDepth(localStorage, TENANT),
   faqs: caiLoadFaqs(localStorage, TENANT),
   instructions: caiLoadInstructions(localStorage, TENANT),
   booking: caiLoadBooking(localStorage, TENANT),
@@ -1878,6 +2064,7 @@ function selectedBot() {
           state.profiles = caiLoadProfiles(localStorage, TENANT);
           state.selected = caiLoadSelected(localStorage, TENANT, caiAllBots(state.names, state.bots, state.profiles, state.avatars));
           state.voice = caiLoadVoice(localStorage, TENANT);
+          state.voiceDepth = caiLoadVoiceDepth(localStorage, TENANT);
           state.faqs = caiLoadFaqs(localStorage, TENANT, BRAND_NAME);
           state.instructions = caiLoadInstructions(localStorage, TENANT);
           state.booking = caiLoadBooking(localStorage, TENANT);
@@ -1923,10 +2110,69 @@ async function postServerConfig() {
       body: JSON.stringify({ config: caiServerConfigFromState(state, BRAND_NAME) }),
     });
     if (!res.ok) throw new Error('HTTP ' + res.status);
-    setSaveState('Saved to your account', 'green');
+    var data = null;
+    try { data = await res.json(); } catch (e) { data = null; }
+    /* The config save succeeded. The Sam voice apply rides along
+       separately: if it failed, Sam keeps his old live voice — say
+       so loudly instead of showing a plain "Saved". */
+    if (data && data.voiceApply) setSamVoiceNote(data.voiceApply, state.voice);
+    setSaveState(
+      data && data.voiceApply && !data.voiceApply.ok
+        ? 'Saved — Sam voice NOT applied live (see Voice library note)'
+        : 'Saved to your account',
+      data && data.voiceApply && !data.voiceApply.ok ? 'red' : 'green'
+    );
   } catch (e) {
     /* Offline: the localStorage fallback cache already holds the edit. */
     setSaveState('Offline — saved on this device', 'amber');
+  }
+}
+/* Sam live-voice status (Nov 27, 2026): the voice pick only counts
+   when the ElevenLabs agent actually took it. The note under the
+   voice list names the live voice and, on failure, the reason — the
+   config save never pretends the voice applied. */
+function caiVoiceNameForNote(sel) {
+  var opt = caiVoiceOption(sel);
+  if (opt) return opt.name;
+  if (typeof sel === 'string' && sel.indexOf('browser:') === 0) return 'device voice';
+  return sel || 'Roger';
+}
+function setSamVoiceNote(voiceApply, pickedSel) {
+  var el = document.getElementById('voiceNote');
+  if (!el || !voiceApply) return;
+  var picked = caiVoiceNameForNote(pickedSel);
+  /* currentVoiceId is the BARE ElevenLabs id Sam is actually on.
+     When it is unknown (explicit retry after a failure with no prior
+     known voice), do not name the pick as the current voice — the
+     pick is exactly what did NOT land. */
+  var current = voiceApply.currentVoiceId
+    ? caiVoiceNameForNote('el:' + voiceApply.currentVoiceId)
+    : null;
+  if (voiceApply.ok && voiceApply.applied && voiceApply.verified) {
+    el.textContent = 'Live Sam voice: ' + picked + ' — applied to the voice agent and verified.';
+  } else if (voiceApply.ok && voiceApply.unchanged) {
+    el.textContent = 'Live Sam voice: ' + (current || picked) + ' (unchanged). Previews play a short greeting in the chosen voice, right in your browser.';
+  } else if (voiceApply.applicable === false) {
+    el.textContent = 'Sam\u2019s live voice is still ' + (current || 'his current voice') + '. ' + (voiceApply.reason || 'That pick is preview-only and cannot be applied to the voice agent.');
+  } else {
+    el.textContent = 'Sam\u2019s live voice is still ' + (current || 'his current voice') + ' — the pick (' + picked + ') did NOT apply: ' + (voiceApply.error || voiceApply.reason || 'ElevenLabs error') + ' Config saved; retry by picking the voice again.';
+  }
+}
+/* Sam on/off + mode, honestly (Nov 27, 2026): the inbound route is
+   gated on these (telnyx-voice-webhook.js). Off / mode Off = inbound
+   calls ring Troy instead of Sam. Suggest has no voice draft UI, so
+   Sam does not answer — same as off, and the note says so instead of
+   implying a draft queue exists. */
+function renderSamRouteNote() {
+  var el = document.getElementById('samRouteNote');
+  if (!el) return;
+  var b = state.bots.sam || { on: true, mode: 'auto' };
+  if (!b.on || b.mode === 'off') {
+    el.textContent = 'Sam is OFF — inbound calls ring Troy instead of Sam.';
+  } else if (b.mode === 'suggest') {
+    el.textContent = 'Suggest has no voice draft review — Sam does not answer; inbound calls ring Troy.';
+  } else {
+    el.textContent = 'Sam answers inbound calls on the Carolina numbers.';
   }
 }
 async function loadServerConfig() {
@@ -1951,10 +2197,34 @@ async function loadServerConfig() {
       if (patch.booking) state.booking = caiSaveBooking(localStorage, TENANT, patch.booking);
       if (patch.guardrails) state.guardrails = caiSaveGuardrails(localStorage, TENANT, patch.guardrails);
       if (patch.voice) state.voice = caiSaveVoice(localStorage, TENANT, patch.voice);
+      if (patch.avatars) state.avatars = caiSaveAvatars(localStorage, TENANT, patch.avatars);
+      /* An empty server voiceDepth means "nothing saved yet" — it
+         must not wipe a legacy per-bot depth still sitting in the
+         local cache (it converts to the keyed shape on the next
+         depth pick and then syncs up). A non-empty map wins per
+         owner, merged over the local cache so other owners' depths
+         survive the load. */
+      if (patch.voiceDepth && Object.keys(patch.voiceDepth).length) {
+        var mergedDepth = {};
+        if (state.voiceDepth && typeof state.voiceDepth === 'object') {
+          Object.keys(state.voiceDepth).forEach(function (o) { mergedDepth[o] = state.voiceDepth[o]; });
+        }
+        Object.keys(patch.voiceDepth).forEach(function (o) { mergedDepth[o] = patch.voiceDepth[o]; });
+        state.voiceDepth = caiSaveVoiceDepth(localStorage, TENANT, mergedDepth);
+      }
+      if (patch.profiles) state.profiles = caiSaveProfiles(localStorage, TENANT, patch.profiles);
+      if (patch.selected) {
+        state.selected = caiValidSelected(patch.selected, caiAllBots(state.names, state.bots, state.profiles, state.avatars));
+        caiSaveSelected(localStorage, TENANT, state.selected);
+      }
     } finally {
       caiApplyingServer = false;
     }
     setSaveState('Saved to your account', 'green');
+    if (data && data.voiceApply) {
+      setSamVoiceNote(data.voiceApply, state.voice);
+      if (!data.voiceApply.ok) setSaveState('Saved — Sam voice NOT applied live (see Voice library note)', 'red');
+    }
     renderAll();
   } catch (e) {
     /* Offline: keep the localStorage fallback cache, say so. */
@@ -1963,6 +2233,85 @@ async function loadServerConfig() {
 }
 /* The hook the pure storage layer calls after every local save. */
 window.caiSaveHook = function () { scheduleServerSave(); };
+
+/* ---- suggested replies (Suggest mode drafts) ----
+   The text bot in Suggest mode saves its computed reply as a draft
+   (cc-bot-runner.js runBotSuggest -> cc-bot-drafts.js) instead of
+   sending it. This panel lists pending drafts for Approve / Dismiss.
+   Nothing sends without a human tap here. */
+var CAI_DRAFTS_URL = '/.netlify/functions/cc-bot-drafts';
+function suggestTime(ms) {
+  try { return new Date(ms).toLocaleString(); } catch (e) { return ''; }
+}
+function renderSuggestedDrafts(drafts) {
+  var list = document.getElementById('suggestList');
+  var empty = document.getElementById('suggestEmpty');
+  if (!list || !empty) return;
+  var rows = Array.isArray(drafts) ? drafts : [];
+  empty.hidden = rows.length > 0;
+  var html = '';
+  rows.forEach(function (d) {
+    var who = esc(d.contactName || d.phone || 'Seller');
+    var book = '';
+    if (d.wouldBook && d.wouldBook.startISO) {
+      book = '<div class="book">Would book: ' + esc(d.wouldBook.title || 'Seller call') + ' — ' + esc(suggestTime(Date.parse(d.wouldBook.startISO))) + '</div>';
+    }
+    html += '<div class="draft" data-draft="' + esc(d.id) + '">' +
+      '<div class="who">' + who + ' <span class="when">' + esc(d.phone || '') + ' · ' + esc(suggestTime(d.createdAt)) + '</span></div>' +
+      '<div class="lbl">Seller said</div><div class="msg">' + esc(d.sellerMessage || '') + '</div>' +
+      '<div class="lbl">Suggested reply</div><div class="reply">' + esc(d.suggestedReply || '') + '</div>' +
+      book +
+      '<div class="row">' +
+        '<button class="btn small primary" type="button" data-draft-approve="' + esc(d.id) + '">Approve &amp; send</button>' +
+        '<button class="btn small danger" type="button" data-draft-dismiss="' + esc(d.id) + '">Dismiss</button>' +
+      '</div></div>';
+  });
+  list.innerHTML = html;
+}
+async function loadSuggestedDrafts() {
+  var status = document.getElementById('suggestStatus');
+  try {
+    var res = await fetch(CAI_DRAFTS_URL + '?action=list', { credentials: 'same-origin', cache: 'no-store' });
+    if (res.status === 401 || res.status === 403) throw new Error('Sign in to see suggested replies.');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    var data = await res.json();
+    renderSuggestedDrafts(data.drafts || []);
+    if (status) status.textContent = '';
+  } catch (e) {
+    renderSuggestedDrafts([]);
+    var empty = document.getElementById('suggestEmpty');
+    if (empty) {
+      empty.hidden = false;
+      empty.textContent = 'Could not load suggested replies (' + (e.message || 'offline') + ') — drafts are safe on the server; try Refresh.';
+    }
+    if (status) status.textContent = '';
+  }
+}
+async function actOnDraft(id, action) {
+  var status = document.getElementById('suggestStatus');
+  if (status) status.textContent = action === 'approve' ? 'Sending…' : 'Dismissing…';
+  try {
+    var res = await fetch(CAI_DRAFTS_URL + '?action=' + action, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: id }),
+    });
+    var data = null;
+    try { data = await res.json(); } catch (e) { data = null; }
+    if (!res.ok) throw new Error((data && data.error) || ('HTTP ' + res.status));
+    if (action === 'approve') {
+      toast(data && data.alreadySent ? 'Already sent — nothing sent twice.' : 'Sent.');
+    } else {
+      toast('Draft dismissed.');
+    }
+  } catch (e) {
+    toast('Could not ' + (action === 'approve' ? 'send' : 'dismiss') + ' that draft: ' + (e.message || 'offline'));
+  } finally {
+    if (status) status.textContent = '';
+    loadSuggestedDrafts();
+  }
+}
 
 /* ---- bots ---- */
 function renderBot(bot, prefix) {
@@ -1975,7 +2324,7 @@ function renderBot(bot, prefix) {
   pill.textContent = label;
   pill.className = 'pill ' + (label === 'Off' ? 'red' : (b.mode === 'suggest' ? 'amber' : 'green'));
 }
-function renderBots() { renderBot('ashley', 'ashley'); renderBot('sam', 'sam'); }
+function renderBots() { renderBot('ashley', 'ashley'); renderBot('sam', 'sam'); renderSamRouteNote(); }
 function wireBot(bot, prefix) {
   document.getElementById(prefix + 'On').addEventListener('change', function (e) {
     state.bots[bot].on = e.target.checked;
@@ -1990,6 +2339,9 @@ function wireBot(bot, prefix) {
     renderBots();
     renderPicker();
     toast('Mode saved.');
+    /* Switching the text bot into (or out of) Suggest changes what
+       the panel should show — reload it. */
+    if (bot === 'ashley') loadSuggestedDrafts();
   });
 }
 
@@ -2587,20 +2939,61 @@ function renderTestLog() {
     var b = botById(m.botId);
     var nm = b ? b.name : (m.name || 'Bot');
     var sel = b ? b.avatar : m.avatarSel;
+    var sim = m.sim ? '<div class="sim-label">' + esc(CAI_OFFLINE_SIM_LABEL) + '</div>' : '';
     return '<div class="bubble-row bot-row"><span class="bot-avatar sm">' + caiAvatarSvg(sel, nm, ACCENT) + '</span>' +
-      '<div><div class="bubble-who">' + esc(nm) + '</div><div class="bubble bot">' + esc(m.text) + '</div></div></div>';
+      '<div><div class="bubble-who">' + esc(nm) + '</div><div class="bubble bot">' + esc(m.text) + '</div>' + sim + '</div></div>';
   }).join('');
   log.scrollTop = log.scrollHeight;
+}
+/* POST one test thread to the server dry-run (cc-bot-config
+   {action:'test'}). Throws on any transport / auth / server error
+   so the caller can fall back to the labelled simulation. */
+async function caiPostDryRun(payload) {
+  var res = await fetch(CAI_CONFIG_URL, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  var data = await res.json();
+  if (!data || typeof data !== 'object' || data.error) throw new Error((data && data.error) || 'empty dry-run response');
+  return data;
 }
 /* One seller message in, one bot answer out — the single path
    every test surface uses: typed messages, spoken utterances on a
    test call, and lines typed during a call all land here, so the
    guardrails and the knowledge base behave identically in text
    and on a call. Returns the engine result (or null for a blank
-   message). */
-function testExchange(msg) {
+   message). The reply comes from the LIVE bot via the server
+   dry-run — same reply logic, same stored settings, same mode
+   gate, nothing sent to any seller. Only when the server cannot
+   be reached does it fall back to the local FAQ simulation
+   (caiTestReply), and that reply is flagged sim:true so the log
+   renders it under the "Offline simulation" label — it never
+   passes as the live bot. */
+async function testExchange(msg) {
   if (!String(msg == null ? '' : msg).trim()) return null;
   var bot = selectedBot();
+  var payload = caiDryRunPayload(msg, testLog, bot.id);
+  testLog.push({ who: 'user', text: msg });
+  renderTestLog();
+  var live = null;
+  try {
+    live = await caiPostDryRun(payload);
+  } catch (e) {
+    live = null;
+  }
+  if (live) {
+    var mapped = caiDryRunResultToLog(live);
+    if (mapped.type === 'silence') testLog.push({ who: 'silence', text: mapped.note });
+    else {
+      testLog.push({ who: 'bot', botId: bot.id, avatarSel: bot.avatar, name: bot.name, text: mapped.text });
+      if (mapped.actionsNote) testLog.push({ who: 'note', text: mapped.actionsNote });
+    }
+    renderTestLog();
+    return { type: mapped.type, text: mapped.text || '', note: mapped.note || '', outcome: mapped.outcome, source: 'live' };
+  }
   var res = caiTestReply(msg, {
     faqs: state.faqs,
     booking: state.booking,
@@ -2609,17 +3002,23 @@ function testExchange(msg) {
     now: new Date(),
   });
   if (res.type === 'empty') return null;
-  testLog.push({ who: 'user', text: msg });
   if (res.type === 'silence') testLog.push({ who: 'silence', text: res.note });
-  else testLog.push({ who: 'bot', botId: bot.id, avatarSel: bot.avatar, name: bot.name, text: res.text });
+  else testLog.push({ who: 'bot', botId: bot.id, avatarSel: bot.avatar, name: bot.name, text: res.text, sim: true });
   renderTestLog();
-  return res;
+  return { type: res.type, text: res.text || '', note: res.note || '', source: 'offline' };
 }
-function runTest() {
+async function runTest() {
   var input = document.getElementById('testInput');
   var msg = input.value;
   if (!msg.trim()) return;
-  var res = testExchange(msg);
+  var sendBtn = document.getElementById('btnTestSend');
+  if (sendBtn) sendBtn.disabled = true;
+  var res = null;
+  try {
+    res = await testExchange(msg);
+  } finally {
+    if (sendBtn) sendBtn.disabled = false;
+  }
   if (!res) return;
   input.value = '';
   input.focus();
@@ -2777,9 +3176,9 @@ function speakTestReply(text) {
   }, depthFor(bot.id));
   if (!spoke) callSpeaking = false;
 }
-function handleCallUtterance(text) {
+async function handleCallUtterance(text) {
   if (!callActive) return;
-  var res = testExchange(text);
+  var res = await testExchange(text);
   if (!res) return;
   if (res.type === 'reply') speakTestReply(res.text);
   /* Silence results are never spoken — the log note says why. */
@@ -2849,6 +3248,16 @@ wireBotName('sam', 'samName');
 refreshSpeechVoices();
 loadServerConfig();
 renderAll();
+/* Suggested replies: refresh on demand + on load; Approve / Dismiss
+   delegate from the list (rows re-render on every load). */
+document.getElementById('btnSuggestRefresh').addEventListener('click', loadSuggestedDrafts);
+document.getElementById('suggestList').addEventListener('click', function (e) {
+  var ap = e.target.closest('[data-draft-approve]');
+  if (ap) { ap.disabled = true; actOnDraft(ap.dataset.draftApprove, 'approve'); return; }
+  var di = e.target.closest('[data-draft-dismiss]');
+  if (di) { di.disabled = true; actOnDraft(di.dataset.draftDismiss, 'dismiss'); }
+});
+loadSuggestedDrafts();
 </script>
 </body>
 </html>

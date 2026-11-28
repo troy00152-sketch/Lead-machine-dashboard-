@@ -116,6 +116,8 @@ const MAX_FLAGS = 200;
 const DEFAULT_THRESHOLD_MINUTES = 30;
 const DIALER_STORE = 'cc-dialer';
 const PAIRINGS_KEY = 'thread-calls';
+const SYNC_QUEUE_STORE = 'cc-hl-sync-queue';
+const HL_SYNC_MAX_ATTEMPTS = 5; // must match cc-hl-sync-queue.js
 const DEFAULT_STUCK_CALL_SECONDS = 60;
 // Engine-stall watch (Nov 27, 2026): the tick sends at most ONE
 // enrollment per market per minute while a queue exists, so 15
@@ -144,6 +146,7 @@ const deps = {
   enrollStoreFactory: null,
   notifStoreFactory: null,
   dialerStoreFactory: null,
+  syncQueueStoreFactory: null,
   // Tests only: () => ({ list: [workflow defs] }). Production uses
   // cc-workflows-store.loadEffective(event) instead.
   workflowsProvider: null,
@@ -168,6 +171,9 @@ function notifStore(event) {
 }
 function dialerStore(event) {
   return makeStore(DIALER_STORE, deps.dialerStoreFactory, event);
+}
+function syncQueueStore(event) {
+  return makeStore(SYNC_QUEUE_STORE, deps.syncQueueStoreFactory, event);
 }
 
 // Strict read: store errors PROPAGATE (a dead conversations store must
@@ -580,6 +586,85 @@ async function scan(opts, event) {
     flagged += 1;
   }
 
+  // ---- HL sync queue failures (Nov 27, 2026) ----
+  // An auto opt-out seal that never lands in HighLevel leaves the
+  // contact textable from HL — the Jason Hogan case. The seal is
+  // queued out-of-band (cc-hl-sync-queue) and drained by the sweep;
+  // an entry that fails HL_SYNC_MAX_ATTEMPTS times is a real
+  // compliance gap, not a transient, so it raises one flag per
+  // enrollment key. Auto-resolve when the drainer later records the
+  // key as synced / superseded / unresolved (the queue no longer
+  // needs the sync). Same-episode dedupe: an open or dismissed flag
+  // for the same key is not re-raised. Best-effort: a dead queue
+  // store skips the pass and never breaks the other passes.
+  let hlSyncFailed = 0;
+  try {
+    let qs = null;
+    try {
+      qs = syncQueueStore(event);
+    } catch (e) {
+      qs = null;
+    }
+    if (qs) {
+      const qdoc = await readJsonSafe(qs, 'queue');
+      const entries = qdoc && Array.isArray(qdoc.entries) ? qdoc.entries : [];
+      const outcomes =
+        qdoc && qdoc.outcomes && typeof qdoc.outcomes === 'object' ? qdoc.outcomes : {};
+      // Auto-resolve: the queue no longer needs this key synced.
+      for (const f of flags) {
+        if (f.type !== 'hl-sync-failed' || f.status !== 'open') continue;
+        const oc = outcomes[f.key];
+        if (
+          oc &&
+          (oc.status === 'synced' || oc.status === 'superseded' || oc.status === 'unresolved')
+        ) {
+          f.status = 'resolved';
+          f.resolvedAt = now;
+          f.resolvedReason = 'hl-' + oc.status;
+          resolved += 1;
+        }
+      }
+      for (const e of entries) {
+        if (!e || !e.key) continue;
+        if ((e.attempts || 0) < HL_SYNC_MAX_ATTEMPTS) continue;
+        if (
+          flags.some(
+            (f) =>
+              f.type === 'hl-sync-failed' &&
+              f.key === e.key &&
+              (f.status === 'open' || f.status === 'dismissed')
+          )
+        ) {
+          continue;
+        }
+        const t = threadForPhone(e.phone);
+        flags.push({
+          id: crypto.randomUUID(),
+          type: 'hl-sync-failed',
+          key: e.key,
+          phone: e.phone || '',
+          name: (t && t.name) || (e.phone || e.key),
+          market: (t && t.market) || '',
+          inboundId: null,
+          inboundAt: e.enqueuedAt || null,
+          preview: (
+            'HighLevel seal failed — seller opted out but HL never got the DND (' +
+            (e.attempts || 0) +
+            ' attempts; last error: ' +
+            String(e.lastError || 'unknown') +
+            ')'
+          ).slice(0, 200),
+          flaggedAt: now,
+          status: 'open',
+        });
+        flagged += 1;
+        hlSyncFailed += 1;
+      }
+    }
+  } catch (e) {
+    // Best-effort: a dead queue store skips the pass.
+  }
+
   // ---- stuck calls (Nov 25, 2026 call-audio deadlock guard) ----
   // A pairing stuck in 'dialing' past the threshold means the seller
   // leg is live but the bridge never formed — the exact failure Troy
@@ -900,7 +985,7 @@ async function scan(opts, event) {
   flags = capFlags(flags);
   await saveFlags(ns, flags);
   const open = flags.filter((f) => f.status === 'open').length;
-  return { flagged, resolved, open, engineStalls };
+  return { flagged, resolved, open, engineStalls, hlSyncFailed };
 }
 
 async function listFlags(event) {
@@ -974,6 +1059,8 @@ exports._test = {
       stores && stores.notifications ? () => stores.notifications : null;
     deps.dialerStoreFactory =
       stores && stores.dialer ? () => stores.dialer : null;
+    deps.syncQueueStoreFactory =
+      stores && stores.syncQueue ? () => stores.syncQueue : null;
     deps.workflowsProvider =
       stores && typeof stores.workflows === 'function' ? stores.workflows : null;
   },
@@ -982,6 +1069,7 @@ exports._test = {
     deps.enrollStoreFactory = null;
     deps.notifStoreFactory = null;
     deps.dialerStoreFactory = null;
+    deps.syncQueueStoreFactory = null;
     deps.workflowsProvider = null;
   },
 };

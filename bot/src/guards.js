@@ -546,23 +546,40 @@ function isFirmPriceBurst(bodies) {
   const list = Array.isArray(bodies) ? bodies : [bodies];
   return list.some((t) => hasMoneyFigure(t)) && list.some((t) => hasFirmLanguage(t));
 }
-function isAbsurdPrice(rawText, mao) {
-  const figures = extractMoneyFigures(rawText);
-  // Word-form check (Nov 3): "one million", "1.5 million", "a million", "2 billion", etc.
-  // extractMoneyFigures only catches digit forms ($1,000,000) — Troy's seller said "one million".
-  const wordMillion = /\b(one|two|three|four|five|six|seven|eight|nine|ten|a|an|\d+(?:\.\d+)?)\s+million\b/i.test(rawText);
-  const wordBillion = /\bmillion\b.*\bbillion\b|\bbillion\b/i.test(rawText);
-  // Word-form hundred-thousands at/above the absolute gate: "five hundred thousand" (Nov 14 battery).
-  const wordHundredThousand = /\b(five|six|seven|eight|nine)\s+hundred\s+thousand\b/i.test(rawText);
-  if (wordMillion || wordBillion || wordHundredThousand) return true;
-  if (!figures.length) return false;
-  const ask = Math.max(...figures);
-  // Absolute gate (Nov 3): half a million or more is absurd on its face,
-  // MAO or no MAO — Troy's ceiling is $350K ARV.
-  if (ask >= ABSURD_PRICE_ABSOLUTE) return true;
-  // Relative gate: needs a real MAO.
-  if (!Number.isFinite(mao) || mao <= 0) return false;
-  return ask > ABSURD_PRICE_MULTIPLE * mao;
+function isAbsurdPrice(rawText, mao, opts) {
+  const branches = absurdPriceBranches(rawText, mao);
+  // Guardrail toggles (Nov 27, 2026 — Conversation AI screen): the two
+  // branches are separately toggleable. `big-ask` gates the absolute
+  // $500K+ gate (digit, word and k/grand forms); `over-mao` gates the
+  // relative >2x-MAO gate. No opts (or neither set false) = the
+  // long-standing behavior, byte-for-byte.
+  const bigAskOn = !opts || opts.bigAsk !== false;
+  const overMaoOn = !opts || opts.overMao !== false;
+  return (bigAskOn && branches.absolute) || (overMaoOn && branches.relative);
+}
+
+/**
+ * Which absurd-price branch(es) a text hits, before any toggle is
+ * applied: { absolute, relative }. `absolute` is the $500K+ gate —
+ * digit figures at/above ABSURD_PRICE_ABSOLUTE, or the word forms
+ * ("one million", "five hundred thousand", "billion"). `relative` is
+ * the > ABSURD_PRICE_MULTIPLE × MAO gate (needs a real MAO). The
+ * handler uses this to name the bypassed guardrail in its log when a
+ * toggle is OFF and the rule would otherwise have fired.
+ */
+function absurdPriceBranches(rawText, mao) {
+  const text = String(rawText || '');
+  const wordMillion = /\b(one|two|three|four|five|six|seven|eight|nine|ten|a|an|\d+(?:\.\d+)?)\s+million\b/i.test(text);
+  const wordBillion = /\bmillion\b.*\bbillion\b|\bbillion\b/i.test(text);
+  const wordHundredThousand = /\b(five|six|seven|eight|nine)\s+hundred\s+thousand\b/i.test(text);
+  const figures = extractMoneyFigures(text);
+  const ask = figures.length ? Math.max(...figures) : null;
+  return {
+    absolute: wordMillion || wordBillion || wordHundredThousand
+      || (ask !== null && ask >= ABSURD_PRICE_ABSOLUTE),
+    relative: ask !== null && Number.isFinite(mao) && mao > 0
+      && ask > ABSURD_PRICE_MULTIPLE * mao,
+  };
 }
 
 /**
@@ -574,6 +591,12 @@ function isAbsurdPrice(rawText, mao) {
  * a bare "No" seals only when the last outbound asked a yes/no question.
  * Callers without history get the fail-open behavior (bare "No" proceeds);
  * every other guard is context-free and unaffected.
+ * `opts` carries the Conversation AI guardrail toggles (Nov 27, 2026):
+ * opts.optout === false skips ONLY the opt-out check, opts.listed ===
+ * false skips ONLY the listed check. Every other bucket (wrong-number /
+ * not-owner, sold / not-for-sale, deceased, hostile, spam, rejection)
+ * has no toggle and always applies. No opts = the long-standing
+ * behavior, byte-for-byte.
  */
 // SMS REACTIONS (Nov 4, 2026, Eric Kinsey lesson): iMessage-style "Liked"
 // reactions arrive as inbound SMS like 'Liked "You're all set..."'. They
@@ -593,12 +616,12 @@ function isReaction(rawText) {
   return REACTION_PATTERNS.some((re) => re.test(text));
 }
 
-function classifyInbound(rawText, history) {
+function classifyInbound(rawText, history, opts) {
   if (isReaction(rawText)) return { verdict: 'silence', category: 'reaction' };
-  if (isOptOut(rawText)) return { verdict: 'silence-dnd', category: 'opt-out' };
+  if ((!opts || opts.optout !== false) && isOptOut(rawText)) return { verdict: 'silence-dnd', category: 'opt-out' };
   if (isNotOwner(rawText)) return { verdict: 'silence-dnd', category: 'wrong-number-or-not-owner' };
   if (isSoldNotForSale(rawText)) return { verdict: 'silence-dnd', category: 'sold-not-for-sale' };
-  if (isListed(rawText)) return { verdict: 'silence-dnd', category: 'listed' };
+  if ((!opts || opts.listed !== false) && isListed(rawText)) return { verdict: 'silence-dnd', category: 'listed' };
   if (isDeceased(rawText)) return { verdict: 'silence-dnd', category: 'deceased' };
   if (isHostile(rawText)) return { verdict: 'silence-dnd', category: 'hostile' };
   if (isSpam(rawText)) return { verdict: 'silence-dnd', category: 'spam' };
@@ -960,11 +983,14 @@ function earlierInboundBodies(history) {
  * consulted here — steps 6.5/6.6 own first detection (one walkaway for
  * firm, silence for absurd); this helper exists so a seller who comes
  * BACK after that gets sealed instead of re-engaged.
+ * `opts` carries the Conversation AI guardrail toggles (Nov 27, 2026):
+ * the absurd half is gated per branch (opts.bigAsk / opts.overMao, see
+ * isAbsurdPrice); the firm half has no toggle and always applies.
  */
-function establishedPriceSeal(history, mao) {
+function establishedPriceSeal(history, mao, opts) {
   const earlier = earlierInboundBodies(history);
   if (!earlier.length) return null;
-  if (earlier.some((t) => isAbsurdPrice(t, mao))) return 'absurd-price';
+  if (earlier.some((t) => isAbsurdPrice(t, mao, opts))) return 'absurd-price';
   if (isFirmPriceBurst(earlier)) return 'firm-price';
   return null;
 }
@@ -1168,6 +1194,7 @@ module.exports = {
   lastOutboundAskedYesNoQuestion,
   isReaction,
   isAbsurdPrice,
+  absurdPriceBranches,
   ABSURD_PRICE_MULTIPLE,
   ABSURD_PRICE_ABSOLUTE,
   isFirmPrice,

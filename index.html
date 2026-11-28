@@ -54,6 +54,16 @@
         else { logoImg.style.display = 'none'; }
         logoImg.alt = name;
       }
+      // Saved brand accent (Nov 27): the Settings accent color rides
+      // the client-config response as accentColor and lands on the
+      // --accent vars, so a brand saved on one device paints on the
+      // next. The Settings inputs sync too, when they exist yet.
+      if (cfg.accentColor) {
+        document.documentElement.style.setProperty('--accent', cfg.accentColor);
+        document.documentElement.style.setProperty('--accent2', cfg.accentColor);
+      }
+      var ni = document.getElementById('brandNameInput'); if (ni && cfg.companyName) ni.value = cfg.companyName;
+      var ci = document.getElementById('brandColorInput'); if (ci && cfg.accentColor) ci.value = cfg.accentColor;
       // Tenant links (multi-tenant pass): the "Back to CRM" buttons
       // and the lead-push webhook resolve from the SAME client
       // config. For Troy they are exactly the URLs this page used to
@@ -97,13 +107,33 @@
     if (document.body) render();
     else document.addEventListener('DOMContentLoaded', render);
   }
-  function fallback() { applyBrand(DEFAULTS, true); }
+  /* Server-vs-cache precedence (Nov 27): the saved brand lives
+     server-side AND as a local cache. Newer wins; a local-only save
+     that never synced always wins on its own device; a remote reset
+     (no override left) beats a synced cache. */
+  function brandCacheRaw() {
+    try { var b = JSON.parse(localStorage.getItem('lm_brand_v1') || 'null'); return (b && b.name) ? b : null; } catch (e) { return null; }
+  }
+  function serverWinsBrand(cfg) {
+    var cache = brandCacheRaw();
+    if (!cache) return true;
+    if (cache.synced === false) return false;
+    if (!cfg.brandUpdatedAt) return true;
+    return cfg.brandUpdatedAt >= (cache.updatedAt || 0);
+  }
+  function fallback() {
+    // A local brand exists — the Settings applyBrand paints it, so
+    // the config defaults must not overwrite it on a failed fetch.
+    if (brandCacheRaw()) return;
+    applyBrand(DEFAULTS, true);
+  }
   try {
     window.LM_CFG_PROMISE = fetch('/.netlify/functions/client-config', { cache: 'no-store' })
       .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
       .then(function (cfg) {
         if (cfg && cfg.accountStatus === 'suspended') { showSuspended(); return cfg; }
-        applyBrand(cfg, false);
+        window.LM_CFG = cfg;
+        if (serverWinsBrand(cfg)) applyBrand(cfg, false);
         return cfg;
       })
       .catch(fallback);
@@ -1555,6 +1585,11 @@ function loadState(){ try{ leads = JSON.parse(localStorage.getItem('acc_leads')|
 /* ============ NAVIGATION ============ */
 document.querySelectorAll('.nav-item').forEach(btn=>{
   btn.addEventListener('click', ()=>{
+    // Page links (<a href>) have no data-nav — they navigate on their
+    // own. Never run showPage(undefined) for them: it stripped .active
+    // from every tab-page and blanked the current view before the
+    // browser navigated away (Nov 27 audit).
+    if(!btn.dataset.nav) return;
     document.querySelectorAll('.nav-item').forEach(b=>b.classList.remove('active'));
     btn.classList.add('active');
     showPage(btn.dataset.nav);
@@ -1562,6 +1597,7 @@ document.querySelectorAll('.nav-item').forEach(btn=>{
   });
 });
 function showPage(name){
+  if(!name) return;
   const wasComps = ((document.querySelector('.tab-page.active')||{}).id === 'page-comps');
   document.querySelectorAll('.tab-page').forEach(p=>p.classList.remove('active'));
   const el = document.getElementById('page-'+name);
@@ -2610,14 +2646,36 @@ function renderRecentLeads(){
     <td>${esc(l.market)}</td><td><span class="badge gray">${esc(l.distressSignal)}</span> ${scoreBadgeHtml(l)}</td>
     <td><span class="badge orange">${esc(l.status)}</span></td><td style="color:var(--muted)">${fmtDate(l.addedAt)}</td></tr>`).join('');
 }
+/* Active Buyers tile — LIVE count (Nov 27 2026 audit fix): was a
+   hardcoded literal '11,718' even though the comment below it
+   claimed live counts. The master buyers file IS the filtered
+   real-buyer set (11,718 records today), so the tile now reads the
+   loaded file's length — and refreshes automatically when the
+   weekly pull rebuilds the file. Until the (static, no-credit)
+   file loads it shows '…'; on load failure it shows '—'. */
+function refreshBuyerStat(){
+  const el = document.getElementById('statBuyers');
+  if(!el) return;
+  const data = (typeof mbData !== 'undefined' && mbData) || window.MASTER_BUYERS || null;
+  if(data && data.length){
+    el.textContent = data.length.toLocaleString();
+    el.removeAttribute('title');
+    return;
+  }
+  el.textContent = '…';
+  loadMasterBuyers().then((d)=>{
+    el.textContent = (d && d.length) ? d.length.toLocaleString() : '—';
+    if(!d || !d.length) el.title = 'Buyer data failed to load';
+    else el.removeAttribute('title');
+  });
+}
 function updateStats(){
   document.getElementById('statLeads').textContent = leads.length;
   document.getElementById('leadCountNav').textContent = leads.length;
   document.getElementById('leadCountBadge').textContent = leads.length;
-  document.getElementById('statBuyers').textContent = '11,718';
+  refreshBuyerStat();
   document.getElementById('statHedge').textContent = (typeof HEDGE_FUNDS!=='undefined'?HEDGE_FUNDS.length:0);
   document.getElementById('statTraced').textContent = leads.filter(l=>l.traced).length;
-  // Buyer counts now come live from the Buyer Match Ai database.
 }
 
 /* ============ LEAD DETAIL MODAL ============ */
@@ -3856,23 +3914,26 @@ function matchLeadToBuyers(leadId){
   runBuyerMatch({ address: `${l.address}, ${l.city}, ${l.state} ${l.zip||''}`, city: l.city, state: l.state, zip: l.zip||'', price: l.estimatedValue || l.value || 0 });
 }
 /* Master Buyers: searchable full database (28K, not just 3+ filter) */
-let mbData = null, mbPage = 0;
+let mbData = null, mbPage = 0, _mbLoadPromise = null;
 const MB_PER_PAGE = 50;
 function loadMasterBuyers(){
-  return new Promise((resolve) => {
-    if(mbData){ resolve(mbData); return; }
-    if(window.MASTER_BUYERS){ mbData = window.MASTER_BUYERS; resolve(mbData); return; }
+  if(_mbLoadPromise) return _mbLoadPromise;
+  _mbLoadPromise = new Promise((resolve) => {
+    if(mbData){ refreshBuyerStat(); resolve(mbData); return; }
+    if(window.MASTER_BUYERS){ mbData = window.MASTER_BUYERS; refreshBuyerStat(); resolve(mbData); return; }
     const s = document.createElement('script');
     s.src = '/assets/master-buyers.js';
     s.onload = () => {
       mbData = window.MASTER_BUYERS || [];
       const badge = document.getElementById('mbCount');
       if(badge) badge.textContent = mbData.length.toLocaleString() + ' BUYERS';
+      refreshBuyerStat();
       resolve(mbData);
     };
-    s.onerror = () => resolve([]);
+    s.onerror = () => { _mbLoadPromise = null; resolve([]); };
     document.head.appendChild(s);
   });
+  return _mbLoadPromise;
 }
 /* Verified buyer tier — live overlay from /.netlify/functions/buyer-verify.
    A buyer is ✅ Verified when they made an offer in a deal room, confirmed
@@ -6578,6 +6639,14 @@ function openLiveCallForLead(id){
   const l = leads.find(x=>x.id===id); if(!l) return;
   window.open('/live-call.html?lead=' + encodeURIComponent(l.id), '_blank');
 }
+/* 💰 Get ARV (lead-card button, Nov 27 2026 audit fix): the button
+   called getARV() but no such function existed anywhere in the
+   dashboard — the click threw ReferenceError. It now runs the lead's
+   comps, exactly like the modal's "Run Comps" button, which loads
+   the Realie comps and computes the ARV for the address. */
+function getARV(id){
+  openCompsForLead(id);
+}
 function openCompsForLead(id){
   const l = leads.find(x=>x.id===id); if(!l) return;
   closeModal();
@@ -7421,12 +7490,40 @@ document.addEventListener('keydown', function(e){
 
 /* ---- Branding ---- */
 const BRAND_KEY = 'lm_brand_v1';
+var _brandServerHooked = false;
+var _brandGen = 0; // bumped by save/reset; stale server corrections ignore themselves
 function brandLoad(){
   try{ const b = JSON.parse(localStorage.getItem(BRAND_KEY)); if(b && b.name) return b; }catch(e){}
   return { name: 'Direct Property Buyers', color: '#ff6b1a' };
 }
+function brandRaw(){
+  try{ const b = JSON.parse(localStorage.getItem(BRAND_KEY)); return (b && b.name) ? b : null; }catch(e){ return null; }
+}
+/* Same server-vs-cache rule as the head hook: newer wins; a
+   local-only save that never synced always wins on its own device;
+   a remote reset (no override left) beats a synced cache. */
+function brandServerWins(cfg){
+  const cache = brandRaw();
+  if(!cache) return true;
+  if(cache.synced === false) return false;
+  if(!cfg.brandUpdatedAt) return true;
+  return cfg.brandUpdatedAt >= (cache.updatedAt || 0);
+}
+function applyServerBrand(cfg){
+  if(!cfg || cfg.accountStatus === 'suspended') return;
+  const small = document.querySelector('.brand small');
+  if(small && cfg.companyName) small.textContent = cfg.companyName;
+  if(cfg.accentColor){
+    document.documentElement.style.setProperty('--accent', cfg.accentColor);
+    document.documentElement.style.setProperty('--accent2', cfg.accentColor);
+  }
+  const ni = ccEl('brandNameInput'); if(ni && cfg.companyName) ni.value = cfg.companyName;
+  const ci = ccEl('brandColorInput'); if(ci && cfg.accentColor) ci.value = cfg.accentColor;
+}
 function applyBrand(){
   const b = brandLoad();
+  const cfg = window.LM_CFG || null;
+  if(cfg && brandServerWins(cfg)){ applyServerBrand(cfg); return; }
   const small = document.querySelector('.brand small');
   if(small && b.name) small.textContent = b.name;
   if(b.color){
@@ -7435,20 +7532,52 @@ function applyBrand(){
   }
   const ni = ccEl('brandNameInput'); if(ni) ni.value = b.name || '';
   const ci = ccEl('brandColorInput'); if(ci && b.color) ci.value = b.color;
+  // Server truth may still be in flight: when the client-config
+  // fetch lands, the saved brand corrects the local cache (Nov 27).
+  if(window.LM_CFG_PROMISE && typeof window.LM_CFG_PROMISE.then === 'function' && !_brandServerHooked){
+    _brandServerHooked = true;
+    const gen = _brandGen;
+    window.LM_CFG_PROMISE.then(function(c){
+      if(gen !== _brandGen) return;
+      window.LM_CFG = c;
+      if(c && brandServerWins(c)) applyServerBrand(c);
+    }).catch(function(){});
+  }
 }
-function saveBrand(){
+/* Save Branding (Nov 27): the brand now ALSO lives server-side
+   (client-config save-brand, lm_auth cookie) so it follows Troy
+   across devices. localStorage stays as the instant cache. A failed
+   sync still saves locally and says so honestly. */
+async function saveBrand(){
   const name = ((ccEl('brandNameInput') || {}).value || '').trim() || 'Direct Property Buyers';
   const color = (ccEl('brandColorInput') || {}).value || '#ff6b1a';
-  try{ localStorage.setItem(BRAND_KEY, JSON.stringify({ name: name, color: color })); }catch(e){}
+  let synced = false;
+  try{
+    const r = await fetch('/.netlify/functions/client-config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'save-brand', name: name, color: color }) });
+    synced = r.ok;
+    if(r.ok){ _brandGen++; window.LM_CFG = { companyName: name, accentColor: color, brandUpdatedAt: Date.now(), accountStatus: 'active' }; }
+  }catch(e){ synced = false; }
+  try{ localStorage.setItem(BRAND_KEY, JSON.stringify({ name: name, color: color, updatedAt: Date.now(), synced: synced })); }catch(e){}
   applyBrand();
-  if(typeof toast === 'function') toast('Branding saved');
+  if(typeof toast === 'function') toast(synced ? 'Branding saved — synced to this account' : 'Branding saved in this browser only — sign in to sync it across devices');
 }
-function resetBrand(){
+/* Reset (Nov 27): fail-atomic — the server reset must land before
+   the local cache is cleared, or the next load would resurrect the
+   old override. */
+async function resetBrand(){
+  let synced = false;
+  try{
+    const r = await fetch('/.netlify/functions/client-config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'reset-brand' }) });
+    synced = r.ok;
+  }catch(e){ synced = false; }
+  if(!synced){ if(typeof toast === 'function') toast('Branding reset failed — still saved on the server. Sign in and try again.'); return; }
+  _brandGen++;
+  window.LM_CFG = null;
   try{ localStorage.removeItem(BRAND_KEY); }catch(e){}
   document.documentElement.style.removeProperty('--accent');
   document.documentElement.style.removeProperty('--accent2');
   applyBrand();
-  if(typeof toast === 'function') toast('Branding reset');
+  if(typeof toast === 'function') toast('Branding reset — synced');
 }
 
 /* ---- init + refresh hooks ---- */

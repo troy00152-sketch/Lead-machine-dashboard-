@@ -218,7 +218,34 @@ function clampInt(v, lo, hi, dflt) {
   if (Number.isNaN(n)) return dflt;
   return Math.min(hi, Math.max(lo, n));
 }
-
+// Guardrail toggles (Nov 27, 2026 — Conversation AI screen): the stored
+// config's guardrails are copied onto the live handler config, so the
+// vendored handler gates each seal/silence rule on its toggle (see
+// bot/src/handler.js guardOn). Only an explicit `false` disables a
+// rule; true/absent means ON.
+// FAIL-CLOSED: when the stored config can't be read (botConfig null),
+// any previously applied toggles are CLEARED from the live config, so
+// a warm container never carries a stale OFF across a failed config
+// load — every rule reads as ON.
+const GUARDRAIL_IDS = ['optout', 'big-ask', 'over-mao', 'referral', 'booked', 'listed'];
+function applyGuardrailsConfig(liveConfig, botConfig, log) {
+  if (!liveConfig) return false;
+  const g = botConfig && botConfig.guardrails && typeof botConfig.guardrails === 'object'
+    ? botConfig.guardrails
+    : null;
+  if (!g) {
+    if (liveConfig.guardrails) delete liveConfig.guardrails;
+    return false;
+  }
+  const out = {};
+  for (const id of GUARDRAIL_IDS) {
+    if (typeof g[id] === 'boolean') out[id] = g[id];
+  }
+  liveConfig.guardrails = out;
+  log('cc-bot-runner: guardrails applied ('
+    + GUARDRAIL_IDS.map((id) => id + '=' + (out[id] === false ? 'OFF' : 'on')).join(', ') + ')');
+  return true;
+}
 // applyBookingConfig(liveConfig, botConfig, log) — feed the screen's
 // booking rule into the slot engine through the knobs the vendored
 // booking.js ALREADY reads per call:
@@ -311,6 +338,11 @@ function buildHandler(log, lambdaEvent, callOverrides) {
     }
   }
   if (ov && ov.sendSms) clientOpts.sendSms = ov.sendSms;
+  // Suggest capture (cc-bot-drafts): the handler's appointment calls
+  // go through this API instead of the real cc-appointments module,
+  // so a would-be booking lands in the mem store only — no HighLevel
+  // event, no push — until a human approves the draft.
+  if (ov && ov.appointmentsApi) clientOpts.appointmentsApi = ov.appointmentsApi;
   // The Lambda event for this invocation: without it the client's
   // default Blobs stores have no context on Netlify Functions v1
   // (reads miss, writes silently no-op — the Nov 26 Amber
@@ -337,13 +369,18 @@ function buildHandler(log, lambdaEvent, callOverrides) {
 // on EVERY invocation (cached per invocation, never across them) and
 // applied three ways before the handler runs:
 //   1. MODE GATE (text bot = ashley/Amber): Off -> silence, logged.
-//      Suggest -> silence + log 'suggest-mode-unavailable' — Suggest
-//      has no draft-approve UI anywhere yet, so the bot must not reply
-//      AND must not pretend a draft exists. Deliberate, not a half
-//      backend; see the report.
+//      Suggest -> runBotSuggest: the reply Auto would have computed
+//      is saved as a draft in cc-bot-drafts (cc-bot-drafts.js) for a
+//      human to approve — NOTHING is sent. See runCaptured below for
+//      why the handler runs against in-memory stores to do that.
 //   2. Knowledge overrides (ensureKnowledge): FAQ / instruction text.
 //   3. Booking rules (applyBookingConfig): window/slots/hours onto the
 //      live handler config object, so a warm container picks them up.
+//   4. Guardrails (applyGuardrailsConfig): the stored guardrail
+//      toggles onto the live handler config, so each seal/silence rule
+//      is gated on its toggle — explicit false skips that one rule
+//      (logged + recorded as guardrailsBypassed); true/absent, or a
+//      config-load failure, leaves every rule ON (fail-closed).
 // A config-load ERROR fails open (bot runs as before, vendored
 // knowledge + env booking rules) — a Blobs blip must never silence
 // the live bot. `opts.dryRun` delegates to runBotDryRun.
@@ -367,8 +404,7 @@ async function runBot(payload, log, lambdaEvent, opts) {
         return { outcome: 'bot-off', statusCode: 200, silenced: true, reason: 'bot-off' };
       }
       if (mode === 'suggest') {
-        logger('cc-bot-runner: suggest-mode-unavailable — Suggest has no draft-approve UI yet; silence, no reply');
-        return { outcome: 'suggest-mode-unavailable', statusCode: 200, silenced: true, reason: 'suggest-mode-unavailable' };
+        return runBotSuggest(payload, logger, lambdaEvent, botConfig);
       }
     }
     return await invokeHandler(payload, logger, lambdaEvent, null, botConfig);
@@ -384,6 +420,9 @@ async function invokeHandler(payload, logger, lambdaEvent, callOverrides, botCon
   // Per-invocation config: a warm container reuses the handler, so
   // knowledge + booking rules are re-applied on EVERY call — a screen
   // edit lands on the next inbound message, not the next cold start.
+  // Guardrails apply on every call too, INCLUDING a null config (which
+  // fail-closes them all to ON — see applyGuardrailsConfig).
+  if (liveHandlerConfig) applyGuardrailsConfig(liveHandlerConfig, botConfig, logger);
   if (botConfig) {
     ensureKnowledge(livePersona || 'amber', logger, botConfig);
     if (liveHandlerConfig) applyBookingConfig(liveHandlerConfig, botConfig, logger);
@@ -414,20 +453,402 @@ function memStore() {
   };
 }
 
+// ---- Suggest capture engine ----
+// The handler sends, books, tags and seals INLINE (hl.sendSms,
+// hl.createAppointment, hl.addTags, hl.setDnd) — there is no
+// "compute the reply, then decide" seam. So Suggest cannot run the
+// handler against the live stores: a capturing send stub alone would
+// still append the reply to the live thread (CcClient.sendSms writes
+// the thread BEFORE calling the injected sender) and a book action
+// would create a REAL appointment — in prod, cc-appointments also
+// syncs it to the HighLevel calendar and pushes Troy's phone.
+//
+// runCaptured() runs the REAL handler against in-memory stores
+// seeded from the live thread / enrollment / appointments, with:
+//   * a capturing sendSms: the reply text is recorded, nothing is
+//     sent (no Telnyx), and the outbound lands in the MEM thread
+//     only — the live thread never sees it;
+//   * a capture appointmentsApi: reads delegate to the real
+//     cc-appointments module (against the mem store), but
+//     createAppointment writes a Blobs-shaped record to the mem
+//     store ONLY — no HighLevel event, no push. A would-be booking
+//     is reported as bookedAttempted and only becomes real when a
+//     human approves the draft (cc-bot-drafts approve creates it
+//     through the real CcClient.createAppointment);
+//   * tags / seals / opportunities land in the mem stores only and
+//     are reported back (the caller diffs the mem enrollment against
+//     the live one for wouldTags / wouldSeal).
+// The caller decides what the capture means: the dry-run test action
+// reports it as a preview; Suggest saves it as a draft. Either way
+// the handler is dropped afterwards (never reused for live traffic)
+// and the appointments store factory is restored — the same
+// discipline the old dry-run kept. (Single-threaded caveat,
+// documented: a live invocation landing mid-capture in the same warm
+// container would briefly see the mem appointments factory. Captures
+// are one handler run; the window is the same as the old dry-run.)
+
+function canonicalKey(idOrPhone) {
+  let d = String(idOrPhone == null ? '' : idOrPhone).replace(/\D/g, '');
+  if (d.length === 10) d = '1' + d;
+  return d;
+}
+
+async function readStoreJson(s, key) {
+  try {
+    const v = await s.get(key, { type: 'json' });
+    return v && typeof v === 'object' ? v : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+let runnerBlobs = null;
+try {
+  runnerBlobs = require('@netlify/blobs');
+} catch (e) {
+  runnerBlobs = null;
+}
+function blobStore(name, event) {
+  if (!runnerBlobs) return null;
+  try {
+    if (typeof runnerBlobs.connectLambda === 'function' && event) runnerBlobs.connectLambda(event);
+  } catch (e) { /* best-effort */ }
+  try {
+    return runnerBlobs.getStore(name);
+  } catch (e) {
+    return null;
+  }
+}
+
+// loadSuggestSeed(payload, lambdaEvent) -> dry-run-shaped seed built
+// from the LIVE thread + enrollment + appointments, or null when the
+// seller has neither. Source stores are the test overrides when
+// present (tests), else the real Blobs stores. Appointments come
+// from the live appointments store (index + records) or, without an
+// injected store, listBlobsAppointments (Blobs-only, no HL merge).
+async function loadSuggestSeed(payload, lambdaEvent) {
+  const key = canonicalKey((payload && (payload.contactId || payload.conversationId || payload.phone)) || '');
+  if (!key || key.length < 11) return null;
+  const ov = testOverrides || {};
+  let conv = (ov.stores && ov.stores.conversations) || null;
+  let enroll = (ov.stores && ov.stores.enrollments) || null;
+  const apptStore = (ov.stores && ov.stores.appointments) || null;
+  if (!conv || !enroll) {
+    conv = conv || blobStore('cc-conversations', lambdaEvent);
+    enroll = enroll || blobStore('cc-enrollments', lambdaEvent);
+    if (!conv || !enroll) return null;
+  }
+  const thread = await readStoreJson(conv, key);
+  const rec = await readStoreJson(enroll, key);
+  if (!thread && !rec) return null;
+  const now = Date.now();
+  let appointments = [];
+  try {
+    if (apptStore) {
+      const idx = await readStoreJson(apptStore, 'index');
+      const ids = (idx && Array.isArray(idx.ids)) ? idx.ids : [];
+      for (const id of ids) {
+        const raw = String(id || '');
+        const r = await readStoreJson(apptStore, raw.startsWith('appt-') ? raw : 'appt-' + raw);
+        if (r) appointments.push(r);
+      }
+    } else {
+      const apptsMod = require('./cc-appointments');
+      appointments = await apptsMod.listBlobsAppointments(
+        { fromMs: now - 90 * 24 * 3600 * 1000, toMs: now + 365 * 24 * 3600 * 1000 },
+        lambdaEvent
+      );
+    }
+  } catch (e) {
+    appointments = [];
+  }
+  const contact = {
+    key,
+    phone: '+' + key,
+    name: (rec && rec.name) || (thread && thread.name) || '',
+    firstName: (rec && (rec.firstName || String(rec.name || '').split(/\s+/)[0])) || '',
+    address1: (rec && (rec.address1 || rec.address)) || (thread && thread.address1) || '',
+    city: (rec && rec.city) || '',
+    state: (rec && rec.state) || '',
+    market: (rec && rec.market) || (thread && thread.market) || '',
+    tags: (rec && Array.isArray(rec.tags)) ? rec.tags.map((t) => String(t)) : [],
+    stage: (rec && rec.stage) || 'sent',
+  };
+  const messages = ((thread && Array.isArray(thread.messages)) ? thread.messages : [])
+    .filter((m) => m && m.kind !== 'note' && m.kind !== 'suggestion')
+    .map((m, i) => ({
+      id: String(m.id || ('live-' + i)),
+      dir: m.dir === 'out' ? 'out' : 'in',
+      body: String(m.body || ''),
+      at: Number(m.at) || now,
+      from: String(m.from || ''),
+      to: String(m.to || ''),
+      status: m.status || 'delivered',
+    }));
+  return { contact, messages, appointments, _liveEnrollment: rec || null, _threadKey: key };
+}
+
+// Capture appointments API: reads delegate to the real module
+// (which, during a capture, reads the mem store via the factory
+// buildHandler installs — the same reads Auto performs), but writes
+// are mem-only. createAppointment mirrors the real record shape
+// (id, calendarId, contactId, phone, name, title, start/end ISO+ms,
+// status 'confirmed', source, createdAt) and updates the mem index,
+// so the handler's getUpcomingAppointments / getFreeSlots see the
+// would-be booking exactly as they would a real one — minus the
+// HighLevel event and the push, which only happen on approve.
+function makeCaptureAppointmentsApi(memAppointments) {
+  const real = require('./cc-appointments');
+  const cryptoMod = require('crypto');
+  function recordKey(id) {
+    const raw = String(id || '');
+    return raw.startsWith('appt-') ? raw : 'appt-' + raw;
+  }
+  function toMs(v) {
+    if (v == null) return null;
+    const ms = Date.parse(String(v));
+    return Number.isFinite(ms) ? ms : null;
+  }
+  return {
+    listAppointments: (range, event) => real.listAppointments(range, event),
+    getAppointment: (id, event) => real.getAppointment(id, event),
+    createAppointment: async (rec) => {
+      const r = rec || {};
+      const startMs = r.startMs != null ? Number(r.startMs) : toMs(r.startISO || r.startTime);
+      const endMs = r.endMs != null ? Number(r.endMs) : toMs(r.endISO || r.endTime);
+      const out = {
+        id: cryptoMod.randomUUID(),
+        calendarId: r.calendarId || 'seller-calls',
+        contactId: r.contactId || null,
+        phone: r.phone || '',
+        name: r.name || '',
+        email: r.email || '',
+        address1: r.address1 || '',
+        title: r.title || '',
+        startISO: r.startISO || r.startTime || (startMs != null ? new Date(startMs).toISOString() : null),
+        endISO: r.endISO || r.endTime || (endMs != null ? new Date(endMs).toISOString() : null),
+        startMs,
+        endMs,
+        status: r.status || 'confirmed',
+        source: r.source || 'bot',
+        createdAt: r.createdAt != null ? r.createdAt : Date.now(),
+        // Capture-only marker: this booking exists in the mem store
+        // alone. It becomes a real calendar event only if a human
+        // approves the draft (cc-bot-drafts approve path).
+        hlSync: 'skipped-suggest-capture',
+      };
+      await memAppointments.set(recordKey(out.id), JSON.stringify(out));
+      const idx = await readStoreJson(memAppointments, 'index');
+      const ids = (idx && Array.isArray(idx.ids)) ? idx.ids.slice() : [];
+      if (!ids.includes(out.id)) ids.push(out.id);
+      await memAppointments.set('index', JSON.stringify({ ids }));
+      return out;
+    },
+    cancelAppointment: async (id) => {
+      const found = await readStoreJson(memAppointments, recordKey(id));
+      if (!found) return null;
+      found.status = 'cancelled';
+      await memAppointments.set(recordKey(found.id), JSON.stringify(found));
+      return found;
+    },
+  };
+}
+
+// runCaptured(seed, payload, logger, lambdaEvent, botConfig) — run
+// the REAL handler against in-memory stores seeded from `seed`
+// (dry-run shape: {contact, messages, appointments}), with a
+// capturing send stub and the capture appointments API. NOTHING is
+// sent (no Telnyx), NOTHING is written to the real stores, and any
+// booking the model attempts lands in the mem appointments store
+// (reported as bookedAttempted, never created). Returns the handler
+// result plus {replyText, actions, sendsAttempted, bookedAttempted,
+// stores}. The caller owns the mode decision (dry-run preview vs
+// Suggest draft); this function applies NO mode gate. The capture
+// handler is NEVER reused for live traffic: the cached handler is
+// dropped in the finally so the next live call rebuilds fresh. The
+// appointments store factory is likewise restored to null.
+async function runCaptured(seed, payload, logger, lambdaEvent, botConfig) {
+  const conversations = memStore();
+  const enrollments = memStore();
+  const opportunities = memStore();
+  const appointments = memStore();
+  const key = String((seed.contact && seed.contact.key) || '').replace(/\D/g, '');
+  const now = Date.now();
+  await enrollments.set(key, JSON.stringify({ ...seed.contact, key }));
+  await conversations.set(key, JSON.stringify({
+    key,
+    phone: (seed.contact && seed.contact.phone) || ('+' + key),
+    name: (seed.contact && seed.contact.name) || '',
+    market: (seed.contact && seed.contact.market) || '',
+    unread: 1,
+    updatedAt: now,
+    botLog: [],
+    messages: Array.isArray(seed.messages) ? seed.messages : [],
+  }));
+  for (const a of (Array.isArray(seed.appointments) ? seed.appointments : [])) {
+    if (a && a.id) {
+      const raw = String(a.id);
+      await appointments.set(raw.startsWith('appt-') ? raw : 'appt-' + raw, JSON.stringify(a));
+    }
+  }
+  // The mem appointments index (loadAll reads it): without it the
+  // handler's getUpcomingAppointments / getFreeSlots would see an
+  // empty calendar and a booked seller would look unbooked.
+  const apptIds = [...appointments._data.keys()]
+    .filter((k) => k.startsWith('appt-'))
+    .map((k) => k.slice('appt-'.length));
+  await appointments.set('index', JSON.stringify({ ids: apptIds }));
+  const apptKeysBefore = new Set([...appointments._data.keys()]);
+  const sendsAttempted = [];
+  // Drop any cached live handler: the capture must build its own
+  // (mem-store) client, and must never leave it behind for live use.
+  handlerInstance = null;
+  handlerClient = null;
+  try {
+    handlerInstance = buildHandler(logger, lambdaEvent, {
+      stores: { conversations, enrollments, opportunities, appointments },
+      sendSms: async (opts) => {
+        sendsAttempted.push({ to: opts.to || '', body: String(opts.message || opts.body || '') });
+        return { id: 'capture-' + sendsAttempted.length, from: opts.from || '', to: opts.to || '', status: 'queued' };
+      },
+      appointmentsApi: makeCaptureAppointmentsApi(appointments),
+    });
+    // Guardrails (Nov 27, 2026): the stored toggles gate the handler's
+    // seal/silence rules — same as the live path (invokeHandler). The
+    // capture builds a fresh handler, so a null config is fail-closed
+    // by construction; the explicit clear in applyGuardrailsConfig
+    // keeps it that way if this ever runs on a reused handler.
+    if (liveHandlerConfig) applyGuardrailsConfig(liveHandlerConfig, botConfig, logger);
+    if (botConfig) {
+      ensureKnowledge(livePersona || 'amber', logger, botConfig);
+      if (liveHandlerConfig) applyBookingConfig(liveHandlerConfig, botConfig, logger);
+    }
+    const event = {
+      httpMethod: 'POST',
+      headers: { 'x-bot-secret': botSecret() || (testOverrides && testOverrides.secret) || '' },
+      body: JSON.stringify(payload || {}),
+    };
+    const res = await handlerInstance(event);
+    let body = {};
+    try { body = JSON.parse(res.body || '{}'); } catch (e) { body = {}; }
+    const result = { outcome: body.outcome || 'unknown', statusCode: res.statusCode, ...body };
+    const actions = Array.isArray(result.actions) ? result.actions : [];
+    let replyText = '';
+    const replyAction = actions.find((a) => a && a.type === 'reply' && a.body);
+    if (replyAction) replyText = String(replyAction.body);
+    else if (typeof result.reply === 'string') replyText = result.reply;
+    else if (sendsAttempted.length) replyText = sendsAttempted[0].body;
+    const bookedAttempted = [...appointments._data.entries()]
+      .filter(([k]) => !apptKeysBefore.has(k))
+      .map(([, v]) => { try { return JSON.parse(v); } catch (e) { return { raw: String(v) }; } })
+      .filter((r) => r && r.id && r.startISO);
+    return {
+      ...result,
+      replyText,
+      actions,
+      sendsAttempted,
+      bookedAttempted,
+      stores: { conversations, enrollments, opportunities, appointments },
+    };
+  } finally {
+    handlerInstance = null;
+    handlerClient = null;
+    try {
+      require('./cc-appointments')._test.setStoreFactory(null);
+    } catch (e) { /* already clear */ }
+  }
+}
+
+// runBotSuggest(payload, logger, lambdaEvent, botConfig) — the
+// Suggest-mode live path. Computes the reply exactly as Auto would
+// (same handler, same knowledge, same booking rules, same guards),
+// against in-memory stores seeded from the live thread, then SAVES
+// it as a draft in cc-bot-drafts instead of sending it. Never
+// throws: any failure resolves to a silent outcome, and a draft-save
+// failure resolves to 'suggest-draft-save-failed' — the reply is
+// lost (logged), the seller hears nothing, and NOTHING is ever sent
+// to compensate. Only a human tapping Approve in the panel (or the
+// drafts API) can send the reply, book the would-be slot, or apply
+// the would-be tags/seal.
+async function runBotSuggest(payload, logger, lambdaEvent, botConfig) {
+  const log = typeof logger === 'function' ? logger : (...a) => console.log(...a);
+  try {
+    const seed = await loadSuggestSeed(payload, lambdaEvent);
+    if (!seed) {
+      log('cc-bot-runner: suggest seed unavailable — no live thread/enrollment for this seller; silence, no reply');
+      return { outcome: 'suggest-seed-failed', statusCode: 200, silenced: true, reason: 'suggest-seed-failed' };
+    }
+    const captured = await runCaptured(seed, payload, log, lambdaEvent, botConfig);
+    const { stores, ...capturedResult } = captured;
+    const replyText = String(captured.replyText || '').trim();
+    // No reply computed (guard silence / seal / model-silent /
+    // booked-silent / generation failure): Suggest has nothing to
+    // draft, so it stays silent exactly as Auto would — no draft,
+    // no send, no side effects (the mem stores are discarded).
+    if (!captured.sendsAttempted.length || !replyText) {
+      log('cc-bot-runner: suggest silent (' + (captured.outcome || 'no-reply') + ') — no draft, no reply');
+      return { ...capturedResult, silenced: true, reason: captured.outcome || 'suggest-silent' };
+    }
+    // What Auto WOULD have done besides sending: tags added / seal
+    // applied to the mem enrollment, bookings in the mem store.
+    const liveRec = seed._liveEnrollment || {};
+    const memRec = await readStoreJson(stores.enrollments, seed._threadKey);
+    const liveTags = (Array.isArray(liveRec.tags) ? liveRec.tags : []).map((t) => String(t).trim().toLowerCase());
+    const memTags = (memRec && Array.isArray(memRec.tags)) ? memRec.tags.map((t) => String(t)) : [];
+    const wouldTags = memTags.filter((t) => !liveTags.includes(String(t).trim().toLowerCase()));
+    const wouldSeal = (memRec && memRec.dnd === true && liveRec.dnd !== true)
+      || wouldTags.some((t) => String(t).trim().toLowerCase() === 'dnc');
+    const wouldBook = (captured.bookedAttempted || [])
+      .filter((a) => a && a.startISO)
+      .map((a) => ({ startISO: a.startISO, endISO: a.endISO || '', title: a.title || '' }));
+    // Save the draft — FAIL SOFT, same doctrine as the HL sync queue:
+    // a store failure must never throw into the reply path, and must
+    // never turn into a send.
+    let draft = null;
+    try {
+      const draftsMod = require('./cc-bot-drafts');
+      draft = await draftsMod.saveDraft(lambdaEvent, {
+        threadKey: seed._threadKey,
+        phone: (seed.contact && seed.contact.phone) || ('+' + seed._threadKey),
+        contactName: (seed.contact && seed.contact.name) || '',
+        sellerMessage: String((payload && payload.body) || ''),
+        suggestedReply: replyText,
+        wouldBook: wouldBook.length ? wouldBook[0] : null,
+        wouldTags,
+        wouldSeal,
+        outcome: captured.outcome || '',
+        messageId: (payload && payload.messageId) || null,
+      });
+    } catch (e) {
+      log('cc-bot-runner: suggest draft save FAILED — nothing sent: ' + ((e && e.message) || e));
+      return { outcome: 'suggest-draft-save-failed', statusCode: 200, silenced: true, reason: 'suggest-draft-save-failed', error: String((e && e.message) || e) };
+    }
+    log('cc-bot-runner: suggest draft saved ' + draft.id + ' for ' + seed._threadKey + ' (outcome ' + (captured.outcome || '') + ') — nothing sent');
+    return {
+      outcome: 'suggest-draft-saved',
+      statusCode: 200,
+      silenced: true,
+      reason: 'suggest-draft-saved',
+      draftId: draft.id,
+      suggestedReply: replyText,
+      wouldBook: draft.wouldBook || null,
+    };
+  } catch (e) {
+    log('cc-bot-runner: suggest capture failed — silence, no reply: ' + ((e && e.message) || e));
+    return { outcome: 'suggest-error', statusCode: 200, silenced: true, reason: 'suggest-error', error: String((e && e.message) || e) };
+  }
+}
+
 // runBotDryRun(seed, payload, log, lambdaEvent) — the `test` action
 // behind cc-bot-config.js. Runs the REAL handler against in-memory
 // stores seeded from the supplied test thread, with a capturing send
 // stub: NOTHING is sent (no Telnyx), NOTHING is written to the real
 // stores, and any booking the model attempts lands in the mem
 // appointments store (reported as bookedAttempted, never created).
-// The live mode gate applies (Off / Suggest -> silence, same as live).
-// The dry-run handler is NEVER reused for live traffic: the cached
-// handler is dropped in the finally so the next live call rebuilds
-// fresh. The appointments store factory is likewise restored to null.
-// (Single-threaded caveat, documented: a live invocation landing
-// mid-dry-run in the same warm container would briefly see the mem
-// appointments factory. Dry-runs are manual and rare; the window is
-// one handler run.)
+// The live mode gate applies for Off (silence). Suggest previews
+// instead of silencing: the capture computes the reply Auto would
+// have sent and reports it as the draft that WOULD be saved —
+// nothing is saved here, nothing is sent.
 async function runBotDryRun(seed, payload, log, lambdaEvent) {
   const logger = typeof log === 'function' ? log : (...a) => console.log(...a);
   if (!configured() && !testOverrides) {
@@ -441,104 +862,34 @@ async function runBotDryRun(seed, payload, log, lambdaEvent) {
   if (!key) {
     return { outcome: 'error', statusCode: 400, dryRun: true, silenced: false, replyText: '', actions: [], sendsAttempted: [], bookedAttempted: [], mode: null, note: 'dry-run needs seed.contact.key' };
   }
-  const conversations = memStore();
-  const enrollments = memStore();
-  const opportunities = memStore();
-  const appointments = memStore();
-  const now = Date.now();
-  await enrollments.set(key, JSON.stringify({ ...contact, key }));
-  await conversations.set(key, JSON.stringify({
-    key,
-    phone: contact.phone || ('+' + key),
-    name: contact.name || '',
-    market: contact.market || '',
-    unread: 1,
-    updatedAt: now,
-    botLog: [],
-    messages: Array.isArray(seed.messages) ? seed.messages : [],
-  }));
-  for (const a of (Array.isArray(seed.appointments) ? seed.appointments : [])) {
-    if (a && a.id) await appointments.set(String(a.id), JSON.stringify(a));
-  }
-  const apptKeysBefore = new Set([...appointments._data.keys()]);
-  const sendsAttempted = [];
-  // Drop any cached live handler: the dry-run must build its own
-  // (mem-store) client, and must never leave it behind for live use.
-  handlerInstance = null;
-  handlerClient = null;
   try {
-    const result = await invokeHandlerWithOverrides(payload, logger, lambdaEvent, {
-      stores: { conversations, enrollments, opportunities, appointments },
-      sendSms: async (opts) => {
-        sendsAttempted.push({ to: opts.to || '', body: String(opts.message || opts.body || '') });
-        return { id: 'dry-run-' + sendsAttempted.length, from: opts.from || '', to: opts.to || '', status: 'queued' };
-      },
-    });
-    const actions = Array.isArray(result.actions) ? result.actions : [];
-    let replyText = '';
-    const replyAction = actions.find((a) => a && a.type === 'reply' && a.body);
-    if (replyAction) replyText = String(replyAction.body);
-    else if (typeof result.reply === 'string') replyText = result.reply;
-    else if (sendsAttempted.length) replyText = sendsAttempted[0].body;
-    const bookedAttempted = [...appointments._data.entries()]
-      .filter(([k]) => !apptKeysBefore.has(k))
-      .map(([, v]) => { try { return JSON.parse(v); } catch (e) { return { raw: String(v) }; } });
-    const botConfig = lastBotConfig;
+    const botConfig = await loadBotConfigForInvocation(lambdaEvent);
+    if (botConfig) {
+      const ash = botConfig.ashley || {};
+      const on = ash.on !== false;
+      const mode = ash.mode || 'auto';
+      if (!on || mode === 'off') {
+        logger('cc-bot-runner: dry-run bot off (ashley on=' + on + ' mode=' + mode + ') — silence, no reply');
+        return { outcome: 'bot-off', statusCode: 200, dryRun: true, silenced: true, reason: 'bot-off', replyText: '', actions: [], sendsAttempted: [], bookedAttempted: [], mode, note: 'Bot is silent in bot-off mode.' };
+      }
+    }
+    const captured = await runCaptured(seed, payload, logger, lambdaEvent, botConfig);
+    const { stores, ...rest } = captured;
+    const mode = botConfig && botConfig.ashley ? (botConfig.ashley.mode || 'auto') : null;
+    const suggest = mode === 'suggest';
     return {
-      ...result,
+      ...rest,
       dryRun: true,
-      replyText,
-      actions,
-      sendsAttempted,
-      bookedAttempted,
-      mode: botConfig && botConfig.ashley ? (botConfig.ashley.mode || 'auto') : null,
-      silenced: !!result.silenced,
-      note: result.silenced ? ('Bot is silent in ' + (result.reason || result.outcome) + ' mode.') : '',
+      mode,
+      silenced: !!rest.silenced,
+      note: suggest
+        ? 'Suggest mode — this reply would be saved as a draft for approval, not sent.'
+        : (rest.silenced ? ('Bot is silent in ' + (rest.reason || rest.outcome) + ' mode.') : ''),
     };
   } catch (e) {
     logger('cc-bot-runner: dry-run failed: ' + ((e && e.message) || e));
-    return { outcome: 'error', statusCode: 500, dryRun: true, silenced: false, replyText: '', actions: [], sendsAttempted, bookedAttempted: [], mode: null, note: String((e && e.message) || e) };
-  } finally {
-    handlerInstance = null;
-    handlerClient = null;
-    try {
-      require('./cc-appointments')._test.setStoreFactory(null);
-    } catch (e) { /* already clear */ }
+    return { outcome: 'error', statusCode: 500, dryRun: true, silenced: false, replyText: '', actions: [], sendsAttempted: [], bookedAttempted: [], mode: null, note: String((e && e.message) || e) };
   }
-}
-
-// invokeHandlerWithOverrides: like invokeHandler, but forces a fresh
-// handler build with per-call overrides (dry-run) and applies the mode
-// gate + per-invocation config first.
-async function invokeHandlerWithOverrides(payload, logger, lambdaEvent, callOverrides) {
-  const botConfig = await loadBotConfigForInvocation(lambdaEvent);
-  if (botConfig) {
-    const ash = botConfig.ashley || {};
-    const on = ash.on !== false;
-    const mode = ash.mode || 'auto';
-    if (!on || mode === 'off') {
-      logger('cc-bot-runner: dry-run bot off (ashley on=' + on + ' mode=' + mode + ') — silence, no reply');
-      return { outcome: 'bot-off', statusCode: 200, silenced: true, reason: 'bot-off' };
-    }
-    if (mode === 'suggest') {
-      logger('cc-bot-runner: dry-run suggest-mode-unavailable — Suggest has no draft-approve UI yet; silence, no reply');
-      return { outcome: 'suggest-mode-unavailable', statusCode: 200, silenced: true, reason: 'suggest-mode-unavailable' };
-    }
-  }
-  handlerInstance = buildHandler(logger, lambdaEvent, callOverrides);
-  if (botConfig) {
-    ensureKnowledge(livePersona || 'amber', logger, botConfig);
-    if (liveHandlerConfig) applyBookingConfig(liveHandlerConfig, botConfig, logger);
-  }
-  const event = {
-    httpMethod: 'POST',
-    headers: { 'x-bot-secret': botSecret() || (testOverrides && testOverrides.secret) || '' },
-    body: JSON.stringify(payload || {}),
-  };
-  const res = await handlerInstance(event);
-  let body = {};
-  try { body = JSON.parse(res.body || '{}'); } catch (e) { body = {}; }
-  return { outcome: body.outcome || 'unknown', statusCode: res.statusCode, ...body };
 }
 
 module.exports = { runBot, runBotDryRun, configured, botSecret, llmKeyPresent, LEAD_PIPELINE_ID, LEAD_APPOINTMENT_STAGE_ID };

@@ -1221,6 +1221,48 @@ exports.handler = async (event) => {
         body: JSON.stringify(body),
       };
     }
+    if (action === 'updateOpportunity') {
+      // Pipeline board stage move (Nov 27, 2026): the board was
+      // read-only, so a deal could not be moved the way HL moves it.
+      // PUT /opportunities/{id} { pipelineStageId } — verified live
+      // against the pinned HL catalog (ghl execute-operation dry-run:
+      // method PUT, camelCase pipelineStageId). POST only: a stage
+      // change is a write and must never happen on a GET. The
+      // full-opps cache is invalidated so the next board load shows
+      // the move; the page itself re-renders in place from the
+      // response and does not refetch.
+      if (event.httpMethod !== 'POST') {
+        return { statusCode: 405, headers: corsHeaders, body: JSON.stringify({ ok: false, error: 'updateOpportunity requires POST' }) };
+      }
+      const ctx = resolveClientData(event, statusOverride);
+      if (!ctx) {
+        return { statusCode: 400, headers: corsHeaders, body: JSON.stringify({ ok: false, error: 'unknown client — no HighLevel location configured for this subdomain' }) };
+      }
+      let body = {};
+      try {
+        body = JSON.parse(event.body || '{}');
+      } catch (e) {
+        return { statusCode: 400, headers: corsHeaders, body: JSON.stringify({ ok: false, error: 'invalid JSON body' }) };
+      }
+      const oppId = String(body.id || '').trim();
+      const stageId = String(body.pipelineStageId || '').trim();
+      if (!oppId || !stageId) {
+        return { statusCode: 400, headers: corsHeaders, body: JSON.stringify({ ok: false, error: 'id and pipelineStageId are required' }) };
+      }
+      await hlFetch(
+        `/opportunities/${encodeURIComponent(oppId)}`,
+        'PUT',
+        { pipelineStageId: stageId },
+        HL_VERSION_OPPORTUNITIES,
+        ctx.token
+      );
+      fullOppsCacheMem = null;
+      return {
+        statusCode: 200,
+        headers: corsHeaders,
+        body: JSON.stringify({ ok: true, id: oppId, pipelineStageId: stageId }),
+      };
+    }
     if (action === 'customfields' || action === 'contactlookup') {
       const ctx = resolveClientData(event, statusOverride);
       if (!ctx) {

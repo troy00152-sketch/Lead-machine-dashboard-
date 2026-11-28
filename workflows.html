@@ -255,7 +255,17 @@ async function loadList(){
 async function togglePublish(id, to){
   try {
     const data = await post({ action: to === 'published' ? 'publish' : 'unpublish', id });
-    showToast(to === 'published' ? '✅ Published — the engine will run it.' : '📝 Unpublished — back to draft, sends stopped.');
+    // The server reports hlStatusMirrored:false — no HL workflow status
+    // API exists, so a publish here is Command-Center-only until the
+    // matching workflow is also flipped in HighLevel. Never claim the
+    // engine + HL both moved when only the CC side did.
+    if (data && data.hlStatusMirrored === true) {
+      showToast(to === 'published' ? '✅ Published — the engine will run it.' : '📝 Unpublished — back to draft, sends stopped.');
+    } else {
+      showToast(to === 'published'
+        ? '✅ Published in the Command Center only — also publish the matching workflow in HighLevel.'
+        : '📝 Unpublished in the Command Center only — also unpublish the matching workflow in HighLevel.');
+    }
     if (current && current.id === id){ current = data.workflow; renderBuilderHead(); renderFlow(); }
     await loadList();
   } catch(e){ handleErr(e); }
@@ -395,7 +405,16 @@ async function saveAs(status){
     current = data.workflow;
     renderBuilderHead();
     renderFlow();
-    showToast(status === 'draft' ? '💾 Saved as draft — nothing will send.' : '🚀 Saved & published — live now.');
+    // Same HL-mirror honesty as togglePublish: the save endpoint never
+    // mirrors status to HighLevel (no such API), so a published save is
+    // Command-Center-only unless the response says otherwise.
+    if (status === 'draft') {
+      showToast('💾 Saved as draft — nothing will send.');
+    } else if (data && data.hlStatusMirrored === true) {
+      showToast('🚀 Saved & published — live now.');
+    } else {
+      showToast('🚀 Saved & published in the Command Center only — also publish the matching workflow in HighLevel.');
+    }
     await loadList();
   } catch(e){ handleErr(e); }
   btns.forEach((b) => { if (b) b.disabled = false; });

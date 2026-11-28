@@ -301,6 +301,20 @@ async function sweep(event, opts) {
   } catch (e) {
     summary.deliveryReconcileError = String((e && e.message) || e);
   }
+  // HighLevel DND mirror drain (Nov 27 2026): auto opt-out seals
+  // enqueue in cc-bot-hook (the hot path cannot afford synchronous
+  // HL calls) and this sweep drains them, bounded per tick (2
+  // entries, 10s each). Same fail-soft pattern as the watchdog and
+  // the delivery reconcile above: a drain failure is reported on
+  // the summary and must never fail the sweep response. Entries
+  // that fail 5 times stay queued and get an 'hl-sync-failed'
+  // watchdog flag — they are never silently dropped.
+  try {
+    const hlSyncQueue = require('./cc-hl-sync-queue');
+    summary.hlSyncQueue = await hlSyncQueue.drainQueue(event, { now });
+  } catch (e) {
+    summary.hlSyncQueueError = String((e && e.message) || e);
+  }
   return summary;
 }
 
