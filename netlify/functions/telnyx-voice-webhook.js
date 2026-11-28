@@ -377,6 +377,21 @@ async function applyThreadCallEvent(evt, event, state) {
       else if (verdict === 'machine') pending.sellerMachine = true;
     }
     await callApi._thread.savePending(event, sellerId, pending);
+    // Sam leg answered before the pairing existed (Nov 28, 2026 —
+    // Halima retest): do not wait for a later merge to bridge — the
+    // merge depends on a Blobs read landing in time, and the 12:40 PM
+    // re-merge fix still missed it twice (1:12 PM, Sam greeted into
+    // the void). Act on the answer NOW: the seller leg id (sellerId)
+    // and the Sam leg id (callControlId) are both in hand. Best
+    // effort — a 422 (already answered / already bridged / caller
+    // hung up) is swallowed by safeVoice, and the normal event path
+    // + re-merge still run as backstops. Sam legs ONLY: browser legs
+    // answer seconds later, after the pairing exists, so they never
+    // need this.
+    if (type === 'call.answered' && isAgentLeg && state && state.kind === 'sam-call' && sellerId && sellerId !== callControlId) {
+      await safeVoice(() => voiceLib().answer(sellerId), 'answer inbound leg (Sam answered before pairing)');
+      await safeVoice(() => voiceLib().bridge(sellerId, callControlId), 'bridge Sam leg (Sam answered before pairing)');
+    }
     return { handled: true, pending: true };
   }
   const rec = found.rec;
@@ -572,7 +587,10 @@ async function applyThreadCallEvent(evt, event, state) {
     // A bridge that formed clears a stale bridge-failed error: the
     // explicit bridge can 422 when Telnyx already bridged the legs,
     // and that transient failure must not flag a working call.
-    if (rec.lastError === 'bridge-failed') rec.lastError = '';
+    // It also clears a stale inbound-answer-failed: a formed bridge
+    // proves the inbound leg was answered (Nov 28, 2026 — the Sam
+    // auto-bridge + the webhook backstop can both answer the leg).
+    if (rec.lastError === 'bridge-failed' || rec.lastError === 'inbound-answer-failed') rec.lastError = '';
   } else if (type === 'call.hangup') {
     if (found.role === 'agent') {
       // A losing agent leg hanging up (inbound rang several) is not
@@ -980,6 +998,38 @@ async function handleInboundCallBrowser(evt, event, fromStr, toStr, callControlI
 // miss is logged, and the watchdog flags it (samDialFailed).
 async function handleInboundCallSam(evt, event, fromStr, toStr, callControlId, pairings, now) {
   const v = voiceLib();
+  // Save the pairing BEFORE dialing Sam (Nov 28, 2026 — Halima
+  // retest): the outbound thread-call path saves first and never
+  // races; the Sam path dialed first, so a sub-second Sam answer
+  // landed while no pairing existed and the bridge depended on a
+  // stashed signal being re-read in time — and the 12:40 PM
+  // re-merge fix still missed it twice (1:12 PM). Saving first
+  // means a late call.answered always finds the pairing
+  // (second-chance lookup by sellerCallControlId in
+  // applyThreadCallEvent), and a retried call.initiated hits the
+  // duplicate branch instead of dialing Sam twice.
+  const rec = {
+    key: callControlId,
+    phone: fromStr || '',
+    to: toStr || null,
+    sellerLeg: callControlId,
+    samLeg: null,
+    agentLeg: null,
+    agentLegs: [],
+    status: 'ringing',
+    direction: 'inbound',
+    route: 'sam',
+    samAnswered: false,
+    agentAnswered: false,
+    sellerHuman: false,
+    sellerAnswered: false,
+    startedAt: now,
+    updatedAt: now,
+    hunt: 'sam',
+    noAgentUri: false,
+  };
+  pairings.calls[callControlId] = rec;
+  await callApi._thread.savePairings(pairings, event);
   let samLeg = null;
   let dialError = '';
   for (let attempt = 0; attempt < 2 && !samLeg; attempt++) {
@@ -998,31 +1048,15 @@ async function handleInboundCallSam(evt, event, fromStr, toStr, callControlId, p
       console.error('[telnyx-voice-webhook] Sam dial attempt ' + (attempt + 1) + ' failed for ' + callControlId + ': ' + dialError);
     }
   }
-  const rec = {
-    key: callControlId,
-    phone: fromStr || '',
-    to: toStr || null,
-    sellerLeg: callControlId,
-    samLeg: samLeg,
-    agentLeg: samLeg,
-    agentLegs: samLeg ? [samLeg] : [],
-    status: 'ringing',
-    direction: 'inbound',
-    route: 'sam',
-    samAnswered: false,
-    agentAnswered: false,
-    sellerHuman: false,
-    sellerAnswered: false,
-    startedAt: now,
-    updatedAt: now,
-    hunt: samLeg ? 'sam' : 'sam-dial-failed',
-    noAgentUri: false,
-  };
-  if (!samLeg) {
+  if (samLeg) {
+    rec.samLeg = samLeg;
+    rec.agentLeg = samLeg;
+    rec.agentLegs = [samLeg];
+  } else {
     rec.samDialFailed = true;
     rec.lastError = 'sam-dial-failed: ' + dialError;
+    rec.hunt = 'sam-dial-failed';
   }
-  pairings.calls[callControlId] = rec;
   // The Sam leg can answer before this save lands — merge any signal
   // stashed while the pairing did not exist yet, and if Sam already
   // answered, answer the inbound leg now (same as the browser path).
@@ -1030,6 +1064,12 @@ async function handleInboundCallSam(evt, event, fromStr, toStr, callControlId, p
   if (rec.agentAnswered && !rec.sellerAnswered) {
     const answered = await safeVoice(() => v.answer(rec.sellerLeg), 'answer inbound leg (pending merge)');
     if (answered === null) rec.lastError = 'inbound-answer-failed';
+    else {
+      // Inbound: answering IS the human signal — the caller is a
+      // real person on the line (Nov 28, 2026).
+      rec.sellerAnswered = true;
+      rec.sellerHuman = true;
+    }
   }
   rec.updatedAt = Date.now();
   await callApi._thread.savePairings(pairings, event);
@@ -1038,9 +1078,14 @@ async function handleInboundCallSam(evt, event, fromStr, toStr, callControlId, p
   // stashed and orphaned: nothing re-reads it (the merge already
   // ran), the sweep's bridge retry needs agentAnswered, and the
   // caller hears ringback until they hang up. Re-merge AFTER the
-  // save, with one short retry, so a stashed answer is picked up
-  // and the seller leg is answered + bridged. (Nov 28, 2026: three
-  // Halima calls — Sam greeted into the void, ASR 0.0s, no bridge.)
+  // save, with one short retry, so a stashed answer is picked up.
+  // (Nov 28, 2026: three Halima calls — Sam greeted into the void,
+  // ASR 0.0s, no bridge.) This block is now the BACKSTOP, not the
+  // bridge: with save-before-dial above, a late call.answered finds
+  // the pairing and answers the seller leg on the event path, and
+  // Telnyx auto-bridges on answer (link_to + bridge_on_answer in
+  // dialSamLeg). If Sam answered, answer the seller leg here too
+  // so the explicit bridge can form.
   if (samLeg && !rec.agentAnswered) {
     await callApi._thread.mergePending(event, callControlId, rec);
     if (!rec.agentAnswered) {
@@ -1053,6 +1098,10 @@ async function handleInboundCallSam(evt, event, fromStr, toStr, callControlId, p
         const answered = await safeVoice(() => v.answer(rec.sellerLeg), 'answer inbound leg (post-save merge)');
         if (answered === null) rec.lastError = 'inbound-answer-failed';
         else {
+          // Inbound: answering IS the human signal — the caller is a
+          // real person on the line (Nov 28, 2026).
+          rec.sellerAnswered = true;
+          rec.sellerHuman = true;
           rec.updatedAt = Date.now();
           await callApi._thread.savePairings(pairings, event);
         }
