@@ -2133,10 +2133,10 @@ async function pauseSession() {
   } catch (e) { toast('Pause failed: ' + (e && e.message ? e.message : e)); }
 }
 async function stopSession() {
-  if (!window.confirm('Stop this session? Live lines hang up and the queue closes.')) return;
-  // Hang up the live browser legs FIRST — the server stop alone never
-  // ends the browser leg (Nov 28: a ringing leg survived two Stops
-  // and page reloads because Stop only ever called the server).
+  // NO confirm dialog here — Nov 28 live test: window.confirm never
+  // surfaced in the browser (4 Stop clicks, no dialog, no state change)
+  // and the session kept dialing while the dialog was supposed to be
+  // open. Stop is the kill switch: one click must end the session.
   await hangupLiveBrowserLegs();
   try {
     var data = await api('', { action: 'stop' });

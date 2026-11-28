@@ -274,7 +274,13 @@ async function summonAgent(session, event) {
 
 async function declareWinner(session, leg, event) {
   session.winnerCallControlId = leg.callControlId;
-  session.status = 'connected';
+  // Nov 28 live test: an answered leg flipped a PAUSED session back to
+  // 'connected', and from there one disposition resumed dialing — Pause
+  // did not stick. Only a running session becomes 'connected'; a paused
+  // or stopped session keeps its status (the winner is still recorded
+  // and the agent is still summoned, so the seller who answered still
+  // reaches Troy — but no new dials follow).
+  if (session.status === 'running') session.status = 'connected';
   const lead = engine.findLead(session, leg.leadKey);
   if (lead) {
     lead.status = 'connected';
