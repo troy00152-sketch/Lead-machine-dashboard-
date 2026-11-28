@@ -69,6 +69,17 @@ try {
   dndMod = null;
 }
 
+// cc-hl-sync-queue owns the out-of-band HighLevel mirror: an auto
+// seal enqueues here (the hot path cannot afford synchronous HL
+// calls) and the 1/min sweep drains it. Guarded the same way — a
+// missing module must never break the local seal.
+let hlSyncQueue = null;
+try {
+  hlSyncQueue = require('./cc-hl-sync-queue');
+} catch (e) {
+  hlSyncQueue = null;
+}
+
 const CONV_STORE = 'cc-conversations';
 const ENROLL_STORE = 'cc-enrollments';
 const MAX_MESSAGES_PER_THREAD = 500;
@@ -246,7 +257,7 @@ function preserveNewerMarkers(rec, fresh) {
 // the thread so the Conversations UI can show it). Written directly to
 // the record key: the enrollments index only carries {market, stage},
 // which a seal does not change.
-async function sealEnrollment(es, key, thread, reason) {
+async function sealEnrollment(es, key, thread, reason, opts) {
   let rec = await readJson(es, key);
   if (!rec) {
     rec = {
@@ -286,6 +297,31 @@ async function sealEnrollment(es, key, thread, reason) {
   rec.sealReason = reason;
   await writeJson(es, key, rec);
   thread.dnd = true;
+  // HighLevel mirror (queued, Nov 27 2026): the auto seal must also
+  // land in HL, but the hot inbound path cannot afford synchronous
+  // HL calls inside the 22s bot-hook budget. Enqueue a best-effort
+  // sync job; the 1/min sweep drains it. The enqueue NEVER throws
+  // into the seal path — the local seal stands even if the queue
+  // write fails. opts.event is the Lambda event (Blobs context);
+  // without it there is no store to enqueue into, so the call is
+  // skipped and the seal stays local-only (same as before).
+  try {
+    if (
+      hlSyncQueue &&
+      typeof hlSyncQueue.enqueueSeal === 'function' &&
+      opts &&
+      opts.event
+    ) {
+      await hlSyncQueue.enqueueSeal(opts.event, {
+        key,
+        phone: rec.phone || thread.phone || ('+' + key),
+        channels: { sms: true, email: true, call: true },
+        reason,
+      });
+    }
+  } catch (e) {
+    console.error('[cc-bot-hook] HL sync enqueue failed for ' + key + ' (local seal stands):', String((e && e.message) || e));
+  }
   return rec;
 }
 
@@ -297,13 +333,13 @@ async function sealEnrollment(es, key, thread, reason) {
 // the caller logs the failure as a botLog entry instead of swallowing
 // it. Returns {ok, rec} on success, {ok:false, error} when every
 // attempt threw.
-async function sealWithRetry(es, key, thread, reason, attempts, delayMs) {
+async function sealWithRetry(es, key, thread, reason, attempts, delayMs, opts) {
   const tries = Math.max(1, attempts || 3);
   const delay = delayMs != null ? delayMs : 250;
   let lastErr = null;
   for (let i = 1; i <= tries; i++) {
     try {
-      const rec = await sealEnrollment(es, key, thread, reason);
+      const rec = await sealEnrollment(es, key, thread, reason, opts);
       return { ok: true, rec };
     } catch (e) {
       lastErr = e;
@@ -544,7 +580,7 @@ async function processInbound(key, event, knownInbound) {
     // FIX B: retried seal; a throw no longer leaves "no seal, no
     // botLog". The failure is logged as 'opt-out-seal-failed' and
     // reported — the caller must not believe the contact is sealed.
-    const sealed = await sealWithRetry(es, key, thread, 'opt-out:' + keyword);
+    const sealed = await sealWithRetry(es, key, thread, 'opt-out:' + keyword, undefined, undefined, { event });
     if (!sealed.ok) {
       logBotEvent(thread, {
         type: 'opt-out-seal-failed',
@@ -619,6 +655,13 @@ async function processInbound(key, event, knownInbound) {
         ...(Array.isArray(result.appointmentIds) && result.appointmentIds.length
           ? { appointmentIds: result.appointmentIds }
           : {}),
+        // Guardrail bypass (Nov 27): when a Conversation AI guardrail
+        // toggle is OFF and the bot skipped that rule, the handler
+        // returns guardrailsBypassed — record it here so a disabled
+        // rule stays visible on the thread botLog.
+        ...(Array.isArray(result.guardrailsBypassed) && result.guardrailsBypassed.length
+          ? { guardrailsBypassed: result.guardrailsBypassed }
+          : {}),
       });
       fresh.updatedAt = Date.now();
       await saveThread(cs, fresh);
@@ -685,7 +728,7 @@ async function processInbound(key, event, knownInbound) {
       // FIX B: retried seal — a failed seal here must not throw the
       // whole action loop away, and must be visible in the bot-actions
       // entry below (ok:false + error) instead of silent.
-      const sealed = await sealWithRetry(es, key, thread, 'bot-seal');
+      const sealed = await sealWithRetry(es, key, thread, 'bot-seal', undefined, undefined, { event });
       if (sealed.ok) {
         currentEnrollment = sealed.rec;
         applied.push({ type: 'seal', ok: true });

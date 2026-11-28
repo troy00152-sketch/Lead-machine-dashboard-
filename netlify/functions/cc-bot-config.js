@@ -28,6 +28,15 @@
 //     booking:{calendar, windowDays, slots, minGapHours, hoursStart, hoursEnd, callMinutes},
 //     guardrails:{<id>: bool},
 //     voice:{sam: <voice selection>},
+//     avatars:{ashley, sam},            // photo pick per original bot ('ph-*' or 'initials')
+//     voiceDepth:{<ownerId>: {<voiceSel>: 'light'|'medium'|'deep'}},
+//                                       // per-voice depth, Nov 19 design: {ownerId:{selId:depth}}
+//     profiles:[{id, name, channel, mode, on, voice, avatar}],
+//                                       // bots added on the screen (picker-only: the live
+//                                       // runner only ever runs ashley/sam — persisting a
+//                                       // profile syncs the picker across devices, it does
+//                                       // NOT give the added bot a live number or runner)
+//     selected:<bot id>,               // picker selection ('ashley' | 'sam' | added-bot id)
 //     names:{ashley, sam},
 //     updatedAt }
 // FAQ ids are the screen's ids: 'faq-1'..'faq-31' map to the vendored
@@ -63,22 +72,45 @@
 //        actions, sendsAttempted, bookedAttempted}. The bot runs against
 //        in-memory stores seeded from the supplied thread, with a
 //        capturing send stub — no Telnyx send, no store writes, no HL
-//        sync. The live mode gate applies: Off / Suggest returns
-//        silence with a reason, exactly like the live bot.
+//        sync. The live mode gate applies for Off (silence with a
+//        reason, exactly like the live bot). Suggest previews: the
+//        reply Auto would have sent is returned as the draft that
+//        WOULD be saved — nothing is saved here, nothing is sent.
 //        A test thread is {contact:{phone,name,address1,...},
 //        messages:[{body, dir:'in'|'out', at}]} — the last inbound
 //        message is the triggering message.
 //
-// What this file does NOT do: guardrails and voice are STORED here
-// (validated, round-tripped) but not yet enforced live — the vendored
-// bot already encodes the guardrails in code, and Sam's voice is
-// applied by the ElevenLabs agent config (cc-sam-init, another file).
-// Suggest mode has no draft-approve UI anywhere yet: the live bot
-// treats Suggest as Off + logs 'suggest-mode-unavailable' (see
-// cc-bot-runner.js). That is deliberate, not a half backend.
+// Enforcement notes:
+// Guardrails ARE enforced live (Nov 27): cc-bot-runner copies
+// botConfig.guardrails onto the handler config on every invocation,
+// and bot/src/handler.js gates each seal/silence rule on its toggle —
+// explicit false skips that one rule (logged + recorded as
+// guardrailsBypassed on the thread botLog); true, absent, or an
+// unreadable config leaves every rule ON (fail-closed). The vendored
+// bot still encodes the guardrails in code; the toggles gate them,
+// they do not rewrite them.
+// Sam's voice IS applied live (Nov 27, 2026, cc-sam-voice.js): saving
+// a changed voice.sam PATCHes the ElevenLabs agent's
+// conversation_config.tts.voice_id and GET-verifies it stuck; a
+// failure never breaks the config save — the save succeeds and the
+// voice-apply status rides in the response (and in GET, as voiceApply)
+// so the page can show it honestly.
+// avatars / voiceDepth / profiles / selected are presentation state
+// stored here so the screen syncs across devices; the live runner
+// only ever runs ashley/sam — an added profile gets NO live number,
+// no runner and no inbound route from being stored. Voice depth is
+// applied in the browser preview path only (playback-rate shift);
+// the live Sam voice pitch comes from the ElevenLabs agent config.
+// Suggest mode HAS a draft-approve flow (Nov 27, 2026): the live
+// runner (cc-bot-runner.js runBotSuggest) computes the reply Auto
+// would have sent and saves it as a draft in cc-bot-drafts.js; the
+// conversation-ai "Suggested replies" panel lists pending drafts for
+// Approve / Dismiss. Sam is voice-only and has no draft UI — this
+// covers the text bot (Ashley/Amber) only.
 'use strict';
 
 const ccAuth = require('./cc-auth');
+const samVoice = require('./cc-sam-voice');
 
 let blobs = null;
 try {
@@ -116,11 +148,11 @@ async function writeJson(s, key, obj) {
 }
 
 // ---- defaults ----
-// Booking default hoursEnd '16:30' is the LIVE truth (cc-slots.js:
-// 08:00-16:30 ET Mon-Sat). The screen used to ship '21:00' and promise
-// 9 PM offers the engine could never make. This is the call window
-// only — the bot's REPLY window is the vendored 8-21 and lives nowhere
-// in this config; see the Booking-truth note above.
+// Booking default hoursEnd '16:30' is the LIVE truth for CALLS
+// (cc-slots.js: 08:00-16:30 ET Mon-Sat). The screen used to ship '21:00'
+// and promise 9 PM offers the engine could never make. This is the call
+// window only — the bot's REPLY window is the vendored 8-21 and lives
+// nowhere in this config; see the Booking-truth note above.
 function defaultConfig() {
   return {
     ashley: { on: true, mode: 'auto' },
@@ -148,6 +180,15 @@ function defaultConfig() {
       listed: true,
     },
     voice: { sam: 'el:CwhRBWXzGAHq8TQ4Fs17' },
+    // Nov 27 audit batch B: avatar picks, per-voice depth, added-bot
+    // profiles and the picker selection used to be localStorage-only
+    // (conversation-ai.html said so in a comment) — they are server
+    // fields now, so they survive across devices. Sam wears Roger's
+    // photo, Amber wears Amber's, matching the Nov 19 shipped faces.
+    avatars: { ashley: 'ph-ashley', sam: 'ph-roger' },
+    voiceDepth: {},
+    profiles: [],
+    selected: 'ashley',
     names: { ashley: 'Amber', sam: 'Sam' },
     updatedAt: 0,
   };
@@ -272,12 +313,109 @@ function sanitizeNames(v, dflt) {
   }
   return out;
 }
+// ---- avatar / voice-depth / added-bot presentation state ----
+// Photo faces shipped Nov 19 (one per real voice + Amber's), in
+// /avatars/<name>.webp. 'initials' renders the bot's initial in the
+// account accent color. The old illustrated 'ava-*' ids no longer
+// validate on the screen either (photos only since Nov 19), so they
+// fall back to the per-bot default here too.
+const PHOTO_AVATAR_IDS = [
+  'ph-ashley', 'ph-sarah', 'ph-bella', 'ph-jessica', 'ph-matilda', 'ph-laura',
+  'ph-alice', 'ph-lily', 'ph-roger', 'ph-eric', 'ph-brian', 'ph-chris',
+  'ph-will', 'ph-liam', 'ph-adam', 'ph-bill', 'ph-callum', 'ph-harry',
+  'ph-charlie', 'ph-george', 'ph-daniel', 'ph-river',
+];
+function sanitizeAvatarSel(v, dflt) {
+  const s = String(v == null ? '' : v).trim();
+  if (s === 'initials' || PHOTO_AVATAR_IDS.indexOf(s) !== -1) return s;
+  return dflt;
+}
+function sanitizeAvatars(v, dflt) {
+  const out = { ...dflt };
+  if (v && typeof v === 'object') {
+    out.ashley = sanitizeAvatarSel(v.ashley, dflt.ashley);
+    out.sam = sanitizeAvatarSel(v.sam, dflt.sam);
+  }
+  return out;
+}
+// One voice-selection shape, shared by Sam's voice, added-bot voices
+// and voice-depth keys: 'el:<id>', a built-in style id, or 'browser:<name>'.
+function voiceSelOk(s) {
+  if (typeof s !== 'string') return false;
+  const t = s.trim();
+  if (/^el:[A-Za-z0-9]{15,30}$/.test(t)) return true;
+  if (/^[a-z][a-z0-9-]{2,30}$/.test(t)) return true;
+  if (t.indexOf('browser:') === 0 && t.length <= 130) return true;
+  return false;
+}
+const VOICE_DEPTHS = ['light', 'medium', 'deep'];
+// Voice depth, Nov 19 design: { ownerId: { voiceSel: depth } } —
+// Light / Medium / Deep per voice, so a voice keeps its depth when
+// it gets Selected. A legacy per-bot STRING value (the pre-Nov-27
+// local shape) has no voice key, so it is dropped here; the screen
+// converts it to the keyed shape before saving.
+function sanitizeVoiceDepth(v) {
+  const out = {};
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return out;
+  for (const owner of Object.keys(v).slice(0, 20)) {
+    if (owner !== 'ashley' && owner !== 'sam' && !/^bot_[A-Za-z0-9_]{1,64}$/.test(owner)) continue;
+    const entry = v[owner];
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+    const inner = {};
+    for (const selId of Object.keys(entry).slice(0, 30)) {
+      if (!voiceSelOk(selId)) continue;
+      const d = String(entry[selId] || '').trim();
+      if (VOICE_DEPTHS.indexOf(d) !== -1) inner[selId] = d;
+    }
+    if (Object.keys(inner).length) out[owner] = inner;
+  }
+  return out;
+}
+const MAX_PROFILES = 20;
+function sanitizeProfileName(v, dflt) {
+  const s = String(v == null ? '' : v).replace(/<[^>]*>/g, ' ').replace(/[<>&"']/g, '').replace(/\s+/g, ' ').trim().slice(0, 40);
+  return s || dflt;
+}
+// Added-bot profiles: the screen's small list (same shape it already
+// sanitizes client-side). Ids are 'bot_<...>' from the screen's
+// caiNewId('bot'); the reserved originals can never be shadowed, and
+// a junk id is dropped, never stored.
+function sanitizeProfiles(v) {
+  if (!Array.isArray(v)) return [];
+  const out = [];
+  const seen = {};
+  for (const p of v.slice(0, MAX_PROFILES)) {
+    if (!p || typeof p !== 'object') continue;
+    const id = String(p.id || '').trim();
+    if (!id || id === 'ashley' || id === 'sam' || seen[id]) continue;
+    if (!/^bot_[A-Za-z0-9_]{1,64}$/.test(id)) continue;
+    seen[id] = 1;
+    const channel = p.channel === 'voice' ? 'voice' : 'text';
+    out.push({
+      id,
+      name: sanitizeProfileName(p.name, 'New bot'),
+      channel,
+      mode: BOT_MODES.indexOf(p.mode) !== -1 ? p.mode : 'auto',
+      on: typeof p.on === 'boolean' ? p.on : true,
+      voice: voiceSelOk(p.voice) ? String(p.voice).trim() : 'natural',
+      avatar: sanitizeAvatarSel(p.avatar, channel === 'voice' ? 'ph-roger' : 'ph-ashley'),
+    });
+  }
+  return out;
+}
+function sanitizeSelected(v, profiles) {
+  const s = String(v == null ? '' : v).trim();
+  if (s === 'ashley' || s === 'sam') return s;
+  if (Array.isArray(profiles) && profiles.some((p) => p && p.id === s)) return s;
+  return 'ashley';
+}
 
 // sanitizeConfig(input) -> merged full config (defaults + input).
 // Unknown keys are dropped; every field is clamped to its valid range.
 function sanitizeConfig(input) {
   const d = defaultConfig();
   if (!input || typeof input !== 'object') return d;
+  const profiles = sanitizeProfiles(input.profiles);
   const out = {
     ashley: sanitizeBot(input.ashley, d.ashley),
     sam: sanitizeBot(input.sam, d.sam),
@@ -289,6 +427,10 @@ function sanitizeConfig(input) {
     booking: sanitizeBooking(input.booking, d.booking),
     guardrails: sanitizeGuardrails(input.guardrails, d.guardrails),
     voice: sanitizeVoice(input.voice, d.voice),
+    avatars: sanitizeAvatars(input.avatars, d.avatars),
+    voiceDepth: sanitizeVoiceDepth(input.voiceDepth),
+    profiles,
+    selected: sanitizeSelected(input.selected, profiles),
     names: sanitizeNames(input.names, d.names),
     updatedAt: typeof input.updatedAt === 'number' ? input.updatedAt : d.updatedAt,
   };
@@ -448,6 +590,68 @@ async function runDryRun(body, event) {
   }
 }
 
+// ---- Sam live-voice apply (Nov 27, 2026) ----
+// applySamVoiceIfChanged(prev, saved, event) -> voiceApply status.
+// Runs AFTER the config save, so an ElevenLabs failure can never
+// break the save itself: the save succeeds and this reports its own
+// status separately (the page shows it and keeps the old voice as
+// current). Only a CHANGED voice.sam triggers an ElevenLabs call —
+// every debounced save re-posting the same voice must not PATCH the
+// agent again. The last outcome is persisted under the 'voice-apply'
+// key so GET can report the live-voice state without calling
+// ElevenLabs on every page load.
+const VOICE_APPLY_KEY = 'voice-apply';
+
+async function readVoiceApply(event) {
+  try {
+    const s = store(event);
+    const v = await readJson(s, VOICE_APPLY_KEY);
+    return v && typeof v === 'object' ? v : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function applySamVoiceIfChanged(prev, saved, event, force) {
+  const prevVoice = prev && prev.voice && typeof prev.voice.sam === 'string' ? prev.voice.sam : null;
+  const nextVoice = saved && saved.voice && typeof saved.voice.sam === 'string' ? saved.voice.sam : null;
+  if (!force && prevVoice === nextVoice) {
+    return { ok: true, applied: false, unchanged: true, verified: false, voiceId: nextVoice, currentVoiceId: nextVoice };
+  }
+  let result = null;
+  try {
+    result = await samVoice.applySamVoice(nextVoice);
+  } catch (e) {
+    result = { ok: false, applied: false, verified: false, error: 'Sam voice apply failed: ' + String((e && e.message) || e), voiceId: nextVoice, currentVoiceId: prevVoice };
+  }
+  if (!result || typeof result !== 'object') {
+    result = { ok: false, applied: false, verified: false, error: 'Sam voice apply returned no result', voiceId: nextVoice, currentVoiceId: prevVoice };
+  }
+  // Fill the "current" voice the page should keep showing on failure:
+  // the voice Sam was on before this save (the live one), not the
+  // newly picked one that never landed.
+  if (!result.ok && (result.currentVoiceId == null || result.currentVoiceId === undefined)) {
+    result.currentVoiceId = prevVoice;
+  }
+  // Normalize: the page reads voiceId/currentVoiceId as BARE
+  // ElevenLabs ids ('el:' + id = the stored selection). The unchanged
+  // shortcut above hands back the full 'el:...' selection, and the
+  // failure fill hands back the previous full selection — strip the
+  // prefix here so every shape the server emits is the same.
+  var bare = function (v) {
+    return typeof v === 'string' && v.indexOf('el:') === 0 ? v.slice(3) : v;
+  };
+  result.voiceId = bare(result.voiceId);
+  result.currentVoiceId = bare(result.currentVoiceId);
+  result.requestedVoiceId = nextVoice;
+  result.at = Date.now();
+  try {
+    const s = store(event);
+    await writeJson(s, VOICE_APPLY_KEY, result);
+  } catch (e) { /* status persistence never fails the save */ }
+  return result;
+}
+
 async function handler(event) {
   const tier = ccAuth.authTier(event);
   if (!tier) return respond(401, { error: 'Not signed in — open the dashboard and sign in first.' });
@@ -456,7 +660,8 @@ async function handler(event) {
     if (event.httpMethod === 'GET') {
       const cfg = await loadBotConfig(event);
       if (!cfg) return respond(503, { error: 'Bot config storage is not ready yet' });
-      return respond(200, { config: cfg, source: cfg.updatedAt ? 'stored' : 'defaults' });
+      const voiceApply = await readVoiceApply(event);
+      return respond(200, { config: cfg, source: cfg.updatedAt ? 'stored' : 'defaults', voiceApply: voiceApply || null });
     }
     if (event.httpMethod === 'POST') {
       let body = {};
@@ -466,11 +671,23 @@ async function handler(event) {
         return respond(400, { error: 'Bad JSON' });
       }
       if (body && body.action === 'test') return runDryRun(body, event);
-      if (!body || typeof body.config !== 'object') {
-        return respond(400, { error: 'POST needs {config:{...}} or {action:\'test\', ...}' });
+      if (body && body.action === 'apply-sam-voice') {
+        // Explicit Apply step: re-apply the STORED voice.sam to the
+        // live agent even when it did not change (retry after a
+        // failed save-time apply, or a first apply of a voice that
+        // was saved before this wiring existed).
+        const cfg = await loadBotConfig(event);
+        if (!cfg) return respond(503, { error: 'Bot config storage is not ready yet' });
+        const voiceApply = await applySamVoiceIfChanged(null, cfg, event, true);
+        return respond(200, { action: 'apply-sam-voice', voice: cfg.voice.sam, voiceApply });
       }
+      if (!body || typeof body.config !== 'object') {
+        return respond(400, { error: 'POST needs {config:{...}} or {action:\'test\' | \'apply-sam-voice\', ...}' });
+      }
+      const prev = await loadBotConfig(event);
       const saved = await saveBotConfig(event, body.config);
-      return respond(200, { config: saved, saved: true });
+      const voiceApply = await applySamVoiceIfChanged(prev, saved, event, false);
+      return respond(200, { config: saved, saved: true, voiceApply });
     }
     return respond(405, { error: 'Method not allowed' });
   } catch (e) {
@@ -489,6 +706,7 @@ module.exports = {
   parseHours,
   STORE_NAME,
   CONFIG_KEY,
+  VOICE_APPLY_KEY,
 };
 
 // Test hook (not part of the deployed surface).
@@ -496,7 +714,12 @@ module.exports._test = {
   setStoreFactory(fn) {
     storeFactory = fn || null;
   },
+  // Stub the ElevenLabs fetch used by the Sam voice apply (cc-sam-voice.js).
+  setSamVoiceFetch(fn) {
+    samVoice._test.setFetch(fn);
+  },
   reset() {
     storeFactory = null;
+    samVoice._test.reset();
   },
 };

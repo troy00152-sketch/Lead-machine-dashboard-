@@ -51,11 +51,12 @@ const telnyxLib = require('./telnyx-lib');
 const dialer = require('./cc-dialer-api');
 const engine = dialer._engine;
 const callApi = require('./cc-call-api');
+const botConfigMod = require('./cc-bot-config');
 const pushDefault = require('./cc-push');
 const voiceTokenDefault = require('./cc-voice-token');
 
 // ---- injectable voice actions (tests) ----
-const deps = { voiceLib: null, pushLib: null, voiceToken: null };
+const deps = { voiceLib: null, pushLib: null, voiceToken: null, samEnabledOverride: null };
 function voiceLib() {
   return deps.voiceLib || voice;
 }
@@ -617,6 +618,53 @@ async function applyThreadCallEvent(evt, event, state) {
   return { handled: true, threadCall: true, status: rec.status };
 }
 
+// ---- Sam on/off + mode gate (Nov 27, 2026) ----
+// Before this, Sam on/off + mode had NO live consumer anywhere:
+// Ashley's on/mode are enforced by cc-bot-runner, but no repo code
+// ever read botConfig.sam — flipping Sam off on the Conversation AI
+// screen changed nothing live. The gate lives HERE because this is
+// the only place an inbound call is routed to Sam: handleInboundCall
+// dials Sam only when samEnabled(event) is true, and routes the call
+// to Troy's browser instead when it is false. The browser path is
+// the safe fallback — the caller still reaches a human, never a
+// hangup and never silence.
+//   sam.on === true AND sam.mode === 'auto'  -> Sam answers.
+//   sam.on === false, or mode 'off'          -> Sam does not answer (browser).
+//   mode 'suggest'                           -> same as off, logged:
+//     Sam is voice-only with no draft-approve UI, so there is no
+//     "suggest" a voice call can do — do NOT invent one.
+// Fail-OPEN by design: a config-load error (Blobs blip) returns
+// enabled=true, exactly like cc-bot-runner fails open for Ashley —
+// a storage blip must never silence live inbound calls. A missing
+// stored record also yields the defaults (Sam on, auto).
+// The override (deps.samEnabledOverride) exists for tests only.
+async function samEnabled(event) {
+  if (typeof deps.samEnabledOverride === 'function') {
+    try {
+      const v = await deps.samEnabledOverride(event);
+      if (v && typeof v === 'object') return v;
+      return { enabled: !!v, on: null, mode: null, reason: 'test-override' };
+    } catch (e) {
+      return { enabled: true, on: null, mode: null, reason: 'override-error-fail-open' };
+    }
+  }
+  try {
+    const cfg = await botConfigMod.loadBotConfig(event);
+    if (!cfg) return { enabled: true, on: null, mode: null, reason: 'config-unavailable-fail-open' };
+    const sam = (cfg && cfg.sam) || {};
+    const on = sam.on !== false;
+    const mode = sam.mode || 'auto';
+    if (!on) return { enabled: false, on, mode, reason: 'sam-off' };
+    if (mode === 'off') return { enabled: false, on, mode, reason: 'sam-mode-off' };
+    if (mode === 'suggest') {
+      return { enabled: false, on, mode, reason: 'sam-mode-suggest-no-draft-ui' };
+    }
+    return { enabled: true, on, mode, reason: 'sam-auto' };
+  } catch (e) {
+    return { enabled: true, on: null, mode: null, reason: 'config-error-fail-open' };
+  }
+}
+
 // ---- Sam inbound routing (Nov 27, 2026) ----
 // Inbound calls on the five new Carolina (252) numbers go to Sam, the
 // ElevenLabs voice agent — NOT to Troy's browser. Troy authorized the
@@ -732,9 +780,19 @@ async function handleInboundCall(evt, event) {
   // numbers go to Sam; Troy's own calls + every other number keep the
   // browser path below. The duplicate check above covers both paths —
   // a retried call.initiated must never dial Sam (or the browser)
-  // twice.
+  // twice. Sam on/off gate (Nov 27): when Sam is off, or mode is
+  // 'off' / 'suggest' (no voice draft UI exists), the call routes to
+  // Troy's browser instead of Sam — the caller still reaches a human.
   if (isSamCall(fromStr, toStr)) {
-    return handleInboundCallSam(evt, event, fromStr, toStr, callControlId, pairings, now);
+    const gate = await samEnabled(event);
+    if (gate.enabled) {
+      return handleInboundCallSam(evt, event, fromStr, toStr, callControlId, pairings, now);
+    }
+    console.warn(
+      '[telnyx-voice-webhook] Sam disabled (' + gate.reason + ', on=' + gate.on + ' mode=' + gate.mode +
+      ') — inbound ' + callControlId + ' routed to browser instead of Sam'
+    );
+    return handleInboundCallBrowser(evt, event, fromStr, toStr, callControlId, pairings, now, { samDisabledReason: gate.reason });
   }
   return handleInboundCallBrowser(evt, event, fromStr, toStr, callControlId, pairings, now);
 }
@@ -744,7 +802,7 @@ async function handleInboundCall(evt, event) {
 // own credential, and an inbound call must reach whichever tab Troy
 // is looking at. First answer wins; the losers are hung up when the
 // winner answers.
-async function handleInboundCallBrowser(evt, event, fromStr, toStr, callControlId, pairings, now) {
+async function handleInboundCallBrowser(evt, event, fromStr, toStr, callControlId, pairings, now, opts) {
   const v = voiceLib();
   // Ring EVERY known voice credential at once (Nov 26, 2026): the
   // Conversations tab and the Dialer tab each hold their own
@@ -841,6 +899,13 @@ async function handleInboundCallBrowser(evt, event, fromStr, toStr, callControlI
     hunt: agentLegs.length ? 'hunting' : 'no-agent',
     noAgentUri: agentLegs.length === 0,
   };
+  // Sam was the intended route but the on/off gate sent the call
+  // here instead — record why, so the thread/watchdog can tell a
+  // deliberately-routed call from a Sam failure.
+  if (opts && opts.samDisabledReason) {
+    rec.samDisabledReason = opts.samDisabledReason;
+    rec.samRoutedToBrowser = true;
+  }
   if (skippedStale.length) rec.presenceSkipped = skippedStale;
   pairings.calls[callControlId] = rec;
   // The agent can answer before this save lands — merge any signal
@@ -1370,6 +1435,7 @@ exports._test = {
   tryPstnFallback,
   verifySignature,
   logMissedCallBackstop,
+  samEnabled,
   setVoiceLib(v) {
     deps.voiceLib = v || null;
   },
@@ -1379,10 +1445,15 @@ exports._test = {
   setVoiceToken(vt) {
     deps.voiceToken = vt || null;
   },
+  // Test-only Sam gate override: fn(event) -> boolean | {enabled, on, mode, reason}.
+  setSamEnabled(fn) {
+    deps.samEnabledOverride = fn || null;
+  },
   reset() {
     deps.voiceLib = null;
     deps.pushLib = null;
     deps.voiceToken = null;
+    deps.samEnabledOverride = null;
     recentMissLogs.clear();
   },
 };
