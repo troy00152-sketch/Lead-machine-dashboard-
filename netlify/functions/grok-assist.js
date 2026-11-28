@@ -142,7 +142,7 @@ exports.handler = async (event) => {
       return json(503, corsHeaders, { status: 'not_configured', error: 'Grok is not configured yet' });
     }
     console.error('[grok-assist] router failed: ' + (result.error || 'unknown'));
-    return json(502, corsHeaders, { status: 'error', error: 'Grok request failed — try again in a moment.' });
+    return json(502, corsHeaders, { status: 'error', error: 'Grok request failed — try again in a moment.', tried: result.tried, attempts: result.attempts });
   }
   const okBody = {
     status: 'ok', action, model: result.model, provider: result.provider,
