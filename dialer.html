@@ -1993,16 +1993,23 @@ function pollManualCallStatus() {
     }
   }, 1000);
 }
-async function endManualCall() {
+// Hang up every live browser-side leg (agent + inbound) FIRST, then the
+// server half. The server hangup alone never ends the browser leg, and
+// the browser hangup alone never ends the seller's leg — both halves
+// are needed. (Troy, Nov 26 — End in the first seconds skipped the
+// server half and the call kept ringing; Nov 28 — Stop skipped the
+// browser half entirely and a ringing leg survived two Stops and page
+// reloads.) Shared by End and Stop so the lesson can't drift apart
+// again.
+async function hangupLiveBrowserLegs() {
   // Kill the answer watch FIRST: a pending 2.5s check must not
   // re-dial a call Troy just ended.
   __inboundAnswerWatch = null;
   __stopInboundRing();
   __stopRingback();
-  // End the LIVE WebRTC leg first — the server hangup alone never
-  // ends the browser leg. Resolve the live object from the SDK
-  // registry: the held object may be stale (Attach replaced it) and
-  // hangup() on a stale object ends nothing.
+  // End the LIVE WebRTC leg first — resolve the live object from the
+  // SDK registry: the held object may be stale (Attach replaced it)
+  // and hangup() on a stale object ends nothing.
   var leg = state.agentCall || state.inboundCall;
   var liveLeg = leg ? __liveCallFor(leg) : null;
   if (liveLeg) leg = liveLeg;
@@ -2010,9 +2017,9 @@ async function endManualCall() {
   if (leg && typeof leg.hangup === 'function') {
     try { await leg.hangup(); } catch (e) { /* already gone */ }
   }
-  // End the Telnyx leg too — the browser hangup alone never ends
-  // the seller's leg, so without this the caller keeps ringing. For
-  // a fresh inbound call the pairing key is often still unresolved
+  // End the Telnyx leg too — the browser hangup alone never ends the
+  // seller's leg, so without this the caller keeps ringing. For a
+  // fresh inbound call the pairing key is often still unresolved
   // (callId null) — the old code skipped the server hangup entirely
   // in that case and the call kept ringing with no way out (Troy,
   // Nov 26 — "we need to have an end button there too to actually
@@ -2026,7 +2033,14 @@ async function endManualCall() {
   if (pid) hangupBody.callId = pid;
   var legId = inboundAgentLegId(leg);
   if (legId) hangupBody.agentLeg = legId;
-  try { await manualCallApi('', hangupBody); } catch (e) { /* already gone */ }
+  if (hangupBody.callId || hangupBody.agentLeg) {
+    try { await manualCallApi('', hangupBody); } catch (e) { /* already gone */ }
+  }
+  state.agentCall = null;
+  state.inboundCall = null;
+}
+async function endManualCall() {
+  await hangupLiveBrowserLegs();
   // One final status read so a call the poll never saw bridged is
   // still labelled "Call ended — m:ss" instead of bare "Ended":
   // the server record carries bridgedAt once the legs joined.
@@ -2120,6 +2134,10 @@ async function pauseSession() {
 }
 async function stopSession() {
   if (!window.confirm('Stop this session? Live lines hang up and the queue closes.')) return;
+  // Hang up the live browser legs FIRST — the server stop alone never
+  // ends the browser leg (Nov 28: a ringing leg survived two Stops
+  // and page reloads because Stop only ever called the server).
+  await hangupLiveBrowserLegs();
   try {
     var data = await api('', { action: 'stop' });
     state.session = data.session;
