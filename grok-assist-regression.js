@@ -20,7 +20,9 @@
 //      pins engine 'grok' first.
 //   4c. 402 on the direct xAI model falls through to the best FREE model
 //      and still answers 200 (fallback: true).
-//   5. Upstream 500 -> clean 502, no stack trace leaked.
+//   5. Upstream 500 -> clean 502, no stack trace leaked; the 502
+//      carries per-candidate attempts detail (model + HTTP status)
+//      so a live failure can be diagnosed from the response.
 //   6. conversations.html carries the Grok assist control: endpoint,
 //      both buttons, and the calm "isn't funded yet" dormant copy.
 'use strict';
@@ -144,8 +146,10 @@ function noStack(body) {
   stubFetch(async (url, opts) => {
     const m = JSON.parse(opts.body).model;
     if (String(url).includes('api.x.ai')) return fakeRes(402, '{"error":"insufficient credits"}');
-    // Both paid models in the chain are unfunded here, so the answer
-    // must come from the best free reader — that is the point of the test.
+    // Paid models of other engines never enter a pinned chain, so the
+    // answer must come from the best free reader — that is the point of
+    // the test. (The 402 branches below are dead code now; kept so the
+    // stub still proves the point if the chain changes.)
     if (m === 'x-ai/grok-4.20' || m === 'anthropic/claude-sonnet-5.5') return fakeRes(402, '{"error":"insufficient credits"}');
     return fakeRes(200, JSON.stringify({ choices: [{ message: { content: 'Free-model summary.\nNext move: call at 2pm.' } }] }));
   });
@@ -155,6 +159,9 @@ function noStack(body) {
   check('402 direct Grok -> fallback model is the best free reader', b.model === 'google/gemma-4-31b-it:free', b.model);
   check('402 direct Grok -> fallback true', b.fallback === true);
   check('402 direct Grok -> xAI was tried first', fetchCalls[0].url === 'https://api.x.ai/v1/chat/completions');
+  check('402 direct Grok -> paid models of other engines were never called', !fetchCalls.some((c) => {
+    try { const m = JSON.parse(c.opts.body).model; return m === 'anthropic/claude-sonnet-5.5' || m === 'x-ai/grok-4.20'; } catch (e) { return false; }
+  }));
   delete process.env.OPENROUTER_API_KEY;
 
   // ---- 4b. self-test route (GET ?selftest=1) ----
@@ -173,6 +180,8 @@ function noStack(body) {
   r = await grok.handler(post({ action: 'summarize', text: 'Seller: hi' }));
   b = JSON.parse(r.body);
   check('xAI 500 -> 502 clean error', r.statusCode === 502 && b.status === 'error' && noStack(r.body));
+  check('xAI 500 -> 502 carries attempts detail (model + HTTP status)', Array.isArray(b.attempts) && b.attempts.length > 0 && b.attempts.every((a) => a.model && a.httpStatus === 500), JSON.stringify(b.attempts));
+  check('xAI 500 -> 502 carries the tried list', Array.isArray(b.tried) && b.tried.length > 0);
   stubFetch(async () => { throw new Error('socket hang up'); });
   r = await grok.handler(post({ action: 'summarize', text: 'Seller: hi' }));
   check('network throw -> 502 clean error', r.statusCode === 502 && noStack(r.body));

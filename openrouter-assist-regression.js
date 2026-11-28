@@ -22,10 +22,16 @@
 //      still answers 200 (fallback: true) — the box never goes dead on
 //      an empty balance while a free model can answer.
 //   4c. New actions 'check' (deal sanity-check, FLAGS ONLY, never
-//      prices) and 'loi' (LOI draft, one engine) take the deal facts
-//      through formatDeal and carry them in the request.
+//      prices) and 'loi' (LOI draft, Gemini-led, 1500 tokens) take the
+//      deal facts through formatDeal and carry them in the request.
+//   4d. Thread-stated facts (seller name, property address) fill the
+//      deal gaps for check/loi — the page only sends {sellerName,
+//      phone} and the panel is often blank; a bare "325k" is never an
+//      offer price. 4e. A router failure carries per-candidate
+//      attempts detail (model + HTTP status) in the 502 body.
 //   5. Self-test route runs the fixed sample on the FREE router model
-//      (openrouter/free) so verification never burns paid credits.
+//      (openrouter/free) so verification never burns paid credits;
+//      reasoning is capped low and an empty first reply is retried.
 //   6. Upstream 500 -> clean 502, no stack trace leaked.
 //   7. conversations.html carries the Deep read control: endpoint, all
 //      four buttons, calm dormant copy, drafts-only note, no send path.
@@ -137,6 +143,7 @@ function noStack(body) {
   check('request carries Bearer TEST key', fetchCalls[0].opts.headers.Authorization === 'Bearer sk-or-TEST-FAKE-KEY');
   const sent = JSON.parse(fetchCalls[0].opts.body);
   check('request model is anthropic/claude-sonnet-5.5', sent.model === 'anthropic/claude-sonnet-5.5');
+  check('claude request caps reasoning effort low', sent.reasoning && sent.reasoning.effort === 'low', JSON.stringify(sent.reasoning));
   check('request messages carry the thread text', sent.messages[1].content.includes('asking 90k, firm'));
   check('summarize prompt demands the Next move line', sent.messages[0].content.includes('Next move:'));
   stubFetch(async () => fakeRes(200, JSON.stringify({ choices: [{ message: { content: 'Hi — just checking in.' } }] })));
@@ -180,6 +187,63 @@ function noStack(body) {
   check('loi prompt drafts for review only (never sends)', /letter of intent \(LOI\)/i.test(loiSent.messages[0].content) && /never send anything/i.test(loiSent.messages[0].content));
   check('loi request carries address + offer amount', loiSent.messages[1].content.includes('address: 123 Main St') && loiSent.messages[1].content.includes('offerAmount: 35000'));
 
+  // LOI is Gemini-led: with a Gemini key present the first attempt
+  // goes to the Google model, not to Gemma (the Nov 28 bug pinned
+  // 'deepread' for every action, so the LOI was Gemma-led and the
+  // 800-token budget cut the draft off mid-sentence).
+  process.env.GEMINI_API_KEY = 'gemini-TEST-FAKE-KEY';
+  stubFetch(async (url) => {
+    if (String(url).includes('generativelanguage')) {
+      return fakeRes(200, JSON.stringify({ candidates: [{ content: { parts: [{ text: 'Dear Test Seller, …' }] } }] }));
+    }
+    return fakeRes(200, JSON.stringify({ choices: [{ message: { content: 'fallback' } }] }));
+  });
+  r = await or.handler(post({ action: 'loi', text: 'Seller: ok at 35k', deal: { ...deal, address: '123 Main St', offerAmount: 35000 } }));
+  b = JSON.parse(r.body);
+  check('loi -> 200 ok via Gemini', r.statusCode === 200 && b.status === 'ok', 'got ' + r.statusCode);
+  check('loi -> Gemini answers first (Gemini-led, not Deep Read)', b.model === 'gemini-3.5-flash' && fetchCalls[0].url.includes('generativelanguage'), b.model);
+  check('loi -> LOI budget is 1500 tokens (a full letter fits)', T.ACTIONS.loi.maxTokens === 1500, 'got ' + T.ACTIONS.loi.maxTokens);
+  check('loi -> Google attempt uses the 2048-token floor', JSON.parse(fetchCalls[0].opts.body).generationConfig.maxOutputTokens === 2048);
+  delete process.env.GEMINI_API_KEY;
+
+  // ---- 4d. thread-stated facts fill the deal gaps (Nov 28 round 2) ----
+  // The page only sends {sellerName, phone} for check/loi and the
+  // contact panel is often blank, so the LOI listed the seller's name
+  // and the property address as missing even when the thread states
+  // them ("Hi Stephanie, ... 1905 Chavis Ct"). The server now reads
+  // those facts out of the thread itself. A bare number in a seller
+  // reply ("325k") is never treated as an offer price.
+  const stephanieThread = 'Us: Hi Stephanie, I came across 1905 Chavis Ct and wanted to check if you would consider selling it. Would you be open to a quick call this week?\nSeller: 325k';
+  check('extractThreadFacts reads name + address from the thread', JSON.stringify(T.extractThreadFacts(stephanieThread)) === JSON.stringify({ sellerName: 'Stephanie', address: '1905 Chavis Ct' }), JSON.stringify(T.extractThreadFacts(stephanieThread)));
+  check('extractThreadFacts finds the address but no name in the sample thread', JSON.stringify(T.extractThreadFacts(T.SELFTEST_TEXT)) === JSON.stringify({ address: '123 Main St' }), JSON.stringify(T.extractThreadFacts(T.SELFTEST_TEXT)));
+  check('extractThreadFacts never extracts a price from a seller reply', JSON.stringify(T.extractThreadFacts('Seller: 325k')) === JSON.stringify({}));
+  check('extractThreadFacts on an empty thread -> empty', JSON.stringify(T.extractThreadFacts('')) === JSON.stringify({}));
+  check('mergeDealFacts: thread fills gaps, deal wins, empty deal fields do not clobber', JSON.stringify(T.mergeDealFacts({ sellerName: 'Stephanie', address: '1905 Chavis Ct' }, { sellerName: '', phone: '+12524129884' })) === JSON.stringify({ sellerName: 'Stephanie', address: '1905 Chavis Ct', phone: '+12524129884' }));
+  check('mergeDealFacts: a real deal name wins over the thread name', T.mergeDealFacts({ sellerName: 'Stephanie' }, { sellerName: 'Real Name', phone: '+1' }).sellerName === 'Real Name');
+  router.resetFundingCache();
+  stubFetch(async () => fakeRes(200, JSON.stringify({ choices: [{ message: { content: 'Please provide the following facts:\n- Offer price\n- Terms' } }] })));
+  r = await or.handler(post({ action: 'loi', text: stephanieThread, deal: { sellerName: '', phone: '+12524129884' } }));
+  b = JSON.parse(r.body);
+  check('loi with a blank contact panel still carries the thread facts', r.statusCode === 200 && b.status === 'ok', 'got ' + r.statusCode);
+  const loiThreadSent = JSON.parse(fetchCalls[0].opts.body);
+  check('loi request carries the thread-derived seller name', loiThreadSent.messages[1].content.includes('sellerName: Stephanie'), loiThreadSent.messages[1].content.slice(-400));
+  check('loi request carries the thread-derived property address', loiThreadSent.messages[1].content.includes('address: 1905 Chavis Ct'));
+  check('loi request does not invent an offer price from "325k"', !/offerAmount|price: 325/i.test(loiThreadSent.messages[1].content));
+  check('loi prompt says the thread is a source of facts', /thread is a source of facts too/i.test(loiThreadSent.messages[0].content));
+  check('loi prompt says a bare number is not a confirmed offer price', /NOT a confirmed offer price/i.test(loiThreadSent.messages[0].content));
+  r = await or.handler(post({ action: 'check', text: stephanieThread, deal: { sellerName: '', phone: '+12524129884' } }));
+  const checkThreadSent = JSON.parse(fetchCalls[0].opts.body);
+  check('check request also carries the thread-derived facts', checkThreadSent.messages[1].content.includes('sellerName: Stephanie') && checkThreadSent.messages[1].content.includes('address: 1905 Chavis Ct'));
+
+  // ---- 4e. a router failure carries per-candidate attempts detail ----
+  router.resetFundingCache();
+  stubFetch(async () => fakeRes(500, 'Internal Server Error'));
+  r = await or.handler(post({ action: 'summarize', text: 'Seller: hi' }));
+  b = JSON.parse(r.body);
+  check('500 failure -> 502 still clean', r.statusCode === 502 && b.status === 'error' && noStack(r.body));
+  check('500 failure -> attempts detail names the model + HTTP status', Array.isArray(b.attempts) && b.attempts.length > 0 && b.attempts.every((a) => a.model && a.httpStatus === 500), JSON.stringify(b.attempts));
+  check('500 failure -> tried list present', Array.isArray(b.tried) && b.tried.length > 0);
+
   // ---- 5. self-test route (GET ?selftest=1) runs on the FREE model ----
   stubFetch(async () => fakeRes(200, JSON.stringify({ choices: [{ message: { content: 'Seller wants $80,000 and agreed to a 2pm call.\nNext move: call at 2pm.' } }] })));
   r = await or.handler({ httpMethod: 'GET', queryStringParameters: { selftest: '1' }, body: '' });
@@ -189,6 +253,23 @@ function noStack(body) {
   check('selftest -> used the FREE router model (no paid credit burn)', JSON.parse(fetchCalls[0].opts.body).model === 'openrouter/free', JSON.parse(fetchCalls[0].opts.body).model);
   check('selftest -> response reports the free model', b.model === 'openrouter/free');
   check('SELFTEST_MODEL export is openrouter/free', T.SELFTEST_MODEL === 'openrouter/free');
+  check('selftest -> reasoning capped low (free router can land on a reasoner)', JSON.parse(fetchCalls[0].opts.body).reasoning && JSON.parse(fetchCalls[0].opts.body).reasoning.effort === 'low');
+  // An empty first reply is retried once instead of erroring (the
+  // Nov 28 flake: the first self-test attempt came back empty, the
+  // retry passed — and its text also ended mid-phrase).
+  let selftestCalls = 0;
+  stubFetch(async () => {
+    selftestCalls += 1;
+    if (selftestCalls === 1) {
+      return fakeRes(200, JSON.stringify({ choices: [{ message: { content: '' } }] }));
+    }
+    return fakeRes(200, JSON.stringify({ choices: [{ message: { content: 'Seller wants $80,000 and agreed to a 2pm call.\nNext move: call at 2pm.' } }] }));
+  });
+  r = await or.handler({ httpMethod: 'GET', queryStringParameters: { selftest: '1' }, body: '' });
+  b = JSON.parse(r.body);
+  check('selftest -> empty first reply is retried, not an error', r.statusCode === 200 && b.status === 'ok', 'got ' + r.statusCode);
+  check('selftest -> the retry actually happened', selftestCalls === 2, 'calls: ' + selftestCalls);
+  check('selftest -> retried reply is the full text, not a fragment', b.result.includes('Next move: call at 2pm.'));
   r = await or.handler({ httpMethod: 'GET', queryStringParameters: {}, body: '' });
   check('plain GET (no selftest) -> 405', r.statusCode === 405, 'got ' + r.statusCode);
 
