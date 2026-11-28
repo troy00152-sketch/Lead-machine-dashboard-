@@ -242,6 +242,20 @@ async function dialSamLeg(opts) {
       { name: 'X-Dialed-Number', value: dialed },
     ],
     client_state: encodeClientState(o.clientState || {}),
+    // Auto-bridge (Nov 28, 2026 — Halima retest): link the Sam leg
+    // to the ringing inbound seller leg and let Telnyx bridge them
+    // the moment Sam answers. The webhook event path (answer +
+    // explicit Bridge in telnyx-voice-webhook.js) stays as the
+    // backstop — it no-ops once the legs are bridged — but the
+    // bridge no longer depends on a call.answered webhook landing,
+    // a client_state echo, or a Blobs read landing in time. That
+    // chain failed twice after the 12:40 PM re-merge deploy (Sam
+    // greeted into the void at 1:12 PM, ASR 0.0s, no bridge).
+    // bridge_intent is deliberately NOT set: it would overwrite
+    // `from` with the linked call's number (same value here, but no
+    // reason to take the side effect).
+    link_to: String(o.callControlId),
+    bridge_on_answer: true,
     sip_transport_protocol: 'TLS',
     media_encryption: 'SRTP',
     preferred_codecs: 'PCMU,PCMA',
