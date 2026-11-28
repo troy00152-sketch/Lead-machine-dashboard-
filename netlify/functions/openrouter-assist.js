@@ -19,8 +19,9 @@
 // Models come from cc-model-router.js — this file hardcodes no model for
 // any job. The Deep read box pins engine 'deepread', so the strongest
 // reader answers first and the best free model answers while the
-// OpenRouter balance is $0 (see the router's chain for 'thread-summarize',
-// 'draft-followup', 'deal-check' and 'loi-draft').
+// OpenRouter balance is $0 — except the LOI action, which pins engine
+// 'gemini': the LOI is Gemini-led by design (see the router's chain for
+// 'loi-draft'), with the free candidates as resilience only.
 //
 // The key lives ONLY in the Netlify env var OPENROUTER_API_KEY — never in
 // browser code, never hardcoded. With no key the function reports
@@ -30,7 +31,11 @@
 //
 // SELF-TEST COST GUARD: the GET ?selftest=1 route runs against the free
 // router model (openrouter/free) so verifying the wiring never burns
-// paid credits. Real page actions use the routed chain.
+// paid credits. Real page actions use the routed chain. Reasoning is
+// capped low and one retry covers a transient empty reply: the free
+// router can land on a reasoning model, and a default high/medium
+// effort can burn the whole max_tokens budget on internal thinking and
+// return an empty or cut-off answer.
 'use strict';
 
 const router = require('./cc-model-router');
@@ -95,7 +100,7 @@ const ACTIONS = {
   },
   loi: {
     job: 'loi-draft',
-    maxTokens: 800,
+    maxTokens: 1500, // a full LOI letter needs room: 800 cut a draft off mid-sentence (Nov 28)
     system: [
       'You draft a letter of intent (LOI) email for Troy, a real estate wholesaler, to send a home seller.',
       'You are given a seller thread and, when available, the deal facts: property address, seller name, offer price and terms.',
@@ -186,51 +191,70 @@ exports.handler = async (event) => {
   if (isSelftest) {
     // Fixed sample, free router model, direct call — the self-test
     // proves the key + wiring for $0 and never touches the paid chain.
-    try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-      let res;
+    // Reasoning is capped low: openrouter/free can land on a reasoning
+    // model, and a default high/medium effort can burn the whole
+    // max_tokens budget on internal thinking and return an empty or
+    // cut-off answer. One retry covers a transient empty reply or a
+    // transient upstream error.
+    let content = '';
+    let failure = null; // { kind: 'http' | 'empty' | 'throw', status? }
+    for (let attempt = 0; attempt < 2 && !content; attempt++) {
+      if (attempt > 0) await new Promise((r) => setTimeout(r, 800));
       try {
-        res = await fetch(SELFTEST_URL, {
-          method: 'POST',
-          signal: controller.signal,
-          headers: {
-            Authorization: 'Bearer ' + apiKey,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            model: SELFTEST_MODEL,
-            temperature: 0.4,
-            max_tokens: 500,
-            messages: buildMessages('summarize', SELFTEST_TEXT, ''),
-          }),
-        });
-      } finally {
-        clearTimeout(timer);
-      }
-      const raw = await res.text().catch(() => '');
-      if (!res.ok) {
-        if (isBillingError(res.status, raw)) {
-          return json(402, corsHeaders, {
-            status: 'no_credit',
-            error: 'Deep read has no credit yet',
-            detail: 'The OpenRouter balance is empty — add prepaid credits in OpenRouter (Credits) and deep read wakes up on its own. Free models still work.',
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+        let res;
+        try {
+          res = await fetch(SELFTEST_URL, {
+            method: 'POST',
+            signal: controller.signal,
+            headers: {
+              Authorization: 'Bearer ' + apiKey,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              model: SELFTEST_MODEL,
+              temperature: 0.4,
+              max_tokens: 500,
+              reasoning: { effort: 'low' },
+              messages: buildMessages('summarize', SELFTEST_TEXT, ''),
+            }),
           });
+        } finally {
+          clearTimeout(timer);
         }
-        console.error('[openrouter-assist] OpenRouter HTTP ' + res.status + ': ' + raw.slice(0, 200));
-        return json(502, corsHeaders, { status: 'error', error: 'Deep read request failed — try again in a moment.' });
+        const raw = await res.text().catch(() => '');
+        if (!res.ok) {
+          if (isBillingError(res.status, raw)) {
+            return json(402, corsHeaders, {
+              status: 'no_credit',
+              error: 'Deep read has no credit yet',
+              detail: 'The OpenRouter balance is empty — add prepaid credits in OpenRouter (Credits) and deep read wakes up on its own. Free models still work.',
+            });
+          }
+          console.error('[openrouter-assist] OpenRouter HTTP ' + res.status + ': ' + raw.slice(0, 200));
+          failure = { kind: 'http', status: res.status };
+          // Only a transient upstream error (429/5xx) is worth one retry.
+          if (!(res.status === 429 || res.status >= 500)) break;
+          continue;
+        }
+        let data = null;
+        try { data = JSON.parse(raw); } catch (e) { /* handled below */ }
+        content = String((data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '').trim();
+        if (!content) failure = { kind: 'empty' };
+      } catch (err) {
+        console.error('[openrouter-assist]', err.message);
+        failure = { kind: 'throw' };
+        // A fetch throw (timeout/network) gets one retry.
       }
-      let data = null;
-      try { data = JSON.parse(raw); } catch (e) { /* handled below */ }
-      const content = String((data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '').trim();
-      if (!content) {
+    }
+    if (!content) {
+      if (failure && failure.kind === 'empty') {
         return json(502, corsHeaders, { status: 'error', error: 'Deep read came back empty — try again.' });
       }
-      return json(200, corsHeaders, { status: 'ok', action: 'summarize', model: SELFTEST_MODEL, result: content, selftest: true });
-    } catch (err) {
-      console.error('[openrouter-assist]', err.message);
       return json(502, corsHeaders, { status: 'error', error: 'Deep read request failed — try again in a moment.' });
     }
+    return json(200, corsHeaders, { status: 'ok', action: 'summarize', model: SELFTEST_MODEL, result: content, selftest: true });
   }
 
   let body;
@@ -253,7 +277,10 @@ exports.handler = async (event) => {
   const result = await router.complete({
     job: a.job,
     messages: buildMessages(action, text, deal),
-    engine: 'deepread',
+    // LOI is Gemini-led by design; every other Deep read action pins
+    // the Deep Read engine. (Pinning 'deepread' for the LOI routed it
+    // Gemma-first — the Nov 28 truncation.)
+    engine: action === 'loi' ? 'gemini' : 'deepread',
     maxTokens: a.maxTokens,
     timeoutMs: TIMEOUT_MS,
   });

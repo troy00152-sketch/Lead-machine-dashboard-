@@ -24,7 +24,11 @@
 // SELF-TEST: GET ?selftest=1 runs a summarize over a fixed sample thread
 // so the wiring can be verified from a plain browser visit — the request
 // still passes the site's sign-in gate. It runs through the routed
-// chain, so it also proves the fallback path.
+// chain, but it is strict on ENGINE: it only passes when the Gemini
+// engine answers (flash, or flash-lite while flash is down). A fallback
+// that serves another engine — e.g. paid Claude while Gemini is 503 —
+// is a failed self-test, reported as a 502 naming the model that
+// answered, never an "ok" that mistakes the fallback for this box working.
 'use strict';
 
 const router = require('./cc-model-router');
@@ -163,6 +167,20 @@ exports.handler = async (event) => {
     }
     console.error('[gemini-assist] router failed: ' + (result.error || 'unknown'));
     return json(502, corsHeaders, { status: 'error', error: 'AI assist request failed — try again in a moment.' });
+  }
+  // Self-test is a wiring proof for THIS box: it only passes when the
+  // Gemini engine answered. A fallback serving another engine is a
+  // failed self-test — fail loudly and name the model, so the check
+  // can never mistake a fallback for the Gemini box working.
+  if (isSelftest && result.engine !== 'gemini') {
+    console.error('[gemini-assist] self-test answered by ' + result.model + ' (' + result.engine + '), not gemini');
+    return json(502, corsHeaders, {
+      status: 'error',
+      error: 'Self-test did not reach Gemini — ' + result.model + ' answered instead. Gemini may be down; try again in a moment.',
+      model: result.model,
+      provider: result.provider,
+      selftest: true,
+    });
   }
   const okBody = {
     status: 'ok', action, model: result.model, provider: result.provider,
