@@ -30,6 +30,19 @@
 //                             when voice is not configured)
 //   POST {action:'pause'} / {action:'stop'}
 //   POST {action:'disposition', leadKey, disposition, notes?}
+//   GET  ?action=rotation-state   number-rotation view (per-number
+//                             calls today, capped/resting, excluded,
+//                             sticky count) — feeds the dialer page's
+//                             rotation panel
+//   POST {action:'rotation-config', dailyCap?, excluded?}
+//                             daily cap (1..500) + excluded numbers
+//
+// Number rotation (Nov 28, 2026 — XLeads 3X Dialer parity, see
+// dialer-rotation.js): dialNextBatch picks an explicit `from` per leg
+// — persisted cursor (no cold-start restart at pool[0]), Best Choice
+// area-code match, per-number daily cap ~80 with rest, sticky number
+// per contact (recorded by telnyx-voice-webhook on first human
+// answer). SMS keeps its own pickSender round-robin — untouched.
 //
 // Stores (Netlify Blobs):
 //   'cc-dialer'      'session'    -> the current session record
@@ -41,6 +54,10 @@
 //                                    the dialer area
 //                    'voice-credential' -> WebRTC credential cache
 //                                    (cc-voice-token.js)
+//                    'rotation'     -> number-rotation state (cursor,
+//                                    per-number daily counts, sticky
+//                                    contact->number, excluded list,
+//                                    daily cap) — dialer-rotation.js
 //   'cc-enrollments' — read for list building; written ONLY by the DNC
 //                      seal and the `hot lead` tag, mirroring
 //                      cc-bot-hook's seal semantics exactly.
@@ -61,6 +78,7 @@ try {
 
 const lib = require('./telnyx-lib');
 const voice = require('./telnyx-voice-lib');
+const rotation = require('./dialer-rotation');
 const ccAuth = require('./cc-auth');
 
 const DIALER_STORE = 'cc-dialer';
@@ -309,16 +327,49 @@ async function dialNextBatch(session, event) {
   if (session.status !== 'running') return { dialed, reason: 'not-running' };
   if (session.winnerCallControlId) return { dialed, reason: 'winner-active' };
   const v = voiceLib();
+  // Number rotation (Nov 28, 2026 — XLeads 3X Dialer parity): one
+  // persisted rotation state per batch; each leg gets an explicit
+  // `from` — persisted cursor, Best Choice area-code match, daily cap
+  // with rest, sticky number per contact. A pick that never dials
+  // (createCall throws) is not counted — recordDial runs only after
+  // Telnyx returns a call_control_id.
+  let rState = null;
+  try {
+    rState = await rotation.loadState(dialerStore(event));
+  } catch (e) {
+    rState = rotation.emptyState();
+  }
   while (activeSellerLegs(session).length < MAX_CONCURRENT_LEGS) {
     const lead = session.leads.find((l) => l.status === 'pending');
     if (!lead) break;
+    // Rotation pick — only when the market actually has numbers. A
+    // market with no pool keeps the legacy path (no `from`): the voice
+    // lib itself fails closed there, exactly as before rotation
+    // existed, so an empty pool never changes behaviour.
+    let pick = null;
+    const pool = lib.SENDER_POOLS[lead.market || session.market];
+    if (pool && pool.length) {
+      try {
+        pick = rotation.pickFrom(rState, {
+          market: lead.market || session.market,
+          to: lead.phone,
+          pool,
+        });
+      } catch (e) {
+        session.lastError = String((e && e.message) || e);
+        await saveSession(session, event);
+        return { dialed, error: session.lastError };
+      }
+    }
+    const callOpts = {
+      to: lead.phone,
+      market: lead.market || session.market || undefined,
+      clientState: { sessionId: session.id, leadKey: lead.key, leg: 'seller' },
+    };
+    if (pick) callOpts.from = pick.from;
     let created;
     try {
-      created = await v.createCall({
-        to: lead.phone,
-        market: lead.market || session.market || undefined,
-        clientState: { sessionId: session.id, leadKey: lead.key, leg: 'seller' },
-      });
+      created = await v.createCall(callOpts);
     } catch (e) {
       session.lastError = String((e && e.message) || e);
       await saveSession(session, event);
@@ -328,6 +379,12 @@ async function dialNextBatch(session, event) {
       session.lastError = 'Telnyx did not return a call_control_id — dialing stopped.';
       await saveSession(session, event);
       return { dialed, error: session.lastError };
+    }
+    if (pick) {
+      rotation.recordDial(rState, pick.from);
+      try {
+        await rotation.saveState(dialerStore(event), rState);
+      } catch (e) { /* rotation state is a guardrail, not the session — a lost count never blocks dialing */ }
     }
     lead.status = 'dialing';
     lead.attempts += 1;
@@ -475,6 +532,7 @@ function publicSession(session) {
       kind: l.kind,
       leadKey: l.leadKey || null,
       phone: l.phone,
+      from: l.from || null, // caller ID this leg dialed out on (rotation pick)
       state: l.state,
       amdResult: l.amdResult || null,
       startedAt: l.startedAt,
@@ -553,7 +611,25 @@ exports.handler = async (event) => {
     if (action === 'state') {
       const session = await loadSession(event);
       const recordings = await listRecordings(event);
-      return ok({ session: publicSession(session), recordings: recordings.slice(0, 50) });
+      let rotationView = null;
+      try {
+        const rState = await rotation.loadState(dialerStore(event));
+        rotationView = rotation.summarize(rState, lib.SENDER_POOLS);
+      } catch (e) { /* rotation panel degrades to empty, never blocks state */ }
+      return ok({ session: publicSession(session), recordings: recordings.slice(0, 50), rotation: rotationView });
+    }
+
+    if (action === 'rotation-state') {
+      const rState = await rotation.loadState(dialerStore(event));
+      return ok({ rotation: rotation.summarize(rState, lib.SENDER_POOLS) });
+    }
+
+    if (action === 'rotation-config') {
+      const rState = await rotation.loadState(dialerStore(event));
+      const r = rotation.setConfig(rState, body || {});
+      if (r.errors.length) return bad(r.errors.join(' '));
+      await rotation.saveState(dialerStore(event), rState);
+      return ok({ rotation: rotation.summarize(rState, lib.SENDER_POOLS) });
     }
 
     if (action === 'recordings') {

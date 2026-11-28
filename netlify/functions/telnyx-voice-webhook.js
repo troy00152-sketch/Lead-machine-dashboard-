@@ -281,6 +281,20 @@ async function declareWinner(session, leg, event) {
     session.connectedLeadKey = lead.key;
   }
   session.stats.connects += 1;
+  // Rotation memory (Nov 28, 2026 — XLeads 3X Dialer parity): the
+  // number this contact answered on becomes their sticky caller ID —
+  // future dials to them use it first. Best-effort by design: a
+  // rotation-store failure must never break the call flow, so any
+  // error here is swallowed. leg.from is our number (set from the
+  // dialer's rotation pick); leg.phone is the seller.
+  try {
+    const rotation = require('./dialer-rotation');
+    const store = engine.dialerStore(event);
+    const rState = await rotation.loadState(store);
+    if (rotation.recordAnswer(rState, { phone: leg.phone, from: leg.from })) {
+      await rotation.saveState(store, rState);
+    }
+  } catch (e) { /* sticky memory is a nicety, never a call blocker */ }
   await hangupLosers(session, leg.callControlId, event);
   await summonAgent(session, event);
 }
