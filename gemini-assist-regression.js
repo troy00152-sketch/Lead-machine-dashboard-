@@ -1,7 +1,8 @@
-// gemini-assist-regression.js — Gemini assist wiring, Nov 17 2026.
-// Fixture tests for netlify/functions/gemini-assist.js + the Conversations
-// page control. NO live calls: global fetch is stubbed and the only key
-// used is an obviously fake TEST value. Run: node gemini-assist-regression.js
+// gemini-assist-regression.js — Gemini assist wiring, Nov 17 2026,
+// routing update Nov 28 2026. Fixture tests for
+// netlify/functions/gemini-assist.js + the Conversations page control.
+// NO live calls: global fetch is stubbed and the only key used is an
+// obviously fake TEST value. Run: node gemini-assist-regression.js
 // (exit non-zero on any failure).
 //
 // What it proves:
@@ -14,7 +15,12 @@
 //   4. Configured key: 200 { status: 'ok', result } and the request really
 //      went to generativelanguage.googleapis.com .../gemini-3.5-flash:
 //      generateContent with the key in the x-goog-api-key header and the
-//      summarize/draft_reply prompts built from the text.
+//      summarize/draft_reply prompts built from the text. Models come from
+//      cc-model-router.js; this box pins engine 'gemini' first.
+//   4c. Gemini 429 walks on to the best FREE model and still answers 200
+//      (fallback: true) instead of going dead on quota.
+//   4d. Self-test route (GET ?selftest=1) answers 200 with the sample
+//      thread on the Gemini model.
 //   5. Upstream 500 -> clean 502, no stack trace leaked.
 //   6. conversations.html carries the Gemini assist control: endpoint,
 //      both buttons, and the calm "isn't configured yet" dormant copy.
@@ -32,9 +38,22 @@ function check(name, cond, extra) {
 
 const gemini = require('./netlify/functions/gemini-assist.js');
 const T = gemini._test;
+// The router keeps a 10-minute unfunded flag per provider in memory;
+// a 402 in one section must not make the next section's paid primary
+// look dead. Reset between sections that need a clean slate.
+const router = require('./netlify/functions/cc-model-router.js');
 
 const realFetch = global.fetch;
-const realKey = process.env.GEMINI_API_KEY;
+const realKeys = {
+  OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
+  XAI_API_KEY: process.env.XAI_API_KEY,
+  GEMINI_API_KEY: process.env.GEMINI_API_KEY,
+};
+function restoreKeys() {
+  for (const k of Object.keys(realKeys)) {
+    if (realKeys[k] === undefined) delete process.env[k]; else process.env[k] = realKeys[k];
+  }
+}
 let fetchCalls = [];
 let fetchImpl = null;
 function stubFetch(impl) {
@@ -59,8 +78,10 @@ function geminiOk(text) {
 }
 
 (async () => {
-  // ---- 1. not configured ----
+  // ---- 1. not configured (no key on ANY provider) ----
   delete process.env.GEMINI_API_KEY;
+  delete process.env.OPENROUTER_API_KEY;
+  delete process.env.XAI_API_KEY;
   stubFetch(async () => { throw new Error('fetch must not be called'); });
   let r = await gemini.handler(post({ action: 'summarize', text: 'Seller: hi' }));
   let b = JSON.parse(r.body);
@@ -93,12 +114,14 @@ function geminiOk(text) {
   check('isQuotaError: 500 false', T.isQuotaError(500, 'RESOURCE_EXHAUSTED') === false);
 
   // ---- 4. configured key -> ok, correct wire shape ----
+  router.resetFundingCache();
   stubFetch(async () => fakeRes(200, geminiOk('Seller wants $90K, firm.\nNext move: send the LAO and hold.')));
   r = await gemini.handler(post({ action: 'summarize', text: 'Seller: asking 90k, firm\nUs: ok' }));
   b = JSON.parse(r.body);
   check('configured -> 200', r.statusCode === 200, 'got ' + r.statusCode);
   check('configured -> status ok + result text', b.status === 'ok' && b.result.includes('Next move:'));
   check('configured -> model reported gemini-3.5-flash', b.model === 'gemini-3.5-flash');
+  check('configured -> fallback false (Gemini answered first)', b.fallback === false);
   check('request URL is the Gemini generateContent endpoint', fetchCalls[0].url === 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent', fetchCalls[0].url);
   check('request carries the TEST key in x-goog-api-key', fetchCalls[0].opts.headers['x-goog-api-key'] === 'gemini-TEST-FAKE-KEY');
   const sent = JSON.parse(fetchCalls[0].opts.body);
@@ -112,7 +135,44 @@ function geminiOk(text) {
   check('extractText joins candidate parts', T.extractText({ candidates: [{ content: { parts: [{ text: 'a' }, { text: 'b' }] } }] }) === 'ab');
   check('extractText on junk -> empty', T.extractText({}) === '' && T.extractText(null) === '');
 
+  // ---- 4c. Gemini 429 walks on to the best free model ----
+  // The free candidates ride the OpenRouter key, so the OR key must be
+  // present for this section (fake test value only).
+  router.resetFundingCache();
+  process.env.OPENROUTER_API_KEY = 'sk-or-TEST-FAKE-KEY';
+  stubFetch(async (url, opts) => {
+    if (String(url).includes('generativelanguage')) {
+      return fakeRes(429, '{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","message":"Quota exceeded"}}');
+    }
+    const m = JSON.parse(opts.body).model;
+    // Both paid models in the chain are unfunded here, so the answer
+    // must come from the best free reader — that is the point of the test.
+    if (m === 'anthropic/claude-sonnet-5.5' || m === 'x-ai/grok-4.20') {
+      return fakeRes(402, '{"error":"insufficient credits"}');
+    }
+    return fakeRes(200, JSON.stringify({ choices: [{ message: { content: 'Free-model summary.\nNext move: call at 2pm.' } }] }));
+  });
+  r = await gemini.handler(post({ action: 'summarize', text: 'Seller: asking 90k, firm' }));
+  b = JSON.parse(r.body);
+  check('Gemini 429 -> still 200 via free fallback', r.statusCode === 200 && b.status === 'ok', 'got ' + r.statusCode);
+  check('Gemini 429 -> fallback model is the best free reader', b.model === 'google/gemma-4-31b-it:free', b.model);
+  check('Gemini 429 -> fallback true', b.fallback === true);
+  check('Gemini 429 -> Gemini was tried first', fetchCalls[0].url.includes('generativelanguage'));
+  delete process.env.OPENROUTER_API_KEY;
+
+  // ---- 4d. self-test route (GET ?selftest=1) ----
+  router.resetFundingCache();
+  stubFetch(async () => fakeRes(200, geminiOk('Seller wants $80,000 and agreed to a 2pm call.\nNext move: call at 2pm.')));
+  r = await gemini.handler({ httpMethod: 'GET', queryStringParameters: { selftest: '1' }, body: '' });
+  b = JSON.parse(r.body);
+  check('selftest -> 200 ok + selftest flag', r.statusCode === 200 && b.status === 'ok' && b.selftest === true, 'got ' + r.statusCode);
+  check('selftest -> ran the fixed sample thread', JSON.parse(fetchCalls[0].opts.body).contents[0].parts[0].text.includes('123 Main St'));
+  check('selftest -> answered on the Gemini model', b.model === 'gemini-3.5-flash', b.model);
+  r = await gemini.handler({ httpMethod: 'GET', queryStringParameters: {}, body: '' });
+  check('plain GET (no selftest) -> 405', r.statusCode === 405, 'got ' + r.statusCode);
+
   // ---- 5. upstream failure -> clean 502 ----
+  router.resetFundingCache();
   stubFetch(async () => fakeRes(500, 'Internal Server Error'));
   r = await gemini.handler(post({ action: 'summarize', text: 'Seller: hi' }));
   b = JSON.parse(r.body);
@@ -134,7 +194,7 @@ function geminiOk(text) {
 
   // restore environment
   global.fetch = realFetch;
-  if (realKey === undefined) delete process.env.GEMINI_API_KEY; else process.env.GEMINI_API_KEY = realKey;
+  restoreKeys();
 
   console.log('\ngemini-assist-regression: ' + pass + ' passed, ' + fail + ' failed.');
   process.exit(fail ? 1 : 0);

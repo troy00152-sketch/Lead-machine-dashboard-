@@ -4,25 +4,25 @@
 //   'draft'     — a follow-up text to the seller, drafted for Troy's review.
 //
 // DRAFT ONLY BY DESIGN: this function never sends anything anywhere. Its
-// only outbound call is the xAI chat completion; the draft comes back to
-// the browser and Troy reviews / copies / sends it himself.
+// only outbound calls are the routed model completions (see
+// cc-model-router.js); the draft comes back to the browser and Troy
+// reviews / copies / sends it himself.
+//
+// Models come from cc-model-router.js — this file hardcodes no model for
+// any job. This box pins engine 'grok', so the direct xAI model answers
+// first (funded from the $5 prepaid xAI credits, non-reasoning so it
+// answers in seconds) and the routed chain falls back across engines
+// after that instead of going dead.
 //
 // The key lives ONLY in the Netlify env var XAI_API_KEY — never in
-// browser code, never hardcoded. Billing is prepaid xAI credits: with no
-// key the function reports 'not_configured', and when xAI answers with a
-// billing error (402 / credit wording) it reports 'no_credit' — the UI
-// shows both as one calm dormant state ("Grok isn't funded yet"), never
-// a stack trace.
+// browser code, never hardcoded. With no key the function reports
+// 'not_configured', and when every funded provider is out of credit it
+// reports 'no_credit' — the UI shows both as one calm dormant state
+// ("Grok isn't funded yet"), never a stack trace.
 'use strict';
 
-const API_URL = 'https://api.x.ai/v1/chat/completions';
-// Non-reasoning on purpose: grok-4.7 is xAI's flagship REASONING model
-// (default effort high), and a live call on Nov 18, 2026 sat past this
-// function's 25s timeout without answering (function log: "This operation
-// was aborted", duration 25012 ms). Summarize/draft work needs seconds,
-// not deep reasoning — the non-reasoning 4.20 answers fast and costs
-// less ($1.25 in / $2.50 out per M tokens).
-const MODEL = 'grok-4.20-0309-non-reasoning';
+const router = require('./cc-model-router');
+
 const TIMEOUT_MS = 25000;
 const MAX_TOKENS = 500;
 const MAX_TEXT_CHARS = 12000; // a full thread transcript fits; runaway bodies don't
@@ -36,6 +36,7 @@ const SELFTEST_TEXT = [
 
 const ACTIONS = {
   summarize: {
+    job: 'thread-summarize',
     system: [
       'You assist Troy, a real estate wholesaler, inside his Command Center.',
       'You are given a text-message thread between his team ("Us") and a home seller ("Seller").',
@@ -47,6 +48,7 @@ const ACTIONS = {
     user: (text) => 'Seller conversation thread:\n\n' + text,
   },
   draft: {
+    job: 'draft-followup',
     system: [
       'You assist Troy, a real estate wholesaler, inside his Command Center.',
       'You are given a text-message thread between his team ("Us") and a home seller ("Seller").',
@@ -67,14 +69,6 @@ function buildMessages(action, text) {
   ];
 }
 
-// xAI bills from prepaid credits: an unfunded key surfaces as HTTP 402,
-// or occasionally a 400/403 whose message names credits/billing/balance.
-function isBillingError(httpStatus, bodyText) {
-  if (httpStatus === 402) return true;
-  if ((httpStatus === 400 || httpStatus === 403) && /credit|billing|balance/i.test(bodyText || '')) return true;
-  return false;
-}
-
 function json(statusCode, headers, obj) {
   return { statusCode, headers, body: JSON.stringify(obj) };
 }
@@ -91,7 +85,7 @@ exports.handler = async (event) => {
   }
   // Self-test: GET ?selftest=1 runs a summarize over a fixed sample thread
   // so the wiring can be verified from a plain browser visit — the request
-  // still passes the site's sign-in gate. No other GET is allowed.
+  // still passes the site's sign-in gate. No other GET allowed.
   const isSelftest = event.httpMethod === 'GET'
     && !!(event.queryStringParameters && event.queryStringParameters.selftest === '1');
   if (event.httpMethod !== 'POST' && !isSelftest) {
@@ -129,54 +123,34 @@ exports.handler = async (event) => {
     }
   }
 
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-    let res;
-    try {
-      res = await fetch(API_URL, {
-        method: 'POST',
-        signal: controller.signal,
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: MODEL,
-          temperature: 0.4,
-          max_tokens: MAX_TOKENS,
-          messages: buildMessages(action, text),
-        }),
+  const result = await router.complete({
+    job: ACTIONS[action].job,
+    messages: buildMessages(action, text),
+    engine: 'grok',
+    maxTokens: MAX_TOKENS,
+    timeoutMs: TIMEOUT_MS,
+  });
+  if (!result.ok) {
+    if (result.status === 'no_credit') {
+      return json(402, corsHeaders, {
+        status: 'no_credit',
+        error: 'Grok has no credit yet',
+        detail: 'The xAI account balance is empty — add prepaid credits in the xAI console (Billing) and Grok assist wakes up on its own.',
       });
-    } finally {
-      clearTimeout(timer);
     }
-    const raw = await res.text().catch(() => '');
-    if (!res.ok) {
-      if (isBillingError(res.status, raw)) {
-        return json(402, corsHeaders, {
-          status: 'no_credit',
-          error: 'Grok has no credit yet',
-          detail: 'The xAI account balance is empty — add prepaid credits in the xAI console (Billing) and Grok assist wakes up on its own.',
-        });
-      }
-      console.error('[grok-assist] xAI HTTP ' + res.status + ': ' + raw.slice(0, 200));
-      return json(502, corsHeaders, { status: 'error', error: 'Grok request failed — try again in a moment.' });
+    if (result.status === 'not_configured') {
+      return json(503, corsHeaders, { status: 'not_configured', error: 'Grok is not configured yet' });
     }
-    let data = null;
-    try { data = JSON.parse(raw); } catch (e) { /* handled below */ }
-    const content = String((data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '').trim();
-    if (!content) {
-      return json(502, corsHeaders, { status: 'error', error: 'Grok came back empty — try again.' });
-    }
-    const okBody = { status: 'ok', action, model: MODEL, result: content };
-    if (isSelftest) okBody.selftest = true;
-    return json(200, corsHeaders, okBody);
-  } catch (err) {
-    console.error('[grok-assist]', err.message);
+    console.error('[grok-assist] router failed: ' + (result.error || 'unknown'));
     return json(502, corsHeaders, { status: 'error', error: 'Grok request failed — try again in a moment.' });
   }
+  const okBody = {
+    status: 'ok', action, model: result.model, provider: result.provider,
+    fallback: !!result.fallback, result: result.content,
+  };
+  if (isSelftest) okBody.selftest = true;
+  return json(200, corsHeaders, okBody);
 };
 
 // Offline checks (no network): node -e "const g=require('./grok-assist.js'); console.log(Object.keys(g._test.ACTIONS))"
-exports._test = { ACTIONS, MODEL, API_URL, buildMessages, isBillingError, MAX_TEXT_CHARS, SELFTEST_TEXT };
+exports._test = { ACTIONS, buildMessages, isBillingError: router.isBillingError, MAX_TEXT_CHARS, SELFTEST_TEXT };

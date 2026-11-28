@@ -65,7 +65,7 @@
   .chip:hover{border-color:var(--accent)}
   .chip.active{background:var(--accent);border-color:var(--accent);color:#fff}
   .thread-list{overflow-y:auto;max-height:calc(100vh - 330px);min-height:200px}
-  .thread-item{padding:11px 14px;border-bottom:1px solid var(--line);cursor:pointer}
+  .thread-item{padding:11px 14px;border-bottom:1px solid var(--line);cursor:pointer;touch-action:manipulation}
   .thread-item:hover{background:var(--panel2)}
   .thread-item.active{background:var(--panel2);box-shadow:inset 3px 0 0 var(--accent)}
   .thread-item .t-top{display:flex;align-items:baseline;gap:8px}
@@ -260,7 +260,7 @@
     </section>
 
     <!-- CENTER: open thread -->
-    <section class="pane" aria-label="Open conversation">
+    <section class="pane" id="threadPane" aria-label="Open conversation">
       <div class="pane-head">
         <h2 id="threadTitle">No conversation selected</h2>
         <div class="note" id="threadSub"></div>
@@ -297,59 +297,6 @@
                hidden then). Wired to endCurrentCall: ends BOTH legs. -->
           <button class="btn small danger hidden" id="inboundEndBtn" type="button">End call</button>
         </div>
-        <!-- Dialer pod (GoHighLevel-style): dial any number from the
-             thread, pick which of our numbers it goes out from, keypad
-             for DTMF while on a call. Hidden until a thread is open. -->
-        <div id="dialerPod" class="dialer-pod hidden">
-          <label class="lbl" for="dialNumber">Call</label>
-          <input class="field" id="dialNumber" type="tel" placeholder="(555) 123-4567" autocomplete="off">
-          <div id="dialFromRow" style="margin-top:8px">
-            <label class="lbl" for="dialFrom">Call from</label>
-            <select class="field" id="dialFrom"></select>
-          </div>
-          <div class="keypad" id="dialKeypad">
-            <button type="button" class="btn" data-key="1">1</button>
-            <button type="button" class="btn" data-key="2">2</button>
-            <button type="button" class="btn" data-key="3">3</button>
-            <button type="button" class="btn" data-key="4">4</button>
-            <button type="button" class="btn" data-key="5">5</button>
-            <button type="button" class="btn" data-key="6">6</button>
-            <button type="button" class="btn" data-key="7">7</button>
-            <button type="button" class="btn" data-key="8">8</button>
-            <button type="button" class="btn" data-key="9">9</button>
-            <button type="button" class="btn" data-key="*">*</button>
-            <button type="button" class="btn" data-key="0">0</button>
-            <button type="button" class="btn" data-key="#">#</button>
-          </div>
-          <div style="display:flex;gap:8px;align-items:center;margin-top:10px">
-            <button class="btn small primary" id="dialCallBtn" type="button" disabled>📞 Call</button>
-            <span class="note">Keypad sends tones while a call is live.</span>
-          </div>
-          <!-- Call box (GoHighLevel-style): opens right here under the Call
-               button when you dial — Dialing, Ringing, Connected with a live
-               timer — then the final result: Call ended (with duration),
-               Missed call, or Voicemail. -->
-          <div id="callBox" class="call-box" hidden>
-            <div class="cb-icon">📞</div>
-            <div class="cb-main">
-              <div class="cb-title" id="callBoxTitle">Dialing…</div>
-              <div class="cb-sub" id="callBoxSub"></div>
-            </div>
-            <div class="cb-dur" id="callBoxDur"></div>
-            <!-- End call, right here in the call card (Nov 26, 2026 —
-                 Troy: HighLevel's call feature has it here; the Call
-                 button flipping its label is not the same thing). -->
-            <button class="btn small danger" id="callBoxEndBtn" type="button">End call</button>
-          </div>
-          <!-- Post-call disposition (HighLevel's six custom
-               dispositions). Shows after a call ends; one tap files
-               it on the call log. -->
-          <div id="dispRow" class="disp-row" hidden></div>
-          <div style="display:flex;gap:8px;align-items:center;margin-top:10px">
-            <button class="btn small" id="podAudioBtn" type="button">🎧 Connect audio</button>
-            <span class="note" id="podAudioStatus"></span>
-          </div>
-        </div>
       </div>
       <div class="messages" id="messages">
         <div class="empty"><div class="big">💬</div><div>Pick a conversation on the left to read it here.</div></div>
@@ -358,6 +305,65 @@
         <textarea class="field" id="sendText" placeholder="Type a text…" disabled></textarea>
         <button class="btn primary" id="sendBtn" type="submit" disabled>Send</button>
       </form>
+      <!-- Dialer pod (GoHighLevel-style): dial any number from the
+           thread, pick which of our numbers it goes out from, keypad
+           for DTMF while on a call. Hidden until a thread is open.
+           Moved Nov 28, 2026 (Troy: the thread must open at the top) —
+           it used to sit in the pane-head ABOVE the messages and pushed
+           the conversation ~400px down the page; it now lives below the
+           send box, so the messages start at the top of the pane. The
+           Call button still opens + flashes it, and the call box /
+           disposition row still live here. -->
+      <div id="dialerPod" class="dialer-pod hidden">
+        <label class="lbl" for="dialNumber">Call</label>
+        <input class="field" id="dialNumber" type="tel" placeholder="(555) 123-4567" autocomplete="off">
+        <div id="dialFromRow" style="margin-top:8px">
+          <label class="lbl" for="dialFrom">Call from</label>
+          <select class="field" id="dialFrom"></select>
+        </div>
+        <div class="keypad" id="dialKeypad">
+          <button type="button" class="btn" data-key="1">1</button>
+          <button type="button" class="btn" data-key="2">2</button>
+          <button type="button" class="btn" data-key="3">3</button>
+          <button type="button" class="btn" data-key="4">4</button>
+          <button type="button" class="btn" data-key="5">5</button>
+          <button type="button" class="btn" data-key="6">6</button>
+          <button type="button" class="btn" data-key="7">7</button>
+          <button type="button" class="btn" data-key="8">8</button>
+          <button type="button" class="btn" data-key="9">9</button>
+          <button type="button" class="btn" data-key="*">*</button>
+          <button type="button" class="btn" data-key="0">0</button>
+          <button type="button" class="btn" data-key="#">#</button>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:10px">
+          <button class="btn small primary" id="dialCallBtn" type="button" disabled>📞 Call</button>
+          <span class="note">Keypad sends tones while a call is live.</span>
+        </div>
+        <!-- Call box (GoHighLevel-style): opens right here under the Call
+             button when you dial — Dialing, Ringing, Connected with a live
+             timer — then the final result: Call ended (with duration),
+             Missed call, or Voicemail. -->
+        <div id="callBox" class="call-box" hidden>
+          <div class="cb-icon">📞</div>
+          <div class="cb-main">
+            <div class="cb-title" id="callBoxTitle">Dialing…</div>
+            <div class="cb-sub" id="callBoxSub"></div>
+          </div>
+          <div class="cb-dur" id="callBoxDur"></div>
+          <!-- End call, right here in the call card (Nov 26, 2026 —
+               Troy: HighLevel's call feature has it here; the Call
+               button flipping its label is not the same thing). -->
+          <button class="btn small danger" id="callBoxEndBtn" type="button">End call</button>
+        </div>
+        <!-- Post-call disposition (HighLevel's six custom
+             dispositions). Shows after a call ends; one tap files
+             it on the call log. -->
+        <div id="dispRow" class="disp-row" hidden></div>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:10px">
+          <button class="btn small" id="podAudioBtn" type="button">🎧 Connect audio</button>
+          <span class="note" id="podAudioStatus"></span>
+        </div>
+      </div>
       <div id="sendError" class="error hidden" style="margin:12px 14px"></div>
     </section>
 
@@ -579,7 +585,18 @@ function statusTick(m) {
   if (m.status === 'failed') return '<span class="st-failed">✗ Failed' + (m.failureReason ? ' — ' + esc(m.failureReason) : '') + '</span>';
   return '<span>Queued</span>';
 }
-function renderMessages() {
+/* Thread opens at the TOP, like GoHighLevel (Nov 28, 2026 — Troy: the
+   conversation has to be readable the moment a thread opens, no
+   scrolling down past anything to find it). renderMessages takes an
+   option:
+   - { atTop: true } — a real open (row tap / bell tap / deep link):
+     the list starts at the FIRST message (scrollTop 0).
+   - { toBottom: true } — after Troy sends: the newest message shows.
+   - no option — a live re-render (30s refresh tick, reload after a
+     call): the reader keeps their place. Was at the bottom? Stays at
+     the bottom for the new message. Was reading up the thread? Stays
+     exactly where they were — the tick never yanks them to the end. */
+function renderMessages(opts) {
   var box = document.getElementById('messages');
   var t = state.selectedThread;
   if (!t) {
@@ -590,6 +607,14 @@ function renderMessages() {
     box.innerHTML = '<div class="empty"><div>No messages in this conversation yet.</div></div>';
     return;
   }
+  // Where was the reader before this re-render? (A box that only ever
+  // held the empty placeholder has no scroll position — treat as bottom.)
+  var wasAtBottom = true;
+  var prevTop = 0;
+  try {
+    prevTop = box.scrollTop || 0;
+    wasAtBottom = (box.scrollHeight - prevTop - (box.clientHeight || 0)) < 40;
+  } catch (e) { wasAtBottom = true; }
   var html = '';
   var lastDay = '';
   t.messages.forEach(function (m, i) {
@@ -628,7 +653,32 @@ function renderMessages() {
       '<div class="m-meta"><span>' + esc(fmtTime(m.at)) + '</span>' + statusTick(m) + '</div></div>';
   });
   box.innerHTML = html;
-  box.scrollTop = box.scrollHeight;
+  if (opts && opts.atTop) box.scrollTop = 0;
+  else if ((opts && opts.toBottom) || wasAtBottom) box.scrollTop = box.scrollHeight;
+  else box.scrollTop = prevTop;
+}
+/* Bring the open thread to the top of the view (Nov 28, 2026 — Troy:
+   opening a conversation must land on the conversation itself, like
+   GoHighLevel — never below the fold under the thread list on a phone,
+   never pushed down the page). Called only on a real open (selectThread
+   with atTop); a send or a refresh re-render never moves the page.
+   On a wide screen the thread is already in view and this is a no-op;
+   on a phone (one-column layout: thread list first, open thread below
+   it) it jumps past the list to the thread. Instant, not smooth — the
+   conversation is there the moment the tap lands. */
+function scrollThreadIntoView() {
+  var pane = document.getElementById('threadPane');
+  var box = document.getElementById('messages');
+  if (!pane || !box) return;
+  var needsScroll = true;
+  try {
+    var r = (typeof box.getBoundingClientRect === 'function') ? box.getBoundingClientRect() : null;
+    if (r && typeof window !== 'undefined' && window.innerHeight) {
+      needsScroll = r.top < 0 || r.bottom > window.innerHeight;
+    }
+  } catch (e) { needsScroll = true; }
+  if (!needsScroll) return;
+  if (typeof pane.scrollIntoView === 'function') pane.scrollIntoView({ behavior: 'auto', block: 'start' });
 }
 function renderContactPanel() {
   var el = document.getElementById('contactPanel');
@@ -839,11 +889,13 @@ async function runGemini(action) {
   renderContactPanel();
 }
 /* Deep read — third engine, same shape as the other assists: summarize
-   this thread or draft a follow-up for Troy's review, with a stronger
-   reader for long threads and second-eyes checks. Draft only: the
-   function never sends anything and never prices; results land in a
-   read-only panel. With no key or no credit the panel shows one calm
-   dormant line instead of an error. */
+   this thread, draft a follow-up, check the deal (flags only, never
+   prices) or draft an LOI, all for Troy's review. The model for each
+   job comes from cc-model-router.js — best reader first, best free
+   model while the OpenRouter balance is $0. Draft only: the function
+   never sends anything and never prices; results land in a read-only
+   panel. With no key or no credit the panel shows one calm dormant
+   line instead of an error. */
 function openrouterSection() {
   var g = state.openrouter;
   var busy = g.busy ? ' disabled' : '';
@@ -861,6 +913,8 @@ function openrouterSection() {
     '<div class="openrouter-actions">' +
     '<button type="button" class="btn small" data-openrouter-action="summarize"' + busy + '>Summarize thread</button>' +
     '<button type="button" class="btn small" data-openrouter-action="draft"' + busy + '>Draft follow-up</button>' +
+    '<button type="button" class="btn small" data-openrouter-action="check"' + busy + '>Check deal</button>' +
+    '<button type="button" class="btn small" data-openrouter-action="loi"' + busy + '>Draft LOI</button>' +
     '</div>' + panel +
     '<div class="openrouter-note">Drafts only — nothing sends from here. You review it, you send it.</div></div>';
 }
@@ -870,11 +924,19 @@ async function runOpenRouter(action) {
   state.openrouter = { busy: true, status: null, text: '' };
   renderContactPanel();
   try {
+    // Check deal / Draft LOI ride on the thread plus the contact's
+    // name and phone; the server lists the missing facts (address,
+    // offer price) instead of inventing them.
+    var payload = { action: action, text: text };
+    if (action === 'check' || action === 'loi') {
+      var t = state.selectedThread;
+      payload.deal = { sellerName: (t && t.name) || '', phone: (t && t.phone) || '' };
+    }
     var r = await fetch(OPENROUTER_API, {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: action, text: text }),
+      body: JSON.stringify(payload),
     });
     var data = {};
     try { data = await r.json(); } catch (e) { data = {}; }
@@ -909,7 +971,7 @@ function renderThreadHead() {
   sub.textContent = fmtPhone(t.phone) + (t.market ? ' · ' + (MARKET_LABELS[t.market] || t.market) : '') +
     (t.ourNumber ? ' · Texting from: ' + fmtPhone(t.ourNumber) : '');
 }
-async function selectThread(key) {
+async function selectThread(key, opts) {
   // A notification tap hands us a phone, not a thread key (a stuck-call
   // flag's key is a callControlId, not a thread key) — resolve the
   // thread by phone too, and canonicalize selectedKey to the thread
@@ -927,8 +989,12 @@ async function selectThread(key) {
   state.gemini = { busy: false, status: null, text: '' };
   state.openrouter = { busy: false, status: null, text: '' };
   renderThreadHead();
-  renderMessages();
+  renderMessages({ atTop: !!(opts && opts.atTop), toBottom: !!(opts && opts.toBottom) });
   renderContactPanel();
+  // A real open lands on the conversation itself (top of the view,
+  // first message readable) — row tap, bell tap, deep link. A
+  // re-select after sending just re-renders; the page stays put.
+  if (opts && opts.atTop) scrollThreadIntoView();
   // Learn once whether voice is switched on, so the Call button knows
   // its state before the first click.
   checkVoiceConfig().then(function (cfg) {
@@ -954,7 +1020,7 @@ async function sendCurrent(ev) {
   try {
     await api('', { action: 'send', phone: t.phone, body: body, market: t.market || state.market || 'carolina' });
     input.value = '';
-    await selectThread(state.selectedKey);
+    await selectThread(state.selectedKey, { toBottom: true });
     await loadThreads();
     await loadStats();
   } catch (e) {
@@ -962,7 +1028,7 @@ async function sendCurrent(ev) {
     // reason when the send itself throws — show it and reload so the
     // failed bubble is visible, never silently dropped.
     showError('sendError', 'Send failed: ' + (e && e.message ? e.message : e));
-    try { await selectThread(state.selectedKey); } catch (e2) { /* keep the error visible */ }
+    try { await selectThread(state.selectedKey, { toBottom: true }); } catch (e2) { /* keep the error visible */ }
   } finally {
     btn.disabled = false;
   }
@@ -2337,7 +2403,7 @@ async function sendNewThread() {
     await loadThreads();
     await loadStats();
     var entry = state.threads.find(function (th) { return samePhone(th.phone, phone); });
-    if (entry) await selectThread(entry.key);
+    if (entry) await selectThread(entry.key, { atTop: true });
     toast('Text sent.');
   } catch (e) {
     // The API stores a failed send on the thread when it can — show the
@@ -2394,7 +2460,7 @@ async function openNotifThread(item) {
   if (!target) { toast('No conversation attached to this alert.'); return; }
   document.getElementById('notifPanel').classList.add('hidden');
   try {
-    await selectThread(target);
+    await selectThread(target, { atTop: true });
   } catch (e) {
     handleLoadError(e);
     return;
@@ -2453,10 +2519,38 @@ function init() {
   });
   document.getElementById('searchBox').addEventListener('input', renderThreads);
   document.getElementById('unreadOnly').addEventListener('change', renderThreads);
-  document.getElementById('threadList').addEventListener('click', function (ev) {
+  // Tap-to-open (Nov 28, 2026 — Troy: tapping a row on his phone did
+  // nothing). Rows opened ONLY on the browser's synthesized click, and
+  // there was no touch path at all: on a phone the tap is touchstart →
+  // touchend → click, and if the 30s refresh re-renders the list
+  // between touchstart and the click, the tap's target node is
+  // detached and the click never fires — the row silently does not
+  // open. touchend opens on the live node instead (closest() still
+  // resolves — the row itself carries data-key — even if the node was
+  // just detached); the click handler stays for mouse/keyboard and
+  // ignores the duplicate click that follows a touch-open. A scroll
+  // gesture (finger moved) never opens a thread.
+  var lastTouchOpenAt = 0;
+  var touchStartPos = null;
+  var threadListEl = document.getElementById('threadList');
+  threadListEl.addEventListener('touchstart', function (ev) {
+    var t = ev.touches && ev.touches[0];
+    touchStartPos = t ? { x: t.clientX, y: t.clientY } : null;
+  }, { passive: true });
+  threadListEl.addEventListener('touchend', function (ev) {
     var item = ev.target.closest ? ev.target.closest('[data-key]') : null;
     if (!item) return;
-    selectThread(item.getAttribute('data-key')).catch(handleLoadError);
+    var t = ev.changedTouches && ev.changedTouches[0];
+    if (t && touchStartPos && (Math.abs(t.clientX - touchStartPos.x) > 10 || Math.abs(t.clientY - touchStartPos.y) > 10)) return; // a scroll, not a tap
+    touchStartPos = null;
+    lastTouchOpenAt = Date.now();
+    selectThread(item.getAttribute('data-key'), { atTop: true }).catch(handleLoadError);
+  });
+  threadListEl.addEventListener('click', function (ev) {
+    var item = ev.target.closest ? ev.target.closest('[data-key]') : null;
+    if (!item) return;
+    if (Date.now() - lastTouchOpenAt < 600) return; // the tap already opened it on touchend
+    selectThread(item.getAttribute('data-key'), { atTop: true }).catch(handleLoadError);
   });
   document.getElementById('sendForm').addEventListener('submit', sendCurrent);
   document.getElementById('sendText').addEventListener('keydown', function (ev) {
@@ -2580,7 +2674,7 @@ function init() {
   refreshAll().then(function () {
     var deep = null;
     try { deep = new URLSearchParams(window.location.search).get('thread'); } catch (e) { deep = null; }
-    if (deep) selectThread(deep).catch(handleLoadError);
+    if (deep) selectThread(deep, { atTop: true }).catch(handleLoadError);
     // Bell deep link (?openNotifications=1): the index / Command
     // Center bells link here — open the notifications panel on
     // arrival, same as tapping the bell (refreshAll already kicked
