@@ -113,10 +113,10 @@
   </div>
 
   <p class="muted">Contracts come live from HighLevel via <b>/.netlify/functions/esign?action=documents</b> (HL GET /proposals/document) and templates via <b>action=templates</b> (HL GET /proposals/templates) — the same lists the e-sign sheet reads. No rows are ever invented: if a call fails, this page says so instead of showing old or made-up contracts. Click any row to open it. Nothing sends on its own: a contract goes out only when Troy taps Send on that one contract's detail view and confirms — never automatically, never in a batch.</p>
-  <p class="muted">What this list shows now (enriched Nov 27, 2026): the documents feed returns links[] + createdAt per document, and the server joins the seller contact's phone + address + contract price — so the Property column shows the seller's address, Sent shows the created date, Price shows the seller contact's contract_price field (the same price the e-sign sheet validates; a document grandTotal above $0 is the fallback — drafts read $0.00, which means "no price on the document", not $0), the Signing link column shows the seller's own signing link (drafts carry no links at all; links are minted at send), and the Contact / Thread column links straight into the Conversations thread (?thread=&lt;phoneKey&gt;) when the seller has a phone. What it still cannot show: <b>viewed date</b> — the feed returns only one timestamp per document (last updated), so Viewed shows “—” and the Status column shows last-updated instead; <b>signed date</b> shows only when a recipient record carries signedDate / signedAt; the document record itself carries no APN or legal description — the Property column is the seller contact's mailing address, not the legal description. Any field the feed does not carry shows an honest “—” — nothing is invented. The seller is the first signer recipient who is not the buyer signer (Paula Thomas) or Troy — co-sellers after the first are listed under the seller name.</p>
+  <p class="muted">What this list shows now (enriched Nov 27, 2026): the documents feed returns links[] + createdAt per document, and the server joins the seller contact's phone + address + contract price — so the Property column shows the seller's address, Sent shows the created date, Price shows the seller contact's contract_price field (the same price the e-sign sheet validates; a document grandTotal above $0 is the fallback — drafts read $0.00, which means "no price on the document", not $0), the Signing link column shows the seller's own signing link — HighLevel's API returns no URL on a link record, only a referenceId, so the server builds the link as https://sendlink.co/documents/v1/&lt;referenceId&gt;?locale=en-US (proven from HighLevel's own signing email, Nov 27, 2026); drafts carry no links at all, links are minted at send), and the Contact / Thread column links straight into the Conversations thread (?thread=&lt;phoneKey&gt;) when the seller has a phone. Viewed shows the viewed date when the document is viewed and no recipient has signed — that date is the document's last update, which is the view event in that case; once a signer has signed, the last update is the signature, not the view, so Viewed shows “—” with the reason. What it still cannot show: <b>signed date</b> shows only when a recipient record carries signedDate / signedAt; the document record itself carries no APN or legal description — the Property column is the seller contact's mailing address, not the legal description. Any field the feed does not carry shows an honest “—” — nothing is invented. The seller is the first signer recipient who is not the buyer signer (Paula Thomas) or Troy — co-sellers after the first are listed under the seller name.</p>
   <p class="muted">Assignment &amp; buyer contracts: HighLevel's document list holds purchase agreements only — all 13 live documents are purchase agreements, and no assignment or buyer contract has been sent from HighLevel yet. Assignment agreements live as templates below (and as the local master in the workspace) until one is created and sent. Google Drive could not be checked for executed copies — it is not connected to this workspace — so if a signed assignment PDF lives there, it is not on this page yet.</p>
   <p class="muted">Templates: the HighLevel templates list returns id / name / type / dates only — no template text and no field data — so a template row opens its details on this page (kind, market, dates, what using it needs) plus a link into HighLevel's Documents &amp; Contracts section, where the template itself opens. "Create a contract from a template and send it" is the e-sign sheet's prepare flow (pick a seller lead on the Dashboard, prepare, then send) — it works today for purchase-agreement templates only. Assignment and buyer templates need the sheet extended to them plus the buyer-signer mapping before they can go out from here; the template detail says exactly what is missing for each one.</p>
-  <p class="muted">Enrichment live (Nov 27, 2026): the documents action now returns links[] + createdAt per document and joins the seller contact's phone + address + contract price (sellerPhoneKey is the digits-only phone key the thread link uses). Remaining gap: contacts.html has no per-contact URL deep-link today, so the Contact link below opens Contacts and the CRM contact id is printed for search.</p>
+  <p class="muted">Enrichment live (Nov 27, 2026): the documents action now returns links[] (each with the signing URL built from its referenceId — HighLevel returns no URL on a link record) + createdAt + the viewed date (the document's last update, which is the view event when the document is viewed and no recipient has signed) per document and joins the seller contact's phone + address + contract price (sellerPhoneKey is the digits-only phone key the thread link uses). Remaining gap: contacts.html has no per-contact URL deep-link today, so the Contact link below opens Contacts and the CRM contact id is printed for search.</p>
 </div>
 
 <script>
@@ -336,6 +336,20 @@ function sellerSigningUrl(doc) {
   }
   return '';
 }
+/* Viewed date — the server joins viewedAt (see esign.js viewedAtOf):
+   the document's updatedAt, which is the view event only when the
+   document is viewed and no recipient has signed. Anything else is
+   an honest "—" with the reason: signed (the last update is the
+   signature / completion, not the view), or not viewed yet. Never
+   invents a date. Returns { date, note }. */
+function viewedInfo(doc) {
+  var d = doc || {};
+  if (d.viewedAt) return { date: String(d.viewedAt), note: 'the document’s last update — the view; HighLevel exposes no separate viewed timestamp' };
+  var s = String(d.status || '').toLowerCase();
+  if (s === 'completed' || s === 'accepted') return { date: '', note: 'signed — the last update is the completion, not the view' };
+  if (s === 'viewed' && signedDateOf(d) !== '') return { date: '', note: 'a signer has already signed, so the last update is the signature, not the view' };
+  return { date: '', note: 'not viewed yet' };
+}
 /* Conversations thread deep-link for the seller's phone key
    (?thread=<digits>). Only the server-joined sellerPhoneKey is used;
    absent or non-digits renders no link. */
@@ -368,14 +382,16 @@ function rowHtml(d) {
     .map(function (r) { return String((r && r.contactName) || '').trim(); })
     .filter(function (n) { return n && n !== seller.name; });
   var status = String(d.status || '');
-  // Sent comes from the enriched createdAt; Viewed has no per-status
-  // timestamp in the feed (only updatedAt, shown as last-updated under
-  // Status), so it stays an honest "—". Signed comes from the
-  // recipient record when it carries one. Property is the seller
-  // contact's joined address; the signing link is the links[] entry
-  // for the seller; the thread link needs the joined sellerPhoneKey.
-  // Price comes from the seller contact's contract_price field, or
-  // the document grandTotal when that is above zero — never invented.
+  // Sent comes from the enriched createdAt; Viewed comes from the
+  // enriched viewedAt — the document's updatedAt, which is the view
+  // event only when the document is viewed and no recipient has
+  // signed (see esign.js viewedAtOf); otherwise it renders "—".
+  // Signed comes from the recipient record when it carries one.
+  // Property is the seller contact's joined address; the signing
+  // link is the links[] entry for the seller; the thread link needs
+  // the joined sellerPhoneKey. Price comes from the seller
+  // contact's contract_price field, or the document grandTotal when
+  // that is above zero — never invented.
   var signed = signedDateOf(d);
   var signingUrl = sellerSigningUrl(d);
   var thread = threadUrl(d);
@@ -403,7 +419,7 @@ function rowHtml(d) {
     '<td><span class="pill ' + esc(docStatusPill(status)) + '">' + esc(docStatusLabel(status)) + '</span>' +
       '<div class="sub">Updated ' + esc(fmtDate(d.updatedAt)) + '</div></td>' +
     '<td>' + esc(fmtDate(d.createdAt)) + '</td>' +
-    '<td>—</td>' +
+    '<td>' + esc(fmtDate(viewedInfo(d).date)) + '</td>' +
     '<td>' + esc(fmtDate(signed)) + '</td>' +
     '<td>' + (signingUrl ? '<a href="' + esc(signingUrl) + '" target="_blank" rel="noopener">Open signing link ↗</a>' : '—') + '</td>' +
     '<td>' + contactCell + '</td>' +
@@ -454,6 +470,7 @@ function detailHtml(d) {
   var signed = signedDateOf(d);
   var signingUrl = sellerSigningUrl(d);
   var thread = threadUrl(d);
+  var vi = viewedInfo(d);
   var status = String(d.status || '');
   var canSend = canSendDoc(d);
   var label = sendLabelDoc(d);
@@ -465,10 +482,10 @@ function detailHtml(d) {
     '<tr><th>Property</th><td>' + (d.sellerAddress ? esc(d.sellerAddress) : '—') + '</td></tr>' +
     '<tr><th>Price</th><td>' + (price.amount != null ? esc(fmtMoney(price.amount)) + ' <span class="sub">(from the ' + (price.source === 'contact' ? 'seller contact’s contract price' : 'document') + ')</span>' : '—') + '</td></tr>' +
     '<tr><th>Sent</th><td>' + esc(fmtDate(d.createdAt)) + '</td></tr>' +
-    '<tr><th>Viewed</th><td>— <span class="sub">(HighLevel returns only one timestamp per document, so the viewed date is not available)</span></td></tr>' +
+    '<tr><th>Viewed</th><td>' + (vi.date ? esc(fmtDate(vi.date)) : '—') + ' <span class="sub">(' + esc(vi.note) + ')</span></td></tr>' +
     '<tr><th>Signed</th><td>' + esc(fmtDate(signed)) + '</td></tr>' +
     '<tr><th>Last updated</th><td>' + esc(fmtDate(d.updatedAt)) + '</td></tr>' +
-    '<tr><th>Signing link</th><td>' + (signingUrl ? '<a href="' + esc(signingUrl) + '" target="_blank" rel="noopener">Open seller signing link ↗</a>' : '— <span class="sub">(drafts carry no links — links are minted at send)</span>') + '</td></tr>' +
+    '<tr><th>Signing link</th><td>' + (signingUrl ? '<a href="' + esc(signingUrl) + '" target="_blank" rel="noopener">Open seller signing link ↗</a>' : '— <span class="sub">(' + (String(d.status || '').toLowerCase() === 'draft' ? 'drafts carry no links — links are minted at send' : 'HighLevel returned no signing link for this document — re-send to mint a fresh one') + ')</span>') + '</td></tr>' +
     '<tr><th>Contact / Thread</th><td>' + (seller.contactId ? '<a href="/contacts.html">View in Contacts ↗</a> <span class="sub">CRM contact ' + esc(seller.contactId) + '</span><br>' : '') +
       (thread ? '<a href="' + esc(thread) + '">Open thread ↗</a>' + (d.sellerPhone ? ' <span class="sub">' + esc(d.sellerPhone) + '</span>' : '') : '—') + '</td></tr>' +
     '</table>';

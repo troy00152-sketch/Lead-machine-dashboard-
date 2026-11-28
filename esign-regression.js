@@ -263,6 +263,20 @@ t('templates: ids unique', new Set(esign.KNOWN_TEMPLATES.map((x) => x.id)).size 
   const doc = { links: [{ recipientId: 'C1', url: 'https://sign.example/C1' }, { recipientId: 'C2', url: 'https://sign.example/C2' }] };
   t('links: signing link found by recipient', esign.signingLinkFor('C2', doc) === 'https://sign.example/C2');
   t('links: unknown recipient -> empty string', esign.signingLinkFor('C9', doc) === '');
+  // Nov 27: HL link records carry NO url field — the signing URL is
+  // constructed from the referenceId (proven from HL's own signing
+  // email: the email's resolved link IS the document's referenceId).
+  // A direct url/link/href still wins when present.
+  t('links: referenceId constructs the sendlink.co signing URL', esign.signingUrlForReferenceId('ca291b5f-8ac9-4c9f-ad3b-26f1e9a379ec', 'en-US') === 'https://sendlink.co/documents/v1/ca291b5f-8ac9-4c9f-ad3b-26f1e9a379ec?locale=en-US');
+  t('links: empty referenceId -> empty, never invented', esign.signingUrlForReferenceId('') === '' && esign.signingUrlForReferenceId(null) === '');
+  t('links: signingLinkFor constructs from referenceId when no url', esign.signingLinkFor('C1', { locale: 'en-US', links: [{ recipientId: 'C1', documentId: 'D1', referenceId: 'ref-1' }] }) === 'https://sendlink.co/documents/v1/ref-1?locale=en-US');
+  t('links: signingUrlForLink prefers a direct url', esign.signingUrlForLink({ url: 'https://x.test/direct', referenceId: 'ref-1' }) === 'https://x.test/direct');
+  t('links: projectDocumentLinks carries referenceId + constructed url', JSON.stringify(esign.projectDocumentLinks({ locale: 'en-US', links: [{ recipientId: 'R1', documentId: 'D1', referenceId: 'ref-1' }] })) === JSON.stringify([{ recipientId: 'R1', documentId: 'D1', referenceId: 'ref-1', url: 'https://sendlink.co/documents/v1/ref-1?locale=en-US' }]));
+  // Nov 27: viewedAt — updatedAt IS the viewed time only when the
+  // document is viewed AND no recipient has signed.
+  t('links: viewedAtOf viewed+unsigned -> updatedAt', esign.viewedAtOf({ status: 'viewed', updatedAt: '2026-11-17T18:43:30Z', recipients: [{ hasCompleted: false }] }) === '2026-11-17T18:43:30Z');
+  t('links: viewedAtOf viewed+signed -> empty (updatedAt is the signature)', esign.viewedAtOf({ status: 'viewed', updatedAt: '2026-10-21T00:54:33Z', recipients: [{ hasCompleted: true, signedDate: '2026-10-21T00:54:14Z' }] }) === '');
+  t('links: viewedAtOf draft/sent/completed -> empty', esign.viewedAtOf({ status: 'draft', updatedAt: '2026-11-18T10:00:00Z', recipients: [] }) === '' && esign.viewedAtOf({ status: 'completed', updatedAt: '2026-11-12T10:00:00Z', recipients: [] }) === '');
   // One-tap preview link (Nov 12): built from the shared location
   // config, targeting the location's Documents & Contracts list —
   // drafts carry no API links, so this is the deepest honest target.
@@ -288,7 +302,19 @@ t('templates: ids unique', new Set(esign.KNOWN_TEMPLATES.map((x) => x.id)).size 
   // as the browser link for the one-tap "Open draft in HighLevel"
   // preview. The guard's intent stands: the only host this function
   // CALLS is the HL API, and no third-party host of any kind is named.
-  t('free: function only calls HighLevel (services.leadconnectorhq.com)', hosts.every((h) => h === 'services.leadconnectorhq.com' || h === 'app.gohighlevel.com'), hosts.join(', '));
+  // Nov 27: sendlink.co is HighLevel's OWN signing host. It is never
+  // fetched by this function — it appears only in HL_SIGNING_BASE,
+  // the constant signingUrlForReferenceId uses to BUILD the seller's
+  // signing URL from a link's referenceId (proven Nov 27 from HL's
+  // own signing email: the email's resolved link IS that
+  // referenceId). sendlink.co is a URL the seller's browser opens,
+  // not a call this function makes.
+  t('free: function only calls HighLevel (services.leadconnectorhq.com)', hosts.every((h) => h === 'services.leadconnectorhq.com' || h === 'app.gohighlevel.com' || h === 'sendlink.co'), hosts.join(', '));
+  // (The // strip above also eats "//" inside string literals such
+  // as 'https://...', so for this check strip only full-line //
+  // comments — the constant line itself must survive the strip.)
+  const codeNoFullLineComments = src.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  t('free: sendlink.co is never fetched — only the URL-builder constant', (codeNoFullLineComments.match(/sendlink\.co/g) || []).length === 1 && codeNoFullLineComments.includes("HL_SIGNING_BASE = 'https://sendlink.co/documents/v1'"));
   t('free: app.gohighlevel.com appears only as the documents preview link', (src.match(/app\.gohighlevel\.com/g) || []).length === 1 && src.includes("'/payments/documents'"));
   t('free: Blobs store is esign-log (connectLambda rule in file)', src.includes("'esign-log'") && src.includes('connectLambda'));
   const ui = fs.readFileSync(path.join(__dirname, 'assets/esign.js'), 'utf8');
