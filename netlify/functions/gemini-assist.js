@@ -166,7 +166,7 @@ exports.handler = async (event) => {
       return json(503, corsHeaders, { status: 'not_configured', error: 'AI assist is not configured yet' });
     }
     console.error('[gemini-assist] router failed: ' + (result.error || 'unknown'));
-    return json(502, corsHeaders, { status: 'error', error: 'AI assist request failed — try again in a moment.' });
+    return json(502, corsHeaders, { status: 'error', error: 'AI assist request failed — try again in a moment.', tried: result.tried, attempts: result.attempts });
   }
   // Self-test is a wiring proof for THIS box: it only passes when the
   // Gemini engine answered. A fallback serving another engine is a
@@ -180,6 +180,8 @@ exports.handler = async (event) => {
       model: result.model,
       provider: result.provider,
       selftest: true,
+      tried: result.tried,
+      attempts: result.attempts,
     });
   }
   const okBody = {

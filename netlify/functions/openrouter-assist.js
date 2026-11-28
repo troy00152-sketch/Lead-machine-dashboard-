@@ -87,6 +87,7 @@ const ACTIONS = {
     system: [
       'You are a second-eyes deal checker for Troy, a real estate wholesaler.',
       'You are given a seller thread and, when available, the deal facts his own Command Center computed (ARV, MAO, LAO, repairs, comps).',
+      'Facts stated in the thread itself (the seller\u2019s name, the property address) count as given.',
       'Reply with a SHORT bullet list of FLAGS ONLY — nothing else:',
       '- a number that does not reconcile with the others (say which two disagree and by how much);',
       '- a fact that is missing and needed before Troy can trust the numbers;',
@@ -96,7 +97,7 @@ const ACTIONS = {
       'If nothing is wrong and nothing is missing, reply with exactly: "No flags — the numbers reconcile and nothing is missing."',
     ].join(' '),
     user: (text, deal) => 'Seller conversation thread:\n\n' + text +
-      (deal ? '\n\nDeal facts from the Command Center:\n\n' + deal : ''),
+      (deal ? '\n\nKnown facts (deal + thread):\n\n' + deal : ''),
   },
   loi: {
     job: 'loi-draft',
@@ -106,12 +107,13 @@ const ACTIONS = {
       'You are given a seller thread and, when available, the deal facts: property address, seller name, offer price and terms.',
       'Draft the LOI email body for Troy\u2019s review. He reviews and sends it himself — you never send anything.',
       'Use ONLY the facts given. Never invent an address, a price, a term, a date, or the seller\u2019s name.',
+      'The seller thread is a source of facts too: a name or address stated in the thread counts as given. A bare number in a seller reply (for example "325k") is NOT a confirmed offer price — treat the offer price as missing until the deal facts confirm it.',
       'If the property address or the offer price is not in the facts given, do NOT draft the letter — reply with the short list of facts needed, nothing else.',
       'Tone: plain, professional, short. Sign it as Troy Thomas, Direct Property Buyers.',
       'Reply with the LOI text only — no quotes, no label, no explanation.',
     ].join(' '),
     user: (text, deal) => 'Seller conversation thread:\n\n' + text +
-      (deal ? '\n\nDeal facts from the Command Center:\n\n' + deal : ''),
+      (deal ? '\n\nKnown facts (deal + thread):\n\n' + deal : ''),
   },
 };
 
@@ -147,6 +149,35 @@ function buildMessages(action, text, deal) {
     { role: 'system', content: a.system },
     { role: 'user', content: a.user(text, deal) },
   ];
+}
+
+// Facts stated in the thread itself. Conservative by design, and it
+// never invents: only a first-name salutation in OUR OWN outgoing
+// message ("Hi Stephanie,") and a house-number street address
+// ("1905 Chavis Ct") count. The page only sends {sellerName, phone}
+// for check/loi and the contact panel is often blank, so without
+// this the LOI lists the name/address as missing even when the
+// thread states them. A bare number in a seller reply ("325k") is
+// NOT an offer price and is never extracted — the offer price stays
+// missing until the deal facts confirm it.
+const THREAD_NAME_RE = /^Us:\s*(?:Hi|Hey|Hello|Good (?:morning|afternoon|evening)),?\s+(?:(?:Mr|Mrs|Ms|Miss|Dr)\.?\s+)?([A-Z][a-z]+)\b/m;
+const THREAD_ADDRESS_RE = /\b(\d{1,5}\s+[A-Z][A-Za-z0-9'.\-]+(?:\s+[A-Z][A-Za-z0-9'.\-]+){0,4}?\s+(?:St|Street|Ave|Avenue|Dr|Drive|Ct|Court|Ln|Lane|Rd|Road|Blvd|Boulevard|Way|Cir|Circle|Pl|Place))\b/;
+function extractThreadFacts(text) {
+  const facts = {};
+  const name = THREAD_NAME_RE.exec(text || '');
+  if (name) facts.sellerName = name[1];
+  const addr = THREAD_ADDRESS_RE.exec(text || '');
+  if (addr) facts.address = addr[1];
+  return facts;
+}
+// Thread facts fill gaps only — a non-empty deal field always wins.
+function mergeDealFacts(threadFacts, deal) {
+  const merged = Object.assign({}, threadFacts);
+  Object.keys(deal || {}).forEach((k) => {
+    const v = deal[k];
+    if (v !== undefined && v !== null && v !== '') merged[k] = v;
+  });
+  return merged;
 }
 
 // OpenRouter bills from prepaid credits: an unfunded key surfaces as
@@ -271,7 +302,15 @@ exports.handler = async (event) => {
   if (!text.trim()) {
     return json(400, corsHeaders, { status: 'error', error: 'Body needs the conversation text' });
   }
-  const deal = formatDeal(body.deal);
+  const deal = (action === 'check' || action === 'loi')
+    // Thread-stated facts (seller name, property address) fill gaps
+    // the deal block doesn't have — the page only sends {sellerName,
+    // phone} and the contact panel is often blank, so without this
+    // the LOI lists the name/address as missing even when the thread
+    // states them. The deal block always wins; a bare number in a
+    // seller reply ("325k") is never treated as an offer price.
+    ? formatDeal(mergeDealFacts(extractThreadFacts(text), body.deal))
+    : '';
 
   const a = ACTIONS[action];
   const result = await router.complete({
@@ -296,7 +335,7 @@ exports.handler = async (event) => {
       return json(503, corsHeaders, { status: 'not_configured', error: 'Deep read is not configured yet' });
     }
     console.error('[openrouter-assist] router failed: ' + (result.error || 'unknown'));
-    return json(502, corsHeaders, { status: 'error', error: 'Deep read request failed — try again in a moment.' });
+    return json(502, corsHeaders, { status: 'error', error: 'Deep read request failed — try again in a moment.', tried: result.tried, attempts: result.attempts });
   }
   return json(200, corsHeaders, {
     status: 'ok', action, model: result.model, provider: result.provider,
@@ -305,4 +344,4 @@ exports.handler = async (event) => {
 };
 
 // Offline checks (no network): node -e "const o=require('./openrouter-assist.js'); console.log(Object.keys(o._test.ACTIONS))"
-exports._test = { ACTIONS, SELFTEST_MODEL, SELFTEST_URL, buildMessages, isBillingError, formatDeal, MAX_TEXT_CHARS, SELFTEST_TEXT };
+exports._test = { ACTIONS, SELFTEST_MODEL, SELFTEST_URL, buildMessages, isBillingError, formatDeal, extractThreadFacts, mergeDealFacts, MAX_TEXT_CHARS, SELFTEST_TEXT };

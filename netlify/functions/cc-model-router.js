@@ -19,12 +19,23 @@
 //     answers with a billing error: HTTP 402, or 400/403 naming credits);
 //   - any other failure (HTTP error, empty reply, timeout, Gemini 429
 //     quota) moves to the next candidate — never an error dump.
-//   - a transient failure (HTTP 429 / 5xx, timeout, network throw) is
-//     retried ONCE on the same candidate after a 1s pause, when the
-//     total budget still holds a full attempt after the pause — a brief
-//     upstream spike (Gemini 503 under load, Nov 28) must not demote
-//     the best model. Billing failures (402) and empty replies are
-//     never retried.
+//   - a transient HTTP failure (429 / 5xx) is retried ONCE on the
+//     same candidate after a 1s pause, when the total budget still
+//     holds a full attempt after the pause — a brief upstream spike
+//     (Gemini 503 under load, Nov 28) must not demote the best
+//     model. A TIMEOUT or network failure is never retried: a model
+//     that hangs for its whole attempt will hang again, and the
+//     retry would eat the budget the rest of the chain needs (Nov
+//     28: flash hangs 15s+; retrying it starved lite and the LOI
+//     went dead twice before answering). Billing failures (402)
+//     and empty replies are never retried.
+//   - Google legs run on a 6s per-attempt cap (candidate
+//     attemptTimeoutMs): flash either 503s fast or hangs
+//     indefinitely, lite answers in ~1s — a hanging flash must not
+//     eat the 15s default attempt and leave the chain no time.
+//   - complete() reports per-candidate attempts (model + HTTP
+//     status + error) on failure, so a live failure can be
+//     diagnosed from the response instead of guessed at.
 //   - reasoning models are capped at effort 'low' on OpenRouter, and
 //     Google attempts get a 2048-token floor: max_tokens /
 //     maxOutputTokens counts internal thinking tokens, and a default
@@ -69,6 +80,12 @@ const GOOGLE_URL_BASE = 'https://generativelanguage.googleapis.com/v1beta/models
 // and falls back across engines after that.
 // provider: 'openrouter' | 'xai' | 'google'.
 // paid: true = needs prepaid credits on that provider.
+// attemptTimeoutMs: a candidate may cap its own attempt shorter than
+// the 15s default. Google legs run on a 6s cap: flash either 503s fast
+// or hangs indefinitely (live Nov 28: 60s+ with no answer), lite
+// answers in ~1s — a hanging flash must not eat the default attempt
+// and starve the rest of the chain.
+const GOOGLE_ATTEMPT_TIMEOUT_MS = 6000;
 const ROUTES = {
   // Long seller thread, faithful extraction. Best reader first
   // (Claude, 1M ctx), then fastest funded (Grok direct), then the best
@@ -81,8 +98,8 @@ const ROUTES = {
     { engine: 'deepread', provider: 'openrouter', model: 'google/gemma-4-31b-it:free', paid: false },
     { engine: 'deepread', provider: 'openrouter', model: 'particle-ai/particle-1:free', paid: false, reasoning: 'low' },
     { engine: 'deepread', provider: 'openrouter', model: 'openrouter/free', paid: false, reasoning: 'low' },
-    { engine: 'gemini', provider: 'google', model: 'gemini-3.5-flash', paid: false },
-    { engine: 'gemini', provider: 'google', model: 'gemini-3.5-flash-lite', paid: false },
+    { engine: 'gemini', provider: 'google', model: 'gemini-3.5-flash', paid: false, attemptTimeoutMs: GOOGLE_ATTEMPT_TIMEOUT_MS },
+    { engine: 'gemini', provider: 'google', model: 'gemini-3.5-flash-lite', paid: false, attemptTimeoutMs: GOOGLE_ATTEMPT_TIMEOUT_MS },
   ],
   // Short seller follow-up text. Fastest funded first (Grok direct
   // answers in seconds, non-reasoning on purpose), then the same model
@@ -92,8 +109,8 @@ const ROUTES = {
     { engine: 'deepread', provider: 'openrouter', model: 'x-ai/grok-4.20', paid: true, reasoning: 'low' },
     { engine: 'deepread', provider: 'openrouter', model: 'google/gemma-4-26b-a4b-it:free', paid: false },
     { engine: 'deepread', provider: 'openrouter', model: 'openrouter/free', paid: false, reasoning: 'low' },
-    { engine: 'gemini', provider: 'google', model: 'gemini-3.5-flash', paid: false },
-    { engine: 'gemini', provider: 'google', model: 'gemini-3.5-flash-lite', paid: false },
+    { engine: 'gemini', provider: 'google', model: 'gemini-3.5-flash', paid: false, attemptTimeoutMs: GOOGLE_ATTEMPT_TIMEOUT_MS },
+    { engine: 'gemini', provider: 'google', model: 'gemini-3.5-flash-lite', paid: false, attemptTimeoutMs: GOOGLE_ATTEMPT_TIMEOUT_MS },
   ],
   // Second-eyes deal check — FLAGS ONLY, never prices. Best careful
   // reader first, then the strongest free reasoner (effort low, so it
@@ -103,8 +120,8 @@ const ROUTES = {
     { engine: 'deepread', provider: 'openrouter', model: 'nvidia/nemotron-3-ultra-550b-a55b:free', paid: false, reasoning: 'low' },
     { engine: 'deepread', provider: 'openrouter', model: 'google/gemma-4-31b-it:free', paid: false },
     { engine: 'deepread', provider: 'openrouter', model: 'openrouter/free', paid: false, reasoning: 'low' },
-    { engine: 'gemini', provider: 'google', model: 'gemini-3.5-flash', paid: false },
-    { engine: 'gemini', provider: 'google', model: 'gemini-3.5-flash-lite', paid: false },
+    { engine: 'gemini', provider: 'google', model: 'gemini-3.5-flash', paid: false, attemptTimeoutMs: GOOGLE_ATTEMPT_TIMEOUT_MS },
+    { engine: 'gemini', provider: 'google', model: 'gemini-3.5-flash-lite', paid: false, attemptTimeoutMs: GOOGLE_ATTEMPT_TIMEOUT_MS },
   ],
   // LOI draft — ONE engine: Gemini. Gemini drafts the contract
   // language; the OpenRouter free candidates below are resilience only,
@@ -112,8 +129,8 @@ const ROUTES = {
   // They are not a second LOI engine. Flash first, flash-lite right
   // behind it (flash 503s under load; lite answers).
   'loi-draft': [
-    { engine: 'gemini', provider: 'google', model: 'gemini-3.5-flash', paid: false },
-    { engine: 'gemini', provider: 'google', model: 'gemini-3.5-flash-lite', paid: false },
+    { engine: 'gemini', provider: 'google', model: 'gemini-3.5-flash', paid: false, attemptTimeoutMs: GOOGLE_ATTEMPT_TIMEOUT_MS },
+    { engine: 'gemini', provider: 'google', model: 'gemini-3.5-flash-lite', paid: false, attemptTimeoutMs: GOOGLE_ATTEMPT_TIMEOUT_MS },
     { engine: 'deepread', provider: 'openrouter', model: 'google/gemma-4-31b-it:free', paid: false },
     { engine: 'deepread', provider: 'openrouter', model: 'openrouter/free', paid: false, reasoning: 'low' },
   ],
@@ -125,8 +142,8 @@ const ROUTES = {
     { engine: 'deepread', provider: 'openrouter', model: 'x-ai/grok-4.20', paid: true, reasoning: 'low' },
     { engine: 'deepread', provider: 'openrouter', model: 'google/gemma-4-31b-it:free', paid: false },
     { engine: 'deepread', provider: 'openrouter', model: 'openrouter/free', paid: false, reasoning: 'low' },
-    { engine: 'gemini', provider: 'google', model: 'gemini-3.5-flash', paid: false },
-    { engine: 'gemini', provider: 'google', model: 'gemini-3.5-flash-lite', paid: false },
+    { engine: 'gemini', provider: 'google', model: 'gemini-3.5-flash', paid: false, attemptTimeoutMs: GOOGLE_ATTEMPT_TIMEOUT_MS },
+    { engine: 'gemini', provider: 'google', model: 'gemini-3.5-flash-lite', paid: false, attemptTimeoutMs: GOOGLE_ATTEMPT_TIMEOUT_MS },
   ],
 };
 
@@ -273,12 +290,15 @@ async function tryCandidate(candidate, messages, maxTokens, timeoutMs) {
         // here is a billing error like anywhere else.
         const billing = isBillingError(res.status, raw);
         if (billing) markUnfunded(provider);
-        return { ok: false, billing, quota: res.status === 429, status: res.status, transient: res.status === 429 || res.status >= 500, error: 'google HTTP ' + res.status };
+        // retryable: only an HTTP 429/5xx gets one retry. A timeout or
+        // network throw never does (see the catch below).
+        const retryable = res.status === 429 || res.status >= 500;
+        return { ok: false, billing, quota: res.status === 429, status: res.status, transient: retryable, retryable, error: 'google HTTP ' + res.status };
       }
       let data = null;
       try { data = JSON.parse(raw); } catch (e) { /* below */ }
       const content = extractText(data);
-      if (!content) return { ok: false, billing: false, status: res.status, error: 'empty reply' };
+      if (!content) return { ok: false, billing: false, status: res.status, retryable: false, error: 'empty reply' };
       return { ok: true, content };
     }
     // OpenAI-compatible providers: OpenRouter + xAI.
@@ -303,17 +323,20 @@ async function tryCandidate(candidate, messages, maxTokens, timeoutMs) {
     if (!res.ok) {
       const billing = isBillingError(res.status, raw);
       if (billing) markUnfunded(provider);
-      return { ok: false, billing, status: res.status, transient: res.status === 429 || res.status >= 500, error: provider + ' HTTP ' + res.status };
+      const retryable = res.status === 429 || res.status >= 500;
+      return { ok: false, billing, status: res.status, transient: retryable, retryable, error: provider + ' HTTP ' + res.status };
     }
     let data = null;
     try { data = JSON.parse(raw); } catch (e) { /* below */ }
     const content = extractText(data);
-    if (!content) return { ok: false, billing: false, status: res.status, error: 'empty reply' };
+    if (!content) return { ok: false, billing: false, status: res.status, retryable: false, error: 'empty reply' };
     return { ok: true, content };
   } catch (err) {
-    // Timeout / network failure: transient — worth one retry, then walk
-    // on. Never throws.
-    return { ok: false, billing: false, transient: true, error: String((err && err.message) || err) };
+    // Timeout / network failure: transient — the chain walks on — but
+    // NEVER retried. A model that hangs for its whole attempt will
+    // hang again; retrying it would eat the budget the rest of the
+    // chain needs (Nov 28: flash hangs 15s+, the retry starved lite).
+    return { ok: false, billing: false, transient: true, retryable: false, error: String((err && err.message) || err) };
   }
 }
 
@@ -323,10 +346,11 @@ async function tryCandidate(candidate, messages, maxTokens, timeoutMs) {
 // engines after that); omit it for the canonical best-first chain (the
 // inbound-agent hook calls it this way). timeoutMs is the total budget
 // (default 25s); attemptTimeoutMs caps one candidate (default 15s) so a
-// hung model cannot eat the whole budget before the chain moves on. A
-// transient failure (429 / 5xx / timeout / network) is retried once on
-// the same candidate after a 1s pause, only when the budget still holds
-// a full attempt after the pause.
+// hung model cannot eat the whole budget before the chain moves on — a
+// candidate may cap itself shorter (Google legs: 6s). A transient HTTP
+// failure (429 / 5xx) is retried once on the same candidate after a 1s
+// pause, only when the budget still holds a full attempt after the
+// pause; a timeout / network failure is never retried.
 // Returns { ok:true, content, model, provider, engine, tried, fallback }
 // or { ok:false, status:'no_credit'|'error'|'not_configured', error, tried }.
 // status 'no_credit' = every attempted candidate failed on billing (or
@@ -348,6 +372,10 @@ async function complete(opts) {
   const chain = routeFor(job, engine);
   const deadline = Date.now() + timeoutMs;
   const tried = [];
+  // Per-candidate failure detail for the caller (model + HTTP status +
+  // error), so a live failure can be diagnosed from the response
+  // instead of guessed at: which candidate failed, and how.
+  const attempts = [];
   let sawBilling = false;
   let sawNonBilling = false;
   let sawQuota = false;
@@ -359,14 +387,19 @@ async function complete(opts) {
     if (candidate.paid && isUnfunded(candidate.provider)) {
       sawBilling = true;
       tried.push(candidate.model + ' (skipped: no credit)');
+      attempts.push({ model: candidate.model, status: 'skipped', reason: 'no credit' });
       continue;
     }
     const remaining = deadline - Date.now();
     if (remaining <= 100) break; // out of budget — stop, don't half-start
-    const attemptTimeout = Math.min(remaining, attemptTimeoutMs);
+    // A candidate may cap its own attempt shorter than the default:
+    // Google legs run on a 6s cap — a hanging flash must not eat the
+    // default 15s attempt and leave the chain no time for lite.
+    const candTimeout = Math.min(remaining, candidate.attemptTimeoutMs || attemptTimeoutMs);
     sawAttempt = true;
-    const attempt = await tryCandidate(candidate, messages, maxTokens, attemptTimeout);
+    const attempt = await tryCandidate(candidate, messages, maxTokens, candTimeout);
     tried.push(candidate.model);
+    attempts.push({ model: candidate.model, status: attempt.ok ? 'ok' : 'error', httpStatus: attempt.status || null, error: attempt.error || null });
     if (attempt.ok) {
       return {
         ok: true,
@@ -382,16 +415,19 @@ async function complete(opts) {
     else sawNonBilling = true;
     if (attempt.quota) sawQuota = true;
     lastError = attempt.error || lastError;
-    // One retry on a transient failure (429 / 5xx / timeout / network),
-    // only when the budget still holds a full attempt after the pause —
-    // a brief upstream spike must not demote the best model, and the
-    // retry must never eat the budget the rest of the chain needs.
-    if (attempt.transient && deadline - Date.now() > RETRY_DELAY_MS + attemptTimeoutMs) {
+    // One retry on a transient HTTP failure (429 / 5xx) only, and
+    // only when the budget still holds a full attempt after the
+    // pause — a brief upstream spike must not demote the best model,
+    // and the retry must never eat the budget the rest of the chain
+    // needs. A timeout / network failure is never retried (see
+    // tryCandidate): a hanging model hangs again.
+    if (attempt.retryable && deadline - Date.now() > RETRY_DELAY_MS + candTimeout) {
       await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
       const retryRemaining = deadline - Date.now();
-      const retryTimeout = Math.min(retryRemaining, attemptTimeoutMs);
+      const retryTimeout = Math.min(retryRemaining, candTimeout);
       const retry = await tryCandidate(candidate, messages, maxTokens, retryTimeout);
       tried.push(candidate.model + ' (retry)');
+      attempts.push({ model: candidate.model + ' (retry)', status: retry.ok ? 'ok' : 'error', httpStatus: retry.status || null, error: retry.error || null });
       if (retry.ok) {
         return {
           ok: true,
@@ -410,15 +446,15 @@ async function complete(opts) {
     }
   }
   if (!sawAttempt && !sawBilling) {
-    return { ok: false, status: 'not_configured', error: 'No AI provider is configured yet', tried };
+    return { ok: false, status: 'not_configured', error: 'No AI provider is configured yet', tried, attempts };
   }
   // 'no_credit' only when EVERY failure was a billing failure (or a
   // paid skip while unfunded). A free model failing on a 500/timeout
   // is an error, not an empty balance — the UI must not call it dormant.
   if (sawBilling && !sawNonBilling) {
-    return { ok: false, status: 'no_credit', error: 'No credit left on any funded provider', tried, quotaHit: sawQuota };
+    return { ok: false, status: 'no_credit', error: 'No credit left on any funded provider', tried, quotaHit: sawQuota, attempts };
   }
-  return { ok: false, status: 'error', error: lastError, tried, quotaHit: sawQuota };
+  return { ok: false, status: 'error', error: lastError, tried, quotaHit: sawQuota, attempts };
 }
 
 module.exports = {
