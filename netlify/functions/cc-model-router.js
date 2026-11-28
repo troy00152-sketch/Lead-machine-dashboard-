@@ -19,6 +19,19 @@
 //     answers with a billing error: HTTP 402, or 400/403 naming credits);
 //   - any other failure (HTTP error, empty reply, timeout, Gemini 429
 //     quota) moves to the next candidate — never an error dump.
+//   - a transient failure (HTTP 429 / 5xx, timeout, network throw) is
+//     retried ONCE on the same candidate after a 1s pause, when the
+//     total budget still holds a full attempt after the pause — a brief
+//     upstream spike (Gemini 503 under load, Nov 28) must not demote
+//     the best model. Billing failures (402) and empty replies are
+//     never retried.
+//   - reasoning models are capped at effort 'low' on OpenRouter, and
+//     Google attempts get a 2048-token floor: max_tokens /
+//     maxOutputTokens counts internal thinking tokens, and a default
+//     high/medium effort can burn a small budget on thinking and
+//     return a cut-off or empty visible answer (the Nov 28 LOI
+//     truncation). Gemma entries carry no reasoning flag — they are
+//     not reasoning models.
 // So the moment Troy funds OpenRouter credits, the paid primaries start
 // answering with zero code change; while the balance is $0 the best
 // FREE model answers instead. Nothing here ever buys credits and nothing
@@ -42,7 +55,9 @@
 //   openrouter/free                        $0 (router picks a servable free model)
 // Direct (not OpenRouter): grok-4.20-0309-non-reasoning via xAI
 //   ($1.25/$2.50, billed from the $5 prepaid xAI credits) and
-//   gemini-3.5-flash via Google (free tier, quota-limited).
+//   gemini-3.5-flash via Google (free tier, quota-limited), with
+//   gemini-3.5-flash-lite right behind it in every chain — flash
+//   returns 503 "high demand" under load (Nov 28), lite answers.
 'use strict';
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
@@ -58,53 +73,60 @@ const ROUTES = {
   // Long seller thread, faithful extraction. Best reader first
   // (Claude, 1M ctx), then fastest funded (Grok direct), then the best
   // free dense reader (Gemma 4 31B), then the 1M-ctx free model, then
-  // the free router, then Gemini direct.
+  // the free router, then Gemini direct — flash first, flash-lite right
+  // behind it (flash 503s under load; lite answers).
   'thread-summarize': [
-    { engine: 'deepread', provider: 'openrouter', model: 'anthropic/claude-sonnet-5.5', paid: true },
+    { engine: 'deepread', provider: 'openrouter', model: 'anthropic/claude-sonnet-5.5', paid: true, reasoning: 'low' },
     { engine: 'grok', provider: 'xai', model: 'grok-4.20-0309-non-reasoning', paid: false },
     { engine: 'deepread', provider: 'openrouter', model: 'google/gemma-4-31b-it:free', paid: false },
-    { engine: 'deepread', provider: 'openrouter', model: 'particle-ai/particle-1:free', paid: false },
-    { engine: 'deepread', provider: 'openrouter', model: 'openrouter/free', paid: false },
+    { engine: 'deepread', provider: 'openrouter', model: 'particle-ai/particle-1:free', paid: false, reasoning: 'low' },
+    { engine: 'deepread', provider: 'openrouter', model: 'openrouter/free', paid: false, reasoning: 'low' },
     { engine: 'gemini', provider: 'google', model: 'gemini-3.5-flash', paid: false },
+    { engine: 'gemini', provider: 'google', model: 'gemini-3.5-flash-lite', paid: false },
   ],
   // Short seller follow-up text. Fastest funded first (Grok direct
   // answers in seconds, non-reasoning on purpose), then the same model
   // through the key, then the best small free model.
   'draft-followup': [
     { engine: 'grok', provider: 'xai', model: 'grok-4.20-0309-non-reasoning', paid: false },
-    { engine: 'deepread', provider: 'openrouter', model: 'x-ai/grok-4.20', paid: true },
+    { engine: 'deepread', provider: 'openrouter', model: 'x-ai/grok-4.20', paid: true, reasoning: 'low' },
     { engine: 'deepread', provider: 'openrouter', model: 'google/gemma-4-26b-a4b-it:free', paid: false },
-    { engine: 'deepread', provider: 'openrouter', model: 'openrouter/free', paid: false },
+    { engine: 'deepread', provider: 'openrouter', model: 'openrouter/free', paid: false, reasoning: 'low' },
     { engine: 'gemini', provider: 'google', model: 'gemini-3.5-flash', paid: false },
+    { engine: 'gemini', provider: 'google', model: 'gemini-3.5-flash-lite', paid: false },
   ],
   // Second-eyes deal check — FLAGS ONLY, never prices. Best careful
   // reader first, then the strongest free reasoner (effort low, so it
   // stays inside the 25s function envelope), then the best free reader.
   'deal-check': [
-    { engine: 'deepread', provider: 'openrouter', model: 'anthropic/claude-sonnet-5.5', paid: true },
+    { engine: 'deepread', provider: 'openrouter', model: 'anthropic/claude-sonnet-5.5', paid: true, reasoning: 'low' },
     { engine: 'deepread', provider: 'openrouter', model: 'nvidia/nemotron-3-ultra-550b-a55b:free', paid: false, reasoning: 'low' },
     { engine: 'deepread', provider: 'openrouter', model: 'google/gemma-4-31b-it:free', paid: false },
-    { engine: 'deepread', provider: 'openrouter', model: 'openrouter/free', paid: false },
+    { engine: 'deepread', provider: 'openrouter', model: 'openrouter/free', paid: false, reasoning: 'low' },
     { engine: 'gemini', provider: 'google', model: 'gemini-3.5-flash', paid: false },
+    { engine: 'gemini', provider: 'google', model: 'gemini-3.5-flash-lite', paid: false },
   ],
   // LOI draft — ONE engine: Gemini. Gemini drafts the contract
   // language; the OpenRouter free candidates below are resilience only,
   // so the button never goes dead if Gemini's free tier is quota-hit.
-  // They are not a second LOI engine.
+  // They are not a second LOI engine. Flash first, flash-lite right
+  // behind it (flash 503s under load; lite answers).
   'loi-draft': [
     { engine: 'gemini', provider: 'google', model: 'gemini-3.5-flash', paid: false },
+    { engine: 'gemini', provider: 'google', model: 'gemini-3.5-flash-lite', paid: false },
     { engine: 'deepread', provider: 'openrouter', model: 'google/gemma-4-31b-it:free', paid: false },
-    { engine: 'deepread', provider: 'openrouter', model: 'openrouter/free', paid: false },
+    { engine: 'deepread', provider: 'openrouter', model: 'openrouter/free', paid: false, reasoning: 'low' },
   ],
   // Default chain for future agent work (e.g. the inbound agent):
   // best reasoning first, fast funded second, best free base last.
   'agent-default': [
-    { engine: 'deepread', provider: 'openrouter', model: 'anthropic/claude-sonnet-5.5', paid: true },
+    { engine: 'deepread', provider: 'openrouter', model: 'anthropic/claude-sonnet-5.5', paid: true, reasoning: 'low' },
     { engine: 'grok', provider: 'xai', model: 'grok-4.20-0309-non-reasoning', paid: false },
-    { engine: 'deepread', provider: 'openrouter', model: 'x-ai/grok-4.20', paid: true },
+    { engine: 'deepread', provider: 'openrouter', model: 'x-ai/grok-4.20', paid: true, reasoning: 'low' },
     { engine: 'deepread', provider: 'openrouter', model: 'google/gemma-4-31b-it:free', paid: false },
-    { engine: 'deepread', provider: 'openrouter', model: 'openrouter/free', paid: false },
+    { engine: 'deepread', provider: 'openrouter', model: 'openrouter/free', paid: false, reasoning: 'low' },
     { engine: 'gemini', provider: 'google', model: 'gemini-3.5-flash', paid: false },
+    { engine: 'gemini', provider: 'google', model: 'gemini-3.5-flash-lite', paid: false },
   ],
 };
 
@@ -112,6 +134,10 @@ const JOBS = Object.keys(ROUTES);
 const DEFAULT_TIMEOUT_MS = 25000;
 const ATTEMPT_TIMEOUT_MS = 15000;
 const UNFUNDED_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const RETRY_DELAY_MS = 1000; // pause before one retry of a transient failure
+const GOOGLE_MIN_TOKENS = 2048; // Google maxOutputTokens floor: thinking
+// tokens count against it, so a small budget can starve the visible
+// answer on a reasoning model (Gemini 3.5 Flash reasoning is mandatory).
 
 // Provider key env vars. A provider with no key is skipped, never called.
 const PROVIDER_KEYS = {
@@ -154,12 +180,18 @@ function markUnfunded(provider) {
 
 // Ordered chain for a job. When an engine is pinned (a Conversations
 // box asking for its own engine), that engine's candidates move to the
-// front in their original relative order; the rest follow untouched.
+// front in their original relative order; the rest follow — but only
+// the FREE ones. A pinned box never silently spends another engine's
+// paid model: the Gemini box's fallback is Gemma / the free router,
+// never paid Claude (Nov 28: Gemini's self-test was served by Claude
+// while Gemini was 503). The pinned engine's own paid primary stays
+// (e.g. Deep Read's Claude) — that is the box's own model, not a
+// cross-engine spend.
 function routeFor(job, engine) {
   const chain = (ROUTES[job] || []).slice();
   if (!engine) return chain;
   const pinned = chain.filter((c) => c.engine === engine);
-  const rest = chain.filter((c) => c.engine !== engine);
+  const rest = chain.filter((c) => c.engine !== engine && !c.paid);
   return pinned.concat(rest);
 }
 
@@ -199,8 +231,10 @@ function extractText(data) {
 }
 
 // One attempt at one candidate. Returns { ok, content } on success or
-// { ok:false, billing, status, error } on failure. Never throws for an
-// HTTP-level failure — the caller walks on to the next candidate.
+// { ok:false, billing, transient, status, error } on failure. Never
+// throws for an HTTP-level failure — the caller walks on to the next
+// candidate. transient = a 429 / 5xx / timeout / network failure, worth
+// one retry; billing failures and empty replies are not transient.
 async function tryCandidate(candidate, messages, maxTokens, timeoutMs) {
   const provider = candidate.provider;
   const apiKey = keyFor(provider);
@@ -216,7 +250,11 @@ async function tryCandidate(candidate, messages, maxTokens, timeoutMs) {
       const body = {
         system_instruction: { parts: [{ text: parts.system }] },
         contents: [{ role: 'user', parts: [{ text: parts.user }] }],
-        generationConfig: { temperature: 0.4, maxOutputTokens: maxTokens },
+        // Floor, not the raw budget: Gemini 3.5 Flash reasoning is
+        // mandatory and its thinking tokens count against
+        // maxOutputTokens, so a 500-token budget can leave almost
+        // nothing for the visible answer.
+        generationConfig: { temperature: 0.4, maxOutputTokens: Math.max(maxTokens, GOOGLE_MIN_TOKENS) },
       };
       res = await fetchWithTimeout(
         GOOGLE_URL_BASE + encodeURIComponent(candidate.model) + ':generateContent',
@@ -235,7 +273,7 @@ async function tryCandidate(candidate, messages, maxTokens, timeoutMs) {
         // here is a billing error like anywhere else.
         const billing = isBillingError(res.status, raw);
         if (billing) markUnfunded(provider);
-        return { ok: false, billing, quota: res.status === 429, status: res.status, error: 'google HTTP ' + res.status };
+        return { ok: false, billing, quota: res.status === 429, status: res.status, transient: res.status === 429 || res.status >= 500, error: 'google HTTP ' + res.status };
       }
       let data = null;
       try { data = JSON.parse(raw); } catch (e) { /* below */ }
@@ -265,7 +303,7 @@ async function tryCandidate(candidate, messages, maxTokens, timeoutMs) {
     if (!res.ok) {
       const billing = isBillingError(res.status, raw);
       if (billing) markUnfunded(provider);
-      return { ok: false, billing, status: res.status, error: provider + ' HTTP ' + res.status };
+      return { ok: false, billing, status: res.status, transient: res.status === 429 || res.status >= 500, error: provider + ' HTTP ' + res.status };
     }
     let data = null;
     try { data = JSON.parse(raw); } catch (e) { /* below */ }
@@ -273,8 +311,9 @@ async function tryCandidate(candidate, messages, maxTokens, timeoutMs) {
     if (!content) return { ok: false, billing: false, status: res.status, error: 'empty reply' };
     return { ok: true, content };
   } catch (err) {
-    // Timeout / network failure: walk on, never throw.
-    return { ok: false, billing: false, error: String((err && err.message) || err) };
+    // Timeout / network failure: transient — worth one retry, then walk
+    // on. Never throws.
+    return { ok: false, billing: false, transient: true, error: String((err && err.message) || err) };
   }
 }
 
@@ -284,7 +323,10 @@ async function tryCandidate(candidate, messages, maxTokens, timeoutMs) {
 // engines after that); omit it for the canonical best-first chain (the
 // inbound-agent hook calls it this way). timeoutMs is the total budget
 // (default 25s); attemptTimeoutMs caps one candidate (default 15s) so a
-// hung model cannot eat the whole budget before the chain moves on.
+// hung model cannot eat the whole budget before the chain moves on. A
+// transient failure (429 / 5xx / timeout / network) is retried once on
+// the same candidate after a 1s pause, only when the budget still holds
+// a full attempt after the pause.
 // Returns { ok:true, content, model, provider, engine, tried, fallback }
 // or { ok:false, status:'no_credit'|'error'|'not_configured', error, tried }.
 // status 'no_credit' = every attempted candidate failed on billing (or
@@ -340,6 +382,32 @@ async function complete(opts) {
     else sawNonBilling = true;
     if (attempt.quota) sawQuota = true;
     lastError = attempt.error || lastError;
+    // One retry on a transient failure (429 / 5xx / timeout / network),
+    // only when the budget still holds a full attempt after the pause —
+    // a brief upstream spike must not demote the best model, and the
+    // retry must never eat the budget the rest of the chain needs.
+    if (attempt.transient && deadline - Date.now() > RETRY_DELAY_MS + attemptTimeoutMs) {
+      await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+      const retryRemaining = deadline - Date.now();
+      const retryTimeout = Math.min(retryRemaining, attemptTimeoutMs);
+      const retry = await tryCandidate(candidate, messages, maxTokens, retryTimeout);
+      tried.push(candidate.model + ' (retry)');
+      if (retry.ok) {
+        return {
+          ok: true,
+          content: retry.content,
+          model: candidate.model,
+          provider: candidate.provider,
+          engine: candidate.engine,
+          tried,
+          fallback: i > 0,
+        };
+      }
+      if (retry.billing) sawBilling = true;
+      else sawNonBilling = true;
+      if (retry.quota) sawQuota = true;
+      lastError = retry.error || lastError;
+    }
   }
   if (!sawAttempt && !sawBilling) {
     return { ok: false, status: 'not_configured', error: 'No AI provider is configured yet', tried };
