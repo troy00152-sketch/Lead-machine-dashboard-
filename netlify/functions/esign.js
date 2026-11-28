@@ -616,10 +616,44 @@ function buildSendDocumentBody({ documentId, sentBy, medium, ccRecipients }) {
   if (ccRecipients && ccRecipients.length) body.ccRecipients = ccRecipients;
   return body;
 }
+// Links — server-side helpers, so the Contracts page, the SMS nudge,
+// and the refresh action all read the seller's signing link the same
+// way. HL's link records NEVER carry a URL: the list projection
+// (GET /proposals/document, verified live Nov 27, 2026 — all 13
+// documents) and the send-response projection both give each link
+// record a referenceId + recipientId + documentId and NO url/link/
+// href field at all. The signing URL is therefore CONSTRUCTED from
+// the referenceId. PROOF: HL's own signing email for document
+// 6af52da82feb5ce2ae937b7d (Nov 11 sheet send, Gmail 1a1cdcb8e8df3fb5)
+// resolved its msgsndrsend tracking link to
+// https://sendlink.co/documents/v1/cf860e46-5ea3-41ee-b7c4-9b297643e9f4?locale=en-US
+// — and cf860e46-... IS that document's contacts-link referenceId
+// (recipient = the emailed test seller). sendlink.co is HighLevel's
+// own signing host; ?locale= is the document's locale (en-US on all
+// 13 live docs; default en-US). A direct url/link/href on a link
+// record, if HL ever returns one, still wins — construction is only
+// the fallback. Drafts carry no links from the HL API (proven live
+// Nov 11: unsent drafts read links: []), so there is no per-draft
+// URL to construct — the caller must treat '' as "no link yet",
+// never invent one.
+const HL_SIGNING_BASE = 'https://sendlink.co/documents/v1';
+function signingUrlForReferenceId(referenceId, locale) {
+  const ref = String(referenceId || '').trim();
+  if (!ref) return '';
+  const loc = String(locale || 'en-US').trim() || 'en-US';
+  return HL_SIGNING_BASE + '/' + encodeURIComponent(ref) + '?locale=' + encodeURIComponent(loc);
+}
+function signingUrlForLink(link, locale) {
+  const l = link || {};
+  const direct = String(l.url || l.link || l.href || '').trim();
+  if (direct) return direct;
+  return signingUrlForReferenceId(l.referenceId, locale);
+}
 function signingLinkFor(recipientId, doc) {
   const links = (doc && Array.isArray(doc.links)) ? doc.links : [];
   const l = links.find((x) => x && x.recipientId === recipientId);
-  return l ? (l.url || l.link || l.href || '') : '';
+  if (!l) return '';
+  return signingUrlForLink(l, (doc && doc.locale) || 'en-US');
 }
 
 // "Open draft in HighLevel" — the one-tap preview link owed since the
@@ -768,15 +802,17 @@ async function resolveEnvelopeDocumentId(token, store, envelope, opts) {
 //    Agency". Do not send from this copy until those are fixed in
 //    the editor (Nov 14 gate, still open).
 //  - 6af9153bdd96ec7856121790 ("Assignment Agreement TO BUYER —
-//    FINAL", Nov 15): created from the text Troy pasted Nov 14
+//    FINAL", Nov 14): created from the text Troy pasted Nov 14
 //    after an "internal server error" on save (it first landed as
-//    "New Template", then was renamed). Its fields have never been
-//    verified by any tool — the HighLevel API cannot return template
-//    text or fields — so signature placement is unconfirmed until
-//    someone opens it in the editor.
+//    "New Template", then was renamed). HL createdAt is
+//    2026-11-15T02:13:15Z, which reads Nov 14 in ET — the page
+//    renders browser-local time, so the note says Nov 14. Its
+//    fields have never been verified by any tool — the HighLevel
+//    API cannot return template text or fields — so signature
+//    placement is unconfirmed until someone opens it in the editor.
 const TEMPLATE_NOTES = {
   '6ad1168a4bf151249d3e873a': 'Live copy differs from the local master (checked in the HighLevel editor Nov 14): no letterhead, no legal description line, no APN line, no $749 administrative fee, and §3 still says "designated Title Agency". Do not send from this copy until those are fixed in the editor.',
-  '6af9153bdd96ec7856121790': 'Created Nov 15 from the text Troy pasted Nov 14. Its fields have never been verified by any tool — the HighLevel API cannot return template text or fields — so confirm the signature fields in the HighLevel editor before the first send.',
+  '6af9153bdd96ec7856121790': 'Created Nov 14 from the text Troy pasted Nov 14. Its fields have never been verified by any tool — the HighLevel API cannot return template text or fields — so confirm the signature fields in the HighLevel editor before the first send.',
 };
 function attachTemplateNotes(templates) {
   const list = Array.isArray(templates) ? templates : [];
@@ -968,13 +1004,40 @@ function resendGateDecision(opts) {
 }
 function projectDocumentLinks(doc) {
   const links = (doc && Array.isArray(doc.links)) ? doc.links : [];
+  const locale = (doc && doc.locale) || 'en-US';
   return links.map((l) => ({
     recipientId: (l && l.recipientId) || '',
     documentId: (l && l.documentId) || '',
-    // HL link URL field varies (url / link / href) — signingLinkFor
-    // in this file reads the same three.
-    url: (l && (l.url || l.link || l.href)) || '',
+    referenceId: (l && l.referenceId) || '',
+    // HL returns NO url field on a link record (verified live Nov 27,
+    // 2026) — the URL is constructed from the referenceId by
+    // signingUrlForLink (see the Links helpers above). The referenceId
+    // is carried through so the page can show it, and the document's
+    // locale sets ?locale= (en-US default).
+    url: signingUrlForLink(l, locale),
   }));
+}
+
+// Viewed date — HighLevel exposes NO dedicated viewed timestamp; a
+// document has only createdAt + updatedAt, and recipients carry no
+// viewed field. updatedAt IS the view event, but ONLY when the
+// document's status is 'viewed' AND no recipient has signed: the
+// only post-send write to an unsigned viewed document is the view
+// itself. Proven Nov 27, 2026 across all 6 live viewed docs:
+// updatedAt trails the link minting (send) by 0.4–15.5 min,
+// documentRevision stays 1, paymentStatus stays no_payment — and
+// the one viewed doc WITH a signature (6ad7f0f89fba0130bbbe29f6) has
+// updatedAt 19s AFTER its recipient's signedDate, i.e. the
+// signature, not the view — so any signed recipient voids the
+// inference. Completed / accepted docs carry the completion time in
+// updatedAt, not the view time, so they get no viewedAt either.
+// Returns the raw ISO updatedAt, or '' when the rule does not hold.
+function viewedAtOf(doc) {
+  const d = doc || {};
+  if (String(d.status || '').toLowerCase() !== 'viewed') return '';
+  const recips = Array.isArray(d.recipients) ? d.recipients : [];
+  if (recips.some((r) => r && (r.hasCompleted === true || r.signedDate || r.signedAt))) return '';
+  return d.updatedAt || '';
 }
 async function enrichDocuments(token, docs, impl) {
   const list = Array.isArray(docs) ? docs : [];
@@ -999,6 +1062,11 @@ async function enrichDocuments(token, docs, impl) {
       status: d.status,
       recipients: d.recipients || [],
       updatedAt: d.updatedAt,
+      // viewedAt is the viewed date under the viewed+unsigned rule
+      // (see viewedAtOf) — '' when the rule does not hold, never
+      // guessed. locale sets ?locale= on the constructed signing URL.
+      viewedAt: viewedAtOf(d),
+      locale: d.locale || 'en-US',
       links: projectDocumentLinks(d),
       createdAt: d.createdAt || '',
       // grandTotal is 0.00 on drafts (verified Nov 11) — the page
@@ -1305,7 +1373,11 @@ exports.handler = async (event) => {
     try {
       const contact = await hlGetContact(token, envelope.contactId);
       const link = (sent.links || []).find((l) => l && l.recipientId === envelope.contactId);
-      const linkUrl = link ? (link.url || link.link || link.href || '') : '';
+      // The send-response links carry no url field — the signing URL
+      // is constructed from the link's referenceId (see
+      // signingUrlForLink). No locale on the send response, so the
+      // en-US default applies (all live docs are en-US).
+      const linkUrl = link ? signingUrlForLink(link) : '';
       if (!contact) { sms.reason = 'Seller contact could not be re-read; link not texted.'; }
       else if (isSmsDnd(contact)) { sms.reason = 'Seller is DND/dnc — signing link sent by email only, no text.'; }
       else if (!contact.phone) { sms.reason = 'No mobile on file — signing link sent by email only.'; }
@@ -1419,7 +1491,9 @@ exports.handler = async (event) => {
     let sms = { attempted: false, sent: false, reason: '' };
     try {
       const link = (sent.links || []).find((l) => l && l.recipientId === String(seller.id));
-      const linkUrl = link ? (link.url || link.link || link.href || '') : '';
+      // Same construction as the send handler (no url field on HL
+      // link records); the document's locale sets ?locale=.
+      const linkUrl = link ? signingUrlForLink(link, doc.locale) : '';
       if (isSmsDnd(contact)) { sms.reason = 'Seller is DND/dnc — signing link sent by email only, no text.'; }
       else if (!contact.phone) { sms.reason = 'No mobile on file — signing link sent by email only.'; }
       else if (!linkUrl) { sms.reason = 'HighLevel did not return a signing link to text.'; }
@@ -1495,6 +1569,9 @@ module.exports = {
   buildSendTemplateBody,
   buildSendDocumentBody,
   signingLinkFor,
+  signingUrlForReferenceId,
+  signingUrlForLink,
+  viewedAtOf,
   hlDocumentsUrl,
   grandTotalAmount,
   contractKind,
