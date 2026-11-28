@@ -702,26 +702,63 @@ exports.handler = async (event) => {
     if (action === 'stop') {
       const session = await loadSession(event);
       if (!session) return bad('No session.');
-      // Best-effort hangup of every live leg; the session ends either way.
+      // Hang up every live leg — seller legs AND the agent leg — and
+      // say so when a hangup fails. A failed hangup used to be
+      // swallowed and the leg marked 'ended' anyway, so a seller's
+      // phone could keep ringing with the record claiming it was dead
+      // (Nov 28: a ringing leg survived two Stops and page reloads).
+      // A leg whose hangup fails stays live in the record (and its
+      // lead stays 'dialing', so it can't be re-dialed while the
+      // first leg still rings) — a second Stop retries it. A
+      // 404/not-found from Telnyx means the leg is already gone, so
+      // that one is marked ended.
       const v = voiceLib();
+      const alreadyGone = (e) => /404|not[\s-]?found/i.test(String((e && e.message) || e));
+      const hangupFailures = [];
+      const failedLeadKeys = new Set();
+      const hangupLeg = async (callControlId, label, leadKey) => {
+        try {
+          await v.hangup(callControlId);
+          return true;
+        } catch (e) {
+          if (alreadyGone(e)) return true;
+          hangupFailures.push(label + ': ' + String((e && e.message) || e));
+          if (leadKey) failedLeadKeys.add(leadKey);
+          return false;
+        }
+      };
       for (const leg of Object.values(session.legs)) {
-        if (leg.state !== 'ended') {
-          try {
-            await v.hangup(leg.callControlId);
-          } catch (e) { /* leg may already be gone */ }
+        if (leg.state === 'ended') continue;
+        const hungUp = await hangupLeg(leg.callControlId, leg.phone || leg.callControlId, leg.leadKey);
+        if (hungUp) {
           leg.state = 'ended';
           leg.endedAt = Date.now();
         }
       }
+      // The agent leg usually rides in session.legs already (summonAgent
+      // records it there); hang it up here only when it has no map entry.
+      const legIds = new Set(Object.values(session.legs).map((l) => l.callControlId));
+      if (session.agentCallControlId && !legIds.has(session.agentCallControlId)) {
+        const hungUp = await hangupLeg(session.agentCallControlId, 'agent leg', null);
+        if (hungUp) session.agentCallControlId = null;
+      } else if (session.agentCallControlId && legIds.has(session.agentCallControlId)) {
+        const agentLeg = session.legs[session.agentCallControlId];
+        if (agentLeg && agentLeg.state === 'ended') session.agentCallControlId = null;
+      }
       for (const lead of session.leads) {
+        if (failedLeadKeys.has(lead.key)) continue; // still ringing — do not re-dial
         if (lead.status === 'dialing' || lead.status === 'answered') lead.status = 'pending';
         if (lead.status === 'connected' || lead.status === 'awaiting-disposition') lead.status = 'done';
       }
       session.winnerCallControlId = null;
-      session.agentCallControlId = null;
       session.connectedLeadKey = null;
       session.status = 'stopped';
       session.endedAt = Date.now();
+      if (hangupFailures.length) {
+        session.lastError = 'stop-hangup-failed: ' + hangupFailures.join(' | ');
+      } else if (session.lastError && session.lastError.indexOf('stop-hangup-failed:') === 0) {
+        session.lastError = null; // a later Stop cleared the earlier failure
+      }
       await saveSession(session, event);
       return ok({ session: publicSession(session) });
     }
