@@ -232,14 +232,25 @@ function renderWeek() {
   var sunday = new Date(range.monday.getFullYear(), range.monday.getMonth(), range.monday.getDate() + 6);
   document.getElementById('weekLabel').textContent = fmtDay(range.monday.getTime()) + ' – ' + fmtDay(sunday.getTime());
   var el = document.getElementById('apptList');
-  var list = state.appointments.slice().sort(function (a, b) {
+  var all = state.appointments.slice().sort(function (a, b) {
     return (Date.parse(a.startISO) || 0) - (Date.parse(b.startISO) || 0);
   });
+  // Cancelled rows are clutter, not content: the cancel path already
+  // cancels all twin rows idempotently, so hide them here and say how
+  // many were hidden — never silently drop rows.
+  var cancelledCount = 0;
+  var list = all.filter(function (a) {
+    if (a.status === 'cancelled') { cancelledCount += 1; return false; }
+    return true;
+  });
+  var hiddenNote = cancelledCount
+    ? '<div class="note" style="margin-bottom:8px">' + cancelledCount + ' cancelled this week — hidden</div>'
+    : '';
   if (!list.length) {
-    el.innerHTML = '<div class="empty"><div class="big">📅</div><div>No appointments this week.</div></div>';
+    el.innerHTML = hiddenNote + '<div class="empty"><div class="big">📅</div><div>No appointments this week.</div></div>';
     return;
   }
-  var html = '';
+  var html = hiddenNote;
   var lastDay = '';
   list.forEach(function (a) {
     var startMs = Date.parse(a.startISO) || 0;

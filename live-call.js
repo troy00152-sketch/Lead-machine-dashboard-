@@ -749,6 +749,7 @@
   // persists the fresh state.
   function clearDraftForNewDeal() {
     try { localStorage.removeItem('liveCallDraft.v1'); } catch (e) { /* ignore */ }
+    clearDraftOnServer(); // or a later load resurrects the stale call
     // Deal fields first: every one blank, before the new deal fills on top.
     var blank = blankDealFields();
     DEAL_FIELD_IDS.forEach(function (id) {
@@ -1102,28 +1103,125 @@
     if (st) st.textContent = 'Downloaded ' + fname + ' — move it into ~/workspace/playbook-system/live-call-debriefs/ (that folder is the canonical record).';
   }
 
-  function saveDraft() {
+  // ---------- server-backed draft (Nov 27, 2026) ----------
+  // Save draft was localStorage-only: a draft saved on Troy's phone
+  // never reached his Mac. The draft now write-throughs to
+  // cc-live-call-draft (Blobs, one draft per account, same lm_auth
+  // gate as cc-tasks-api). Local FIRST, server second: the local write
+  // never waits on the network, and a failed server save leaves the
+  // local copy intact and says so in #saveStatus ("saved in this
+  // browser only") instead of claiming a sync that did not happen.
+  var DRAFT_API = '/.netlify/functions/cc-live-call-draft';
+  var draftSaveSeq = 0;
+  var draftLastServerJson = null; // stable JSON the server last acked
+  var draftServerLoadDone = false;
+
+  function collectDraftData() {
+    var data = {};
+    document.querySelectorAll('[data-draft]').forEach(function (el) {
+      data[el.id] = el.type === 'checkbox' ? el.checked : el.value;
+    });
+    data.__notes = notes;
+    data.updatedAt = Date.now();
+    return data;
+  }
+  // The dedupe key: identical field content must not re-POST. updatedAt
+  // changes on every collect, so it is stripped from the comparison.
+  function draftStableJson(data) {
+    var copy = {};
+    Object.keys(data || {}).forEach(function (k) { if (k !== 'updatedAt') copy[k] = data[k]; });
+    return JSON.stringify(copy);
+  }
+  function applyDraftData(data) {
+    if (!data || typeof data !== 'object') return;
+    Object.keys(data).forEach(function (id) {
+      if (id === '__notes') { notes = data[id] || []; return; }
+      if (id === 'updatedAt') return; // bookkeeping, not a field
+      var el = $(id);
+      if (!el) return;
+      if (el.type === 'checkbox') el.checked = !!data[id]; else el.value = data[id];
+    });
+    renderNotes();
+  }
+  function setDraftStatus(text) { var st = $('saveStatus'); if (st) st.textContent = text || ''; }
+  function pushDraftToServer(data) {
+    if (typeof fetch === 'undefined') { setDraftStatus('Draft saved in this browser only — server could not be reached.'); return; }
+    var stable = draftStableJson(data);
+    if (stable === draftLastServerJson) return; // already on the server
+    var seq = ++draftSaveSeq;
+    fetch(DRAFT_API + '?action=save', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      credentials: 'include', body: JSON.stringify({ draft: data })
+    }).then(function (r) { return r.ok ? r.json() : null; }).then(function (body) {
+      if (!body || body.ok !== true) return false;
+      draftLastServerJson = stable;
+      return true;
+    }).catch(function () { return false; }).then(function (ok) {
+      if (seq !== draftSaveSeq) return ok; // a newer save supersedes this status
+      setDraftStatus(ok ? 'Draft saved.' : 'Draft saved in this browser only — server could not be reached.');
+      return ok;
+    });
+  }
+  function clearDraftOnServer() {
+    if (typeof fetch === 'undefined') return;
+    draftLastServerJson = null;
     try {
-      var data = {};
-      document.querySelectorAll('[data-draft]').forEach(function (el) {
-        data[el.id] = el.type === 'checkbox' ? el.checked : el.value;
-      });
-      data.__notes = notes;
-      localStorage.setItem('liveCallDraft.v1', JSON.stringify(data));
-    } catch (e) { /* private mode — download still works */ }
+      fetch(DRAFT_API + '?action=clear', { method: 'POST', credentials: 'include' }).catch(function () {});
+    } catch (e) { /* best-effort — the local clear already happened */ }
+  }
+  // Restore from the server when its draft is newer than the local one.
+  // Runs AFTER the local restore + auto-fill, so it can never clobber a
+  // deal the URL just filled: a server draft is applied only when no
+  // auto-fill resolved, or when it is the SAME address as the form
+  // (same call, newer notes/fields). A server draft for another address
+  // is an older/other call — ignored; the next local save overwrites it
+  // (one draft per account, last writer wins). When the local copy is
+  // newer (edited while offline), it is pushed up instead.
+  function loadDraftFromServer(autoFillSource) {
+    if (typeof fetch === 'undefined' || draftServerLoadDone) return;
+    draftServerLoadDone = true;
+    var localData = null;
+    try {
+      var localRaw = localStorage.getItem('liveCallDraft.v1');
+      if (localRaw) localData = JSON.parse(localRaw);
+    } catch (e) { localData = null; }
+    fetch(DRAFT_API + '?action=load', { credentials: 'include' }).then(function (r) {
+      return r.ok ? r.json() : null;
+    }).then(function (body) {
+      if (!body || body.ok !== true || !body.draft) return;
+      var server = body.draft;
+      var localAt = (localData && typeof localData.updatedAt === 'number') ? localData.updatedAt : 0;
+      var serverAt = typeof server.updatedAt === 'number' ? server.updatedAt : (body.updatedAt || 0);
+      var formAddress = $('address') ? $('address').value.trim() : '';
+      if (autoFillSource && server.address && formAddress && !isSameAddress(server.address, formAddress)) return; // other call — do not clobber
+      if (serverAt > localAt) {
+        applyDraftData(server);
+        try { localStorage.setItem('liveCallDraft.v1', JSON.stringify(server)); } catch (e) {}
+        draftLastServerJson = draftStableJson(server);
+        if (server.address) buildPrep();
+      } else if (localData && serverAt < localAt) {
+        // Local is newer (edited while offline) — push it up so the
+        // server stops holding the stale copy.
+        pushDraftToServer(localData);
+      } else {
+        draftLastServerJson = draftStableJson(server);
+      }
+    }).catch(function () { /* offline — the local draft stands */ });
+  }
+
+  function saveDraft() {
+    var data;
+    try { data = collectDraftData(); } catch (e) { return; }
+    // Local FIRST: the local write never waits on the network, so a
+    // draft is never lost to a failed server round trip.
+    try { localStorage.setItem('liveCallDraft.v1', JSON.stringify(data)); } catch (e) { /* private mode — the server copy is the fallback; download still works */ }
+    pushDraftToServer(data);
   }
   function restoreDraft() {
     try {
       var raw = localStorage.getItem('liveCallDraft.v1');
       if (!raw) return;
-      var data = JSON.parse(raw);
-      Object.keys(data).forEach(function (id) {
-        if (id === '__notes') { notes = data[id] || []; return; }
-        var el = $(id);
-        if (!el) return;
-        if (el.type === 'checkbox') el.checked = !!data[id]; else el.value = data[id];
-      });
-      renderNotes();
+      applyDraftData(JSON.parse(raw));
     } catch (e) { /* ignore corrupt draft */ }
   }
   function renderNotes() {
@@ -1308,6 +1406,7 @@
   document.addEventListener('DOMContentLoaded', function () {
     restoreDraft();
     var autoFillSource = autoFillFromUrl(); // ?lead= / URL params win over the restored draft
+    loadDraftFromServer(autoFillSource); // server copy, when newer (never clobbers the filled deal)
     renderChips(null);
     renderNotes();
     // Seed the lookup's "current address" from the restored draft /
@@ -1346,7 +1445,7 @@
     var dlBtn = $('downloadBtn');
     if (dlBtn) dlBtn.addEventListener('click', downloadDebrief);
     var draftBtn = $('draftBtn');
-    if (draftBtn) draftBtn.addEventListener('click', function () { saveDraft(); var st = $('saveStatus'); if (st) st.textContent = 'Draft saved in this browser.'; });
+    if (draftBtn) draftBtn.addEventListener('click', function () { saveDraft(); }); // saveDraft sets #saveStatus honestly (server ok vs browser-only)
     var noteBtn = $('addNote');
     if (noteBtn) noteBtn.addEventListener('click', function () {
       var v = $('noteText') ? $('noteText').value.trim() : '';

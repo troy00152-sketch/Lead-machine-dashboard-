@@ -41,14 +41,16 @@
 <div class="wrap">
   <div class="topbar">
     <div class="title">📊 Pipeline</div>
+    <input id="pipeSearch" type="search" placeholder="Search deals — name, address, phone" oninput="pipeApplyFilter(this.value)" style="flex:1;min-width:200px;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:20px;padding:9px 14px;font-size:13px;outline:none">
     <a class="back active" href="/pipeline.html">📊 Pipeline</a>
     <a class="back" href="/contacts.html">👥 Contacts</a>
     <a class="back" href="/conversations.html">💬 Conversations</a>
     <a class="back" href="/index.html">← Dashboard</a>
   </div>
   <p class="muted" id="pipeMeta">Loading pipeline…</p>
+  <p class="muted" id="pipeStatus"></p>
   <div id="board"></div>
-  <p class="muted">Read-only board — no drag, no status changes. Deals come from the dedicated cc-data getOpportunities feed, which returns every pipeline and stage from HighLevel (including empty stages), every fetched opportunity with its stage name resolved server-side, value, contact phone + contact id, pipeline, and dates. Closed deals render as rows in their Closed / Sold / Won stage columns like any other deal — no longer count + volume only.</p>
+  <p class="muted">Search filters the board by deal name, address, or phone. Move a deal with the "Move to…" menu on its card — it writes the new stage to HighLevel, the same as dragging the card in the CRM, and the board re-renders in place. Deals come from the dedicated cc-data getOpportunities feed, which returns every pipeline and stage from HighLevel (including empty stages), every fetched opportunity with its stage name resolved server-side, value, contact phone + contact id, pipeline, and dates. Closed deals render as rows in their Closed / Sold / Won stage columns like any other deal — no longer count + volume only.</p>
   <p class="muted">Honest limit: HighLevel holds far more opportunities than one function call can fetch (12,917 total on Nov 27 vs a 20-page / 2,000-opp per-call cap), so the board shows the newest fetched slice, labelled above with the exact total and the per-pipeline counts. Empty stages render as empty columns, not missing ones. Contact phones are enriched for up to 200 fetched deals per load (deal pipelines first); the rest show no phone until enriched.</p>
 </div>
 
@@ -101,6 +103,12 @@ function pipeThreadLink(phone) {
 function pipePhoneHref(phone) {
   var k = pipeThreadKey(phone);
   return k ? 'tel:+' + k : '';
+}
+/* Contacts deep-link per deal (contacts.html opens the matching
+   drawer from ?phone=), or the plain list when the deal has no phone. */
+function pipeContactsLink(phone) {
+  var k = pipeThreadKey(phone);
+  return k ? '/contacts.html?phone=' + encodeURIComponent(k) : '/contacts.html';
 }
 /* Closed-deal summary over fetched opportunities: a deal counts as
    closed when its status is 'won' or its stage name says Closed,
@@ -205,6 +213,21 @@ function dealCardHtml(o) {
   var thread = pipeThreadLink(o.contactPhone);
   var phoneHref = pipePhoneHref(o.contactPhone);
   var created = o.createdAt ? new Date(o.createdAt).toLocaleDateString() : '';
+  /* Stage move (Nov 27, 2026): the board was read-only — a deal could
+     not be moved the way HL moves it. The menu lists the other stages
+     of this deal's own pipeline (PIPE_STAGES, filled at load); the
+     current stage is disabled, not offered. Deals with no pipeline
+     (Unmatched bucket) get no menu — there is no stage list to move to. */
+  var stages = (typeof PIPE_STAGES !== 'undefined' && o.pipelineId) ? (PIPE_STAGES[o.pipelineId] || []) : [];
+  var moveHtml = '';
+  if (stages.length && o.id) {
+    moveHtml = '<div style="margin-top:6px"><select onchange="pipeMoveStage(\'' + esc(o.id) + '\', \'' + esc(o.stageId || '') + '\', this)" title="Move to another stage" style="width:100%;background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:6px 8px;font-size:12px">' +
+      '<option value="">Move to…</option>' +
+      stages.map(function (s) {
+        return '<option value="' + esc(s.id) + '"' + (s.id === String(o.stageId || '') ? ' disabled' : '') + '>' + esc(s.name) + '</option>';
+      }).join('') +
+      '</select></div>';
+  }
   return '<div class="card"><div class="name">' + esc(o.name || 'Opportunity') + '</div>' +
     (addr ? '<div class="sub">' + addr + '</div>' : '') +
     '<div class="val">' + esc(pipeMoney(o.monetaryValue)) + '</div>' +
@@ -213,9 +236,10 @@ function dealCardHtml(o) {
       : '<div class="sub">No phone on file</div>') +
     (o.contactId ? '<div class="sub">CRM contact ' + esc(o.contactId) + '</div>' : '') +
     (created ? '<div class="sub">Created ' + esc(created) + '</div>' : '') +
+    moveHtml +
     '<div style="margin-top:6px">' +
     (thread ? '<a href="' + esc(thread) + '">Open thread →</a> · ' : '') +
-    '<a href="/contacts.html">View in Contacts →</a></div></div>';
+    '<a href="' + esc(pipeContactsLink(o.contactPhone)) + '">View in Contacts →</a></div></div>';
 }
 function stageColumnHtml(c) {
   var part = columnDealsForRender(c.deals, PIPE_COLUMN_RENDER_MAX);
@@ -232,6 +256,81 @@ function stageColumnHtml(c) {
   }
   return html + '</div>';
 }
+/* Last fetched payload + live filter + stage list per pipeline.
+   renderBoard() re-renders from these, so search and stage moves
+   never refetch. */
+var PIPE_DATA = null;
+var PIPE_FILTER = '';
+var PIPE_STAGES = {};
+function pipeApplyFilter(q) {
+  PIPE_FILTER = String(q || '').trim().toLowerCase();
+  renderBoard();
+}
+function pipeFilteredOpps() {
+  var opps = (PIPE_DATA && PIPE_DATA.opportunities) || [];
+  if (!PIPE_FILTER) return opps;
+  return opps.filter(function (o) {
+    var hay = [o.name, o.address, o.contactPhone, o.stage, o.pipeline].join(' ').toLowerCase();
+    return hay.indexOf(PIPE_FILTER) !== -1;
+  });
+}
+function renderBoard() {
+  var board = document.getElementById('board');
+  var d = PIPE_DATA;
+  if (!d) { board.innerHTML = ''; return; }
+  var cols = buildPipelineColumns(d.pipelines || [], pipeFilteredOpps());
+  var html = cols.map(function (pipe) {
+    var pipeTotal = (d.perPipeline && d.perPipeline[pipe.pipelineId])
+      ? d.perPipeline[pipe.pipelineId]
+      : null;
+    var sub = pipeTotal
+      ? pipeTotal.fetched + ' of ' + pipeTotal.total + ' fetched' + (pipeTotal.capped ? ' (capped)' : '')
+      : pipe.stages.reduce(function (n, c) { return n + c.deals.length; }, 0) + ' deals';
+    return '<h2 class="pipe-head">' + esc(pipe.pipeline) + ' <span class="muted">— ' + esc(sub) + '</span></h2>' +
+      '<div class="board">' + pipe.stages.map(stageColumnHtml).join('') + '</div>';
+  }).join('');
+  board.innerHTML = html || '<div class="empty">No pipelines returned by the feed.</div>';
+}
+/* Stage move (Nov 27, 2026): PUT the new stage to HighLevel via
+   cc-data updateOpportunity, then update the cached row and
+   re-render in place. The server invalidated its own feed cache, so
+   the next full load agrees. A failed move restores the menu and
+   says why — the card never silently lands in the wrong stage. */
+async function pipeMoveStage(oppId, fromStageId, sel) {
+  var toStageId = sel.value;
+  if (!toStageId || toStageId === String(fromStageId || '')) { sel.value = ''; return; }
+  var status = document.getElementById('pipeStatus');
+  sel.disabled = true;
+  if (status) status.textContent = 'Moving…';
+  try {
+    var res = await fetch('/.netlify/functions/cc-data?action=updateOpportunity', {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: oppId, pipelineStageId: toStageId }),
+    });
+    var d = await res.json().catch(function () { return null; });
+    if (!res.ok || !d || d.ok === false) throw new Error((d && (d.detail || d.error)) || ('HTTP ' + res.status));
+    var rows = (PIPE_DATA && PIPE_DATA.opportunities) || [];
+    var moved = null;
+    var stageName = toStageId;
+    for (var i = 0; i < rows.length; i++) {
+      if (String(rows[i].id) === String(oppId)) {
+        moved = rows[i];
+        moved.stageId = toStageId;
+        var st = (PIPE_STAGES[moved.pipelineId] || []).filter(function (s) { return s.id === toStageId; })[0];
+        if (st) { moved.stage = st.name; stageName = st.name; }
+        moved.updatedAt = new Date().toISOString();
+        break;
+      }
+    }
+    renderBoard();
+    if (status) status.textContent = '✓ Moved ' + (moved ? (moved.name || 'deal') : 'deal') + ' to ' + stageName + '.';
+  } catch (e) {
+    sel.value = '';
+    sel.disabled = false;
+    if (status) status.textContent = 'Could not move the deal: ' + (e.message || e);
+  }
+}
 async function loadPipeline() {
   var meta = document.getElementById('pipeMeta');
   var board = document.getElementById('board');
@@ -239,8 +338,14 @@ async function loadPipeline() {
     var res = await fetch('/.netlify/functions/cc-data?action=getOpportunities', { credentials: 'include' });
     var d = await res.json();
     if (!d || d.ok === false) throw new Error((d && d.error) || ('HTTP ' + res.status));
+    PIPE_DATA = d;
+    PIPE_STAGES = {};
+    (d.pipelines || []).forEach(function (p) {
+      PIPE_STAGES[String(p.id || '')] = (p.stages || []).map(function (s) {
+        return { id: String(s.id || ''), name: String(s.name || '') };
+      });
+    });
     var opps = d.opportunities || [];
-    var cols = buildPipelineColumns(d.pipelines || [], opps);
     var closed = pipeClosedSummary(opps);
     var perPipe = Object.keys(d.perPipeline || {}).map(function (id) {
       var p = d.perPipeline[id];
@@ -254,17 +359,7 @@ async function loadPipeline() {
     metaLine += (d.fetchedAt ? ' As of ' + new Date(d.fetchedAt).toLocaleString() + '.' : '') +
       ((d.errors && (d.errors.pipelines || d.errors.opps)) ? ' Feed issue: ' + (d.errors.pipelines || d.errors.opps) : '');
     meta.textContent = metaLine;
-    var html = cols.map(function (pipe) {
-      var pipeTotal = (d.perPipeline && d.perPipeline[pipe.pipelineId])
-        ? d.perPipeline[pipe.pipelineId]
-        : null;
-      var sub = pipeTotal
-        ? pipeTotal.fetched + ' of ' + pipeTotal.total + ' fetched' + (pipeTotal.capped ? ' (capped)' : '')
-        : pipe.stages.reduce(function (n, c) { return n + c.deals.length; }, 0) + ' deals';
-      return '<h2 class="pipe-head">' + esc(pipe.pipeline) + ' <span class="muted">— ' + esc(sub) + '</span></h2>' +
-        '<div class="board">' + pipe.stages.map(stageColumnHtml).join('') + '</div>';
-    }).join('');
-    board.innerHTML = html || '<div class="empty">No pipelines returned by the feed.</div>';
+    renderBoard();
   } catch (e) {
     meta.textContent = 'Pipeline could not be loaded.';
     board.innerHTML = '<div class="empty">Could not load the pipeline: ' + esc(e.message || e) + '</div>';

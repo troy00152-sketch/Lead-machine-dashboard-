@@ -326,7 +326,14 @@
           <div class="mtab-pane" id="mtab-voicemail" hidden>
             <input class="field" id="voicemailSearch" type="search" placeholder="Search for a phone number" autocomplete="off">
             <div class="seg" style="margin-top:10px"><button type="button" class="seg-btn active" data-vm="me">For Me</button><button type="button" class="seg-btn" data-vm="all">All</button></div>
-            <div class="empty" style="text-align:center;padding:28px 0"><div class="vm-circle">✉</div><div>No voicemail</div></div>
+            <!-- Voicemail list (Nov 27, 2026): there is no voicemail API
+                 in this system, so this tab is fed from the recents the
+                 dialer already loads — calls whose outcome was voicemail
+                 (see renderVoicemail). The static empty state below is
+                 the first paint only; renderVoicemail() replaces it, and
+                 "No voicemail" is then TRUE (zero voicemail-outcome
+                 calls), not a placeholder. -->
+            <div id="voicemailList" style="margin-top:10px"><div class="empty" style="text-align:center;padding:28px 0"><div class="vm-circle">✉</div><div>No voicemail</div></div></div>
           </div>
           <div class="mtab-pane" id="mtab-queue" hidden>
             <div class="empty" style="text-align:center;padding:28px 0"><div class="big" style="color:#9aa0a6">📞</div><div>Coming soon…</div></div>
@@ -1414,6 +1421,7 @@ function switchMtab(name) {
   });
   if (name === 'recents') loadRecents();
   if (name === 'contacts') loadDialerContacts();
+  if (name === 'voicemail') loadVoicemail();
 }
 function initialsFor(label) {
   var parts = String(label || '').replace(/[^A-Za-z0-9 ]/g, ' ').trim().split(/\s+/).filter(Boolean);
@@ -1444,6 +1452,7 @@ async function loadRecents() {
     var data = await manualCallApi('?action=recents');
     __recents = (data && data.calls) || [];
     renderRecents();
+    renderVoicemail(); // same data feeds the Voicemail tab — keep it fresh
   } catch (e) {
     if (box) box.innerHTML = '<div class="empty"><div>Could not load recents.</div></div>';
   }
@@ -1467,13 +1476,96 @@ function renderRecents() {
     row.addEventListener('click', function () { fillKeypadNumber(row.getAttribute('data-phone')); });
   });
 }
+/* ==VOICEMAIL-PURE== */
+// Voicemail tab (Nov 27, 2026): no voicemail API exists, so the tab is
+// fed from the recents rows the dialer already loads (GET cc-call-api
+// ?action=recents). A row counts as voicemail when its outcome is
+// voicemail — the same outcome renderRecents shows: callStatus
+// 'voicemail' (server-side: bridged + AMD machine, or the disposition
+// filed as Voicemail/Machine). Completed / missed / other-disposition
+// rows never appear here.
+function isVoicemailCall(c) {
+  if (!c || typeof c !== 'object') return false;
+  if (c.callStatus === 'voicemail') return true;
+  var d = c.disposition;
+  if (d === 'Voicemail' || d === 'Machine') return true;
+  return false;
+}
+function voicemailCalls(list) {
+  return (list || []).filter(function (c) { return isVoicemailCall(c); });
+}
+// Same digits-only phone match as renderRecents: a typed query filters
+// by the digits of the number, so "(252) 555" and "252555" both match.
+function filterVoicemailByQuery(list, q) {
+  var digits = String(q || '').replace(/\D/g, '');
+  return voicemailCalls(list).filter(function (c) {
+    return !digits || (c.phone || '').replace(/\D/g, '').indexOf(digits) !== -1;
+  });
+}
+/* ==/VOICEMAIL-PURE== */
+function renderVoicemail() {
+  var box = document.getElementById('voicemailList');
+  if (!box) return;
+  var searchEl = document.getElementById('voicemailSearch');
+  var list = filterVoicemailByQuery(__recents, searchEl ? searchEl.value : '');
+  if (!list.length) {
+    // Honest empty state: zero voicemail-outcome calls in the loaded
+    // recents (or the search matched none). When recents failed to
+    // load at all, loadVoicemail shows "Could not load voicemail."
+    // instead — this branch never claims a failed load is empty.
+    var q = searchEl ? searchEl.value.trim() : '';
+    box.innerHTML = '<div class="empty" style="text-align:center;padding:28px 0"><div class="vm-circle">✉</div><div>' + (q ? 'No voicemail matches that number.' : 'No voicemail') + '</div></div>';
+    return;
+  }
+  box.innerHTML = list.map(function (c) {
+    var label = fmtPhone(c.phone) || c.phone;
+    return '<div class="mrow" data-phone="' + esc(c.phone) + '">' +
+      '<div class="avatar" style="background:' + avatarColor(c.phone) + '">' + esc(initialsFor(label)) + '</div>' +
+      '<div class="m-main"><div class="m-name">' + esc(label) + '</div>' +
+      '<div class="m-sub">✉ Voicemail · ' + esc(relTime(c.startedAt)) + '</div></div>' +
+      '<button type="button" class="btn small m-call" data-vm-call="' + esc(c.phone) + '">📞 Call Back</button></div>';
+  }).join('');
+  box.querySelectorAll('[data-vm-call]').forEach(function (b) {
+    b.addEventListener('click', function (ev) { ev.stopPropagation(); callBackVoicemail(b.getAttribute('data-vm-call')); });
+  });
+}
+async function loadVoicemail() {
+  var box = document.getElementById('voicemailList');
+  if (!__recents) await loadRecents(); // fetches recents; never throws (it renders its own error)
+  if (!__recents) {
+    if (box) box.innerHTML = '<div class="empty"><div>Could not load voicemail.</div></div>';
+    return;
+  }
+  renderVoicemail();
+}
+// Call Back dials through the existing manual-call path: the number
+// goes on the keypad, then onManualCallClick runs (quiet-hours check,
+// audio connect, cc-call-api start) exactly as if Troy typed it.
+function callBackVoicemail(phone) {
+  if (!phone) return;
+  fillKeypadNumber(phone);
+  onManualCallClick().catch(function (e) { toast('Call failed: ' + (e && e.message ? e.message : e)); });
+}
 async function loadDialerContacts() {
   var box = document.getElementById('contactsList');
   try {
     var r = await fetch(CONV_API + '?action=threads', { credentials: 'include' });
     var data = {};
     try { data = await r.json(); } catch (e) { data = {}; }
-    __dialerContacts = (r.ok && data.threads) || [];
+    // A failed fetch must NOT render as an empty list: the old code
+    // collapsed !r.ok into [] and showed "No contacts yet" for a 401/403
+    // exactly like a genuinely empty thread list. (Known live limit,
+    // Nov 27: ?action=threads requires the full admin login — the
+    // calling-only login gets 403 "Calling access only", so for Irish
+    // this tab honestly reports it cannot load instead of pretending
+    // there are no contacts. Same 403 gates Recents/Voicemail, which
+    // ride cc-call-api — both tabs show their load-error state too.)
+    if (!r.ok) {
+      if (box) box.innerHTML = '<div class="empty"><div>Could not load contacts.</div></div>';
+      __dialerContacts = null;
+      return;
+    }
+    __dialerContacts = data.threads || [];
     renderDialerContacts();
   } catch (e) {
     if (box) box.innerHTML = '<div class="empty"><div>Could not load contacts.</div></div>';
@@ -2013,9 +2105,15 @@ function init() {
   });
   document.getElementById('recentsSearch').addEventListener('input', renderRecents);
   document.getElementById('contactsSearch').addEventListener('input', renderDialerContacts);
+  document.getElementById('voicemailSearch').addEventListener('input', renderVoicemail);
   document.querySelectorAll('[data-vm]').forEach(function (b) {
     b.addEventListener('click', function () {
       document.querySelectorAll('[data-vm]').forEach(function (x) { x.classList.toggle('active', x === b); });
+      // For Me / All has no backing distinction in the recents rows
+      // (no agent/owner field), so it re-renders the same voicemail
+      // list rather than pretending to filter it. If a per-agent field
+      // ever lands on recents, filter here.
+      renderVoicemail();
     });
   });
   document.getElementById('qhCancelBtn').addEventListener('click', function () { __qhAnswer(false); });

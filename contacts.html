@@ -196,7 +196,8 @@
         <button class="btn small primary" id="btnAddTask" type="button">Add task</button>
       </div>
       <div id="taskList"></div>
-      <p class="muted">Tasks are saved in this browser (the Command Center has no task backend yet) — they show here and on each contact's detail view.</p>
+      <p class="muted">Tasks sync to your account — they follow you across devices, and show here and on each contact's detail view.</p>
+      <p class="muted" id="taskSyncNote"></p>
     </div>
   </section>
 </div>
@@ -920,14 +921,17 @@ async function bulkTag(addMode) {
   if (!tag) { toast('Type a tag name first.'); return; }
   var rows = selectedRows();
   if (!rows.length) return;
-  var ok = 0, fail = 0;
+  var ok = 0, fail = 0, skippedThread = 0;
   for (var i = 0; i < rows.length; i++) {
+    // Thread-only rows have no enrollment record to tag — say so
+    // instead of counting them as silent failures (Nov 27 audit).
+    if (rows[i].source === 'thread') { skippedThread++; continue; }
     try {
       var good = await tagRow(rows[i], addMode ? [tag] : [], addMode ? [] : [tag]);
       if (good) ok++; else fail++;
     } catch (e) { fail++; if (e.auth) break; }
   }
-  toast((addMode ? 'Tag “' + tag + '” added to ' : 'Tag “' + tag + '” removed from ') + ok + ' contact' + (ok === 1 ? '' : 's') + (fail ? ' — ' + fail + ' failed' : '') + '.');
+  toast((addMode ? 'Tag “' + tag + '” added to ' : 'Tag “' + tag + '” removed from ') + ok + ' contact' + (ok === 1 ? '' : 's') + (fail ? ' — ' + fail + ' failed' : '') + (skippedThread ? ' — ' + skippedThread + ' skipped (thread-only: add to a workflow first)' : '') + '.');
   document.getElementById('bulkTagInput').value = '';
   await loadContacts();
 }
@@ -1008,12 +1012,15 @@ document.getElementById('bulkDelete').addEventListener('click', async function (
   var rows = selectedRows();
   if (!rows.length) return;
   if (!confirm('Delete ' + rows.length + ' contact' + (rows.length === 1 ? '' : 's') + ' from the Command Center?\n\nThis removes the standalone record (or local lead). It does NOT delete the CRM contact.')) return;
-  var ok = 0, fail = 0;
+  var ok = 0, fail = 0, skippedThread = 0;
   for (var i = 0; i < rows.length; i++) {
+    // Thread-only rows live in Conversations; nothing to delete here —
+    // say so instead of counting them as silent failures (Nov 27 audit).
+    if (rows[i].source === 'thread') { skippedThread++; continue; }
     try { if (await deleteRow(rows[i])) ok++; else fail++; } catch (e) { fail++; if (e.auth) break; }
   }
   state.selected.clear();
-  toast('Deleted ' + ok + ' contact' + (ok === 1 ? '' : 's') + (fail ? ' — ' + fail + ' failed' : '') + '.');
+  toast('Deleted ' + ok + ' contact' + (ok === 1 ? '' : 's') + (fail ? ' — ' + fail + ' failed' : '') + (skippedThread ? ' — ' + skippedThread + ' skipped (thread-only: lives in Conversations)' : '') + '.');
   await loadContacts();
 });
 </script>
@@ -1226,12 +1233,13 @@ function wireDrawer() {
   document.getElementById('btnAddTaskDetail').addEventListener('click', function () {
     var title = document.getElementById('dTaskTitle').value.trim();
     if (!title) { toast('Type a task title first.'); return; }
-    addTask(localStorage, {
+    var dt = addTask(localStorage, {
       contactId: r.id, contactName: r.name || r.phone || '',
       title: title, due: document.getElementById('dTaskDue').value,
     });
     renderDetailTasks();
     toast('Task added.');
+    syncTaskAdd(dt);
   });
   document.getElementById('btnDeleteDetail').addEventListener('click', async function () {
     if (r.source === 'thread') { toast('Thread-only contacts live in Conversations — there is no Command Center record to delete.'); return; }
@@ -1551,6 +1559,7 @@ document.getElementById('btnAddTask').addEventListener('click', function () {
   document.getElementById('taskTitle').value = '';
   renderTasks();
   toast('Task added.');
+  syncTaskAdd(t);
 });
 document.addEventListener('change', function (e) {
   var tg = e.target.closest('[data-task-toggle]');
@@ -1558,6 +1567,7 @@ document.addEventListener('change', function (e) {
   setTaskDone(localStorage, tg.dataset.taskToggle, tg.checked);
   renderTasks();
   renderDetailTasks();
+  syncTaskDone(tg.dataset.taskToggle, tg.checked);
 });
 document.addEventListener('click', function (e) {
   var del = e.target.closest('[data-task-del]');
@@ -1565,13 +1575,116 @@ document.addEventListener('click', function (e) {
   removeTask(localStorage, del.dataset.taskDel);
   renderTasks();
   renderDetailTasks();
+  syncTaskDelete(del.dataset.taskDel);
 });
+
+/* ================= TASK SYNC (server-backed, Nov 27, 2026) =================
+   Tasks used to live in localStorage only — a task added on the phone
+   never appeared on the Mac. cc-tasks-api.js is now the source of
+   truth; localStorage stays as the instant cache. Every mutation
+   writes locally first (instant UI) and then to the server; a
+   successful server write replaces the cache with the returned list.
+   On load, local-only tasks (created while the server was
+   unreachable) upload first, then the server list replaces the
+   cache — so a task deleted on another device stays deleted. */
+function tasksApi(action, body) {
+  return api('cc-tasks-api?action=' + encodeURIComponent(action), body ? {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  } : undefined);
+}
+function replaceLocalTasks(tasks) {
+  try { ctSaveJson(localStorage, TASK_KEY, Array.isArray(tasks) ? tasks : []); } catch (e) {}
+  renderTasks();
+  renderDetailTasks();
+}
+function taskSyncNote(msg) {
+  var n = document.getElementById('taskSyncNote');
+  if (n) n.textContent = msg || '';
+}
+async function syncTasksFromServer() {
+  try {
+    var r = await tasksApi('list');
+    if (r.status !== 200 || !r.data || r.data.ok === false) throw new Error('list failed');
+    var serverTasks = r.data.tasks || [];
+    var serverIds = {};
+    serverTasks.forEach(function (t) { serverIds[t.id] = true; });
+    // Upload local-only tasks first (created while offline), so the
+    // replace below never drops them.
+    var localOnly = loadTasks(localStorage).filter(function (t) { return t.id && !serverIds[t.id]; });
+    if (localOnly.length) {
+      for (var i = 0; i < localOnly.length; i++) {
+        try {
+          var up = await tasksApi('add', { task: localOnly[i] });
+          if (up.status === 200 && up.data && up.data.ok && Array.isArray(up.data.tasks)) serverTasks = up.data.tasks;
+        } catch (e) { /* stays local-only; the next load retries */ }
+      }
+    }
+    replaceLocalTasks(serverTasks);
+    taskSyncNote('');
+  } catch (e) {
+    if (e && e.auth) return; // the auth banner already explains it
+    taskSyncNote('Tasks are saved in this browser right now — the server could not be reached, so they are not synced yet.');
+  }
+}
+async function syncTaskAdd(task) {
+  if (!task) return;
+  try {
+    var r = await tasksApi('add', { task: task });
+    if (r.status === 200 && r.data && r.data.ok && Array.isArray(r.data.tasks)) { replaceLocalTasks(r.data.tasks); return; }
+    throw new Error('add failed');
+  } catch (e) {
+    if (e && e.auth) return;
+    toast('Task saved in this browser only — server sync failed.');
+  }
+}
+async function syncTaskDone(id, done) {
+  try {
+    var r = await tasksApi('set-done', { id: id, done: !!done });
+    if (r.status === 200 && r.data && r.data.ok && Array.isArray(r.data.tasks)) { replaceLocalTasks(r.data.tasks); return; }
+    throw new Error('set-done failed');
+  } catch (e) {
+    if (e && e.auth) return;
+    toast('Task saved in this browser only — server sync failed.');
+  }
+}
+async function syncTaskDelete(id) {
+  try {
+    var r = await tasksApi('delete', { id: id });
+    if (r.status === 200 && r.data && r.data.ok && Array.isArray(r.data.tasks)) { replaceLocalTasks(r.data.tasks); return; }
+    if (r.status === 404) { /* already gone server-side — local delete stands */ return; }
+    throw new Error('delete failed');
+  } catch (e) {
+    if (e && e.auth) return;
+    toast('Task deleted in this browser only — server sync failed.');
+  }
+}
 
 /* ================= BOOT ================= */
 (async function init() {
   try { state.workflows = await wfList(); } catch (e) { state.workflows = []; }
   await loadContacts();
+  await syncTasksFromServer();
   renderTasks();
+  // Deep link from the Pipeline board (?phone=): open that contact's
+  // drawer once the list has loaded (Nov 27 audit — the link used to
+  // land on the plain list with nothing selected).
+  try {
+    var deepPhone = new URLSearchParams(window.location.search).get('phone');
+    if (deepPhone) {
+      var digits = String(deepPhone).replace(/\D/g, '');
+      if (digits.length === 11 && digits.charAt(0) === '1') digits = digits.slice(1);
+      if (digits.length === 10) {
+        var hit = state.contacts.find(function (x) {
+          var p = String(x.phone || '').replace(/\D/g, '');
+          if (p.length === 11 && p.charAt(0) === '1') p = p.slice(1);
+          return p === digits;
+        });
+        if (hit) openDetail(hit.id);
+      }
+    }
+  } catch (e) { /* deep link is best-effort; the list still loaded */ }
 })();
 </script>
 </body>
